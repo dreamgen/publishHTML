@@ -454,6 +454,40 @@
         let motionPermissionGranted = false;
         let lastAcc = { x: null, y: null, z: null };
         let lastShakeTime = 0; // 新增：搖晃冷卻計時器
+        let shakeStartTime = 0; // 新增：紀錄本次擲骰的起始時間，用來限制 5 秒強制落地
+
+        // --- 新增：讓骰子再次彈起的函數 (模擬持續搖骰盅) ---
+        function bounceDice() {
+            diceArray.forEach(die => {
+                // 給予向上的拋力與隨機水平力
+                const forceY = Math.random() * 15 + 15; // 向上力道 15~30
+                const forceX = (Math.random() - 0.5) * 20;
+                const forceZ = (Math.random() - 0.5) * 20;
+
+                // 若骰子已經飛太高，就不再往上加力，避免飛出界
+                if (die.body.position.y < 15) {
+                    die.body.velocity.set(forceX, forceY, forceZ);
+                } else {
+                    die.body.velocity.set(forceX, 2, forceZ);
+                }
+
+                // 給予隨機劇烈旋轉
+                die.body.angularVelocity.set(
+                    (Math.random() - 0.5) * 50,
+                    (Math.random() - 0.5) * 50,
+                    (Math.random() - 0.5) * 50
+                );
+            });
+
+            // 重置結算計時器，避免在彈跳過程中被系統強制結算
+            rollFrames = 0; 
+            settleFrames = 0;
+            
+            // 確保分數看板隱藏
+            scoreContainer.classList.add('hidden');
+            scoreContainer.classList.remove('pop-in');
+            totalValue.textContent = '0';
+        }
 
         function handleMotion(event) {
             // 相容不同手機型號的加速度 API
@@ -468,8 +502,6 @@
                 hintText.classList.add('text-green-400');
             }
 
-            // 【關鍵修正】：必須先計算並更新 lastAcc，不能因為正在滾動就提早 return！
-            // 否則骰子停下時，會拿「當下的靜止狀態」去和「幾秒前搖晃最高峰的狀態」相減而導致二次觸發。
             let isShake = false;
             if (lastAcc.x !== null) {
                 const deltaX = Math.abs(acc.x - lastAcc.x);
@@ -484,19 +516,39 @@
             // 永遠持續更新加速度紀錄，確保比對基準是最新的
             lastAcc = { x: acc.x, y: acc.y, z: acc.z };
 
-            // 若正在滾動中，直接忽略搖晃動作
-            if (isRolling) return; 
-
-            // 如果偵測到搖晃，且距離上次擲骰超過 1 秒 (防呆冷卻時間)
             const now = Date.now();
-            if (isShake && (now - lastShakeTime > 1000)) { 
-                lastShakeTime = now;
-                throwDice(true); 
+
+            if (isShake) {
+                if (!isRolling) {
+                    // 1. 骰子靜止時：要求距離上次搖晃至少 1 秒，才能觸發全新擲骰 (防呆冷卻)
+                    if (now - lastShakeTime > 1000) {
+                        lastShakeTime = now;
+                        throwDice(true); 
+                    } else {
+                        // 若還在持續搖晃，更新時間，延長冷卻 (必須徹底停下 1 秒才能重新擲骰)
+                        lastShakeTime = now;
+                    }
+                } else {
+                    // 2. 骰子滾動中：處理連續搖晃
+                    if (now - shakeStartTime <= 5000) {
+                        // 5 秒內，持續給予彈跳力道 (加入 300ms 冷卻避免瞬間疊加過大力量)
+                        if (now - lastShakeTime > 300) { 
+                            lastShakeTime = now;
+                            bounceDice(); 
+                        }
+                    } else {
+                        // 超過 5 秒，強制停止彈跳，準備落地結算
+                        // 依然更新搖晃時間，防止落地結算後立刻誤觸下一輪擲骰
+                        lastShakeTime = now;
+                    }
+                }
             }
         }
 
         function throwDice(isUserClick = false) {
             if (isRolling) return;
+
+            shakeStartTime = Date.now(); // 記錄本次投擲的起始時間
 
             // 每次使用者主動點擊或搖晃時，若設定面板是展開的，就自動收合
             if (isUserClick && !isSettingsCollapsed) {
