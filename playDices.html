@@ -4,6 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>🎲 物理 3D 托盤擲骰子</title>
+
+    <!-- PWA: Manifest & Theme -->
+    <link rel="manifest" href="./playDices.webmanifest">
+    <meta name="theme-color" content="#667eea">
+    <meta name="application-name" content="骰子搖搖">
+    <meta name="description" content="使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子">
+
+    <!-- PWA: iOS Safari -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="骰子搖搖">
+    <link rel="apple-touch-icon" href="./icons/playDices-192.svg">
+
+    <!-- PWA: Windows / general -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="icon" type="image/svg+xml" href="./icons/playDices-192.svg">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -784,6 +801,21 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
 
             updatePreviewContainerSize();
+        }
+    </script>
+
+    <!-- PWA: Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js', { scope: './' })
+                    .then((reg) => {
+                        console.log('[PWA] Service Worker registered, scope:', reg.scope);
+                    })
+                    .catch((err) => {
+                        console.warn('[PWA] Service Worker registration failed:', err);
+                    });
+            });
         }
     </script>
 </body>
