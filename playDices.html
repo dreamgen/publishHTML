@@ -453,13 +453,14 @@
 
         let motionPermissionGranted = false;
         let lastAcc = { x: null, y: null, z: null };
+        let lastShakeTime = 0; // 新增：搖晃冷卻計時器
 
         function handleMotion(event) {
-            // 【修改】相容不同手機型號的加速度 API
+            // 相容不同手機型號的加速度 API
             const acc = event.acceleration || event.accelerationIncludingGravity;
             if (!acc || acc.x === null) return; 
             
-            // 【修改】成功讀取到感測器時，將文字變為綠色提示
+            // 成功讀取到感測器時，將文字變為綠色提示
             const hintText = document.getElementById('motionHint');
             if (hintText && !hintText.innerText.includes('✅')) {
                 hintText.innerText = "✅ 搖晃感應已啟動！請用力搖晃！";
@@ -467,19 +468,31 @@
                 hintText.classList.add('text-green-400');
             }
 
-            if (isRolling) return; 
-
+            // 【關鍵修正】：必須先計算並更新 lastAcc，不能因為正在滾動就提早 return！
+            // 否則骰子停下時，會拿「當下的靜止狀態」去和「幾秒前搖晃最高峰的狀態」相減而導致二次觸發。
+            let isShake = false;
             if (lastAcc.x !== null) {
                 const deltaX = Math.abs(acc.x - lastAcc.x);
                 const deltaY = Math.abs(acc.y - lastAcc.y);
                 const deltaZ = Math.abs(acc.z - lastAcc.z);
                 
-                // 【修改】調低搖晃閾值 (從 25 降至 15)，讓搖晃更容易觸發
                 if (deltaX + deltaY + deltaZ > 15) { 
-                    throwDice(true); 
+                    isShake = true;
                 }
             }
+            
+            // 永遠持續更新加速度紀錄，確保比對基準是最新的
             lastAcc = { x: acc.x, y: acc.y, z: acc.z };
+
+            // 若正在滾動中，直接忽略搖晃動作
+            if (isRolling) return; 
+
+            // 如果偵測到搖晃，且距離上次擲骰超過 1 秒 (防呆冷卻時間)
+            const now = Date.now();
+            if (isShake && (now - lastShakeTime > 1000)) { 
+                lastShakeTime = now;
+                throwDice(true); 
+            }
         }
 
         function throwDice(isUserClick = false) {
