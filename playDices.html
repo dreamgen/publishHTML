@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🎲 物理 3D 托盤擲骰子</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- 引入 Cannon.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; touch-action: none; }
+        #canvas-container { position: absolute; inset: 0; width: 100vw; height: 100vh; z-index: 1; }
+        #ui-layer { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* 隱藏數字輸入框的上下箭頭 */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+        
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            80% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    </style>
+</head>
+<body>
+
+    <!-- 錯誤訊息顯示區 (除錯用) -->
+    <div id="error-log" class="absolute top-0 left-0 bg-red-600 text-white p-2 z-50 text-xs hidden w-full text-center"></div>
+
+    <!-- 3D 畫布 -->
+    <div id="canvas-container"></div>
+
+    <!-- UI 介面層 -->
+    <div id="ui-layer" class="p-4 sm:p-8 flex flex-col justify-between h-full">
+        
+        <!-- 頂部區：控制面板與分數 -->
+        <div class="flex justify-between items-start w-full">
+            
+            <!-- 左側動態控制面板 -->
+            <div id="controlPanel" class="pointer-events-auto bg-white/95 backdrop-blur-md rounded-2xl sm:rounded-3xl shadow-xl border border-white/40 overflow-hidden transition-all duration-300 w-full sm:w-[280px]">
+                
+                <!-- 【完整設定模式】 -->
+                <div id="fullView" class="p-4 sm:p-5 w-full">
+                    <!-- 標題與手動縮小按鈕 -->
+                    <div class="flex justify-between items-center mb-5">
+                        <span class="font-bold text-gray-700 text-sm tracking-widest">⚙️ 遊戲設定</span>
+                        <button onclick="toggleSettings(true)" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1 rounded-full font-bold focus:outline-none transition-colors">
+                            縮小 ▴
+                        </button>
+                    </div>
+
+                    <!-- 骰子數量控制 -->
+                    <div class="flex flex-col items-center w-full">
+                        <label class="block text-xs sm:text-sm font-bold text-gray-600 mb-2">骰子數量</label>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="adjustCount(-1)" class="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400">−</button>
+                            <input type="number" id="diceCount" value="3" min="1" max="20" class="w-10 sm:w-12 text-center text-xl sm:text-2xl font-black bg-transparent focus:outline-none text-blue-700 font-mono">
+                            <button onclick="adjustCount(1)" class="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400">+</button>
+                        </div>
+                    </div>
+
+                    <!-- 骰子大小控制 -->
+                    <div class="w-full border-t border-gray-200 pt-4 mt-5 flex flex-col items-center">
+                        <label class="block text-xs sm:text-sm font-bold text-gray-600 mb-2">骰子大小預覽 (1:1 比例)</label>
+                        <div class="flex items-center w-full px-2">
+                            <!-- 預覽框 (完整版位置) -->
+                            <div id="previewContainerFull" class="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 bg-gray-200/50 rounded-xl shadow-inner border border-gray-300 flex items-center justify-center mr-4 relative overflow-hidden">
+                            </div>
+                            <!-- 滑軌 -->
+                            <div class="flex-1 flex flex-col">
+                                <input type="range" id="sizeSlider" min="1" max="4" step="0.1" value="2" class="w-full accent-blue-600">
+                                <div class="flex justify-between text-[10px] text-gray-400 mt-1 px-1">
+                                    <span>小</span>
+                                    <span>大</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 【簡化模式】 (隱藏初始) -->
+                <div id="compactView" class="hidden items-center justify-between p-1 pl-4 h-[60px]">
+                    <!-- 數量 -->
+                    <div class="flex items-baseline flex-shrink-0">
+                        <span id="compactCountText" class="text-3xl font-black text-blue-700">3</span>
+                        <span class="text-xs font-bold text-gray-500 ml-1 mr-3">顆</span>
+                    </div>
+                    <!-- 預覽框 (縮小版位置，改為圓形) -->
+                    <div id="previewContainerCompact" class="w-12 h-12 bg-gray-200/80 rounded-full shadow-inner border border-gray-300 flex items-center justify-center relative overflow-hidden flex-shrink-0">
+                    </div>
+                    <!-- 齒輪展開按鈕 -->
+                    <button onclick="toggleSettings(false)" class="p-3 text-gray-400 hover:text-gray-700 focus:outline-none group flex-shrink-0" aria-label="打開設定">
+                        <svg class="w-6 h-6 transition-transform group-hover:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                </div>
+
+            </div>
+
+            <!-- 分數結算看板 -->
+            <div id="scoreContainer" class="hidden pointer-events-auto ml-2">
+                <div class="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-4 sm:p-5 shadow-[0_10px_40px_rgba(37,99,235,0.5)] border border-blue-400/50 transform pop-in text-center min-w-[100px] sm:min-w-[120px]">
+                    <div class="text-blue-200 text-xs sm:text-sm font-bold mb-1 tracking-widest">物理總計</div>
+                    <div class="text-5xl sm:text-6xl font-black text-white drop-shadow-lg" id="totalValue">0</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 底部區：擲骰按鈕 -->
+        <div class="pb-6 sm:pb-10 flex flex-col items-center">
+            <button id="rollBtn" onclick="throwDice(true)" class="pointer-events-auto relative group focus:outline-none">
+                <div class="absolute -inset-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full blur opacity-70 group-hover:opacity-100 transition duration-200"></div>
+                <div class="relative px-12 py-5 sm:px-16 sm:py-6 bg-gradient-to-b from-blue-500 to-blue-700 rounded-full flex items-center shadow-[0_8px_0_#1e3a8a] active:shadow-[0_0px_0_#1e3a8a] active:translate-y-[8px] transition-all duration-100 ease-in-out border border-blue-400/30">
+                    <span class="text-white text-3xl sm:text-4xl font-black tracking-widest drop-shadow-md">搖一搖</span>
+                </div>
+            </button>
+            <!-- 【修改】加入 id="motionHint" 作為除錯指示燈 -->
+            <p id="motionHint" class="mt-4 text-blue-300/80 text-sm font-bold tracking-widest text-center pointer-events-auto">💡 首次點擊按鈕後，即可支援「搖晃手機」</p>
+        </div>
+    </div>
+
+    <script>
+        window.onerror = function(msg) {
+            const err = document.getElementById('error-log');
+            if(err) { err.style.display = 'block'; err.innerText = '系統提示: ' + msg; }
+        };
+
+        let scene, camera, renderer, world;
+        let diceArray = [];
+        let isRolling = false;
+        
+        let diceSize = 2;
+        let currentGeomSize = 0;
+        
+        let previewScene, previewCamera, previewRenderer, previewMesh;
+        
+        const scoreContainer = document.getElementById('scoreContainer');
+        const totalValue = document.getElementById('totalValue');
+        const countInput = document.getElementById('diceCount');
+        const rollBtn = document.getElementById('rollBtn');
+        const sizeSlider = document.getElementById('sizeSlider');
+        let diceMaterials = [];
+
+        // --- 新增：用於判斷骰子傾斜角度的全域向量 (方案三) ---
+        const baseNormals = [
+            new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+            new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+            new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
+        ];
+        const worldUpVec = new THREE.Vector3(0, 1, 0);
+
+        // --- 面板狀態控制變數 ---
+        let isSettingsCollapsed = false;
+
+        window.addEventListener('load', () => {
+            init();
+            animate();
+            
+            sizeSlider.addEventListener('input', (e) => {
+                diceSize = parseFloat(e.target.value);
+                updateDiceGeometry(); 
+            });
+            
+            // 延遲一點點時間自動先擲一次 (注意：這次自動投擲不會縮小面板)
+            setTimeout(() => throwDice(false), 800);
+        });
+
+        function init() {
+            // --- 1. Three.js 主環境 ---
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color('#0f172a');
+            scene.fog = new THREE.FogExp2('#0f172a', 0.01);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 40, 25);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight.position.set(10, 50, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.left = -25;
+            dirLight.shadow.camera.right = 25;
+            dirLight.shadow.camera.top = 25;
+            dirLight.shadow.camera.bottom = -25;
+            scene.add(dirLight);
+
+            // --- 2. Cannon.js 物理環境 ---
+            world = new CANNON.World();
+            world.gravity.set(0, -60, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 20;
+
+            const floorMaterial = new CANNON.Material();
+            const wallMaterial = new CANNON.Material(); // 【方案一】建立牆壁專屬物理材質
+            const dicePhysicsMaterial = new CANNON.Material();
+            
+            const diceFloorContact = new CANNON.ContactMaterial(floorMaterial, dicePhysicsMaterial, { friction: 0.4, restitution: 0.4 });
+            // 【方案一】牆壁與骰子的摩擦力設為 0，讓邊緣失去抓地力，自然滑落
+            const diceWallContact = new CANNON.ContactMaterial(wallMaterial, dicePhysicsMaterial, { friction: 0.0, restitution: 0.2 });
+            const diceDiceContact = new CANNON.ContactMaterial(dicePhysicsMaterial, dicePhysicsMaterial, { friction: 0.01, restitution: 0.5 });
+            
+            world.addContactMaterial(diceFloorContact);
+            world.addContactMaterial(diceWallContact);
+            world.addContactMaterial(diceDiceContact);
+
+            createTray(floorMaterial, wallMaterial);
+            preloadDiceMaterials();
+
+            // --- 3. 建立 3D 大小預覽器 ---
+            previewScene = new THREE.Scene();
+            
+            const pAmbient = new THREE.AmbientLight(0xffffff, 0.8);
+            previewScene.add(pAmbient);
+            const pDir = new THREE.DirectionalLight(0xffffff, 0.9);
+            pDir.position.set(5, 5, 10);
+            previewScene.add(pDir);
+
+            const pContainer = document.getElementById('previewContainerFull');
+            const rect = pContainer.getBoundingClientRect();
+            const pW = rect.width || 80;
+            const pH = rect.height || 80;
+
+            // 確保攝影機放置在遙遠的 Z 軸，避免被巨型骰子穿模
+            previewCamera = new THREE.OrthographicCamera(-pW/2, pW/2, pH/2, -pH/2, 0.1, 2000);
+            previewCamera.position.set(0, 0, 500);
+            previewCamera.lookAt(0, 0, 0);
+
+            previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            previewRenderer.setSize(pW, pH);
+            previewRenderer.setPixelRatio(window.devicePixelRatio);
+            pContainer.appendChild(previewRenderer.domElement);
+
+            updateDiceGeometry();
+            previewMesh = new THREE.Mesh(roundedDiceGeometry, diceMaterials);
+            previewScene.add(previewMesh);
+
+            window.addEventListener('resize', onWindowResize, false);
+            onWindowResize();
+        }
+
+        // --- 面板縮放邏輯 ---
+        function toggleSettings(forceCollapse) {
+            isSettingsCollapsed = forceCollapse !== undefined ? forceCollapse : !isSettingsCollapsed;
+
+            const panel = document.getElementById('controlPanel');
+            const fullView = document.getElementById('fullView');
+            const compactView = document.getElementById('compactView');
+            const canvas = previewRenderer.domElement;
+
+            if (isSettingsCollapsed) {
+                // 切換為簡化膠囊模式
+                panel.classList.remove('w-full', 'sm:w-[280px]', 'rounded-2xl', 'sm:rounded-3xl');
+                panel.classList.add('w-max', 'rounded-full');
+
+                fullView.classList.add('hidden');
+                compactView.classList.remove('hidden');
+                compactView.classList.add('flex');
+
+                // 將 3D 畫布無縫移動到小的預覽框中
+                document.getElementById('previewContainerCompact').appendChild(canvas);
+                // 同步數字
+                document.getElementById('compactCountText').textContent = document.getElementById('diceCount').value;
+            } else {
+                // 切換為完整設定模式
+                panel.classList.remove('w-max', 'rounded-full');
+                panel.classList.add('w-full', 'sm:w-[280px]', 'rounded-2xl', 'sm:rounded-3xl');
+
+                compactView.classList.add('hidden');
+                compactView.classList.remove('flex');
+                fullView.classList.remove('hidden');
+
+                // 將 3D 畫布無縫移動回大的預覽框中
+                document.getElementById('previewContainerFull').appendChild(canvas);
+            }
+
+            // 給 DOM 一點時間重繪後，強制更新預覽攝影機比例
+            setTimeout(updatePreviewContainerSize, 20);
+        }
+
+        function createTray(floorPhysicsMat, wallPhysicsMat) {
+            const trayWidth = 28;
+            const trayDepth = 28;
+            const wallHeight = 4;
+            const wallThickness = 1;
+
+            const baseShape = new CANNON.Box(new CANNON.Vec3(trayWidth/2, 1/2, trayDepth/2));
+            const baseBody = new CANNON.Body({ mass: 0, material: floorPhysicsMat });
+            baseBody.addShape(baseShape);
+            baseBody.position.set(0, -0.5, 0);
+            world.addBody(baseBody);
+
+            const baseGeo = new THREE.BoxGeometry(trayWidth, 1, trayDepth);
+            const baseMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.9 });
+            const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+            baseMesh.position.set(0, -0.5, 0);
+            baseMesh.receiveShadow = true;
+            scene.add(baseMesh);
+
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.6 });
+
+            function addWall(x, y, z, w, h, d) {
+                const invisibleWallHeight = 100;
+                const physY = invisibleWallHeight / 2; 
+
+                const shape = new CANNON.Box(new CANNON.Vec3(w/2, invisibleWallHeight/2, d/2));
+                // 【方案一】套用專屬的無摩擦力牆壁材質
+                const body = new CANNON.Body({ mass: 0, material: wallPhysicsMat });
+                body.addShape(shape);
+                body.position.set(x, physY, z);
+                world.addBody(body);
+
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mesh = new THREE.Mesh(geo, woodMat);
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+            }
+
+            const yPos = wallHeight/2;
+            addWall(0, yPos, -trayDepth/2 - wallThickness/2, trayWidth + wallThickness*2, wallHeight, wallThickness);
+            addWall(0, yPos, trayDepth/2 + wallThickness/2, trayWidth + wallThickness*2, wallHeight, wallThickness);
+            addWall(-trayWidth/2 - wallThickness/2, yPos, 0, wallThickness, wallHeight, trayDepth);
+            addWall(trayWidth/2 + wallThickness/2, yPos, 0, wallThickness, wallHeight, trayDepth);
+        }
+
+        function preloadDiceMaterials() {
+            const faces = [1, 6, 2, 5, 3, 4];
+            diceMaterials = faces.map(num => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                
+                ctx.fillStyle = '#f4f4f6';
+                ctx.fillRect(0, 0, 256, 256);
+
+                ctx.fillStyle = (num === 1 || num === 4) ? '#ef4444' : '#1f2937';
+                const radius = 22;
+                const center = 128;
+                const offset = 55;
+                
+                const drawDot = (x, y) => {
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                };
+
+                if (num === 1 || num === 3 || num === 5) drawDot(center, center);
+                if (num !== 1) {
+                    drawDot(center - offset, center - offset);
+                    drawDot(center + offset, center + offset);
+                }
+                if (num === 4 || num === 5 || num === 6) {
+                    drawDot(center - offset, center + offset);
+                    drawDot(center + offset, center - offset);
+                }
+                if (num === 6) {
+                    drawDot(center - offset, center);
+                    drawDot(center + offset, center);
+                }
+
+                const texture = new THREE.CanvasTexture(canvas);
+                try { texture.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch(e){}
+                return new THREE.MeshStandardMaterial({ map: texture, roughness: 0.2, metalness: 0.1 });
+            });
+        }
+
+        function createRoundedBoxGeometry(size, radius, segments) {
+            const geometry = new THREE.BoxGeometry(size, size, size, segments, segments, segments);
+            const position = geometry.attributes.position;
+            const v = new THREE.Vector3();
+            const inner = size / 2 - radius;
+            
+            for (let i = 0; i < position.count; i++) {
+                v.fromBufferAttribute(position, i);
+                const signX = Math.sign(v.x);
+                const signY = Math.sign(v.y);
+                const signZ = Math.sign(v.z);
+                
+                const dx = Math.max(0, Math.abs(v.x) - inner);
+                const dy = Math.max(0, Math.abs(v.y) - inner);
+                const dz = Math.max(0, Math.abs(v.z) - inner);
+                
+                const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                if (dist > 0) {
+                    const factor = radius / dist;
+                    if (dx > 0) v.x = signX * (inner + dx * factor);
+                    if (dy > 0) v.y = signY * (inner + dy * factor);
+                    if (dz > 0) v.z = signZ * (inner + dz * factor);
+                }
+                position.setXYZ(i, v.x, v.y, v.z);
+            }
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        let roundedDiceGeometry = null;
+
+        function updateDiceGeometry() {
+            if (currentGeomSize !== diceSize) {
+                const radius = 0.2 * diceSize;
+                roundedDiceGeometry = createRoundedBoxGeometry(diceSize, radius, 12);
+                currentGeomSize = diceSize;
+                
+                if (previewMesh) {
+                    previewMesh.geometry = roundedDiceGeometry;
+                }
+            }
+        }
+
+        function createDie(x, y, z) {
+            updateDiceGeometry();
+            
+            const mesh = new THREE.Mesh(roundedDiceGeometry, diceMaterials);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            const halfExtents = new CANNON.Vec3(diceSize/2, diceSize/2, diceSize/2);
+            const shape = new CANNON.Box(halfExtents);
+            const body = new CANNON.Body({ mass: 1 }); 
+            body.addShape(shape);
+            
+            body.position.set(x, y, z);
+            body.quaternion.setFromEuler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+            
+            const force = 30;
+            body.velocity.set( (Math.random()-0.5)*force, Math.random()*20 + 10, (Math.random()-0.5)*force );
+            body.angularVelocity.set( Math.random()*30, Math.random()*30, Math.random()*30 );
+            
+            world.addBody(body);
+            return { mesh, body };
+        }
+
+        let motionPermissionGranted = false;
+        let lastAcc = { x: null, y: null, z: null };
+
+        function handleMotion(event) {
+            // 【修改】相容不同手機型號的加速度 API
+            const acc = event.acceleration || event.accelerationIncludingGravity;
+            if (!acc || acc.x === null) return; 
+            
+            // 【修改】成功讀取到感測器時，將文字變為綠色提示
+            const hintText = document.getElementById('motionHint');
+            if (hintText && !hintText.innerText.includes('✅')) {
+                hintText.innerText = "✅ 搖晃感應已啟動！請用力搖晃！";
+                hintText.classList.remove('text-blue-300/80', 'text-yellow-400', 'text-red-400');
+                hintText.classList.add('text-green-400');
+            }
+
+            if (isRolling) return; 
+
+            if (lastAcc.x !== null) {
+                const deltaX = Math.abs(acc.x - lastAcc.x);
+                const deltaY = Math.abs(acc.y - lastAcc.y);
+                const deltaZ = Math.abs(acc.z - lastAcc.z);
+                
+                // 【修改】調低搖晃閾值 (從 25 降至 15)，讓搖晃更容易觸發
+                if (deltaX + deltaY + deltaZ > 15) { 
+                    throwDice(true); 
+                }
+            }
+            lastAcc = { x: acc.x, y: acc.y, z: acc.z };
+        }
+
+        function throwDice(isUserClick = false) {
+            if (isRolling) return;
+
+            // 每次使用者主動點擊或搖晃時，若設定面板是展開的，就自動收合
+            if (isUserClick && !isSettingsCollapsed) {
+                toggleSettings(true);
+            }
+
+            // 處理搖晃權限與環境政策阻擋
+            if (isUserClick && !motionPermissionGranted) {
+                try {
+                    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                        DeviceMotionEvent.requestPermission().then(permissionState => {
+                            if (permissionState === 'granted') {
+                                window.addEventListener('devicemotion', handleMotion);
+                                motionPermissionGranted = true;
+                            } else {
+                                const hintText = document.getElementById('motionHint');
+                                hintText.innerText = "❌ 搖晃權限被拒絕，請檢查手機設定";
+                                hintText.classList.replace('text-blue-300/80', 'text-red-400');
+                            }
+                        }).catch(err => {
+                            console.error("DeviceMotion Error:", err);
+                            // 捕捉因 iframe 政策或非 HTTPS 導致的錯誤
+                            const hintText = document.getElementById('motionHint');
+                            hintText.innerText = "❌ 預覽環境限制：請將網頁獨立開啟以支援搖晃";
+                            hintText.classList.replace('text-blue-300/80', 'text-red-400');
+                        });
+                    } else {
+                        window.addEventListener('devicemotion', handleMotion);
+                        motionPermissionGranted = true;
+                        
+                        // 針對沒有 requestPermission 但被 iframe 政策阻擋的情況 (例如 Android 預覽環境)
+                        setTimeout(() => {
+                            const hintText = document.getElementById('motionHint');
+                            // 如果過了 1.5 秒還是沒收到任何資料，代表很可能被瀏覽器政策阻擋了
+                            if (lastAcc.x === null && hintText && !hintText.innerText.includes('✅')) {
+                                hintText.innerText = "⚠️ 預覽器可能阻擋感測，若搖晃無效請獨立開啟網頁";
+                                hintText.classList.replace('text-blue-300/80', 'text-yellow-400');
+                            }
+                        }, 1500);
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+            
+            let count = parseInt(countInput.value) || 3;
+            if (count < 1) count = 1;
+            if (count > 20) count = 20;
+            countInput.value = count;
+            document.getElementById('compactCountText').textContent = count;
+
+            diceArray.forEach(d => {
+                scene.remove(d.mesh);
+                world.removeBody(d.body);
+            });
+            diceArray = [];
+            
+            scoreContainer.classList.add('hidden');
+            scoreContainer.classList.remove('pop-in');
+            totalValue.textContent = '0';
+            
+            rollBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            isRolling = true;
+
+            for (let i = 0; i < count; i++) {
+                const x = (Math.random() - 0.5) * 10;
+                const y = 8 + i * (diceSize * 1.5); 
+                const z = (Math.random() - 0.5) * 10;
+                diceArray.push(createDie(x, y, z));
+            }
+            
+            rollFrames = 0; // 重置滾動計時器
+            settleFrames = 0;
+        }
+
+        function updatePreview() {
+            if (!previewMesh) return;
+            
+            previewMesh.rotation.x += 0.015;
+            previewMesh.rotation.y += 0.025;
+            previewMesh.rotation.z += 0.01;
+
+            const dist = camera.position.distanceTo(new THREE.Vector3(0,0,0));
+            const vFov = (camera.fov * Math.PI) / 180;
+            const visibleHeightAtDist = 2 * Math.tan(vFov / 2) * dist;
+            const pixelsPerUnit = (window.innerHeight * camera.zoom) / visibleHeightAtDist;
+            
+            previewMesh.scale.set(pixelsPerUnit, pixelsPerUnit, pixelsPerUnit);
+            previewRenderer.render(previewScene, previewCamera);
+        }
+
+        let settleFrames = 0; 
+        let rollFrames = 0; // 新增：滾動總影格數計時器，用於判斷是否超時
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            world.step(1 / 60);
+
+            if (isRolling) rollFrames++; // 記錄已經滾動了多久
+
+            let allSettled = true;
+
+            diceArray.forEach(die => {
+                die.mesh.position.copy(die.body.position);
+                die.mesh.quaternion.copy(die.body.quaternion);
+
+                const speed = die.body.velocity.lengthSquared();
+                const angularSpeed = die.body.angularVelocity.lengthSquared();
+                
+                // 動態放寬靜止判定標準：超過 3 秒 (180 影格) 後，稍微移動也視為靜止
+                const sThresh = rollFrames > 180 ? 0.1 : 0.01;
+
+                if (speed > sThresh || angularSpeed > sThresh) {
+                    allSettled = false;
+                } else if (isRolling && rollFrames < 150) {
+                    // 【方案三】智慧防卡死：限制只在前 2.5 秒 (150 影格) 內觸發，避免骰子堆疊互卡時無限期推動
+                    let maxDot = -Infinity;
+                    baseNormals.forEach(n => {
+                        const localNormal = n.clone().applyQuaternion(die.mesh.quaternion);
+                        const dot = localNormal.dot(worldUpVec);
+                        if (dot > maxDot) maxDot = dot;
+                    });
+
+                    // 1.0 代表完美平躺，若小於 0.95 (傾斜大約超過 18 度)，則判定為卡在邊角
+                    if (maxDot < 0.95) {
+                        // 給予一個輕微的隨機旋轉推力，打破平衡讓它倒下
+                        die.body.angularVelocity.set(
+                            (Math.random() - 0.5) * 8,
+                            (Math.random() - 0.5) * 8,
+                            (Math.random() - 0.5) * 8
+                        );
+                        allSettled = false; // 拒絕結算，繼續運算
+                    }
+                }
+            });
+
+            // 強制結算保險：如果滾動超過 5 秒 (300 影格) 依然沒有判定靜止，就強制結算
+            if (isRolling && rollFrames > 300) {
+                allSettled = true;
+            }
+
+            renderer.render(scene, camera);
+            updatePreview();
+
+            if (isRolling) {
+                if (allSettled && diceArray.length > 0) {
+                    settleFrames++;
+                    // 只要連續靜止達到標準，或者已經強制超時，就進行結算
+                    if (settleFrames > 15 || rollFrames > 300) { 
+                        calculateScore();
+                        isRolling = false;
+                        rollBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        settleFrames = 0;
+                    }
+                } else {
+                    settleFrames = 0;
+                }
+            }
+        }
+
+        function calculateScore() {
+            let total = 0;
+            const normals = [
+                { vec: new THREE.Vector3(1, 0, 0), val: 1 },
+                { vec: new THREE.Vector3(-1, 0, 0), val: 6 },
+                { vec: new THREE.Vector3(0, 1, 0), val: 2 },
+                { vec: new THREE.Vector3(0, -1, 0), val: 5 },
+                { vec: new THREE.Vector3(0, 0, 1), val: 3 },
+                { vec: new THREE.Vector3(0, 0, -1), val: 4 }
+            ];
+            const worldUp = new THREE.Vector3(0, 1, 0);
+
+            diceArray.forEach(die => {
+                let maxDot = -Infinity;
+                let finalVal = 1;
+
+                normals.forEach(n => {
+                    const localNormal = n.vec.clone().applyQuaternion(die.mesh.quaternion);
+                    const dot = localNormal.dot(worldUp);
+                    if (dot > maxDot) {
+                        maxDot = dot;
+                        finalVal = n.val;
+                    }
+                });
+                total += finalVal;
+            });
+
+            totalValue.textContent = total;
+            scoreContainer.classList.remove('hidden');
+            void scoreContainer.offsetWidth; 
+            scoreContainer.classList.add('pop-in');
+        }
+
+        function adjustCount(change) {
+            if(isRolling) return;
+            let current = parseInt(countInput.value) || 3;
+            current += change;
+            if (current < 1) current = 1;
+            if (current > 20) current = 20;
+            countInput.value = current;
+            document.getElementById('compactCountText').textContent = current;
+        }
+
+        // 動態更新當前顯示的預覽框比例
+        function updatePreviewContainerSize() {
+            const container = isSettingsCollapsed ? document.getElementById('previewContainerCompact') : document.getElementById('previewContainerFull');
+            if (!container || !previewCamera || !previewRenderer) return;
+
+            const rect = container.getBoundingClientRect();
+            const pW = rect.width;
+            const pH = rect.height;
+            if (pW > 0 && pH > 0) {
+                previewCamera.left = -pW/2;
+                previewCamera.right = pW/2;
+                previewCamera.top = pH/2;
+                previewCamera.bottom = -pH/2;
+                previewCamera.updateProjectionMatrix();
+                previewRenderer.setSize(pW, pH);
+            }
+        }
+
+        function onWindowResize() {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.aspect = aspect;
+            
+            if (aspect < 1.0) {
+                camera.zoom = aspect * 1.1; 
+            } else {
+                camera.zoom = 1.0; 
+            }
+            
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            updatePreviewContainerSize();
+        }
+    </script>
+</body>
+</html>
