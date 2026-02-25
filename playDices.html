@@ -44,6 +44,28 @@
             100% { transform: scale(1); opacity: 1; }
         }
         .pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        /* ── 橫向模式（手機）：按鈕移至右下角，避免遮住桌面 ── */
+        @media (orientation: landscape) and (max-height: 540px) {
+            #rollBtnArea {
+                position: absolute !important;
+                bottom: 0.6rem;
+                right: 0.75rem;
+                padding-bottom: 0 !important;
+                align-items: flex-end !important;
+            }
+            #rollBtnInner {
+                padding: 0.55rem 1.75rem !important;
+            }
+            #rollBtnInner span {
+                font-size: 1.2rem !important;
+            }
+            #motionHint {
+                font-size: 0.6rem !important;
+                margin-top: 0.2rem !important;
+                text-align: right !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -131,10 +153,10 @@
         </div>
 
         <!-- 底部區：擲骰按鈕 -->
-        <div class="pb-6 sm:pb-10 flex flex-col items-center">
+        <div id="rollBtnArea" class="pb-6 sm:pb-10 flex flex-col items-center">
             <button id="rollBtn" onclick="throwDice(true)" class="pointer-events-auto relative group focus:outline-none">
                 <div class="absolute -inset-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full blur opacity-70 group-hover:opacity-100 transition duration-200"></div>
-                <div class="relative px-12 py-5 sm:px-16 sm:py-6 bg-gradient-to-b from-blue-500 to-blue-700 rounded-full flex items-center shadow-[0_8px_0_#1e3a8a] active:shadow-[0_0px_0_#1e3a8a] active:translate-y-[8px] transition-all duration-100 ease-in-out border border-blue-400/30">
+                <div id="rollBtnInner" class="relative px-12 py-5 sm:px-16 sm:py-6 bg-gradient-to-b from-blue-500 to-blue-700 rounded-full flex items-center shadow-[0_8px_0_#1e3a8a] active:shadow-[0_0px_0_#1e3a8a] active:translate-y-[8px] transition-all duration-100 ease-in-out border border-blue-400/30">
                     <span class="text-white text-3xl sm:text-4xl font-black tracking-widest drop-shadow-md">搖一搖</span>
                 </div>
             </button>
