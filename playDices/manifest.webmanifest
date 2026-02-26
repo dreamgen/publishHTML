@@ -1,5 +1,5 @@
 {
-  "id": "./",
+  "id": "playDices",
   "name": "物理 3D 骰子 - Play Dices",
   "short_name": "骰子搖搖",
   "description": "使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子",

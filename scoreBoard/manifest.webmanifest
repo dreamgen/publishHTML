@@ -1,5 +1,5 @@
 {
-  "id": "./",
+  "id": "scoreBoard",
   "name": "萬用計分板 - ScoreBoard",
   "short_name": "計分板",
   "description": "適用於球類、牌局、比賽的萬用計分工具，支援多人對戰、自訂步距與勝利條件",
