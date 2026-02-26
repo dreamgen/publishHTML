@@ -1,12 +1,12 @@
 # publishHTML — PWA 工具集
 
-一組可安裝的 Progressive Web App（PWA）小工具，適合在手機或平板上獨立使用。
+一組可安裝的 Progressive Web App（PWA）小工具，適合在手機或平板上**獨立安裝**使用。
 
 ---
 
 ## 工具列表
 
-### 🎲 骰子搖搖 (`playDices.html`)
+### 🎲 骰子搖搖 (`playDices/`)
 
 > 使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子
 
@@ -16,11 +16,11 @@
 - 可調整骰子數量（1–20 顆）與大小（1×–4×）
 - 自動計算點數總和
 
-**安裝：** 在瀏覽器開啟後，點選「加入主畫面」即可安裝為 App。
+**安裝：** 開啟 `/playDices/` 後，點選「加入主畫面」即可安裝為獨立 App。
 
 ---
 
-### 🏆 萬用計分板 (`scoreBoard.html`)
+### 🏆 萬用計分板 (`scoreBoard/`)
 
 > 適用於球類、牌局、比賽的通用即時計分工具
 
@@ -38,7 +38,7 @@
 - 一鍵歸零（含確認對話框）
 - 完整離線支援（Service Worker 快取）
 
-**安裝：** 在瀏覽器開啟後，點選「加入主畫面」即可安裝為 App。
+**安裝：** 開啟 `/scoreBoard/` 後，點選「加入主畫面」即可安裝為獨立 App。
 
 **適用場景範例：**
 
@@ -66,29 +66,104 @@
 | 快取策略 | Stale-While-Revalidate（支援離線） |
 | 介面語言 | 繁體中文（zh-TW） |
 
-### 目錄結構
+---
+
+## 目錄結構與 PWA Scope 設計
+
+**每個工具都放在獨立子目錄**，擁有專屬的 PWA Scope，讓手機可以將每個工具分別安裝為獨立的 App，互不干擾。
 
 ```
 publishHTML/
-├── playDices.html          # 3D 骰子 PWA
-├── playDices.webmanifest   # 骰子 App 設定
-├── scoreBoard.html         # 萬用計分板 PWA
-├── scoreBoard.webmanifest  # 計分板 App 設定
-├── sw.js                   # Service Worker（共用）
-├── icons/
-│   ├── playDices-192.svg   # 骰子圖示 192×192
-│   ├── playDices-512.svg   # 骰子圖示 512×512
-│   ├── scoreBoard-192.svg  # 計分板圖示 192×192
-│   └── scoreBoard-512.svg  # 計分板圖示 512×512
+├── playDices/                   # 骰子搖搖 PWA（scope: /playDices/）
+│   ├── index.html               # 主頁面（含所有 HTML/CSS/JS）
+│   ├── manifest.webmanifest     # PWA 設定（scope、icon、name…）
+│   ├── sw.js                    # Service Worker（僅管理此工具的快取）
+│   └── icons/
+│       ├── playDices-192.svg    # App 圖示 192×192
+│       └── playDices-512.svg    # App 圖示 512×512
+├── scoreBoard/                  # 萬用計分板 PWA（scope: /scoreBoard/）
+│   ├── index.html
+│   ├── manifest.webmanifest
+│   ├── sw.js
+│   └── icons/
+│       ├── scoreBoard-192.svg
+│       └── scoreBoard-512.svg
 └── README.md
 ```
 
-### 新增工具說明
+---
 
-1. 建立 `yourTool.html`（含所有 HTML/CSS/JS）
-2. 建立 `yourTool.webmanifest`（參考 `scoreBoard.webmanifest`）
-3. 在 `icons/` 新增 SVG 圖示（192 與 512）
-4. 在 `sw.js` 的 `APP_CACHE_MAP` 加入一行：
-   ```js
-   'yourTool': `${CACHE_PREFIX}-yourTool-${SW_VERSION}`,
+## 新增工具說明
+
+每個新工具必須放在**獨立子目錄**，並擁有自己的 `manifest.webmanifest` 與 `sw.js`，這樣手機才能將它安裝為獨立的 App。
+
+### 步驟
+
+1. **建立子目錄** `yourTool/`，並在其中建立以下檔案：
+
    ```
+   yourTool/
+   ├── index.html               # 工具主頁面（含所有 HTML/CSS/JS）
+   ├── manifest.webmanifest     # PWA 設定
+   ├── sw.js                    # Service Worker
+   └── icons/
+       ├── yourTool-192.svg     # 圖示 192×192
+       └── yourTool-512.svg     # 圖示 512×512
+   ```
+
+2. **設定 `manifest.webmanifest`**，關鍵欄位如下（複製 `scoreBoard/manifest.webmanifest` 再修改）：
+
+   ```json
+   {
+     "id": "/yourTool/",
+     "name": "工具全名",
+     "short_name": "短名稱",
+     "start_url": "/yourTool/",
+     "scope": "/yourTool/",
+     "icons": [
+       { "src": "./icons/yourTool-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+       { "src": "./icons/yourTool-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
+       { "src": "./icons/yourTool-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" }
+     ]
+   }
+   ```
+
+   > **重要：** `scope` 與 `start_url` 必須設為 `/yourTool/`（與子目錄名稱一致），否則瀏覽器無法正確安裝為獨立 PWA。
+
+3. **設定 `sw.js`**（複製 `scoreBoard/sw.js`，將所有 `scoreBoard` 改為 `yourTool`）：
+
+   ```js
+   const CACHE_NAME = `yourTool-v1`;
+   const SHARED_CACHE = `yourTool-shared-v1`;
+   const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
+   // …其餘邏輯不變
+   ```
+
+4. **在 `index.html` 的 `<head>` 加入 PWA meta**：
+
+   ```html
+   <link rel="manifest" href="./manifest.webmanifest">
+   <link rel="apple-touch-icon" href="./icons/yourTool-192.svg">
+   <link rel="icon" type="image/svg+xml" href="./icons/yourTool-192.svg">
+   <meta name="mobile-web-app-capable" content="yes">
+   <meta name="apple-mobile-web-app-capable" content="yes">
+   ```
+
+5. **在 `index.html` 底部加入 Service Worker 註冊**：
+
+   ```html
+   <script>
+     if ('serviceWorker' in navigator) {
+       window.addEventListener('load', () =>
+         navigator.serviceWorker.register('./sw.js')
+           .catch(err => console.warn('[SW] Registration failed:', err))
+       );
+     }
+   </script>
+   ```
+
+### 為何每個工具需要獨立 Scope？
+
+PWA 的「可安裝性」取決於 `manifest.webmanifest` 中的 `scope` 欄位。若多個工具共用相同的 scope（例如根目錄 `"/"`），行動瀏覽器會認為它們是**同一個 App**，導致後安裝的工具覆蓋前一個，無法同時在主畫面保留兩個獨立圖示。
+
+將每個工具放在獨立子目錄並設定對應的 `scope`，瀏覽器即可識別為不同的 App，使用者便能分別安裝、各自出現在主畫面。
