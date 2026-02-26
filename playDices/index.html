@@ -6,7 +6,7 @@
     <title>🎲 物理 3D 托盤擲骰子</title>
 
     <!-- PWA: Manifest & Theme -->
-    <link rel="manifest" href="./playDices.webmanifest">
+    <link rel="manifest" href="./manifest.webmanifest">
     <meta name="theme-color" content="#667eea">
     <meta name="application-name" content="骰子搖搖">
     <meta name="description" content="使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子">
@@ -830,7 +830,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js', { scope: './' })
+                navigator.serviceWorker.register('./sw.js')
                     .then((reg) => {
                         console.log('[PWA] Service Worker registered, scope:', reg.scope);
                     })

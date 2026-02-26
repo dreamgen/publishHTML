@@ -1,10 +1,10 @@
 {
-  "id": "./scoreBoard.html",
-  "name": "萬用計分板 - ScoreBoard",
-  "short_name": "計分板",
-  "description": "適用於球類、牌局、比賽的萬用計分工具，支援多人對戰、自訂步距與勝利條件",
-  "start_url": "./scoreBoard.html",
-  "scope": "./",
+  "id": "/playDices/",
+  "name": "物理 3D 骰子 - Play Dices",
+  "short_name": "骰子搖搖",
+  "description": "使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子",
+  "start_url": "/playDices/",
+  "scope": "/playDices/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f172a",
@@ -13,19 +13,19 @@
   "categories": ["games", "utilities"],
   "icons": [
     {
-      "src": "./icons/scoreBoard-192.svg",
+      "src": "./icons/playDices-192.svg",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "./icons/scoreBoard-512.svg",
+      "src": "./icons/playDices-512.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "./icons/scoreBoard-512.svg",
+      "src": "./icons/playDices-512.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "maskable"
@@ -34,13 +34,13 @@
   "screenshots": [],
   "shortcuts": [
     {
-      "name": "開始計分",
-      "short_name": "計分",
-      "description": "快速開啟萬用計分板",
-      "url": "./scoreBoard.html",
+      "name": "開始搖骰子",
+      "short_name": "搖一搖",
+      "description": "直接開始搖骰子",
+      "url": "/playDices/",
       "icons": [
         {
-          "src": "./icons/scoreBoard-192.svg",
+          "src": "./icons/playDices-192.svg",
           "sizes": "192x192",
           "type": "image/svg+xml"
         }
