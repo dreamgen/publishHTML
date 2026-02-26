@@ -74,14 +74,14 @@
 
 ```
 publishHTML/
-├── playDices/                   # 骰子搖搖 PWA（scope: /playDices/）
+├── playDices/                   # 骰子搖搖 PWA（scope: ./，解析為 …/playDices/）
 │   ├── index.html               # 主頁面（含所有 HTML/CSS/JS）
 │   ├── manifest.webmanifest     # PWA 設定（scope、icon、name…）
 │   ├── sw.js                    # Service Worker（僅管理此工具的快取）
 │   └── icons/
 │       ├── playDices-192.svg    # App 圖示 192×192
 │       └── playDices-512.svg    # App 圖示 512×512
-├── scoreBoard/                  # 萬用計分板 PWA（scope: /scoreBoard/）
+├── scoreBoard/                  # 萬用計分板 PWA（scope: ./，解析為 …/scoreBoard/）
 │   ├── index.html
 │   ├── manifest.webmanifest
 │   ├── sw.js
@@ -115,11 +115,11 @@ publishHTML/
 
    ```json
    {
-     "id": "/yourTool/",
+     "id": "./",
      "name": "工具全名",
      "short_name": "短名稱",
-     "start_url": "/yourTool/",
-     "scope": "/yourTool/",
+     "start_url": "./",
+     "scope": "./",
      "icons": [
        { "src": "./icons/yourTool-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
        { "src": "./icons/yourTool-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
@@ -128,7 +128,9 @@ publishHTML/
    }
    ```
 
-   > **重要：** `scope` 與 `start_url` 必須設為 `/yourTool/`（與子目錄名稱一致），否則瀏覽器無法正確安裝為獨立 PWA。
+   > **重要：** `id`、`scope`、`start_url` 必須使用**相對路徑** `"./"`，不可寫成絕對路徑（如 `"/yourTool/"`）。
+   > 絕對路徑在 GitHub Pages 等部署於子目錄的環境中，會從網域根目錄解析，導致安裝後開啟出現 404。
+   > 相對路徑會從 manifest 檔案所在位置解析，每個工具的 `"./"` 自然指向各自的子目錄，仍可各自獨立安裝。
 
 3. **設定 `sw.js`**（複製 `scoreBoard/sw.js`，將所有 `scoreBoard` 改為 `yourTool`）：
 

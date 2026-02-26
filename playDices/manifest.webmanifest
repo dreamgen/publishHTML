@@ -1,10 +1,10 @@
 {
-  "id": "/playDices/",
+  "id": "./",
   "name": "物理 3D 骰子 - Play Dices",
   "short_name": "骰子搖搖",
   "description": "使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子",
-  "start_url": "/playDices/",
-  "scope": "/playDices/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f172a",
@@ -37,7 +37,7 @@
       "name": "開始搖骰子",
       "short_name": "搖一搖",
       "description": "直接開始搖骰子",
-      "url": "/playDices/",
+      "url": "./",
       "icons": [
         {
           "src": "./icons/playDices-192.svg",

@@ -1,10 +1,10 @@
 {
-  "id": "/scoreBoard/",
+  "id": "./",
   "name": "萬用計分板 - ScoreBoard",
   "short_name": "計分板",
   "description": "適用於球類、牌局、比賽的萬用計分工具，支援多人對戰、自訂步距與勝利條件",
-  "start_url": "/scoreBoard/",
-  "scope": "/scoreBoard/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f172a",
@@ -37,7 +37,7 @@
       "name": "開始計分",
       "short_name": "計分",
       "description": "快速開啟萬用計分板",
-      "url": "/scoreBoard/",
+      "url": "./",
       "icons": [
         {
           "src": "./icons/scoreBoard-192.svg",
