@@ -67,7 +67,8 @@
     .hide-scrollbar::-webkit-scrollbar { display: none; }
 
     /* ── Touch / font tweaks ───────────────────────────────────────────── */
-    button, input { -webkit-appearance: none; }
+    button, input:not([type="checkbox"]):not([type="radio"]) { -webkit-appearance: none; }
+    input[type="checkbox"], input[type="radio"] { accent-color: #6366f1; }
     .tabular-nums { font-variant-numeric: tabular-nums; }
   </style>
 </head>
@@ -486,7 +487,7 @@
               <div
                 key={player.id}
                 className={`relative flex flex-col rounded-2xl sm:rounded-3xl shadow-lg bg-gradient-to-br ${player.color} overflow-hidden transition-all duration-300
-                  ${isVersusMode ? 'flex-1 justify-center p-4 sm:p-8' : 'p-4 min-h-[280px]'}
+                  ${isVersusMode ? 'flex-1 justify-center p-4 sm:p-8' : 'p-4 min-h-[400px]'}
                   ${winnerId === player.id ? 'ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.5)]' : ''}
                 `}
               >
@@ -578,7 +579,7 @@
                     </button>
                   </div>
 
-                  <div className="flex gap-2 h-12 flex-wrap z-10">
+                  <div className="flex gap-2 min-h-[3rem] flex-wrap z-10">
                     {settings.buttons
                       .map(b => parseInt(b, 10))
                       .filter(num => !isNaN(num))
