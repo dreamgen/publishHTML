@@ -1,33 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="scoreBoardBg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#667eea;stop-opacity:1"/>
       <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1"/>
     </linearGradient>
-    <linearGradient id="trophy" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="scoreBoardTrophy" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1"/>
       <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1"/>
     </linearGradient>
   </defs>
 
   <!-- Background -->
-  <rect width="192" height="192" rx="38" ry="38" fill="url(#bg)"/>
+  <rect width="192" height="192" rx="38" ry="38" fill="url(#scoreBoardBg)"/>
 
   <!-- Trophy cup body -->
   <path d="M72 44 h48 v52 c0 22 -12 34 -24 38 c-12 -4 -24 -16 -24 -38 Z"
-        fill="url(#trophy)" opacity="0.95"/>
+        fill="url(#scoreBoardTrophy)" opacity="0.95"/>
 
   <!-- Trophy handles -->
   <path d="M72 56 Q44 56 44 76 Q44 96 64 96"
-        fill="none" stroke="url(#trophy)" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
+        fill="none" stroke="url(#scoreBoardTrophy)" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
   <path d="M120 56 Q148 56 148 76 Q148 96 128 96"
-        fill="none" stroke="url(#trophy)" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
+        fill="none" stroke="url(#scoreBoardTrophy)" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
 
   <!-- Trophy stem -->
-  <rect x="88" y="134" width="16" height="18" rx="3" fill="url(#trophy)" opacity="0.95"/>
+  <rect x="88" y="134" width="16" height="18" rx="3" fill="url(#scoreBoardTrophy)" opacity="0.95"/>
 
   <!-- Trophy base -->
-  <rect x="68" y="150" width="56" height="10" rx="5" fill="url(#trophy)" opacity="0.95"/>
+  <rect x="68" y="150" width="56" height="10" rx="5" fill="url(#scoreBoardTrophy)" opacity="0.95"/>
 
   <!-- Score lines on cup -->
   <line x1="82" y1="70" x2="110" y2="70" stroke="white" stroke-width="3.5" stroke-linecap="round" opacity="0.55"/>

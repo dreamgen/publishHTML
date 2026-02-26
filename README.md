@@ -115,7 +115,7 @@ publishHTML/
 
    ```json
    {
-     "id": "./",
+     "id": "yourTool",
      "name": "工具全名",
      "short_name": "短名稱",
      "start_url": "./",
@@ -128,9 +128,11 @@ publishHTML/
    }
    ```
 
-   > **重要：** `id`、`scope`、`start_url` 必須使用**相對路徑** `"./"`，不可寫成絕對路徑（如 `"/yourTool/"`）。
-   > 絕對路徑在 GitHub Pages 等部署於子目錄的環境中，會從網域根目錄解析，導致安裝後開啟出現 404。
-   > 相對路徑會從 manifest 檔案所在位置解析，每個工具的 `"./"` 自然指向各自的子目錄，仍可各自獨立安裝。
+   > **重要：**
+   > - `id` 必須是**每個工具唯一的字串**（如工具名稱），**不可**所有工具都用 `"./"`。
+   >   macOS Chrome 比對 `id` 時不展開相對路徑，若多個工具都寫 `"./"` 會被識別為同一個 App，導致後安裝的工具顯示先前工具的圖示。
+   > - `scope` 與 `start_url` 使用 `"./"` 即可（從 manifest 所在目錄解析，自動指向該工具的子目錄）。
+   > - 不可寫成絕對路徑（如 `"/yourTool/"`），在 GitHub Pages 等子目錄部署環境會從網域根解析，造成安裝後 404。
 
 3. **設定 `sw.js`**（複製 `scoreBoard/sw.js`，將所有 `scoreBoard` 改為 `yourTool`）：
 
@@ -145,13 +147,24 @@ publishHTML/
 
    ```html
    <link rel="manifest" href="./manifest.webmanifest">
-   <link rel="apple-touch-icon" href="./icons/yourTool-192.svg">
    <link rel="icon" type="image/svg+xml" href="./icons/yourTool-192.svg">
+   <link rel="apple-touch-icon" href="./icons/yourTool-192.svg">
    <meta name="mobile-web-app-capable" content="yes">
    <meta name="apple-mobile-web-app-capable" content="yes">
    ```
 
-5. **在 `index.html` 底部加入 Service Worker 註冊**：
+   > **注意：** `<link rel="icon" type="image/svg+xml">` 必須加入，macOS Chrome 依賴此標籤顯示 PWA 圖示；遺漏時會退回顯示 App 名稱的第一個字。
+
+5. **SVG 圖示的 `id` 屬性須以工具名稱為前綴**，避免多個圖示在相同渲染環境中產生衝突：
+
+   ```xml
+   <!-- 錯誤：通用 id 可能跨檔衝突 -->
+   <linearGradient id="bg" ...>
+   <!-- 正確：加工具名稱前綴 -->
+   <linearGradient id="yourToolBg" ...>
+   ```
+
+6. **在 `index.html` 底部加入 Service Worker 註冊**：
 
    ```html
    <script>
