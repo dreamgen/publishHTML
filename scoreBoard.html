@@ -1,850 +1,857 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>萬用計分板</title>
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { 
+  Plus, Minus, RotateCcw, Users, Timer as TimerIcon, 
+  Trash2, Play, Pause, Square, Undo2, Sun, Moon,
+  MonitorPlay, Trophy, Settings, Flag
+} from 'lucide-react';
 
-  <!-- PWA -->
-  <link rel="manifest" href="./scoreBoard.webmanifest">
-  <link rel="apple-touch-icon" href="./icons/scoreBoard-192.svg">
-  <meta name="theme-color" content="#4f46e5">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="計分板">
-  <meta name="description" content="適用於球類、牌局、比賽的萬用計分工具">
+// 預設顏色庫，新增玩家時自動循環使用
+const COLORS = [
+  'from-blue-500 to-blue-800',
+  'from-red-500 to-red-800',
+  'from-green-500 to-green-800',
+  'from-yellow-500 to-yellow-800',
+  'from-purple-500 to-purple-800',
+  'from-pink-500 to-pink-800',
+  'from-teal-500 to-teal-800',
+  'from-orange-500 to-orange-800',
+];
 
-  <!-- Tailwind CSS (Play CDN — supports arbitrary values like text-[12rem]) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+// 內建比賽模式範本 (新增 periodMode、customPeriods 與 maxPeriods)
+const GAME_TEMPLATES = {
+  normal: { id: 'normal', name: '一般模式 (無判定)', targetScore: 0, winByTwo: false, maxScore: 0, buttons: [-5, 5, 10], timerMode: 'countup', defaultTime: 0, showServe: false, showFouls: false, showPeriod: false, periodMode: 'number', customPeriods: [], maxPeriods: 0, autoResetScores: false },
+  badminton: { id: 'badminton', name: '羽球 (21分制)', targetScore: 21, winByTwo: true, maxScore: 30, buttons: [-1, 1, 2, 3], timerMode: 'countup', defaultTime: 0, showServe: true, showFouls: false, showPeriod: true, periodMode: 'number', customPeriods: [], maxPeriods: 3, autoResetScores: true },
+  pingpong: { id: 'pingpong', name: '桌球 (11分制)', targetScore: 11, winByTwo: true, maxScore: 0, buttons: [-1, 2, 5], timerMode: 'countup', defaultTime: 0, showServe: true, showFouls: false, showPeriod: true, periodMode: 'number', customPeriods: [], maxPeriods: 5, autoResetScores: true },
+  basketball: { id: 'basketball', name: '籃球', targetScore: 0, winByTwo: false, maxScore: 0, buttons: [-1, 1, 2, 3], timerMode: 'countdown', defaultTime: 600, showServe: false, showFouls: true, showPeriod: true, periodMode: 'number', customPeriods: [], maxPeriods: 4, autoResetScores: false },
+  volleyball: { id: 'volleyball', name: '排球 (25分制)', targetScore: 25, winByTwo: true, maxScore: 0, buttons: [-1, 2, 3], timerMode: 'countup', defaultTime: 0, showServe: true, showFouls: false, showPeriod: true, periodMode: 'number', customPeriods: [], maxPeriods: 5, autoResetScores: true },
+  mahjong: { id: 'mahjong', name: '麻將', targetScore: 0, winByTwo: false, maxScore: 0, buttons: [-100, 100, 500, 1000], timerMode: 'countup', defaultTime: 0, showServe: false, showFouls: false, showPeriod: true, periodMode: 'custom', customPeriods: ['東風東局','東風南局','東風西局','東風北局','南風東局','南風南局','南風西局','南風北局','西風東局','西風南局','西風西局','西風北局','北風東局','北風南局','北風西局','北風北局'], maxPeriods: 16, autoResetScores: false }
+};
 
-  <style>
-    *, *::before, *::after {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
+export default function App() {
+  // 狀態管理
+  const [players, setPlayers] = useState([
+    { id: '1', name: '主場 (Home)', score: 0, color: COLORS[0], isServing: true, fouls: 0 },
+    { id: '2', name: '客場 (Away)', score: 0, color: COLORS[1], isServing: false, fouls: 0 }
+  ]);
+  const [currentPeriod, setCurrentPeriod] = useState(0); // 局數/節次狀態
+  const [history, setHistory] = useState([]);
+  const [showTimer, setShowTimer] = useState(false);
+  
+  const [settings, setSettings] = useState(GAME_TEMPLATES.normal);
+  const [showSettings, setShowSettings] = useState(false);
+  const [tempSettings, setTempSettings] = useState(GAME_TEMPLATES.normal);
+  
+  // 計時器狀態
+  const [time, setTime] = useState(GAME_TEMPLATES.normal.defaultTime); // 單位：秒
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const timerRef = useRef(null);
+
+  const [wakeLock, setWakeLock] = useState(null);
+  const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showNextPeriodConfirm, setShowNextPeriodConfirm] = useState(false);
+  const [autoResetPeriod, setAutoResetPeriod] = useState(null); // 記錄無上限時第一次換局是否歸零的選擇
+
+  // 自動判定勝負邏輯
+  const winnerId = useMemo(() => {
+    if (!settings.targetScore || settings.targetScore <= 0) return null;
+    
+    const sorted = [...players].sort((a, b) => b.score - a.score);
+    const first = sorted[0];
+    const second = sorted.length > 1 ? sorted[1] : { score: 0 };
+    
+    if (first.score >= settings.targetScore) {
+      if (settings.winByTwo) {
+        if (first.score - second.score >= 2 || (settings.maxScore > 0 && first.score >= settings.maxScore)) {
+          return first.id;
+        }
+      } else {
+        return first.id;
+      }
     }
+    return null;
+  }, [players, settings]);
 
-    /* Full-height fix for mobile (dvh avoids address-bar overlap) */
-    html, body {
-      height: 100%;
-      height: 100dvh;
-      margin: 0;
-      overflow: hidden;
-    }
+  // 判斷是否可以進入下一局
+  const canAdvancePeriod = (settings.targetScore === 0 || winnerId !== null) && 
+                           (!settings.maxPeriods || settings.maxPeriods === 0 || currentPeriod < settings.maxPeriods - 1);
 
-    #root {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+  // 初始化 PWA 與移動端優化設定
+  useEffect(() => {
+    const meta = document.createElement('meta');
+    meta.name = 'viewport';
+    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    document.head.appendChild(meta);
 
-    /* Override Tailwind's min-h-screen (100vh) with dvh */
-    .min-h-screen { min-height: 100dvh; }
+    requestWakeLock();
 
-    /* ── tailwindcss-animate equivalents ─────────────────────────────────── */
-    @keyframes fadeInScale {
-      from { opacity: 0; transform: scale(0.93); }
-      to   { opacity: 1; transform: scale(1);    }
-    }
-    @keyframes slideDown {
-      from { opacity: 0; transform: translateY(-6px); }
-      to   { opacity: 1; transform: translateY(0);    }
-    }
-
-    /* animate-in + fade-in + zoom-in  →  modal/dialog entrance */
-    .animate-in.fade-in.zoom-in {
-      animation: fadeInScale 0.2s ease-out both;
-    }
-    /* animate-in + slide-in-from-top-2  →  collapsible panels */
-    .animate-in.slide-in-from-top-2,
-    .animate-in.fade-in.slide-in-from-top-2 {
-      animation: slideDown 0.2s ease-out both;
-    }
-
-    /* ── Scrollbar hiding ──────────────────────────────────────────────── */
-    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    .hide-scrollbar::-webkit-scrollbar { display: none; }
-
-    /* ── Touch / font tweaks ───────────────────────────────────────────── */
-    button, input:not([type="checkbox"]):not([type="radio"]) { -webkit-appearance: none; }
-    /* Custom checkbox / radio for dark theme */
-    input[type="checkbox"],
-    input[type="radio"] {
-      -webkit-appearance: none;
-      appearance: none;
-      cursor: pointer;
-      border: 2px solid #4b5563;
-      background-color: #374151;
-      transition: background-color 0.15s, border-color 0.15s;
-      flex-shrink: 0;
-    }
-    input[type="radio"] { border-radius: 50%; }
-    input[type="checkbox"]:checked,
-    input[type="radio"]:checked {
-      background-color: #6366f1 !important;
-      border-color: #6366f1 !important;
-    }
-    input[type="checkbox"]:checked {
-      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c%2fsvg%3e");
-      background-size: 90%;
-      background-position: center;
-      background-repeat: no-repeat;
-    }
-    input[type="radio"]:checked {
-      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3ccircle cx='8' cy='8' r='3'/%3e%3c%2fsvg%3e");
-      background-size: 100%;
-      background-position: center;
-      background-repeat: no-repeat;
-    }
-    .tabular-nums { font-variant-numeric: tabular-nums; }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-
-  <!-- React 18 UMD -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <!-- Babel Standalone — browser-side JSX transpilation -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback, useMemo } = React;
-
-    // ── SVG Icon components (replaces lucide-react imports) ───────────────
-
-    const Icon = ({ size = 24, className = '', children }) => (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width={size} height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={className}
-      >{children}</svg>
-    );
-
-    const Plus      = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
-    const Minus     = (p) => <Icon {...p}><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
-    const RotateCcw = (p) => <Icon {...p}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></Icon>;
-    const Users     = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
-    const TimerIcon = (p) => <Icon {...p}><path d="M10 2h4"/><path d="m12 14 1.5-1.5"/><circle cx="12" cy="14" r="8"/></Icon>;
-    const Trash2    = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Icon>;
-    const Play      = (p) => <Icon {...p}><polygon points="5 3 19 12 5 21 5 3"/></Icon>;
-    const Pause     = (p) => <Icon {...p}><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></Icon>;
-    const Square    = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></Icon>;
-    const Undo2     = (p) => <Icon {...p}><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></Icon>;
-    const MonitorPlay = (p) => <Icon {...p}><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25A.75.75 0 0 1 10 12.25Z"/><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M12 17v4"/><path d="M8 21h8"/></Icon>;
-    const Trophy    = (p) => <Icon {...p}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></Icon>;
-    const Settings  = (p) => <Icon {...p}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></Icon>;
-    const Flag      = (p) => <Icon {...p}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></Icon>;
-    // Imported in original source but not rendered — defined for completeness
-    const Sun       = (p) => <Icon {...p}><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></Icon>;
-    const Moon      = (p) => <Icon {...p}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></Icon>;
-
-    // ── Constants ─────────────────────────────────────────────────────────
-
-    const COLORS = [
-      'from-blue-500 to-blue-800',
-      'from-red-500 to-red-800',
-      'from-green-500 to-green-800',
-      'from-yellow-500 to-yellow-800',
-      'from-purple-500 to-purple-800',
-      'from-pink-500 to-pink-800',
-      'from-teal-500 to-teal-800',
-      'from-orange-500 to-orange-800',
-    ];
-
-    const GAME_TEMPLATES = {
-      normal:     { id: 'normal',     name: '一般模式 (無判定)', targetScore: 0,  winByTwo: false, maxScore: 0,  buttons: [-5, 5, 10],          timerMode: 'countup',   defaultTime: 0,   showServe: false, showFouls: false, showPeriod: false, periodMode: 'number', customPeriods: [],                                                                                                                                                                                  maxPeriods: 0,  autoResetScores: false },
-      badminton:  { id: 'badminton',  name: '羽球 (21分制)',     targetScore: 21, winByTwo: true,  maxScore: 30, buttons: [-1, 1, 2, 3],         timerMode: 'countup',   defaultTime: 0,   showServe: true,  showFouls: false, showPeriod: true,  periodMode: 'number', customPeriods: [],                                                                                                                                                                                  maxPeriods: 3,  autoResetScores: true  },
-      pingpong:   { id: 'pingpong',   name: '桌球 (11分制)',     targetScore: 11, winByTwo: true,  maxScore: 0,  buttons: [-1, 2, 5],            timerMode: 'countup',   defaultTime: 0,   showServe: true,  showFouls: false, showPeriod: true,  periodMode: 'number', customPeriods: [],                                                                                                                                                                                  maxPeriods: 5,  autoResetScores: true  },
-      basketball: { id: 'basketball', name: '籃球',              targetScore: 0,  winByTwo: false, maxScore: 0,  buttons: [-1, 1, 2, 3],         timerMode: 'countdown', defaultTime: 600, showServe: false, showFouls: true,  showPeriod: true,  periodMode: 'number', customPeriods: [],                                                                                                                                                                                  maxPeriods: 4,  autoResetScores: false },
-      volleyball: { id: 'volleyball', name: '排球 (25分制)',     targetScore: 25, winByTwo: true,  maxScore: 0,  buttons: [-1, 2, 3],            timerMode: 'countup',   defaultTime: 0,   showServe: true,  showFouls: false, showPeriod: true,  periodMode: 'number', customPeriods: [],                                                                                                                                                                                  maxPeriods: 5,  autoResetScores: true  },
-      mahjong:    { id: 'mahjong',    name: '麻將',              targetScore: 0,  winByTwo: false, maxScore: 0,  buttons: [-100, 100, 500, 1000], timerMode: 'countup',   defaultTime: 0,   showServe: false, showFouls: false, showPeriod: true,  periodMode: 'custom', customPeriods: ['東風東局','東風南局','東風西局','東風北局','南風東局','南風南局','南風西局','南風北局','西風東局','西風南局','西風西局','西風北局','北風東局','北風南局','北風西局','北風北局'], maxPeriods: 16, autoResetScores: false },
+    return () => {
+      document.head.removeChild(meta);
+      if (wakeLock) wakeLock.release();
     };
+  }, []);
 
-    // ── App ───────────────────────────────────────────────────────────────
-
-    function App() {
-      const [players, setPlayers] = useState([
-        { id: '1', name: '主場 (Home)', score: 0, color: COLORS[0], isServing: true,  fouls: 0 },
-        { id: '2', name: '客場 (Away)', score: 0, color: COLORS[1], isServing: false, fouls: 0 },
-      ]);
-      const [currentPeriod, setCurrentPeriod] = useState(0);
-      const [history, setHistory] = useState([]);
-      const [showTimer, setShowTimer] = useState(false);
-      const [settings, setSettings] = useState(GAME_TEMPLATES.normal);
-      const [showSettings, setShowSettings] = useState(false);
-      const [tempSettings, setTempSettings] = useState(GAME_TEMPLATES.normal);
-      const [time, setTime] = useState(GAME_TEMPLATES.normal.defaultTime);
-      const [isTimerRunning, setIsTimerRunning] = useState(false);
-      const timerRef = useRef(null);
-      const [wakeLock, setWakeLock] = useState(null);
-      const [isWakeLockActive, setIsWakeLockActive] = useState(false);
-      const [showResetConfirm, setShowResetConfirm] = useState(false);
-      const [showNextPeriodConfirm, setShowNextPeriodConfirm] = useState(false);
-      const [autoResetPeriod, setAutoResetPeriod] = useState(null);
-
-      const winnerId = useMemo(() => {
-        if (!settings.targetScore || settings.targetScore <= 0) return null;
-        const sorted = [...players].sort((a, b) => b.score - a.score);
-        const first  = sorted[0];
-        const second = sorted.length > 1 ? sorted[1] : { score: 0 };
-        if (first.score >= settings.targetScore) {
-          if (settings.winByTwo) {
-            if (first.score - second.score >= 2 || (settings.maxScore > 0 && first.score >= settings.maxScore)) {
-              return first.id;
+  // 計時器邏輯
+  useEffect(() => {
+    if (isTimerRunning) {
+      timerRef.current = setInterval(() => {
+        setTime(prev => {
+          if (settings.timerMode === 'countdown') {
+            if (prev <= 1) {
+              setIsTimerRunning(false);
+              return 0;
             }
-          } else {
-            return first.id;
+            return prev - 1;
           }
-        }
-        return null;
-      }, [players, settings]);
-
-      const canAdvancePeriod =
-        (settings.targetScore === 0 || winnerId !== null) &&
-        (!settings.maxPeriods || settings.maxPeriods === 0 || currentPeriod < settings.maxPeriods - 1);
-
-      useEffect(() => {
-        const meta = document.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-        document.head.appendChild(meta);
-        requestWakeLock();
-        return () => {
-          document.head.removeChild(meta);
-          if (wakeLock) wakeLock.release();
-        };
-      }, []);
-
-      useEffect(() => {
-        if (isTimerRunning) {
-          timerRef.current = setInterval(() => {
-            setTime(prev => {
-              if (settings.timerMode === 'countdown') {
-                if (prev <= 1) { setIsTimerRunning(false); return 0; }
-                return prev - 1;
-              }
-              return prev + 1;
-            });
-          }, 1000);
-        } else {
-          clearInterval(timerRef.current);
-        }
-        return () => clearInterval(timerRef.current);
-      }, [isTimerRunning, settings.timerMode]);
-
-      const formatTime = (seconds) => {
-        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-        const s = (seconds % 60).toString().padStart(2, '0');
-        return `${m}:${s}`;
-      };
-
-      const requestWakeLock = async () => {
-        try {
-          if ('wakeLock' in navigator) {
-            const lock = await navigator.wakeLock.request('screen');
-            setWakeLock(lock);
-            setIsWakeLockActive(true);
-            lock.addEventListener('release', () => setIsWakeLockActive(false));
-          }
-        } catch (err) {
-          console.log('Wake Lock request failed:', err);
-          setIsWakeLockActive(false);
-        }
-      };
-
-      const toggleWakeLock = () => {
-        if (isWakeLockActive && wakeLock) {
-          wakeLock.release();
-          setWakeLock(null);
-        } else {
-          requestWakeLock();
-        }
-      };
-
-      const saveToHistory = (prevPlayers, period) => {
-        setHistory(prev => [...prev, { players: prevPlayers, period }]);
-      };
-
-      const changeScore = (id, delta) => {
-        setPlayers(prevPlayers => {
-          saveToHistory(prevPlayers, currentPeriod);
-          return prevPlayers.map(p => p.id === id ? { ...p, score: p.score + delta } : p);
+          return prev + 1;
         });
-      };
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isTimerRunning, settings.timerMode]);
 
-      const changeFouls = (id, delta) => {
-        setPlayers(prevPlayers => {
-          saveToHistory(prevPlayers, currentPeriod);
-          return prevPlayers.map(p => p.id === id ? { ...p, fouls: Math.max(0, (p.fouls || 0) + delta) } : p);
-        });
-      };
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
-      const setServe = (id) => {
-        setPlayers(prevPlayers => {
-          saveToHistory(prevPlayers, currentPeriod);
-          return prevPlayers.map(p => ({ ...p, isServing: p.id === id }));
-        });
-      };
+  const requestWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator) {
+        const lock = await navigator.wakeLock.request('screen');
+        setWakeLock(lock);
+        setIsWakeLockActive(true);
+        lock.addEventListener('release', () => setIsWakeLockActive(false));
+      }
+    } catch (err) {
+      console.log('Wake Lock request failed:', err);
+      setIsWakeLockActive(false);
+    }
+  };
 
-      const undoScore = () => {
-        if (history.length > 0) {
-          const lastState = history[history.length - 1];
-          if (Array.isArray(lastState)) {
-            setPlayers(lastState);
-          } else {
-            setPlayers(lastState.players);
-            setCurrentPeriod(lastState.period !== undefined ? lastState.period : currentPeriod);
-          }
-          setHistory(prev => prev.slice(0, -1));
-        }
-      };
+  const toggleWakeLock = () => {
+    if (isWakeLockActive && wakeLock) {
+      wakeLock.release();
+      setWakeLock(null);
+    } else {
+      requestWakeLock();
+    }
+  };
 
-      const addPlayer = () => {
-        const newId = Date.now().toString();
-        const nextColor = COLORS[players.length % COLORS.length];
-        saveToHistory(players, currentPeriod);
-        setPlayers([...players, { id: newId, name: `玩家 ${players.length + 1}`, score: 0, color: nextColor, isServing: false, fouls: 0 }]);
-      };
+  const saveToHistory = (prevPlayers, period) => {
+    setHistory(prev => [...prev, { players: prevPlayers, period: period }]);
+  };
 
-      const removePlayer = (id) => {
-        saveToHistory(players, currentPeriod);
-        setPlayers(players.filter(p => p.id !== id));
-      };
+  const changeScore = (id, delta) => {
+    setPlayers(prevPlayers => {
+      saveToHistory(prevPlayers, currentPeriod);
+      return prevPlayers.map(p => p.id === id ? { ...p, score: p.score + delta } : p);
+    });
+  };
 
-      const updatePlayerName = (id, newName) => {
-        setPlayers(players.map(p => p.id === id ? { ...p, name: newName } : p));
-      };
+  const changeFouls = (id, delta) => {
+    setPlayers(prevPlayers => {
+      saveToHistory(prevPlayers, currentPeriod);
+      return prevPlayers.map(p => p.id === id ? { ...p, fouls: Math.max(0, (p.fouls || 0) + delta) } : p);
+    });
+  };
 
-      const handleResetClick = () => setShowResetConfirm(true);
+  const setServe = (id) => {
+    setPlayers(prevPlayers => {
+      saveToHistory(prevPlayers, currentPeriod);
+      return prevPlayers.map(p => ({ ...p, isServing: p.id === id }));
+    });
+  };
 
-      const handleNextPeriodClick = () => {
-        if (settings.maxPeriods > 0) {
-          confirmNextPeriod(settings.autoResetScores);
-        } else if (autoResetPeriod !== null) {
-          confirmNextPeriod(autoResetPeriod);
-        } else {
-          setShowNextPeriodConfirm(true);
-        }
-      };
+  const undoScore = () => {
+    if (history.length > 0) {
+      const lastState = history[history.length - 1];
+      // 相容舊的陣列歷史紀錄與新的物件歷史紀錄
+      if (Array.isArray(lastState)) {
+        setPlayers(lastState);
+      } else {
+        setPlayers(lastState.players);
+        setCurrentPeriod(lastState.period !== undefined ? lastState.period : currentPeriod);
+      }
+      setHistory(prev => prev.slice(0, -1));
+    }
+  };
 
-      const confirmResetAllScores = () => {
-        saveToHistory(players, currentPeriod);
-        setPlayers(players.map((p, idx) => ({ ...p, score: 0, fouls: 0, isServing: idx === 0 })));
-        setTime(settings.timerMode === 'countdown' ? settings.defaultTime : 0);
-        setIsTimerRunning(false);
-        setCurrentPeriod(0);
-        setAutoResetPeriod(null);
-        setShowResetConfirm(false);
-      };
+  const addPlayer = () => {
+    const newId = Date.now().toString();
+    const nextColor = COLORS[players.length % COLORS.length];
+    saveToHistory(players, currentPeriod);
+    setPlayers([...players, { id: newId, name: `玩家 ${players.length + 1}`, score: 0, color: nextColor, isServing: false, fouls: 0 }]);
+  };
 
-      const confirmNextPeriod = (resetScores) => {
-        if ((!settings.maxPeriods || settings.maxPeriods === 0) && autoResetPeriod === null) {
-          setAutoResetPeriod(resetScores);
-        }
-        saveToHistory(players, currentPeriod);
-        if (resetScores) {
-          setPlayers(players.map((p, idx) => ({ ...p, score: 0, fouls: 0, isServing: idx === 0 })));
-        }
-        setCurrentPeriod(prev => prev + 1);
-        setTime(settings.timerMode === 'countdown' ? settings.defaultTime : 0);
-        setIsTimerRunning(false);
-        setShowNextPeriodConfirm(false);
-      };
+  const removePlayer = (id) => {
+    saveToHistory(players, currentPeriod);
+    setPlayers(players.filter(p => p.id !== id));
+  };
 
-      const openSettings = () => {
-        setTempSettings(settings);
-        setShowSettings(true);
-      };
+  const updatePlayerName = (id, newName) => {
+    setPlayers(players.map(p => p.id === id ? { ...p, name: newName } : p));
+  };
 
-      const saveSettings = () => {
-        if (tempSettings.timerMode !== settings.timerMode || tempSettings.defaultTime !== settings.defaultTime) {
-          setIsTimerRunning(false);
-          setTime(tempSettings.timerMode === 'countdown' ? tempSettings.defaultTime : 0);
-        }
-        if (tempSettings.id !== settings.id || tempSettings.maxPeriods !== settings.maxPeriods || tempSettings.autoResetScores !== settings.autoResetScores) {
-          setAutoResetPeriod(null);
-        }
-        setSettings(tempSettings);
-        setShowSettings(false);
-      };
+  const handleResetClick = () => {
+    setShowResetConfirm(true);
+  };
 
-      const getPeriodText = () => {
-        if (settings.periodMode === 'custom' && settings.customPeriods && settings.customPeriods.length > 0) {
-          return settings.customPeriods[currentPeriod % settings.customPeriods.length]?.trim() || `第 ${currentPeriod + 1} 局`;
-        }
-        const totalText = settings.maxPeriods > 0 ? ` / ${settings.maxPeriods}` : '';
-        return `第 ${currentPeriod + 1}${totalText} ${settings.id === 'basketball' ? '節' : '局'}`;
-      };
+  const handleNextPeriodClick = () => {
+    if (settings.maxPeriods > 0) {
+      // 有設定最高局數，直接依照設定決定是否歸零，不再詢問
+      confirmNextPeriod(settings.autoResetScores);
+    } else if (autoResetPeriod !== null) {
+      // 沒有最高局數且已經選擇過是否歸零，直接沿用
+      confirmNextPeriod(autoResetPeriod);
+    } else {
+      // 沒有最高局數且第一次換局，彈出確認視窗詢問
+      setShowNextPeriodConfirm(true);
+    }
+  };
 
-      const isVersusMode = players.length <= 2;
+  const confirmResetAllScores = () => {
+    saveToHistory(players, currentPeriod);
+    setPlayers(players.map((p, idx) => ({ ...p, score: 0, fouls: 0, isServing: idx === 0 })));
+    setTime(settings.timerMode === 'countdown' ? settings.defaultTime : 0);
+    setIsTimerRunning(false);
+    setCurrentPeriod(0); // 歸零時也重設局數
+    setAutoResetPeriod(null); // 清除換局預設行為
+    setShowResetConfirm(false);
+  };
 
-      return (
-        <div className="min-h-screen bg-gray-950 text-white font-sans select-none flex flex-col overflow-hidden" style={{ touchAction: 'manipulation' }}>
+  const confirmNextPeriod = (resetScores) => {
+    if ((!settings.maxPeriods || settings.maxPeriods === 0) && autoResetPeriod === null) {
+      setAutoResetPeriod(resetScores); // 記錄第一次選擇
+    }
+    saveToHistory(players, currentPeriod);
+    if (resetScores) {
+      setPlayers(players.map((p, idx) => ({ ...p, score: 0, fouls: 0, isServing: idx === 0 })));
+    }
+    setCurrentPeriod(prev => prev + 1);
+    setTime(settings.timerMode === 'countdown' ? settings.defaultTime : 0);
+    setIsTimerRunning(false);
+    setShowNextPeriodConfirm(false);
+  };
 
-          {/* ── Header ── */}
-          <header className="bg-gray-900 border-b border-gray-800 p-3 sm:p-4 flex flex-wrap justify-between items-center gap-2 z-10 shadow-md">
-            <div className="flex items-center gap-2">
-              <div className="bg-indigo-600 p-1.5 rounded-lg">
-                <Trophy size={20} className="text-white" />
-              </div>
-              <h1 className="text-lg sm:text-xl font-bold tracking-wider hidden sm:block">萬用計分板</h1>
+  const openSettings = () => {
+    setTempSettings(settings);
+    setShowSettings(true);
+  };
 
-              {settings.showPeriod && (
-                <div className="flex items-center bg-gray-800/80 rounded-full pl-3 pr-1 py-1 ml-1 border border-gray-700">
-                  <span className="font-bold text-indigo-300 text-sm mr-2 whitespace-nowrap">
-                    {getPeriodText()}
-                  </span>
-                  <button
-                    onClick={() => { if (canAdvancePeriod) handleNextPeriodClick(); }}
-                    disabled={!canAdvancePeriod}
-                    className={`flex items-center justify-center p-1 rounded-full transition-colors ${!canAdvancePeriod ? 'opacity-30 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'}`}
-                    title={!canAdvancePeriod ? '請先分出勝負，或已達最高局數' : '進入下一局/節'}
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-              )}
-            </div>
+  const saveSettings = () => {
+    if (tempSettings.timerMode !== settings.timerMode || tempSettings.defaultTime !== settings.defaultTime) {
+      setIsTimerRunning(false);
+      setTime(tempSettings.timerMode === 'countdown' ? tempSettings.defaultTime : 0);
+    }
+    if (tempSettings.id !== settings.id || tempSettings.maxPeriods !== settings.maxPeriods || tempSettings.autoResetScores !== settings.autoResetScores) {
+      setAutoResetPeriod(null); // 變更模式、最高局數或歸零設定時重設自動換局行為
+    }
+    setSettings(tempSettings);
+    setShowSettings(false);
+  };
 
-            <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar">
-              <button
-                onClick={() => setShowTimer(!showTimer)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${showTimer || isTimerRunning ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+  const getPeriodText = () => {
+    if (settings.periodMode === 'custom' && settings.customPeriods && settings.customPeriods.length > 0) {
+      return settings.customPeriods[currentPeriod % settings.customPeriods.length]?.trim() || `第 ${currentPeriod + 1} 局`;
+    }
+    const totalText = settings.maxPeriods > 0 ? ` / ${settings.maxPeriods}` : '';
+    return `第 ${currentPeriod + 1}${totalText} ${settings.id === 'basketball' ? '節' : '局'}`;
+  };
+
+  const isVersusMode = players.length <= 2;
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white font-sans select-none flex flex-col overflow-hidden" style={{ touchAction: 'manipulation' }}>
+      
+      {/* 頂部導航列 */}
+      <header className="bg-gray-900 border-b border-gray-800 p-3 sm:p-4 flex flex-wrap justify-between items-center gap-2 z-10 shadow-md">
+        <div className="flex items-center gap-2">
+          <div className="bg-indigo-600 p-1.5 rounded-lg">
+            <Trophy size={20} className="text-white" />
+          </div>
+          <h1 className="text-lg sm:text-xl font-bold tracking-wider hidden sm:block">萬用計分板</h1>
+          
+          {/* 局數 / 節次指示器 */}
+          {settings.showPeriod && (
+            <div className="flex items-center bg-gray-800/80 rounded-full pl-3 pr-1 py-1 ml-1 border border-gray-700">
+              <span className="font-bold text-indigo-300 text-sm mr-2 whitespace-nowrap">
+                {getPeriodText()}
+              </span>
+              <button 
+                onClick={() => { if (canAdvancePeriod) handleNextPeriodClick(); }}
+                disabled={!canAdvancePeriod}
+                className={`flex items-center justify-center p-1 rounded-full transition-colors ${!canAdvancePeriod ? 'opacity-30 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'}`}
+                title={!canAdvancePeriod ? '請先分出勝負，或已達最高局數' : '進入下一局/節'}
               >
-                <TimerIcon size={16} />
-                <span className="hidden sm:inline">計時</span>
-                {isTimerRunning && <span className="ml-1 tabular-nums animate-pulse">{formatTime(time)}</span>}
+                <Plus size={14} />
               </button>
-
-              <button
-                onClick={undoScore}
-                disabled={history.length === 0}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
-              >
-                <Undo2 size={16} />
-                <span className="hidden sm:inline">復原</span>
-              </button>
-
-              <button
-                onClick={toggleWakeLock}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${isWakeLockActive ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                title="防止螢幕休眠"
-              >
-                <MonitorPlay size={16} />
-              </button>
-
-              <button
-                onClick={addPlayer}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-500 text-sm font-medium transition-colors"
-              >
-                <Users size={16} />
-                <span className="hidden lg:inline">新增</span>
-              </button>
-
-              <button
-                onClick={openSettings}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700 text-sm font-medium transition-colors"
-              >
-                <Settings size={16} />
-              </button>
-
-              <button
-                onClick={handleResetClick}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-900/50 text-red-400 hover:bg-red-800/60 hover:text-red-300 text-sm font-medium transition-colors"
-              >
-                <RotateCcw size={16} />
-              </button>
-            </div>
-          </header>
-
-          {/* ── Timer panel (collapsible) ── */}
-          {showTimer && (
-            <div className="bg-gray-800 border-b border-gray-700 p-4 flex flex-col items-center justify-center animate-in slide-in-from-top-2 relative">
-              <div className="flex items-center gap-4 mb-4">
-                {!isTimerRunning && settings.timerMode === 'countdown' && (
-                  <button
-                    onClick={() => setTime(prev => Math.max(0, prev - 60))}
-                    className="p-3 bg-gray-700 hover:bg-gray-600 active:scale-95 rounded-full text-gray-300 transition-all"
-                  >
-                    <Minus size={20} />
-                  </button>
-                )}
-                <div className={`text-5xl sm:text-6xl font-mono font-bold tracking-wider tabular-nums ${time === 0 && settings.timerMode === 'countdown' ? 'text-red-500 animate-pulse' : 'text-indigo-300'}`}>
-                  {formatTime(time)}
-                </div>
-                {!isTimerRunning && settings.timerMode === 'countdown' && (
-                  <button
-                    onClick={() => setTime(prev => prev + 60)}
-                    className="p-3 bg-gray-700 hover:bg-gray-600 active:scale-95 rounded-full text-gray-300 transition-all"
-                  >
-                    <Plus size={20} />
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setIsTimerRunning(!isTimerRunning)}
-                  disabled={settings.timerMode === 'countdown' && time === 0}
-                  className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold ${isTimerRunning ? 'bg-orange-600 hover:bg-orange-500' : 'bg-green-600 hover:bg-green-500'} disabled:opacity-50 disabled:cursor-not-allowed transition-transform active:scale-95`}
-                >
-                  {isTimerRunning ? <Pause size={20} /> : <Play size={20} />}
-                  {isTimerRunning ? '暫停' : '開始'}
-                </button>
-                <button
-                  onClick={() => { setIsTimerRunning(false); setTime(settings.timerMode === 'countdown' ? settings.defaultTime : 0); }}
-                  className="flex items-center gap-2 px-6 py-2 rounded-full bg-gray-700 hover:bg-gray-600 font-bold transition-transform active:scale-95"
-                >
-                  <Square size={20} />
-                  {settings.timerMode === 'countdown' ? '重設' : '歸零'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ── Scoring area ── */}
-          <main className={`flex-1 overflow-y-auto p-2 sm:p-4 ${isVersusMode ? 'flex flex-col sm:flex-row gap-2 sm:gap-4' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4'}`}>
-            {players.map((player) => (
-              <div
-                key={player.id}
-                className={`relative flex flex-col rounded-2xl sm:rounded-3xl shadow-lg bg-gradient-to-br ${player.color} overflow-hidden transition-all duration-300
-                  ${isVersusMode ? 'flex-1 justify-center p-4 sm:p-8' : 'p-4 min-h-[400px]'}
-                  ${winnerId === player.id ? 'ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.5)]' : ''}
-                `}
-              >
-                {winnerId === player.id && (
-                  <div className="absolute top-0 left-0 right-0 bg-yellow-400 text-yellow-900 font-black text-center py-1.5 sm:py-2 z-20 shadow-md flex items-center justify-center gap-2 animate-pulse">
-                    <Trophy size={16} />
-                    <span className="tracking-widest">WINNER 勝出</span>
-                    <Trophy size={16} />
-                  </div>
-                )}
-
-                <div className={`flex items-center justify-between mb-2 z-10 ${winnerId === player.id ? 'mt-6 sm:mt-8' : ''}`}>
-                  <input
-                    type="text"
-                    value={player.name}
-                    onChange={(e) => updatePlayerName(player.id, e.target.value)}
-                    className="bg-transparent text-white/90 text-xl sm:text-2xl font-bold w-full focus:outline-none focus:bg-white/10 rounded px-2 py-1 placeholder-white/50 text-center"
-                    placeholder="輸入名稱..."
-                  />
-                  {!isVersusMode && players.length > 1 && (
-                    <button
-                      onClick={() => removePlayer(player.id)}
-                      className="p-2 bg-black/20 hover:bg-black/40 rounded-full text-white/70 hover:text-white transition-colors absolute top-4 right-4"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  )}
-                </div>
-
-                {(settings.showServe || settings.showFouls) && (
-                  <div className="flex items-center justify-center gap-3 z-10 mb-2">
-                    {settings.showServe && (
-                      <button
-                        onClick={() => setServe(player.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold transition-all active:scale-95 border ${player.isServing ? 'bg-yellow-400 text-yellow-900 border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.4)]' : 'bg-black/20 text-white/50 border-white/5 hover:bg-black/40 hover:text-white/80'}`}
-                      >
-                        <div className={`w-2 h-2 rounded-full ${player.isServing ? 'bg-yellow-800 animate-pulse' : 'bg-white/30'}`}></div>
-                        發球
-                      </button>
-                    )}
-                    {settings.showFouls && (
-                      <div className="flex items-center bg-black/20 rounded-full overflow-hidden border border-white/5 backdrop-blur-sm">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); changeFouls(player.id, -1); }}
-                          className="px-2 py-1 hover:bg-white/10 active:bg-white/20 transition-colors text-white/50 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
-                          disabled={!player.fouls}
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <div className="px-1 flex items-center gap-1 text-sm font-bold" title="犯規次數">
-                          <Flag size={12} className={player.fouls > 0 ? 'text-red-400' : 'text-white/30'} />
-                          <span className={`tabular-nums w-4 text-center ${player.fouls > 0 ? 'text-red-300' : 'text-white/50'}`}>
-                            {player.fouls || 0}
-                          </span>
-                        </div>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); changeFouls(player.id, 1); }}
-                          className="px-2 py-1 hover:bg-white/10 active:bg-white/20 transition-colors text-white/50 hover:text-red-400"
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex-1 flex items-center justify-center my-2 sm:my-4">
-                  <span
-                    className={`font-black drop-shadow-xl tabular-nums tracking-tighter cursor-pointer ${isVersusMode ? 'text-8xl sm:text-[12rem]' : 'text-7xl sm:text-8xl'}`}
-                    onClick={() => changeScore(player.id, 1)}
-                  >
-                    {player.score}
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-2 mt-auto">
-                  <div className="flex gap-2 h-20 sm:h-24 z-10">
-                    <button
-                      onClick={() => changeScore(player.id, -1)}
-                      className="flex-1 bg-black/20 hover:bg-black/30 active:bg-black/50 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all active:scale-95"
-                    >
-                      <Minus size={isVersusMode ? 48 : 32} className="text-white/80" />
-                    </button>
-                    <button
-                      onClick={() => changeScore(player.id, 1)}
-                      className="flex-[2] bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all active:scale-95 backdrop-blur-sm shadow-inner"
-                    >
-                      <Plus size={isVersusMode ? 56 : 40} className="text-white" />
-                    </button>
-                  </div>
-
-                  <div className="flex gap-2 min-h-[3rem] flex-wrap z-10">
-                    {settings.buttons
-                      .map(b => parseInt(b, 10))
-                      .filter(num => !isNaN(num))
-                      .slice(0, 5)
-                      .map((num, idx) => {
-                        const display = num > 0 ? `+${num}` : num.toString();
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => changeScore(player.id, num)}
-                            className={`flex-1 min-w-[3rem] ${num > 0 ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-black/10 hover:bg-black/20 text-white/80'} rounded-lg flex items-center justify-center font-bold text-lg active:scale-95 transition-transform`}
-                          >
-                            {display}
-                          </button>
-                        );
-                      })}
-                  </div>
-                </div>
-
-                <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl pointer-events-none"></div>
-                <div className="absolute bottom-0 left-0 -mb-10 -ml-10 w-32 h-32 bg-black opacity-10 rounded-full blur-xl pointer-events-none"></div>
-              </div>
-            ))}
-          </main>
-
-          {/* ── Next period confirm dialog ── */}
-          {showNextPeriodConfirm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-              <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full border border-gray-700 animate-in fade-in zoom-in duration-200">
-                <h2 className="text-xl font-bold text-white mb-2">準備進入下一局 / 節</h2>
-                <p className="text-gray-400 mb-6 text-sm">
-                  請問要如何處理目前的比分？<br/>
-                  <span className="text-gray-500">(籃球等累計得分制請選擇「僅換局」，羽球/桌球等重新計分制請選擇「歸零並換局」)</span>
-                  {(!settings.maxPeriods || settings.maxPeriods === 0) && (
-                    <span className="block mt-3 text-indigo-400 font-medium bg-indigo-900/30 p-2 rounded-lg">💡 提示：因為無最高局數限制，之後換局將自動套用您這次的選擇，不會再詢問。</span>
-                  )}
-                </p>
-                <div className="flex flex-col gap-3">
-                  <button onClick={() => confirmNextPeriod(true)} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium shadow-lg">
-                    歸零並換局 (重新計分)
-                  </button>
-                  <button onClick={() => confirmNextPeriod(false)} className="w-full py-3 rounded-xl bg-gray-700 hover:bg-gray-600 text-white transition-colors font-medium">
-                    僅換局 (保留分數累計)
-                  </button>
-                  <button onClick={() => setShowNextPeriodConfirm(false)} className="w-full py-3 rounded-xl text-gray-400 hover:bg-gray-800 transition-colors font-medium mt-1">
-                    取消
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Full reset confirm dialog ── */}
-          {showResetConfirm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-              <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full border border-gray-700 animate-in fade-in zoom-in duration-200">
-                <h2 className="text-xl font-bold text-white mb-2">確定要全部歸零嗎？</h2>
-                <p className="text-gray-400 mb-6">這將會清除所有玩家的分數、犯規紀錄、計時器時間以及局數，此動作執行後仍可透過上方「復原」按鈕還原。</p>
-                <div className="flex gap-3 justify-end">
-                  <button onClick={() => setShowResetConfirm(false)} className="px-4 py-2 rounded-xl text-gray-300 hover:bg-gray-700 transition-colors font-medium">取消</button>
-                  <button onClick={confirmResetAllScores} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white transition-colors font-medium">確定歸零</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Settings dialog ── */}
-          {showSettings && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-              <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-md w-full border border-gray-700 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-                <div className="flex items-center gap-2 mb-4">
-                  <Settings className="text-indigo-400" />
-                  <h2 className="text-xl font-bold text-white">比賽模式與設定</h2>
-                </div>
-
-                <div className="flex-1 overflow-y-auto pr-1 space-y-5 pb-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">快速選擇模式</label>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.values(GAME_TEMPLATES).map(tmpl => (
-                        <button
-                          key={tmpl.id}
-                          onClick={() => setTempSettings({ ...tmpl })}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${tempSettings.name === tmpl.name ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'}`}
-                        >
-                          {tmpl.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
-                    <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">局數 / 節次設定</h3>
-                    <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg">
-                      <input type="checkbox" checked={tempSettings.showPeriod || false} onChange={(e) => setTempSettings({...tempSettings, showPeriod: e.target.checked})} className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600" />
-                      <span className="text-sm text-gray-200">啟用局數 / 節次顯示</span>
-                    </label>
-                    {tempSettings.showPeriod && (
-                      <div className="space-y-4 animate-in fade-in slide-in-from-top-2 ml-2 pl-4 border-l-2 border-gray-700">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">最高局數 / 節次 (0 為無上限)</label>
-                          <input type="number" value={tempSettings.maxPeriods !== undefined ? tempSettings.maxPeriods : 0} onChange={(e) => setTempSettings({...tempSettings, maxPeriods: Math.max(0, parseInt(e.target.value) || 0)})} className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" min="0" />
-                        </div>
-                        <div className="flex gap-6">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="periodMode" checked={tempSettings.periodMode === 'number'} onChange={() => setTempSettings({...tempSettings, periodMode: 'number'})} className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600" />
-                            <span className="text-sm text-gray-200">數字遞增 (第 1 局...)</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="periodMode" checked={tempSettings.periodMode === 'custom'} onChange={() => setTempSettings({...tempSettings, periodMode: 'custom'})} className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600" />
-                            <span className="text-sm text-gray-200">自訂文字循環</span>
-                          </label>
-                        </div>
-                        {tempSettings.periodMode === 'custom' && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">自訂文字 (請用逗號分隔)</label>
-                            <input type="text" value={(tempSettings.customPeriods || []).join(',')} onChange={(e) => setTempSettings({...tempSettings, customPeriods: e.target.value.split(',')})} className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="例如：東風局, 南風局, 西風局, 北風局" />
-                          </div>
-                        )}
-                        {tempSettings.maxPeriods > 0 && (
-                          <div className="mt-4 pt-4 border-t border-gray-700">
-                            <label className="block text-sm font-medium text-gray-400 mb-2">換局時的比分處理</label>
-                            <div className="flex flex-col sm:flex-row gap-4">
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="radio" name="autoResetScores" checked={tempSettings.autoResetScores === true} onChange={() => setTempSettings({...tempSettings, autoResetScores: true})} className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600" />
-                                <span className="text-sm text-gray-200">歸零並換局 (重新計分)</span>
-                              </label>
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="radio" name="autoResetScores" checked={tempSettings.autoResetScores === false} onChange={() => setTempSettings({...tempSettings, autoResetScores: false})} className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600" />
-                                <span className="text-sm text-gray-200">僅換局 (保留分數累計)</span>
-                              </label>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
-                    <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">勝負判定規則</h3>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">目標分數 (達標即獲勝，0 為不判定)</label>
-                      <input type="number" value={tempSettings.targetScore} onChange={(e) => setTempSettings({...tempSettings, targetScore: parseInt(e.target.value) || 0})} className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" min="0" />
-                    </div>
-                    {tempSettings.targetScore > 0 && (
-                      <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
-                        <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg">
-                          <input type="checkbox" checked={tempSettings.winByTwo} onChange={(e) => setTempSettings({...tempSettings, winByTwo: e.target.checked})} className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600" />
-                          <span className="text-sm text-gray-200">Deuce 規則 (需連贏 2 分才算勝出)</span>
-                        </label>
-                        {tempSettings.winByTwo && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">強制獲勝分數上限 (0 為無上限)</label>
-                            <input type="number" value={tempSettings.maxScore} onChange={(e) => setTempSettings({...tempSettings, maxScore: parseInt(e.target.value) || 0})} className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none" min="0" />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
-                    <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">計時器設定</h3>
-                    <div className="flex gap-6">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="timerMode" checked={tempSettings.timerMode === 'countup'} onChange={() => setTempSettings({...tempSettings, timerMode: 'countup'})} className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600" />
-                        <span className="text-sm text-gray-200">正數計時</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="timerMode" checked={tempSettings.timerMode === 'countdown'} onChange={() => setTempSettings({...tempSettings, timerMode: 'countdown'})} className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600" />
-                        <span className="text-sm text-gray-200">倒數計時</span>
-                      </label>
-                    </div>
-                    {tempSettings.timerMode === 'countdown' && (
-                      <div className="animate-in fade-in slide-in-from-top-2 pt-2">
-                        <label className="block text-sm font-medium text-gray-400 mb-1">預設倒數時間 (分鐘)</label>
-                        <input type="number" value={Math.floor(tempSettings.defaultTime / 60)} onChange={(e) => setTempSettings({...tempSettings, defaultTime: Math.max(1, parseInt(e.target.value) || 1) * 60})} className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all" min="1" />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
-                    <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">玩家狀態列顯示設定</h3>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg flex-1">
-                        <input type="checkbox" checked={tempSettings.showServe || false} onChange={(e) => setTempSettings({...tempSettings, showServe: e.target.checked})} className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600" />
-                        <span className="text-sm text-gray-200">顯示發球權指示器</span>
-                      </label>
-                      <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg flex-1">
-                        <input type="checkbox" checked={tempSettings.showFouls || false} onChange={(e) => setTempSettings({...tempSettings, showFouls: e.target.checked})} className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600" />
-                        <span className="text-sm text-gray-200">顯示犯規計數器</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-900/50 p-4 rounded-xl">
-                    <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2 mb-3">自訂下方快捷按鈕</h3>
-                    <p className="text-xs text-gray-400 mb-3">最多可設定 5 個按鈕。輸入正數(+)或負數(-)，留空代表隱藏。</p>
-                    <div className="flex gap-2">
-                      {[0, 1, 2, 3, 4].map(idx => (
-                        <input
-                          key={idx}
-                          type="number"
-                          value={tempSettings.buttons[idx] !== undefined ? tempSettings.buttons[idx] : ''}
-                          onChange={(e) => {
-                            const newBtns = [...tempSettings.buttons];
-                            newBtns[idx] = e.target.value;
-                            setTempSettings({...tempSettings, buttons: newBtns});
-                          }}
-                          className="w-full bg-gray-700 text-white rounded-lg px-1 py-2 text-center focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm sm:text-base placeholder-gray-500"
-                          placeholder="無"
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 justify-end mt-2 pt-4 border-t border-gray-700">
-                  <button onClick={() => setShowSettings(false)} className="px-4 py-2 rounded-xl text-gray-300 hover:bg-gray-700 transition-colors font-medium">取消</button>
-                  <button onClick={saveSettings} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium">儲存設定</button>
-                </div>
-              </div>
             </div>
           )}
         </div>
-      );
-    }
+        
+        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar">
+          <button 
+            onClick={() => setShowTimer(!showTimer)}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${showTimer || isTimerRunning ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+          >
+            <TimerIcon size={16} />
+            <span className="hidden sm:inline">計時</span>
+            {isTimerRunning && <span className="ml-1 tabular-nums animate-pulse">{formatTime(time)}</span>}
+          </button>
+          
+          <button 
+            onClick={undoScore}
+            disabled={history.length === 0}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+          >
+            <Undo2 size={16} />
+            <span className="hidden sm:inline">復原</span>
+          </button>
 
-    // ── Bootstrap ─────────────────────────────────────────────────────────
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+          <button 
+            onClick={toggleWakeLock}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${isWakeLockActive ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+            title="防止螢幕休眠"
+          >
+            <MonitorPlay size={16} />
+          </button>
 
-    // Service Worker
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () =>
-        navigator.serviceWorker.register('./sw.js')
-          .catch(err => console.warn('[SW] Registration failed:', err))
-      );
-    }
-  </script>
-</body>
-</html>
+          <button 
+            onClick={addPlayer}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-500 text-sm font-medium transition-colors"
+          >
+            <Users size={16} />
+            <span className="hidden lg:inline">新增</span>
+          </button>
+
+          <button 
+            onClick={openSettings}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700 text-sm font-medium transition-colors"
+          >
+            <Settings size={16} />
+          </button>
+
+          <button 
+            onClick={handleResetClick}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-900/50 text-red-400 hover:bg-red-800/60 hover:text-red-300 text-sm font-medium transition-colors"
+          >
+            <RotateCcw size={16} />
+          </button>
+        </div>
+      </header>
+
+      {/* 計時器面板 (可折疊) */}
+      {showTimer && (
+        <div className="bg-gray-800 border-b border-gray-700 p-4 flex flex-col items-center justify-center animate-in slide-in-from-top-2 relative">
+          <div className="flex items-center gap-4 mb-4">
+            {!isTimerRunning && settings.timerMode === 'countdown' && (
+              <button 
+                onClick={() => setTime(prev => Math.max(0, prev - 60))} 
+                className="p-3 bg-gray-700 hover:bg-gray-600 active:scale-95 rounded-full text-gray-300 transition-all"
+              >
+                <Minus size={20} />
+              </button>
+            )}
+            
+            <div className={`text-5xl sm:text-6xl font-mono font-bold tracking-wider tabular-nums 
+              ${time === 0 && settings.timerMode === 'countdown' ? 'text-red-500 animate-pulse' : 'text-indigo-300'}`}
+            >
+              {formatTime(time)}
+            </div>
+
+            {!isTimerRunning && settings.timerMode === 'countdown' && (
+              <button 
+                onClick={() => setTime(prev => prev + 60)} 
+                className="p-3 bg-gray-700 hover:bg-gray-600 active:scale-95 rounded-full text-gray-300 transition-all"
+              >
+                <Plus size={20} />
+              </button>
+            )}
+          </div>
+
+          <div className="flex gap-4">
+            <button 
+              onClick={() => setIsTimerRunning(!isTimerRunning)}
+              disabled={settings.timerMode === 'countdown' && time === 0}
+              className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold ${isTimerRunning ? 'bg-orange-600 hover:bg-orange-500' : 'bg-green-600 hover:bg-green-500'} disabled:opacity-50 disabled:cursor-not-allowed transition-transform active:scale-95`}
+            >
+              {isTimerRunning ? <Pause size={20} /> : <Play size={20} />}
+              {isTimerRunning ? '暫停' : '開始'}
+            </button>
+            <button 
+              onClick={() => { 
+                setIsTimerRunning(false); 
+                setTime(settings.timerMode === 'countdown' ? settings.defaultTime : 0); 
+              }}
+              className="flex items-center gap-2 px-6 py-2 rounded-full bg-gray-700 hover:bg-gray-600 font-bold transition-transform active:scale-95"
+            >
+              <Square size={20} />
+              {settings.timerMode === 'countdown' ? '重設' : '歸零'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 主要計分區域 */}
+      <main className={`flex-1 overflow-y-auto p-2 sm:p-4 ${isVersusMode ? 'flex flex-col sm:flex-row gap-2 sm:gap-4' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4'}`}>
+        {players.map((player) => (
+          <div 
+            key={player.id} 
+            className={`relative flex flex-col rounded-2xl sm:rounded-3xl shadow-lg bg-gradient-to-br ${player.color} overflow-hidden transition-all duration-300
+              ${isVersusMode ? 'flex-1 justify-center p-4 sm:p-8' : 'p-4 min-h-[280px]'}
+              ${winnerId === player.id ? 'ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.5)]' : ''}
+            `}
+          >
+            {/* 獲勝橫幅 */}
+            {winnerId === player.id && (
+              <div className="absolute top-0 left-0 right-0 bg-yellow-400 text-yellow-900 font-black text-center py-1.5 sm:py-2 z-20 shadow-md flex items-center justify-center gap-2 animate-pulse">
+                <Trophy size={16} />
+                <span className="tracking-widest">WINNER 勝出</span>
+                <Trophy size={16} />
+              </div>
+            )}
+
+            {/* 玩家名稱與刪除按鈕 */}
+            <div className={`flex items-center justify-between mb-2 z-10 ${winnerId === player.id ? 'mt-6 sm:mt-8' : ''}`}>
+              <input
+                type="text"
+                value={player.name}
+                onChange={(e) => updatePlayerName(player.id, e.target.value)}
+                className="bg-transparent text-white/90 text-xl sm:text-2xl font-bold w-full focus:outline-none focus:bg-white/10 rounded px-2 py-1 placeholder-white/50 text-center"
+                placeholder="輸入名稱..."
+              />
+              {!isVersusMode && players.length > 1 && (
+                <button 
+                  onClick={() => removePlayer(player.id)}
+                  className="p-2 bg-black/20 hover:bg-black/40 rounded-full text-white/70 hover:text-white transition-colors absolute top-4 right-4"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
+            </div>
+
+            {/* 狀態列：發球權與犯規 */}
+            {(settings.showServe || settings.showFouls) && (
+              <div className="flex items-center justify-center gap-3 z-10 mb-2">
+                {settings.showServe && (
+                  <button 
+                    onClick={() => setServe(player.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold transition-all active:scale-95 border ${player.isServing ? 'bg-yellow-400 text-yellow-900 border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.4)]' : 'bg-black/20 text-white/50 border-white/5 hover:bg-black/40 hover:text-white/80'}`}
+                  >
+                    <div className={`w-2 h-2 rounded-full ${player.isServing ? 'bg-yellow-800 animate-pulse' : 'bg-white/30'}`}></div>
+                    發球
+                  </button>
+                )}
+
+                {settings.showFouls && (
+                  <div className="flex items-center bg-black/20 rounded-full overflow-hidden border border-white/5 backdrop-blur-sm">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); changeFouls(player.id, -1); }} 
+                      className="px-2 py-1 hover:bg-white/10 active:bg-white/20 transition-colors text-white/50 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
+                      disabled={!player.fouls}
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <div className="px-1 flex items-center gap-1 text-sm font-bold" title="犯規次數">
+                      <Flag size={12} className={player.fouls > 0 ? "text-red-400" : "text-white/30"} />
+                      <span className={`tabular-nums w-4 text-center ${player.fouls > 0 ? 'text-red-300' : 'text-white/50'}`}>
+                        {player.fouls || 0}
+                      </span>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); changeFouls(player.id, 1); }} 
+                      className="px-2 py-1 hover:bg-white/10 active:bg-white/20 transition-colors text-white/50 hover:text-red-400"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 分數顯示區 */}
+            <div className="flex-1 flex items-center justify-center my-2 sm:my-4">
+              <span className={`font-black drop-shadow-xl tabular-nums tracking-tighter cursor-pointer ${isVersusMode ? 'text-8xl sm:text-[12rem]' : 'text-7xl sm:text-8xl'}`}
+                    onClick={() => changeScore(player.id, 1)}>
+                {player.score}
+              </span>
+            </div>
+
+            {/* 控制按鈕區 */}
+            <div className="flex flex-col gap-2 mt-auto">
+              <div className="flex gap-2 h-20 sm:h-24 z-10">
+                <button 
+                  onClick={() => changeScore(player.id, -1)}
+                  className="flex-1 bg-black/20 hover:bg-black/30 active:bg-black/50 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all active:scale-95"
+                >
+                  <Minus size={isVersusMode ? 48 : 32} className="text-white/80" />
+                </button>
+                <button 
+                  onClick={() => changeScore(player.id, 1)}
+                  className="flex-[2] bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all active:scale-95 backdrop-blur-sm shadow-inner"
+                >
+                  <Plus size={isVersusMode ? 56 : 40} className="text-white" />
+                </button>
+              </div>
+              
+              {/* 動態快捷加減分按鈕 */}
+              <div className="flex gap-2 h-12 flex-wrap z-10">
+                {settings.buttons
+                  .map(b => parseInt(b, 10))
+                  .filter(num => !isNaN(num))
+                  .slice(0, 5) // 強制最多 5 個
+                  .map((num, idx) => {
+                    const display = num > 0 ? `+${num}` : num.toString();
+                    return (
+                      <button 
+                        key={idx}
+                        onClick={() => changeScore(player.id, num)}
+                        className={`flex-1 min-w-[3rem] ${num > 0 ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-black/10 hover:bg-black/20 text-white/80'} rounded-lg flex items-center justify-center font-bold text-lg active:scale-95 transition-transform`}
+                      >
+                        {display}
+                      </button>
+                    );
+                })}
+              </div>
+            </div>
+            
+            {/* 背景裝飾 */}
+            <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl pointer-events-none"></div>
+            <div className="absolute bottom-0 left-0 -mb-10 -ml-10 w-32 h-32 bg-black opacity-10 rounded-full blur-xl pointer-events-none"></div>
+          </div>
+        ))}
+      </main>
+
+      {/* 換局確認彈窗 */}
+      {showNextPeriodConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full border border-gray-700 animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-bold text-white mb-2">準備進入下一局 / 節</h2>
+            <p className="text-gray-400 mb-6 text-sm">
+              請問要如何處理目前的比分？<br/>
+              <span className="text-gray-500">(籃球等累計得分制請選擇「僅換局」，羽球/桌球等重新計分制請選擇「歸零並換局」)</span>
+              {(!settings.maxPeriods || settings.maxPeriods === 0) && (
+                <span className="block mt-3 text-indigo-400 font-medium bg-indigo-900/30 p-2 rounded-lg">💡 提示：因為無最高局數限制，之後換局將自動套用您這次的選擇，不會再詢問。</span>
+              )}
+            </p>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => confirmNextPeriod(true)}
+                className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium shadow-lg"
+              >
+                歸零並換局 (重新計分)
+              </button>
+              <button 
+                onClick={() => confirmNextPeriod(false)}
+                className="w-full py-3 rounded-xl bg-gray-700 hover:bg-gray-600 text-white transition-colors font-medium"
+              >
+                僅換局 (保留分數累計)
+              </button>
+              <button 
+                onClick={() => setShowNextPeriodConfirm(false)}
+                className="w-full py-3 rounded-xl text-gray-400 hover:bg-gray-800 transition-colors font-medium mt-1"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 全部歸零確認彈窗 */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full border border-gray-700 animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-bold text-white mb-2">確定要全部歸零嗎？</h2>
+            <p className="text-gray-400 mb-6">這將會清除所有玩家的分數、犯規紀錄、計時器時間以及局數，此動作執行後仍可透過上方「復原」按鈕還原。</p>
+            <div className="flex gap-3 justify-end">
+              <button 
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 rounded-xl text-gray-300 hover:bg-gray-700 transition-colors font-medium"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmResetAllScores}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white transition-colors font-medium"
+              >
+                確定歸零
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 設定與模式彈窗 */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-md w-full border border-gray-700 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="flex items-center gap-2 mb-4">
+              <Settings className="text-indigo-400" />
+              <h2 className="text-xl font-bold text-white">比賽模式與設定</h2>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-1 space-y-5 pb-4">
+              {/* 範本選擇 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">快速選擇模式</label>
+                <div className="flex flex-wrap gap-2">
+                  {Object.values(GAME_TEMPLATES).map(tmpl => (
+                    <button
+                      key={tmpl.id}
+                      onClick={() => setTempSettings({ ...tmpl, name: tmpl.name })}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${tempSettings.name === tmpl.name ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'}`}
+                    >
+                      {tmpl.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 局數 / 節次設定 */}
+              <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
+                <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">局數 / 節次設定</h3>
+                <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg">
+                  <input 
+                    type="checkbox" 
+                    checked={tempSettings.showPeriod || false}
+                    onChange={(e) => setTempSettings({...tempSettings, showPeriod: e.target.checked})}
+                    className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600"
+                  />
+                  <span className="text-sm text-gray-200">啟用局數 / 節次顯示</span>
+                </label>
+
+                {tempSettings.showPeriod && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2 ml-2 pl-4 border-l-2 border-gray-700">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">最高局數 / 節次 (0 為無上限)</label>
+                      <input 
+                        type="number" 
+                        value={tempSettings.maxPeriods !== undefined ? tempSettings.maxPeriods : 0}
+                        onChange={(e) => setTempSettings({...tempSettings, maxPeriods: Math.max(0, parseInt(e.target.value) || 0)})}
+                        className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        min="0"
+                      />
+                    </div>
+                    
+                    <div className="flex gap-6">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="periodMode" 
+                          checked={tempSettings.periodMode === 'number'} 
+                          onChange={() => setTempSettings({...tempSettings, periodMode: 'number'})}
+                          className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600"
+                        />
+                        <span className="text-sm text-gray-200">數字遞增 (第 1 局...)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="periodMode" 
+                          checked={tempSettings.periodMode === 'custom'} 
+                          onChange={() => setTempSettings({...tempSettings, periodMode: 'custom'})}
+                          className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600"
+                        />
+                        <span className="text-sm text-gray-200">自訂文字循環</span>
+                      </label>
+                    </div>
+
+                    {tempSettings.periodMode === 'custom' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">自訂文字 (請用逗號分隔)</label>
+                        <input 
+                          type="text" 
+                          value={(tempSettings.customPeriods || []).join(',')}
+                          onChange={(e) => setTempSettings({...tempSettings, customPeriods: e.target.value.split(',')})}
+                          className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                          placeholder="例如：東風局, 南風局, 西風局, 北風局"
+                        />
+                      </div>
+                    )}
+
+                    {tempSettings.maxPeriods > 0 && (
+                      <div className="mt-4 pt-4 border-t border-gray-700">
+                        <label className="block text-sm font-medium text-gray-400 mb-2">換局時的比分處理</label>
+                        <div className="flex flex-col sm:flex-row gap-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="radio" 
+                              name="autoResetScores" 
+                              checked={tempSettings.autoResetScores === true} 
+                              onChange={() => setTempSettings({...tempSettings, autoResetScores: true})}
+                              className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600"
+                            />
+                            <span className="text-sm text-gray-200">歸零並換局 (重新計分)</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="radio" 
+                              name="autoResetScores" 
+                              checked={tempSettings.autoResetScores === false} 
+                              onChange={() => setTempSettings({...tempSettings, autoResetScores: false})}
+                              className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600"
+                            />
+                            <span className="text-sm text-gray-200">僅換局 (保留分數累計)</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 勝負判定規則 */}
+              <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
+                <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">勝負判定規則</h3>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">目標分數 (達標即獲勝，0 為不判定)</label>
+                  <input 
+                    type="number" 
+                    value={tempSettings.targetScore}
+                    onChange={(e) => setTempSettings({...tempSettings, targetScore: parseInt(e.target.value) || 0})}
+                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    min="0"
+                  />
+                </div>
+                
+                {tempSettings.targetScore > 0 && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                    <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg">
+                      <input 
+                        type="checkbox" 
+                        checked={tempSettings.winByTwo}
+                        onChange={(e) => setTempSettings({...tempSettings, winByTwo: e.target.checked})}
+                        className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600"
+                      />
+                      <span className="text-sm text-gray-200">Deuce 規則 (需連贏 2 分才算勝出)</span>
+                    </label>
+
+                    {tempSettings.winByTwo && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">強制獲勝分數上限 (0 為無上限)</label>
+                        <input 
+                          type="number" 
+                          value={tempSettings.maxScore}
+                          onChange={(e) => setTempSettings({...tempSettings, maxScore: parseInt(e.target.value) || 0})}
+                          className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                          min="0"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 計時器設定 */}
+              <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
+                <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">計時器設定</h3>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="timerMode" 
+                      checked={tempSettings.timerMode === 'countup'} 
+                      onChange={() => setTempSettings({...tempSettings, timerMode: 'countup'})}
+                      className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600"
+                    />
+                    <span className="text-sm text-gray-200">正數計時</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="timerMode" 
+                      checked={tempSettings.timerMode === 'countdown'} 
+                      onChange={() => setTempSettings({...tempSettings, timerMode: 'countdown'})}
+                      className="w-4 h-4 text-indigo-500 bg-gray-700 border-gray-600"
+                    />
+                    <span className="text-sm text-gray-200">倒數計時</span>
+                  </label>
+                </div>
+                
+                {tempSettings.timerMode === 'countdown' && (
+                  <div className="animate-in fade-in slide-in-from-top-2 pt-2">
+                    <label className="block text-sm font-medium text-gray-400 mb-1">預設倒數時間 (分鐘)</label>
+                    <input 
+                      type="number" 
+                      value={Math.floor(tempSettings.defaultTime / 60)}
+                      onChange={(e) => setTempSettings({...tempSettings, defaultTime: Math.max(1, parseInt(e.target.value) || 1) * 60})}
+                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                      min="1"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 顯示功能設定 (發球與犯規) */}
+              <div className="bg-gray-900/50 p-4 rounded-xl space-y-4">
+                <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2">玩家狀態列顯示設定</h3>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg flex-1">
+                    <input 
+                      type="checkbox" 
+                      checked={tempSettings.showServe || false}
+                      onChange={(e) => setTempSettings({...tempSettings, showServe: e.target.checked})}
+                      className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600"
+                    />
+                    <span className="text-sm text-gray-200">顯示發球權指示器</span>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer p-2 bg-gray-800 rounded-lg flex-1">
+                    <input 
+                      type="checkbox" 
+                      checked={tempSettings.showFouls || false}
+                      onChange={(e) => setTempSettings({...tempSettings, showFouls: e.target.checked})}
+                      className="w-5 h-5 rounded text-indigo-500 bg-gray-700 border-gray-600"
+                    />
+                    <span className="text-sm text-gray-200">顯示犯規計數器</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 快捷按鈕設定 */}
+              <div className="bg-gray-900/50 p-4 rounded-xl">
+                <h3 className="font-medium text-indigo-300 border-b border-gray-700 pb-2 mb-3">自訂下方快捷按鈕</h3>
+                <p className="text-xs text-gray-400 mb-3">最多可設定 5 個按鈕。輸入正數(+)或負數(-)，留空代表隱藏。</p>
+                <div className="flex gap-2">
+                  {[0, 1, 2, 3, 4].map(idx => (
+                    <input
+                      key={idx}
+                      type="number"
+                      value={tempSettings.buttons[idx] !== undefined ? tempSettings.buttons[idx] : ''}
+                      onChange={(e) => {
+                        const newBtns = [...tempSettings.buttons];
+                        newBtns[idx] = e.target.value;
+                        setTempSettings({...tempSettings, buttons: newBtns});
+                      }}
+                      className="w-full bg-gray-700 text-white rounded-lg px-1 py-2 text-center focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm sm:text-base placeholder-gray-500"
+                      placeholder="無"
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end mt-2 pt-4 border-t border-gray-700">
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="px-4 py-2 rounded-xl text-gray-300 hover:bg-gray-700 transition-colors font-medium"
+              >
+                取消
+              </button>
+              <button 
+                onClick={saveSettings}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium"
+              >
+                儲存設定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
