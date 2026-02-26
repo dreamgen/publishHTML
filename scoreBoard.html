@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>萬用計分板</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="./scoreBoard.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/scoreBoard-192.svg">
+  <meta name="theme-color" content="#667eea">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="計分板">
+  <meta name="description" content="適用於球類、牌局、比賽的萬用計分工具">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; height: 100dvh;
+      overflow: hidden;
+      background: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Glass card style */
+    .glass {
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    #appHeader {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 1rem;
+      background: rgba(15,23,42,0.95);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+
+    /* ── Players Grid ────────────────────────────────────────── */
+    #playersGrid {
+      flex: 1;
+      display: grid;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    /* ── Player Card ─────────────────────────────────────────── */
+    .player-card {
+      border-radius: 0.875rem;
+      border: 1.5px solid rgba(255,255,255,0.09);
+      background: rgba(255,255,255,0.04);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.5rem 0.6rem;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.35s, box-shadow 0.35s, background 0.35s;
+      min-height: 0;
+    }
+
+    .player-card.leading {
+      border-color: rgba(251,191,36,0.55);
+      background: rgba(251,191,36,0.07);
+      box-shadow: 0 0 28px rgba(251,191,36,0.15);
+    }
+
+    .player-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(102,126,234,0.08), rgba(118,75,162,0.08));
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+
+    /* ── Player Name ─────────────────────────────────────────── */
+    .player-name {
+      font-size: clamp(0.7rem, 2.5vw, 0.85rem);
+      font-weight: 700;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      padding: 0.15rem 0.5rem;
+      border-radius: 0.375rem;
+      transition: background 0.2s, color 0.2s;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+      user-select: none;
+    }
+    .player-name:hover { background: rgba(255,255,255,0.1); color: white; }
+
+    /* ── Score Display ───────────────────────────────────────── */
+    .score-value {
+      font-size: clamp(2.2rem, 10vw, 5.5rem);
+      font-weight: 900;
+      line-height: 1;
+      color: white;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 30px rgba(102,126,234,0.4);
+      transition: color 0.2s;
+      user-select: none;
+    }
+    .score-value.negative { color: #f87171; text-shadow: 0 0 20px rgba(248,113,113,0.3); }
+
+    @keyframes scorePop {
+      0%   { transform: scale(1); }
+      35%  { transform: scale(1.28); }
+      65%  { transform: scale(0.94); }
+      100% { transform: scale(1); }
+    }
+    .score-pop { animation: scorePop 0.28s cubic-bezier(0.34,1.56,0.64,1); }
+
+    /* ── Score Buttons ───────────────────────────────────────── */
+    .btn-row {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .btn-plus, .btn-minus {
+      width: 100%;
+      border: none;
+      border-radius: 0.625rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.1s, box-shadow 0.1s, opacity 0.1s;
+      user-select: none;
+      letter-spacing: 0.01em;
+    }
+    .btn-plus {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      font-size: clamp(1rem, 4vw, 1.4rem);
+      height: clamp(2.5rem, 8vw, 3.5rem);
+      box-shadow: 0 4px 18px rgba(102,126,234,0.35);
+    }
+    .btn-plus:active  { transform: scale(0.94); box-shadow: 0 2px 8px rgba(102,126,234,0.25); }
+    .btn-minus {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.6);
+      font-size: clamp(0.875rem, 3vw, 1.1rem);
+      height: clamp(1.875rem, 6vw, 2.5rem);
+    }
+    .btn-minus:active { background: rgba(248,113,113,0.18); border-color: rgba(248,113,113,0.4); transform: scale(0.94); }
+
+    /* ── Bottom Toolbar ──────────────────────────────────────── */
+    #toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: rgba(15,23,42,0.9);
+      border-top: 1px solid rgba(255,255,255,0.07);
+      flex-wrap: wrap;
+    }
+
+    .tbtn {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.11);
+      border-radius: 0.5rem;
+      color: rgba(255,255,255,0.75);
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.45rem 0.7rem;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .tbtn:hover   { background: rgba(255,255,255,0.13); }
+    .tbtn:active  { transform: scale(0.93); }
+    .tbtn:disabled { opacity: 0.3; pointer-events: none; }
+
+    .step-tag {
+      background: rgba(102,126,234,0.2);
+      border: 1px solid rgba(102,126,234,0.35);
+      border-radius: 9999px;
+      color: #a5b4fc;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 0.35rem 0.7rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .step-tag:hover { background: rgba(102,126,234,0.32); }
+
+    /* ── Backdrop ────────────────────────────────────────────── */
+    #backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.52);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+    #backdrop.show { opacity: 1; pointer-events: auto; }
+
+    /* ── Settings Panel (bottom sheet) ──────────────────────── */
+    #settingsPanel {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 50;
+      border-radius: 1.25rem 1.25rem 0 0;
+      padding: 0.75rem 1.25rem 2rem;
+      transform: translateY(100%);
+      transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+    }
+    #settingsPanel.open { transform: translateY(0); }
+
+    .panel-handle {
+      width: 2.25rem; height: 0.25rem;
+      background: rgba(255,255,255,0.22);
+      border-radius: 9999px;
+      margin: 0 auto 1rem;
+    }
+
+    .setting-label { color: rgba(255,255,255,0.65); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem; display: block; }
+
+    .setting-input {
+      width: 100%;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 0.5rem;
+      color: white;
+      font-size: 1rem;
+      padding: 0.5rem 0.75rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .setting-input:focus { border-color: rgba(102,126,234,0.65); background: rgba(255,255,255,0.1); }
+
+    .preset-btn {
+      padding: 0.4rem 0.8rem;
+      border-radius: 0.5rem;
+      border: 1px solid rgba(255,255,255,0.13);
+      background: rgba(255,255,255,0.07);
+      color: rgba(255,255,255,0.7);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .preset-btn.active {
+      background: rgba(102,126,234,0.3);
+      border-color: rgba(102,126,234,0.65);
+      color: #c7d2fe;
+    }
+    .preset-btn:active { transform: scale(0.93); }
+
+    .action-btn-primary {
+      flex: 1; padding: 0.7rem;
+      background: linear-gradient(135deg,#667eea,#764ba2);
+      border: none; border-radius: 0.75rem;
+      color: white; font-weight: 700; font-size: 0.95rem;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .action-btn-primary:active { opacity: 0.82; }
+    .action-btn-secondary {
+      padding: 0.7rem 1.1rem;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.13);
+      border-radius: 0.75rem;
+      color: rgba(255,255,255,0.65); font-weight: 600; font-size: 0.9rem;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .action-btn-secondary:active { background: rgba(255,255,255,0.12); }
+
+    /* ── Overlay (Win / Reset Confirm) ───────────────────────── */
+    .overlay {
+      position: fixed; inset: 0;
+      z-index: 60;
+      background: rgba(0,0,0,0.72);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+      display: none;
+    }
+    .overlay.show { display: flex; }
+
+    .overlay-card {
+      width: 100%; max-width: 360px;
+      border-radius: 1.5rem;
+      padding: 1.75rem 1.5rem;
+      text-align: center;
+    }
+
+    @keyframes winEnter {
+      from { opacity: 0; transform: scale(0.75) translateY(20px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    #winOverlay .overlay-card {
+      animation: winEnter 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards;
+    }
+
+    /* ── Header Buttons ──────────────────────────────────────── */
+    .hbtn {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.11);
+      border-radius: 0.5rem;
+      color: rgba(255,255,255,0.75);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.38rem 0.6rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .hbtn:hover { background: rgba(255,255,255,0.13); }
+
+    /* ── Round Badge ─────────────────────────────────────────── */
+    .round-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #a5b4fc;
+      background: rgba(102,126,234,0.18);
+      border: 1px solid rgba(102,126,234,0.32);
+      border-radius: 9999px;
+      padding: 0.15rem 0.55rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ── -->
+  <div id="appHeader">
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+      <span style="font-size:1.2rem;">🏆</span>
+      <span style="color:white;font-weight:800;font-size:1rem;letter-spacing:0.01em;">萬用計分板</span>
+      <span id="roundBadge" class="round-badge">第 1 回合</span>
+    </div>
+    <div style="display:flex;gap:0.4rem;">
+      <button class="hbtn" id="settingsBtn">⚙ 設定</button>
+      <button class="hbtn" id="resetBtn">↺ 重置</button>
+    </div>
+  </div>
+
+  <!-- ── Players Grid ── -->
+  <div id="playersGrid"></div>
+
+  <!-- ── Bottom Toolbar ── -->
+  <div id="toolbar">
+    <button class="tbtn" id="undoBtn" disabled>↩ 撤銷</button>
+    <button class="tbtn" id="addBtn">＋ 加人</button>
+    <button class="tbtn" id="removeBtn">－ 移除</button>
+    <span class="step-tag" id="stepTag" onclick="openSettings()">步距 ×1</span>
+  </div>
+
+  <!-- ── Backdrop ── -->
+  <div id="backdrop" onclick="closeSettings()"></div>
+
+  <!-- ── Settings Panel ── -->
+  <div id="settingsPanel" class="glass">
+    <div class="panel-handle"></div>
+    <h2 style="color:white;font-weight:800;font-size:1rem;margin-bottom:1rem;">遊戲設定</h2>
+
+    <div style="display:flex;flex-direction:column;gap:1rem;">
+      <!-- Target Score -->
+      <div>
+        <label class="setting-label">目標分數 <span style="opacity:0.5;font-weight:400;">（0 = 無限制）</span></label>
+        <input type="number" id="targetScoreInput" class="setting-input" min="0" placeholder="例：21 或 100">
+      </div>
+
+      <!-- Score Step -->
+      <div>
+        <label class="setting-label">每次得分步距</label>
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+          <button class="preset-btn" data-step="1">＋1</button>
+          <button class="preset-btn" data-step="2">＋2</button>
+          <button class="preset-btn" data-step="3">＋3</button>
+          <button class="preset-btn" data-step="5">＋5</button>
+          <button class="preset-btn" data-step="10">＋10</button>
+        </div>
+        <input type="number" id="scoreStepInput" class="setting-input" min="1" placeholder="自訂步距">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.6rem;margin-top:1.25rem;">
+      <button class="action-btn-primary" onclick="applySettings()">套用設定</button>
+      <button class="action-btn-secondary" onclick="closeSettings()">取消</button>
+    </div>
+  </div>
+
+  <!-- ── Win Overlay ── -->
+  <div class="overlay" id="winOverlay">
+    <div class="overlay-card glass">
+      <div style="font-size:3rem;margin-bottom:0.4rem;">🏆</div>
+      <div id="winnerName" style="color:#fbbf24;font-size:1.6rem;font-weight:900;margin-bottom:0.2rem;"></div>
+      <div style="color:rgba(255,255,255,0.5);font-size:0.9rem;margin-bottom:1.25rem;">獲得勝利！</div>
+      <div id="finalScores" style="display:flex;flex-direction:column;gap:0.4rem;margin-bottom:1.25rem;text-align:left;"></div>
+      <div style="display:flex;gap:0.6rem;">
+        <button class="action-btn-primary" onclick="newGame()">再來一局</button>
+        <button class="action-btn-secondary" onclick="continueGame()">繼續</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Reset Confirm ── -->
+  <div class="overlay" id="resetConfirm">
+    <div class="overlay-card glass" style="max-width:300px;">
+      <div style="font-size:2rem;margin-bottom:0.5rem;">🔄</div>
+      <div style="color:white;font-weight:700;font-size:1rem;margin-bottom:0.3rem;">確定重置？</div>
+      <div style="color:rgba(255,255,255,0.5);font-size:0.85rem;margin-bottom:1.25rem;">所有分數將歸零，回合重置為第 1 回合</div>
+      <div style="display:flex;gap:0.6rem;">
+        <button onclick="confirmReset()" style="flex:1;padding:0.65rem;background:linear-gradient(135deg,#ef4444,#b91c1c);border:none;border-radius:0.65rem;color:white;font-weight:700;cursor:pointer;">確定重置</button>
+        <button onclick="document.getElementById('resetConfirm').classList.remove('show')" style="flex:1;padding:0.65rem;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.13);border-radius:0.65rem;color:rgba(255,255,255,0.7);font-weight:600;cursor:pointer;">取消</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const state = {
+  players: [
+    { id: 1, name: '玩家 1', score: 0 },
+    { id: 2, name: '玩家 2', score: 0 },
+  ],
+  settings: { targetScore: 0, scoreStep: 1 },
+  round: 1,
+  history: [],   // { playerId, delta }[]  max 30
+  nextId: 3,
+};
+
+// ─── Grid Columns ─────────────────────────────────────────────────────────────
+function getGridCols(n) {
+  const w = window.innerWidth;
+  if (n <= 2) return 2;
+  if (n <= 4) return w < 480 ? 2 : 2;
+  if (n <= 6) return w < 480 ? 2 : 3;
+  return w < 480 ? 2 : 4;
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  renderGrid();
+  updateToolbar();
+  document.getElementById('roundBadge').textContent = `第 ${state.round} 回合`;
+  document.getElementById('stepTag').textContent = `步距 ×${state.settings.scoreStep}`;
+}
+
+function renderGrid() {
+  const grid = document.getElementById('playersGrid');
+  const n = state.players.length;
+  const cols = getGridCols(n);
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  // Calculate leading player (highest score > 0, unique)
+  const maxScore = Math.max(...state.players.map(p => p.score));
+  const leadCount = state.players.filter(p => p.score === maxScore).length;
+  const hasLeader = maxScore > 0 && leadCount === 1;
+
+  // Build a map of existing cards
+  const existing = new Map();
+  grid.querySelectorAll('[data-pid]').forEach(el => existing.set(+el.dataset.pid, el));
+
+  // Remove stale cards
+  existing.forEach((el, id) => {
+    if (!state.players.find(p => p.id === id)) { el.remove(); existing.delete(id); }
+  });
+
+  // Update / create cards
+  state.players.forEach(player => {
+    const isLeading = hasLeader && player.score === maxScore;
+    if (existing.has(player.id)) {
+      patchCard(existing.get(player.id), player, isLeading);
+    } else {
+      const card = buildCard(player, isLeading);
+      grid.appendChild(card);
+    }
+  });
+
+  // Reorder to match state order
+  state.players.forEach((p, i) => {
+    const card = grid.querySelector(`[data-pid="${p.id}"]`);
+    if (card && grid.children[i] !== card) grid.insertBefore(card, grid.children[i] || null);
+  });
+}
+
+function buildCard(player, isLeading) {
+  const card = document.createElement('div');
+  card.className = 'player-card' + (isLeading ? ' leading' : '');
+  card.dataset.pid = player.id;
+  card.innerHTML = cardInner(player);
+  card.addEventListener('click', onCardClick);
+  return card;
+}
+
+function patchCard(card, player, isLeading) {
+  card.classList.toggle('leading', isLeading);
+
+  const scoreEl = card.querySelector('.score-value');
+  if (scoreEl && +scoreEl.dataset.v !== player.score) {
+    scoreEl.dataset.v = player.score;
+    scoreEl.textContent = player.score;
+    scoreEl.classList.toggle('negative', player.score < 0);
+    scoreEl.classList.remove('score-pop');
+    void scoreEl.offsetWidth;
+    scoreEl.classList.add('score-pop');
+  }
+
+  const nameEl = card.querySelector('.player-name');
+  if (nameEl && nameEl.textContent !== player.name) nameEl.textContent = player.name;
+
+  // Update step label on buttons
+  const plusEl = card.querySelector('.btn-plus');
+  const minusEl = card.querySelector('.btn-minus');
+  const s = state.settings.scoreStep;
+  if (plusEl) plusEl.textContent = `＋${s}`;
+  if (minusEl) minusEl.textContent = `－${s}`;
+}
+
+function cardInner(player) {
+  const s = state.settings.scoreStep;
+  return `
+    <span class="player-name">${player.name}</span>
+    <div class="score-value${player.score < 0 ? ' negative' : ''}" data-v="${player.score}">${player.score}</div>
+    <div class="btn-row">
+      <button class="btn-plus" data-action="plus">＋${s}</button>
+      <button class="btn-minus" data-action="minus">－${s}</button>
+    </div>`;
+}
+
+function onCardClick(e) {
+  const card = e.currentTarget;
+  const pid = +card.dataset.pid;
+  const action = e.target.closest('[data-action]')?.dataset.action;
+  const isName = e.target.classList.contains('player-name');
+
+  if (action === 'plus')  changeScore(pid, +state.settings.scoreStep);
+  else if (action === 'minus') changeScore(pid, -state.settings.scoreStep);
+  else if (isName) renamePlayer(pid);
+}
+
+function updateToolbar() {
+  document.getElementById('undoBtn').disabled   = state.history.length === 0;
+  document.getElementById('addBtn').disabled    = state.players.length >= 8;
+  document.getElementById('removeBtn').disabled = state.players.length <= 2;
+}
+
+// ─── Score ────────────────────────────────────────────────────────────────────
+function changeScore(pid, delta) {
+  const p = state.players.find(p => p.id === pid);
+  if (!p) return;
+  p.score += delta;
+  state.history.push({ pid, delta });
+  if (state.history.length > 30) state.history.shift();
+  render();
+  checkWin();
+}
+
+function checkWin() {
+  const t = state.settings.targetScore;
+  if (t <= 0) return;
+  const winner = state.players.find(p => p.score >= t);
+  if (winner) showWin(winner);
+}
+
+// ─── Players ──────────────────────────────────────────────────────────────────
+function addPlayer() {
+  if (state.players.length >= 8) return;
+  const id = state.nextId++;
+  state.players.push({ id, name: `玩家 ${id}`, score: 0 });
+  render();
+}
+
+function removeLastPlayer() {
+  if (state.players.length <= 2) return;
+  const removed = state.players.pop();
+  state.history = state.history.filter(h => h.pid !== removed.id);
+  render();
+}
+
+function renamePlayer(pid) {
+  const p = state.players.find(p => p.id === pid);
+  if (!p) return;
+  const name = prompt('輸入新名稱：', p.name);
+  if (name !== null && name.trim()) {
+    p.name = name.trim().slice(0, 18);
+    render();
+  }
+}
+
+// ─── Undo ─────────────────────────────────────────────────────────────────────
+function undoLastAction() {
+  if (!state.history.length) return;
+  const { pid, delta } = state.history.pop();
+  const p = state.players.find(p => p.id === pid);
+  if (p) p.score -= delta;
+  render();
+}
+
+// ─── Reset ────────────────────────────────────────────────────────────────────
+function confirmReset() {
+  document.getElementById('resetConfirm').classList.remove('show');
+  state.players.forEach(p => p.score = 0);
+  state.history = [];
+  state.round = 1;
+  render();
+}
+
+// ─── New Game / Continue ──────────────────────────────────────────────────────
+function newGame() {
+  document.getElementById('winOverlay').classList.remove('show');
+  state.players.forEach(p => p.score = 0);
+  state.history = [];
+  state.round = 1;
+  render();
+}
+
+function continueGame() {
+  document.getElementById('winOverlay').classList.remove('show');
+  state.round++;
+  render();
+}
+
+// ─── Win Overlay ──────────────────────────────────────────────────────────────
+function showWin(winner) {
+  document.getElementById('winnerName').textContent = winner.name;
+  const medals = ['🥇','🥈','🥉'];
+  const sorted = [...state.players].sort((a,b) => b.score - a.score);
+  document.getElementById('finalScores').innerHTML = sorted.map((p,i) =>
+    `<div style="display:flex;align-items:center;justify-content:space-between;padding:0.35rem 0.7rem;background:rgba(255,255,255,0.04);border-radius:0.45rem;">
+      <span style="color:rgba(255,255,255,0.8);">${medals[i] ?? ''} ${p.name}</span>
+      <span style="color:white;font-weight:800;">${p.score}</span>
+    </div>`
+  ).join('');
+  document.getElementById('winOverlay').classList.add('show');
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('targetScoreInput').value = state.settings.targetScore || '';
+  document.getElementById('scoreStepInput').value   = state.settings.scoreStep;
+  syncPresetBtns(state.settings.scoreStep);
+  document.getElementById('settingsPanel').classList.add('open');
+  document.getElementById('backdrop').classList.add('show');
+}
+
+function closeSettings() {
+  document.getElementById('settingsPanel').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('show');
+}
+
+function applySettings() {
+  const t = Math.max(0, parseInt(document.getElementById('targetScoreInput').value) || 0);
+  const s = Math.max(1, parseInt(document.getElementById('scoreStepInput').value)   || 1);
+  state.settings.targetScore = t;
+  state.settings.scoreStep   = s;
+  closeSettings();
+  // Rebuild cards to refresh button labels
+  document.getElementById('playersGrid').innerHTML = '';
+  render();
+}
+
+function syncPresetBtns(step) {
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.toggle('active', +btn.dataset.step === step);
+  });
+}
+
+// ─── Event Listeners ──────────────────────────────────────────────────────────
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+document.getElementById('resetBtn').addEventListener('click', () =>
+  document.getElementById('resetConfirm').classList.add('show'));
+document.getElementById('undoBtn').addEventListener('click', undoLastAction);
+document.getElementById('addBtn').addEventListener('click', addPlayer);
+document.getElementById('removeBtn').addEventListener('click', removeLastPlayer);
+
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const step = +btn.dataset.step;
+    document.getElementById('scoreStepInput').value = step;
+    syncPresetBtns(step);
+  });
+});
+
+document.getElementById('scoreStepInput').addEventListener('input', function() {
+  syncPresetBtns(+this.value);
+});
+
+window.addEventListener('resize', render);
+
+// ─── Service Worker ───────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () =>
+    navigator.serviceWorker.register('./sw.js')
+      .catch(err => console.warn('[SW] Registration failed:', err))
+  );
+}
+
+// ─── Bootstrap ────────────────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>

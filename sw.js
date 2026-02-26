@@ -12,7 +12,8 @@ const CACHE_PREFIX = 'publishHTML';
 
 // App-specific cache names — add new apps here
 const APP_CACHE_MAP = {
-  'playDices': `${CACHE_PREFIX}-playDices-${SW_VERSION}`,
+  'playDices':   `${CACHE_PREFIX}-playDices-${SW_VERSION}`,
+  'scoreBoard':  `${CACHE_PREFIX}-scoreBoard-${SW_VERSION}`,
 };
 const DEFAULT_CACHE = `${CACHE_PREFIX}-shared-${SW_VERSION}`;
 
