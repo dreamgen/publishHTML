@@ -20,6 +20,25 @@
 
 ---
 
+### 🀄 台灣麻將練習 (`mahjongPractice/`)
+
+> 台灣麻將 16 張單機練習版，含 AI 對手，支援吃、碰、胡
+
+**功能：**
+- 台灣麻將 16 張牌制（含一對眼 + 五個面子）
+- **3 位 AI 對手**自動摸牌出牌（隨機策略，帶延遲動畫）
+- 支援**吃、碰**操作（互動按鈕提示）
+- 支援**放槍胡**與**自摸胡**判定
+- 牌面依花色分色顯示（萬/筒/索/風/三元牌）
+- 剛摸進的牌高亮顯示，方便辨識
+- 出牌後自動理牌排序
+- 流局偵測（牌庫耗盡）
+- 完整離線支援（Service Worker 快取）
+
+**安裝：** 開啟 `/mahjongPractice/` 後，點選「加入主畫面」即可安裝為獨立 App。
+
+---
+
 ### 🏆 萬用計分板 (`scoreBoard/`)
 
 > 適用於球類、牌局、比賽的通用即時計分工具
@@ -88,6 +107,13 @@ publishHTML/
 │   └── icons/
 │       ├── scoreBoard-192.svg
 │       └── scoreBoard-512.svg
+├── mahjongPractice/             # 台灣麻將練習 PWA（scope: ./，解析為 …/mahjongPractice/）
+│   ├── index.html
+│   ├── manifest.webmanifest
+│   ├── sw.js
+│   └── icons/
+│       ├── mahjongPractice-192.svg
+│       └── mahjongPractice-512.svg
 └── README.md
 ```
 
