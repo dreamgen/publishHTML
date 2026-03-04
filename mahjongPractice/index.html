@@ -638,10 +638,10 @@
                 </div>
 
                 {/* 下方 玩家手牌區 */}
-                <div className="flex items-end justify-center mb-2 w-full px-2 z-10 relative">
-                    {/* 副露牌 — 左側，水平排列，平放效果 */}
+                <div className="flex flex-col sm:flex-row items-center sm:items-end justify-center mb-2 w-full px-2 z-10 relative">
+                    {/* 副露牌 — 手機垂直排列、電腦水平排列，平放效果 */}
                     {gameState.melds[0]?.length > 0 && (
-                        <div className="flex gap-1.5 flex-shrink-0 mr-3 self-end">
+                        <div className="flex flex-col sm:flex-row gap-1.5 flex-shrink-0 sm:mr-3 mb-1 sm:mb-0 sm:self-end">
                             {gameState.melds[0].map((meld, i) => (
                                 <div key={i} className="flex gap-px bg-green-950/40 px-1 py-0.5 rounded-lg border border-green-800">
                                     {meld.tiles.map((t, ti) => (
