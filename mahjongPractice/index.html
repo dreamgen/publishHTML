@@ -452,13 +452,15 @@
 
             // 玩家出牌
             const handlePlayerDiscard = (tile) => {
-                if (gameState.turn !== 0 || gameState.actionPrompt || gameState.hands[0].length % 3 !== 2) return;
+                // gangPrompt 存在時不允許直接出牌（需先宣告槓或不槓）
+                if (gameState.turn !== 0 || gameState.actionPrompt || gameState.gangPrompt || gameState.hands[0].length % 3 !== 2) return;
                 setGameState(prev => {
                     const newHands = [...prev.hands];
                     // 玩家出牌後，清掉剛打出的牌，並且 **進行手牌排序(理牌)**
                     newHands[0] = newHands[0].filter(t => t.uid !== tile.uid).sort((a, b) => a.id - b.id);
                     const newDiscards = [...prev.discards, { ...tile, by: 0, claimed: false }];
-                    return { ...prev, hands: newHands, discards: newDiscards, turn: 1, drawnTileUid: null }; // 清除摸牌提示
+                    // 清除 drawnTileUid 與 gangPrompt（防止殘留的 gangPrompt 阻斷 AI 回合）
+                    return { ...prev, hands: newHands, discards: newDiscards, turn: 1, drawnTileUid: null, gangPrompt: null };
                 });
             };
 
