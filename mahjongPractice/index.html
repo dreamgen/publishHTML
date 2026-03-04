@@ -268,6 +268,15 @@
                 drawnTileUid: null, // 記錄玩家剛摸進來的牌 UID
                 gangPrompt: null,   // [{ type: 'angang'|'minggang', tileId }] | null
                 winScore: null,     // { yaku: [...], totalFan: N }
+                gameLog: [],        // 每局完整打牌記錄
+            });
+            const [showLog, setShowLog] = useState(false); // 控制記錄面板顯示
+            const playerNames = ['玩家', 'AI右', 'AI上', 'AI左'];
+
+            // --- 記錄 helper ---
+            const addLog = (prev, msg) => ({
+                ...prev,
+                gameLog: [...(prev.gameLog || []), msg]
             });
 
             const startGame = () => {
@@ -296,10 +305,12 @@
                     drawnTileUid: firstDraw.uid,
                     gangPrompt: null,
                     winScore: null,
+                    gameLog: [`=== 對局開始 ===`, `[莊家] 玩家摸牌(首張): ${firstDraw.label}`],
                 });
             };
 
             const backToMenu = () => {
+                setShowLog(false);
                 setGameState({
                     status: 'menu',
                     deck: [],
@@ -313,6 +324,7 @@
                     drawnTileUid: null,
                     gangPrompt: null,
                     winScore: null,
+                    gameLog: [],
                 });
             };
 
@@ -328,7 +340,7 @@
                         const newDeck = [...deck];
                         const drawnTile = newDeck.pop();
                         if (!drawnTile) {
-                            setGameState(prev => ({ ...prev, status: 'gameover', winType: '流局' }));
+                            setGameState(prev => addLog({ ...prev, status: 'gameover', winType: '流局' }, '=== 流局 (牌庫耗盡) ==='));
                             return;
                         }
                         const newHands = [...hands];
@@ -337,16 +349,16 @@
                         // 檢查玩家是否自摸
                         if (checkWin(newHands[0])) {
                             const score = calculateScore(newHands[0], melds[0], '自摸');
-                            setGameState(prev => ({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: 0, winType: '自摸', drawnTileUid: drawnTile.uid, winScore: score }));
+                            setGameState(prev => addLog({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: 0, winType: '自摸', drawnTileUid: drawnTile.uid, winScore: score }, `[玩家] 摸牌: ${drawnTile.label} → 自摸胡牌！`));
                             return;
                         }
                         // 檢查槓選項
                         const gangOpts = findGangOptions(newHands[0], melds[0]);
-                        setGameState(prev => ({
+                        setGameState(prev => addLog({
                             ...prev, deck: newDeck, hands: newHands,
                             drawnTileUid: drawnTile.uid,
                             gangPrompt: gangOpts.length > 0 ? gangOpts : null,
-                        }));
+                        }, `[玩家] 摸牌: ${drawnTile.label}${gangOpts.length > 0 ? ' ⚡可宣告槓' : ''}`));
                     }
                 } else {
                     // AI 回合 (延遲以增加真實感)
@@ -373,15 +385,19 @@
                             const latestCurrentHand = newHands[turn];
                             const latestNeedsToDraw = latestCurrentHand.length % 3 === 1;
 
+                            let newLog = [...(prev.gameLog || [])];
                             if (latestNeedsToDraw) {
                                 const drawnTile = newDeck.pop();
                                 if (!drawnTile) {
-                                    return { ...prev, status: 'gameover', winType: '流局' };
+                                    newLog.push('=== 流局 (牌庫耗盡) ===');
+                                    return { ...prev, status: 'gameover', winType: '流局', gameLog: newLog };
                                 }
                                 newHands[turn] = [...newHands[turn], drawnTile];
+                                newLog.push(`[${playerNames[turn]}] 摸牌`);
                                 // AI 檢查自摸
                                 if (checkWin(newHands[turn])) {
-                                    return { ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: turn, winType: '自摸' };
+                                    newLog.push(`[${playerNames[turn]}] 自摸胡牌！`);
+                                    return { ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: turn, winType: '自摸', gameLog: newLog };
                                 }
                                 // AI 自動宣告槓
                                 const aiGangs = findGangOptions(newHands[turn], newMelds[turn]);
@@ -395,6 +411,7 @@
                                             return true;
                                         });
                                         newMelds[turn] = [...newMelds[turn], { type: 'angang', tiles: gangTiles }];
+                                        newLog.push(`[${playerNames[turn]}] 宣告暗槓: ${TILE_TYPES[g.tileId].label}`);
                                     } else {
                                         const mIdx = newMelds[turn].findIndex(m => m.type === 'pong' && m.tiles[0].id === g.tileId);
                                         const gt = newHands[turn].find(t => t.id === g.tileId);
@@ -402,12 +419,18 @@
                                         newMelds[turn] = newMelds[turn].map((m, i) =>
                                             i === mIdx ? { ...m, type: 'minggang', tiles: [...m.tiles, gt] } : m
                                         );
+                                        newLog.push(`[${playerNames[turn]}] 宣告明槓: ${TILE_TYPES[g.tileId].label}`);
                                     }
                                     const lingshang = newDeck.pop();
-                                    if (!lingshang) return { ...prev, status: 'gameover', winType: '流局' };
+                                    if (!lingshang) {
+                                        newLog.push('=== 流局 (牌庫耗盡) ===');
+                                        return { ...prev, status: 'gameover', winType: '流局', gameLog: newLog };
+                                    }
                                     newHands[turn] = [...newHands[turn], lingshang];
+                                    newLog.push(`[${playerNames[turn]}] 摸嶺上牌`);
                                     if (checkWin(newHands[turn])) {
-                                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, status: 'gameover', winner: turn, winType: '嶺上自摸' };
+                                        newLog.push(`[${playerNames[turn]}] 嶺上自摸胡牌！`);
+                                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, status: 'gameover', winner: turn, winType: '嶺上自摸', gameLog: newLog };
                                     }
                                 }
                             }
@@ -416,6 +439,7 @@
                             const discardedTile = newHands[turn][discardIndex];
                             newHands[turn] = newHands[turn].filter((_, i) => i !== discardIndex);
                             newDiscards.push({ ...discardedTile, by: turn, claimed: false });
+                            newLog.push(`[${playerNames[turn]}] 打出: ${discardedTile.label}`);
                             // --- 檢查玩家 (0) 是否可以吃碰胡（使用最新手牌）---
                             const pHand = newHands[0]; // 已是最新的玩家手牌
                             let options = [];
@@ -437,12 +461,15 @@
                                 if (chowCombos.length > 0) options.push('chow');
                             }
                             if (options.length > 0) {
+                                const optStr = options.map(o => o === 'chow' ? `吃(${chowCombos.map(c => c.map(t => t.label).join('')).join('/')})` : o === 'pong' ? '碰' : o === 'dagang' ? '槓' : '胡').join('/');
+                                newLog.push(`  → 玩家可選: ${optStr}`);
                                 return {
                                     ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards,
-                                    actionPrompt: { options, tile: discardedTile, from: turn, chowCombos }
+                                    actionPrompt: { options, tile: discardedTile, from: turn, chowCombos },
+                                    gameLog: newLog
                                 };
                             } else {
-                                return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, turn: (turn + 1) % 4 };
+                                return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, turn: (turn + 1) % 4, gameLog: newLog };
                             }
                         });
                     }, 800);
@@ -460,7 +487,8 @@
                     newHands[0] = newHands[0].filter(t => t.uid !== tile.uid).sort((a, b) => a.id - b.id);
                     const newDiscards = [...prev.discards, { ...tile, by: 0, claimed: false }];
                     // 清除 drawnTileUid 與 gangPrompt（防止殘留的 gangPrompt 阻斷 AI 回合）
-                    return { ...prev, hands: newHands, discards: newDiscards, turn: 1, drawnTileUid: null, gangPrompt: null };
+                    return addLog({ ...prev, hands: newHands, discards: newDiscards, turn: 1, drawnTileUid: null, gangPrompt: null },
+                        `[玩家] 打出: ${tile.label}`);
                 });
             };
 
@@ -473,7 +501,8 @@
                     let newMelds = [...melds];
                     let newDiscards = [...discards];
                     if (action === 'skip') {
-                        return { ...prev, actionPrompt: null, turn: (actionPrompt.from + 1) % 4 };
+                        return addLog({ ...prev, actionPrompt: null, turn: (actionPrompt.from + 1) % 4 },
+                            `[玩家] 過 (${playerNames[actionPrompt.from]}打${tile.label})`);
                     }
                     // 若選擇吃、碰、胡，將海底最後一張牌標記為「已取走 (claimed)」
                     if (newDiscards.length > 0) {
@@ -482,15 +511,16 @@
                     if (action === 'win') {
                         newHands[0] = [...newHands[0], tile].sort((a, b) => a.id - b.id);
                         const score = calculateScore(newHands[0], newMelds[0], '放槍');
-                        return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, status: 'gameover', winner: 0, winType: '放槍', winScore: score };
+                        return addLog({ ...prev, hands: newHands, melds: newMelds, discards: newDiscards, status: 'gameover', winner: 0, winType: '放槍', winScore: score },
+                            `[玩家] 胡牌！(放槍: ${playerNames[actionPrompt.from]} 打 ${tile.label})`);
                     }
                     if (action === 'pong') {
                         const pHand = newHands[0];
                         const matches = pHand.filter(t => t.id === tile.id).slice(0, 2);
                         newHands[0] = pHand.filter(t => !matches.includes(t));
                         newMelds[0] = [...newMelds[0], { type: 'pong', tiles: [tile, ...matches] }];
-                        // 吃碰後不需要再提示摸牌狀態，所以 drawnTileUid 維持 null
-                        return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
+                        return addLog({ ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 },
+                            `[玩家] 碰 ${tile.label} (從${playerNames[actionPrompt.from]})`);
                     }
                     if (action === 'dagang') {
                         const newDeck = [...prev.deck];
@@ -499,20 +529,24 @@
                         newHands[0] = pHand.filter(t => !matches.includes(t));
                         newMelds[0] = [...newMelds[0], { type: 'minggang', tiles: [tile, ...matches] }];
                         const lingshang = newDeck.pop();
-                        if (!lingshang) return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winType: '流局' };
+                        if (!lingshang) return addLog({ ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winType: '流局' },
+                            `[玩家] 大明槓 ${tile.label} → 流局`);
                         newHands[0] = [...newHands[0], lingshang];
                         if (checkWin(newHands[0])) {
                             const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
-                            return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid };
+                            return addLog({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid },
+                                `[玩家] 大明槓 ${tile.label} → 摸嶺上 ${lingshang.label} → 嶺上自摸！`);
                         }
                         const moreGangs = findGangOptions(newHands[0], newMelds[0]);
-                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0, drawnTileUid: lingshang.uid, gangPrompt: moreGangs.length > 0 ? moreGangs : null };
+                        return addLog({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0, drawnTileUid: lingshang.uid, gangPrompt: moreGangs.length > 0 ? moreGangs : null },
+                            `[玩家] 大明槓 ${tile.label} → 摸嶺上: ${lingshang.label}`);
                     }
                     if (action === 'chow' && chowCombo) {
                         const pHand = newHands[0];
                         newHands[0] = pHand.filter(t => t.uid !== chowCombo[0].uid && t.uid !== chowCombo[1].uid);
                         newMelds[0] = [...newMelds[0], { type: 'chow', tiles: [tile, ...chowCombo].sort((a, b) => a.id - b.id) }];
-                        return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
+                        return addLog({ ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 },
+                            `[玩家] 吃 ${tile.label}+${chowCombo[0].label}+${chowCombo[1].label} (從${playerNames[actionPrompt.from]})`);
                     }
                     return prev;
                 });
@@ -528,6 +562,7 @@
                     let newHands = [...prev.hands];
                     let newMelds = [...prev.melds];
                     let newDeck = [...prev.deck];
+                    const gangLabel = TILE_TYPES[gangOpt.tileId].label;
                     if (gangOpt.type === 'angang') {
                         const gangTiles = [];
                         let removed = 0;
@@ -546,24 +581,25 @@
                     }
                     // 摸嶺上牌
                     const lingshang = newDeck.pop();
-                    if (!lingshang) return { ...prev, status: 'gameover', winType: '流局' };
+                    if (!lingshang) return addLog({ ...prev, status: 'gameover', winType: '流局' },
+                        `[玩家] ${gangOpt.type === 'angang' ? '暗' : '明'}槓 ${gangLabel} → 流局`);
                     newHands[0] = [...newHands[0], lingshang];
                     // 嶺上自摸判定
                     if (checkWin(newHands[0])) {
                         const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
-                        return {
+                        return addLog({
                             ...prev, hands: newHands, melds: newMelds, deck: newDeck,
                             drawnTileUid: lingshang.uid, gangPrompt: null,
                             status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score
-                        };
+                        }, `[玩家] ${gangOpt.type === 'angang' ? '暗' : '明'}槓 ${gangLabel} → 摸嶺上 ${lingshang.label} → 嶺上自摸！`);
                     }
                     // 檢查是否還可以再槓
                     const moreGangs = findGangOptions(newHands[0], newMelds[0]);
-                    return {
+                    return addLog({
                         ...prev, hands: newHands, melds: newMelds, deck: newDeck,
                         drawnTileUid: lingshang.uid,
                         gangPrompt: moreGangs.length > 0 ? moreGangs : null
-                    };
+                    }, `[玩家] ${gangOpt.type === 'angang' ? '暗' : '明'}槓 ${gangLabel} → 摸嶺上: ${lingshang.label}`);
                 });
             };
 
@@ -583,9 +619,36 @@
                 );
             }
 
-            const playerNames = ['玩家', 'AI 右', 'AI 上', 'AI 左'];
+            // 記錄面板元件（遊戲中與結算畫面共用）
+            const LogPanel = ({ onClose }) => (
+                <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="bg-gray-900 rounded-2xl border border-gray-600 w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+                            <span className="text-yellow-300 font-bold text-base">📋 打牌記錄 ({gameState.gameLog.length} 條)</span>
+                            {onClose && <button className="text-gray-400 hover:text-white text-xl px-2" onClick={onClose}>✕</button>}
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 font-mono text-xs sm:text-sm text-green-200 whitespace-pre-wrap leading-relaxed">
+                            {gameState.gameLog.length === 0
+                                ? <span className="text-gray-500">尚無記錄</span>
+                                : gameState.gameLog.map((line, i) => (
+                                    <div key={i} className={`py-0.5 ${line.startsWith('===') ? 'text-yellow-400 font-bold mt-2' : line.startsWith('  →') ? 'text-cyan-300' : ''}`}>{line}</div>
+                                ))
+                            }
+                        </div>
+                    </div>
+                </div>
+            );
             return (
                 <div className="h-screen w-full bg-green-800 flex flex-col justify-between font-sans overflow-hidden">
+
+                    {/* 記錄浮層 */}
+                    {showLog && <LogPanel onClose={() => setShowLog(false)} />}
+
+                    {/* 記錄按鈕 */}
+                    <button
+                        className="absolute top-4 right-4 z-20 bg-black/60 hover:bg-black/80 text-yellow-300 border border-yellow-600 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors"
+                        onClick={() => setShowLog(v => !v)}
+                    >📋 記錄</button>
 
                     {/* 狀態提示 */}
                     <div className="absolute top-4 left-4 bg-black/50 text-white px-4 py-2 rounded-lg z-10 text-sm sm:text-base">
@@ -748,6 +811,15 @@
                                     {gameState.hands[gameState.winner].map(t => <Tile key={t.uid} tile={t} />)}
                                 </div>
                             )}
+                            {/* 結算畫面：內嵌記錄（可展開） */}
+                            <details className="w-full max-w-lg mb-6 bg-black/30 rounded-xl border border-gray-700">
+                                <summary className="cursor-pointer px-4 py-2 text-yellow-300 text-sm font-bold select-none">📋 查看打牌記錄 ({gameState.gameLog.length} 條)</summary>
+                                <div className="max-h-48 overflow-y-auto p-4 font-mono text-xs text-green-200 leading-relaxed">
+                                    {gameState.gameLog.map((line, i) => (
+                                        <div key={i} className={`py-0.5 ${line.startsWith('===') ? 'text-yellow-400 font-bold mt-1' : line.startsWith('  →') ? 'text-cyan-300' : ''}`}>{line}</div>
+                                    ))}
+                                </div>
+                            </details>
                             <button
                                 className="bg-green-600 hover:bg-green-500 text-white border-2 border-green-400 px-12 py-4 rounded-full text-2xl font-bold shadow-2xl transition-transform hover:scale-105"
                                 onClick={backToMenu}
