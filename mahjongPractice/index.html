@@ -403,6 +403,7 @@
                     // 檢查碰牌
                     const pongTiles = pHand.filter(t => t.id === discardedTile.id);
                     if (pongTiles.length >= 2) options.push('pong');
+                    if (pongTiles.length >= 3) options.push('dagang'); // 大明槓
                     // 檢查吃牌 (只有當上家 AI 3 打牌時)
                     if (turn === 3 && discardedTile.id < 27) {
                         const id = discardedTile.id;
@@ -467,6 +468,22 @@
                     newMelds[0] = [...newMelds[0], { type: 'pong', tiles: [tile, ...matches] }];
                     // 吃碰後不需要再提示摸牌狀態，所以 drawnTileUid 維持 null
                     return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
+                }
+                if (action === 'dagang') {
+                    const newDeck = [...prev.deck];
+                    const pHand = newHands[0];
+                    const matches = pHand.filter(t => t.id === tile.id).slice(0, 3);
+                    newHands[0] = pHand.filter(t => !matches.includes(t));
+                    newMelds[0] = [...newMelds[0], { type: 'minggang', tiles: [tile, ...matches] }];
+                    const lingshang = newDeck.pop();
+                    if (!lingshang) return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winType: '流局' };
+                    newHands[0] = [...newHands[0], lingshang];
+                    if (checkWin(newHands[0])) {
+                        const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
+                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid };
+                    }
+                    const moreGangs = findGangOptions(newHands[0], newMelds[0]);
+                    return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0, drawnTileUid: lingshang.uid, gangPrompt: moreGangs.length > 0 ? moreGangs : null };
                 }
                 if (action === 'chow' && chowCombo) {
                     const pHand = newHands[0];
@@ -604,6 +621,9 @@
                                     )}
                                     {gameState.actionPrompt.options.includes('pong') && (
                                         <button className="bg-yellow-600 hover:bg-yellow-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-yellow-400 font-bold" onClick={() => handleAction('pong')}>碰</button>
+                                    )}
+                                    {gameState.actionPrompt.options.includes('dagang') && (
+                                        <button className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-purple-400 font-bold" onClick={() => handleAction('dagang')}>槓</button>
                                     )}
                                     {gameState.actionPrompt.options.includes('chow') && gameState.actionPrompt.chowCombos.map((combo, idx) => (
                                         <button key={idx} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl text-lg shadow-lg border-2 border-blue-400 font-bold" onClick={() => handleAction('chow', combo)}>
