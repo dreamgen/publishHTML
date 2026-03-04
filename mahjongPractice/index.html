@@ -1,750 +1,776 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>台灣麻將練習</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>台灣麻將練習</title>
 
-  <!-- PWA -->
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" type="image/svg+xml" href="./icons/mahjongPractice-192.svg">
-  <link rel="apple-touch-icon" href="./icons/mahjongPractice-192.svg">
-  <meta name="theme-color" content="#f59e0b">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="麻將練習">
-  <meta name="description" content="台灣麻將 16 張單機練習版，支援吃、碰、胡，含 AI 對手">
+    <!-- PWA -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="./icons/mahjongPractice-192.svg">
+    <link rel="apple-touch-icon" href="./icons/mahjongPractice-192.svg">
+    <meta name="theme-color" content="#f59e0b">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="麻將練習">
+    <meta name="description" content="台灣麻將 16 張單機練習版，支援吃、碰、胡，含 AI 對手">
 
-  <!-- Tailwind CSS (Play CDN — supports arbitrary values like text-[12rem]) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS (Play CDN — supports arbitrary values like text-[12rem]) -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-  <style>
-    *, *::before, *::after {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
 
-    /* Full-height fix for mobile (dvh avoids address-bar overlap) */
-    html, body {
-      height: 100%;
-      height: 100dvh;
-      margin: 0;
-      overflow: hidden;
-    }
+        /* Full-height fix for mobile (dvh avoids address-bar overlap) */
+        html,
+        body {
+            height: 100%;
+            height: 100dvh;
+            margin: 0;
+            overflow: hidden;
+        }
 
-    #root {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+        #root {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
 
-    /* Override Tailwind's min-h-screen (100vh) with dvh */
-    .min-h-screen { min-height: 100dvh; }
-  </style>
+        /* Override Tailwind's min-h-screen (100vh) with dvh */
+        .min-h-screen {
+            min-height: 100dvh;
+        }
+    </style>
 </head>
+
 <body>
-  <div id="root"></div>
+    <div id="root"></div>
 
-  <!-- React 18 (UMD) -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <!-- Babel Standalone (browser-side JSX compilation) -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- React 18 (UMD) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel Standalone (browser-side JSX compilation) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <script type="text/babel">
-    const { useState, useEffect } = React;
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-    // --- 常數與牌庫定義 ---
-    const TILE_TYPES = [
-        ...Array.from({ length: 9 }, (_, i) => ({ id: i, suit: 'wan', value: i + 1, label: `${i + 1}萬` })),
-        ...Array.from({ length: 9 }, (_, i) => ({ id: i + 9, suit: 'tong', value: i + 1, label: `${i + 1}筒` })),
-        ...Array.from({ length: 9 }, (_, i) => ({ id: i + 18, suit: 'suo', value: i + 1, label: `${i + 1}索` })),
-        { id: 27, suit: 'feng', value: 'dong', label: '東' },
-        { id: 28, suit: 'feng', value: 'nan', label: '南' },
-        { id: 29, suit: 'feng', value: 'xi', label: '西' },
-        { id: 30, suit: 'feng', value: 'bei', label: '北' },
-        { id: 31, suit: 'yuan', value: 'zhong', label: '中' },
-        { id: 32, suit: 'yuan', value: 'fa', label: '發' },
-        { id: 33, suit: 'yuan', value: 'bai', label: '白' },
-    ];
+        // --- 常數與牌庫定義 ---
+        const TILE_TYPES = [
+            ...Array.from({ length: 9 }, (_, i) => ({ id: i, suit: 'wan', value: i + 1, label: `${i + 1}萬` })),
+            ...Array.from({ length: 9 }, (_, i) => ({ id: i + 9, suit: 'tong', value: i + 1, label: `${i + 1}筒` })),
+            ...Array.from({ length: 9 }, (_, i) => ({ id: i + 18, suit: 'suo', value: i + 1, label: `${i + 1}索` })),
+            { id: 27, suit: 'feng', value: 'dong', label: '東' },
+            { id: 28, suit: 'feng', value: 'nan', label: '南' },
+            { id: 29, suit: 'feng', value: 'xi', label: '西' },
+            { id: 30, suit: 'feng', value: 'bei', label: '北' },
+            { id: 31, suit: 'yuan', value: 'zhong', label: '中' },
+            { id: 32, suit: 'yuan', value: 'fa', label: '發' },
+            { id: 33, suit: 'yuan', value: 'bai', label: '白' },
+        ];
 
-    function generateDeck() {
-        let deck = [];
-        let uid = 0;
-        for (let type of TILE_TYPES) {
-            for (let i = 0; i < 4; i++) {
-                deck.push({ ...type, uid: uid++ });
+        function generateDeck() {
+            let deck = [];
+            let uid = 0;
+            for (let type of TILE_TYPES) {
+                for (let i = 0; i < 4; i++) {
+                    deck.push({ ...type, uid: uid++ });
+                }
             }
-        }
-        // 洗牌
-        for (let i = deck.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [deck[i], deck[j]] = [deck[j], deck[i]];
-        }
-        return deck;
-    }
-
-    // --- 胡牌判定邏輯 ---
-    function convertHandToCounts(handTiles) {
-        const counts = new Array(34).fill(0);
-        handTiles.forEach(t => {
-            if (t && t.id !== undefined) counts[t.id]++;
-        });
-        return counts;
-    }
-
-    function checkCombinations(counts) {
-        let i = 0;
-        while (i < 34 && counts[i] === 0) i++;
-        if (i === 34) return true; // 所有牌都配對成功
-        let result = false;
-        // 嘗試刻子 (碰/暗刻)
-        if (counts[i] >= 3) {
-            counts[i] -= 3;
-            result = checkCombinations(counts);
-            counts[i] += 3;
-            if (result) return true;
-        }
-        // 嘗試順子 (吃) - 只能是萬、筒、索，且不能跨花色
-        if (i < 27 && i % 9 <= 6 && counts[i + 1] > 0 && counts[i + 2] > 0) {
-            counts[i]--; counts[i + 1]--; counts[i + 2]--;
-            result = checkCombinations(counts);
-            counts[i]++; counts[i + 1]++; counts[i + 2]++;
-            if (result) return true;
-        }
-        return false;
-    }
-
-    function checkWin(handTiles) {
-        // 台灣麻將胡牌需要 17 張牌 (包含一對眼 + 五個面子)
-        if (handTiles.length % 3 !== 2) return false;
-        const counts = convertHandToCounts(handTiles);
-
-        // 尋找將牌 (眼)
-        for (let i = 0; i < 34; i++) {
-            if (counts[i] >= 2) {
-                counts[i] -= 2; // 抽起將牌
-                if (checkCombinations(counts)) return true; // 檢查剩下的牌是否能組成面子
-                counts[i] += 2; // 放回將牌
+            // 洗牌
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];
             }
+            return deck;
         }
-        return false;
-    }
 
-    // --- 槓與計分 Helper 函式 ---
-
-    // 找出可宣告的槓選項
-    function findGangOptions(hand, melds) {
-        const options = [];
-        // 暗槓：手中有 4 張同牌
-        const counts = {};
-        hand.forEach(t => counts[t.id] = (counts[t.id] || 0) + 1);
-        Object.entries(counts).forEach(([id, n]) => {
-            if (n === 4) options.push({ type: 'angang', tileId: parseInt(id) });
-        });
-        // 明槓：摸到的牌 id 與現有碰副露 id 相同
-        melds.filter(m => m.type === 'pong').forEach(m => {
-            if (hand.some(t => t.id === m.tiles[0].id))
-                options.push({ type: 'minggang', tileId: m.tiles[0].id });
-        });
-        return options;
-    }
-
-    // 碰碰和判定 — 僅允許刻子（無順子）
-    function checkCombinationsNoSeq(counts) {
-        let i = 0;
-        while (i < 34 && counts[i] === 0) i++;
-        if (i === 34) return true;
-        if (counts[i] >= 3) {
-            counts[i] -= 3;
-            const r = checkCombinationsNoSeq(counts);
-            counts[i] += 3;
-            return r;
+        // --- 胡牌判定邏輯 ---
+        function convertHandToCounts(handTiles) {
+            const counts = new Array(34).fill(0);
+            handTiles.forEach(t => {
+                if (t && t.id !== undefined) counts[t.id]++;
+            });
+            return counts;
         }
-        return false;
-    }
 
-    // 計算台數
-    function calculateScore(hand, melds, winType) {
-        const yaku = [];
-        if (winType === '自摸' || winType === '嶺上自摸') yaku.push({ name: '自摸', fan: 1 });
-        if (winType === '嶺上自摸') yaku.push({ name: '嶺上花', fan: 1 });
-        const hasOpenMeld = melds.some(m => m.type === 'pong' || m.type === 'chow' || m.type === 'minggang');
-        if (!hasOpenMeld) yaku.push({ name: '門前清', fan: 1 });
-        // 碰碰和：無吃，且手牌可全刻子組成
-        if (!melds.some(m => m.type === 'chow')) {
-            const counts = convertHandToCounts(hand);
+        function checkCombinations(counts) {
+            let i = 0;
+            while (i < 34 && counts[i] === 0) i++;
+            if (i === 34) return true; // 所有牌都配對成功
+            let result = false;
+            // 嘗試刻子 (碰/暗刻)
+            if (counts[i] >= 3) {
+                counts[i] -= 3;
+                result = checkCombinations(counts);
+                counts[i] += 3;
+                if (result) return true;
+            }
+            // 嘗試順子 (吃) - 只能是萬、筒、索，且不能跨花色
+            if (i < 27 && i % 9 <= 6 && counts[i + 1] > 0 && counts[i + 2] > 0) {
+                counts[i]--; counts[i + 1]--; counts[i + 2]--;
+                result = checkCombinations(counts);
+                counts[i]++; counts[i + 1]++; counts[i + 2]++;
+                if (result) return true;
+            }
+            return false;
+        }
+
+        function checkWin(handTiles) {
+            // 台灣麻將胡牌需要 17 張牌 (包含一對眼 + 五個面子)
+            if (handTiles.length % 3 !== 2) return false;
+            const counts = convertHandToCounts(handTiles);
+
+            // 尋找將牌 (眼)
             for (let i = 0; i < 34; i++) {
                 if (counts[i] >= 2) {
-                    counts[i] -= 2;
-                    if (checkCombinationsNoSeq(counts)) { yaku.push({ name: '碰碰和', fan: 3 }); break; }
-                    counts[i] += 2;
+                    counts[i] -= 2; // 抽起將牌
+                    if (checkCombinations(counts)) return true; // 檢查剩下的牌是否能組成面子
+                    counts[i] += 2; // 放回將牌
                 }
             }
+            return false;
         }
-        // 清一色 / 混一色
-        const allTiles = [...hand, ...melds.flatMap(m => m.tiles)];
-        const suitSet = new Set(allTiles.map(t => t.suit));
-        const honorSuits = new Set(['feng', 'yuan']);
-        const seqSuits = [...suitSet].filter(s => !honorSuits.has(s));
-        if (seqSuits.length === 1 && suitSet.size === 1) yaku.push({ name: '清一色', fan: 4 });
-        else if (seqSuits.length === 1 && suitSet.size > 1) yaku.push({ name: '混一色', fan: 2 });
-        const totalFan = yaku.reduce((s, y) => s + y.fan, 0);
-        return { yaku, totalFan };
-    }
 
-    // --- React 元件 ---
-    const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn }) => {
-        if (isHidden) {
-            return <div className="w-8 h-12 sm:w-10 sm:h-14 bg-green-600 rounded shadow-[inset_0_0_8px_rgba(0,0,0,0.3)] border-b-4 border-green-800 m-px"></div>;
-        }
-        let textColor = "text-gray-900";
-        if (tile.suit === 'wan') textColor = "text-red-700";
-        if (tile.suit === 'tong') textColor = "text-blue-700";
-        if (tile.suit === 'suo') textColor = "text-green-700";
-        if (tile.suit === 'yuan') {
-            if (tile.value === 'zhong') textColor = "text-red-600";
-            if (tile.value === 'fa') textColor = "text-green-600";
-            if (tile.value === 'bai') textColor = isOpenMeld ? "text-blue-500" : "text-blue-500 border border-blue-500 rounded-sm m-1 px-1";
-        }
-        let sizeClass = "w-10 h-14 sm:w-12 sm:h-16 text-lg sm:text-xl border-b-4 hover:-translate-y-2 cursor-pointer";
-        if (isDiscard || isMeld) {
-            sizeClass = "w-7 h-10 sm:w-8 sm:h-12 text-xs sm:text-sm border-b-2";
-        }
-        if (isOpenMeld) {
-            // 平放效果：橫置（寬 > 高），薄邊框，模擬牌面朝上平放桌面
-            sizeClass = "w-10 h-7 text-[10px] border border-gray-400 cursor-default";
-        }
-        if (large) {
-            sizeClass = "w-16 h-24 sm:w-20 sm:h-28 text-3xl sm:text-4xl border-b-[6px] shadow-xl";
-        }
-        // 若牌被吃碰走，則加上變灰暗的樣式
-        const claimedStyle = isClaimed ? "opacity-30 grayscale brightness-50 pointer-events-none" : "";
+        // --- 槓與計分 Helper 函式 ---
 
-        // 背景與特效
-        const bgStyle = isOpenMeld
-            ? "bg-amber-50 shadow-sm"
-            : isDrawn
-                ? "ml-4 sm:ml-6 -translate-y-2 ring-4 ring-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.8)] z-10 bg-yellow-100"
-                : "bg-yellow-50";
-        return (
-            <div
-                onClick={onClick}
-                className={`relative rounded ${isOpenMeld ? '' : 'shadow-md'} border-gray-300 flex flex-col justify-center items-center m-px font-bold select-none transition-transform ${sizeClass} ${claimedStyle} ${bgStyle}`}
-            >
-                {isOpenMeld ? (
-                    <span className={`${textColor} whitespace-nowrap leading-none`}>{tile.label}</span>
-                ) : (
-                    <>
-                        <span className={textColor}>{tile.label.substring(0, 1)}</span>
-                        {tile.label.length > 1 && <span className={textColor}>{tile.label.substring(1)}</span>}
-                    </>
-                )}
-                {isAngangHidden && <div className="absolute inset-0 bg-green-900/80 rounded"></div>}
-            </div>
-        );
-    };
-
-    function App() {
-        const [gameState, setGameState] = useState({
-            status: 'menu', // menu, playing, gameover
-            deck: [],
-            hands: [[], [], [], []],
-            melds: [[], [], [], []], // 吃碰的牌
-            discards: [], // 格式: { ...tile, by: playerId, claimed: boolean }
-            turn: 0,
-            winner: null,
-            winType: null, // '自摸', '嶺上自摸', '放槍', '流局'
-            actionPrompt: null, // { options: ['win', 'pong', 'chow'], tile, from, chowCombos }
-            drawnTileUid: null, // 記錄玩家剛摸進來的牌 UID
-            gangPrompt: null,   // [{ type: 'angang'|'minggang', tileId }] | null
-            winScore: null,     // { yaku: [...], totalFan: N }
-        });
-
-        const startGame = () => {
-            const deck = generateDeck();
-            const hands = [[], [], [], []];
-            for (let i = 0; i < 4; i++) {
-                for (let j = 0; j < 16; j++) {
-                    hands[i].push(deck.pop());
-                }
-                if (i === 0) hands[i].sort((a, b) => a.id - b.id); // 玩家起始的 16 張先理牌排序好
-            }
-
-            // 莊家 (玩家 0) 多摸一張 (第 17 張牌，不加入排序)
-            const firstDraw = deck.pop();
-            hands[0].push(firstDraw);
-            setGameState({
-                status: 'playing',
-                deck,
-                hands,
-                melds: [[], [], [], []],
-                discards: [],
-                turn: 0,
-                winner: null,
-                winType: null,
-                actionPrompt: null,
-                drawnTileUid: firstDraw.uid,
-                gangPrompt: null,
-                winScore: null,
+        // 找出可宣告的槓選項
+        function findGangOptions(hand, melds) {
+            const options = [];
+            // 暗槓：手中有 4 張同牌
+            const counts = {};
+            hand.forEach(t => counts[t.id] = (counts[t.id] || 0) + 1);
+            Object.entries(counts).forEach(([id, n]) => {
+                if (n === 4) options.push({ type: 'angang', tileId: parseInt(id) });
             });
+            // 明槓：摸到的牌 id 與現有碰副露 id 相同
+            melds.filter(m => m.type === 'pong').forEach(m => {
+                if (hand.some(t => t.id === m.tiles[0].id))
+                    options.push({ type: 'minggang', tileId: m.tiles[0].id });
+            });
+            return options;
+        }
+
+        // 碰碰和判定 — 僅允許刻子（無順子）
+        function checkCombinationsNoSeq(counts) {
+            let i = 0;
+            while (i < 34 && counts[i] === 0) i++;
+            if (i === 34) return true;
+            if (counts[i] >= 3) {
+                counts[i] -= 3;
+                const r = checkCombinationsNoSeq(counts);
+                counts[i] += 3;
+                return r;
+            }
+            return false;
+        }
+
+        // 計算台數
+        function calculateScore(hand, melds, winType) {
+            const yaku = [];
+            if (winType === '自摸' || winType === '嶺上自摸') yaku.push({ name: '自摸', fan: 1 });
+            if (winType === '嶺上自摸') yaku.push({ name: '嶺上花', fan: 1 });
+            const hasOpenMeld = melds.some(m => m.type === 'pong' || m.type === 'chow' || m.type === 'minggang');
+            if (!hasOpenMeld) yaku.push({ name: '門前清', fan: 1 });
+            // 碰碰和：無吃，且手牌可全刻子組成
+            if (!melds.some(m => m.type === 'chow')) {
+                const counts = convertHandToCounts(hand);
+                for (let i = 0; i < 34; i++) {
+                    if (counts[i] >= 2) {
+                        counts[i] -= 2;
+                        if (checkCombinationsNoSeq(counts)) { yaku.push({ name: '碰碰和', fan: 3 }); break; }
+                        counts[i] += 2;
+                    }
+                }
+            }
+            // 清一色 / 混一色
+            const allTiles = [...hand, ...melds.flatMap(m => m.tiles)];
+            const suitSet = new Set(allTiles.map(t => t.suit));
+            const honorSuits = new Set(['feng', 'yuan']);
+            const seqSuits = [...suitSet].filter(s => !honorSuits.has(s));
+            if (seqSuits.length === 1 && suitSet.size === 1) yaku.push({ name: '清一色', fan: 4 });
+            else if (seqSuits.length === 1 && suitSet.size > 1) yaku.push({ name: '混一色', fan: 2 });
+            const totalFan = yaku.reduce((s, y) => s + y.fan, 0);
+            return { yaku, totalFan };
+        }
+
+        // --- React 元件 ---
+        const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn }) => {
+            if (isHidden) {
+                return <div className="w-8 h-12 sm:w-10 sm:h-14 bg-green-600 rounded shadow-[inset_0_0_8px_rgba(0,0,0,0.3)] border-b-4 border-green-800 m-px"></div>;
+            }
+            let textColor = "text-gray-900";
+            if (tile.suit === 'wan') textColor = "text-red-700";
+            if (tile.suit === 'tong') textColor = "text-blue-700";
+            if (tile.suit === 'suo') textColor = "text-green-700";
+            if (tile.suit === 'yuan') {
+                if (tile.value === 'zhong') textColor = "text-red-600";
+                if (tile.value === 'fa') textColor = "text-green-600";
+                if (tile.value === 'bai') textColor = isOpenMeld ? "text-blue-500" : "text-blue-500 border border-blue-500 rounded-sm m-1 px-1";
+            }
+            let sizeClass = "w-10 h-14 sm:w-12 sm:h-16 text-lg sm:text-xl border-b-4 hover:-translate-y-2 cursor-pointer";
+            if (isDiscard || isMeld) {
+                sizeClass = "w-7 h-10 sm:w-8 sm:h-12 text-xs sm:text-sm border-b-2";
+            }
+            if (isOpenMeld) {
+                // 平放效果：橫置（寬 > 高），薄邊框，模擬牌面朝上平放桌面
+                sizeClass = "w-10 h-7 text-[10px] border border-gray-400 cursor-default";
+            }
+            if (large) {
+                sizeClass = "w-16 h-24 sm:w-20 sm:h-28 text-3xl sm:text-4xl border-b-[6px] shadow-xl";
+            }
+            // 若牌被吃碰走，則加上變灰暗的樣式
+            const claimedStyle = isClaimed ? "opacity-30 grayscale brightness-50 pointer-events-none" : "";
+
+            // 背景與特效
+            const bgStyle = isOpenMeld
+                ? "bg-amber-50 shadow-sm"
+                : isDrawn
+                    ? "ml-4 sm:ml-6 -translate-y-2 ring-4 ring-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.8)] z-10 bg-yellow-100"
+                    : "bg-yellow-50";
+            return (
+                <div
+                    onClick={onClick}
+                    className={`relative rounded ${isOpenMeld ? '' : 'shadow-md'} border-gray-300 flex flex-col justify-center items-center m-px font-bold select-none transition-transform ${sizeClass} ${claimedStyle} ${bgStyle}`}
+                >
+                    {isOpenMeld ? (
+                        <span className={`${textColor} whitespace-nowrap leading-none`}>{tile.label}</span>
+                    ) : (
+                        <>
+                            <span className={textColor}>{tile.label.substring(0, 1)}</span>
+                            {tile.label.length > 1 && <span className={textColor}>{tile.label.substring(1)}</span>}
+                        </>
+                    )}
+                    {isAngangHidden && <div className="absolute inset-0 bg-green-900/80 rounded"></div>}
+                </div>
+            );
         };
 
-        const backToMenu = () => {
-            setGameState({
-                status: 'menu',
+        function App() {
+            const [gameState, setGameState] = useState({
+                status: 'menu', // menu, playing, gameover
                 deck: [],
                 hands: [[], [], [], []],
-                melds: [[], [], [], []],
-                discards: [],
+                melds: [[], [], [], []], // 吃碰的牌
+                discards: [], // 格式: { ...tile, by: playerId, claimed: boolean }
                 turn: 0,
                 winner: null,
-                winType: null,
-                actionPrompt: null,
-                drawnTileUid: null,
-                gangPrompt: null,
-                winScore: null,
+                winType: null, // '自摸', '嶺上自摸', '放槍', '流局'
+                actionPrompt: null, // { options: ['win', 'pong', 'chow'], tile, from, chowCombos }
+                drawnTileUid: null, // 記錄玩家剛摸進來的牌 UID
+                gangPrompt: null,   // [{ type: 'angang'|'minggang', tileId }] | null
+                winScore: null,     // { yaku: [...], totalFan: N }
             });
-        };
 
-        // 遊戲主迴圈
-        useEffect(() => {
-            if (gameState.status !== 'playing' || gameState.actionPrompt || gameState.gangPrompt) return;
-            const { turn, hands, deck, melds } = gameState;
-            const currentHand = hands[turn];
-            const needsToDraw = currentHand.length % 3 === 1; // 16, 13, 10 等狀態需要摸牌
-            if (turn === 0) {
-                // 玩家回合
-                if (needsToDraw) {
-                    const newDeck = [...deck];
-                    const drawnTile = newDeck.pop();
-                    if (!drawnTile) {
-                        setGameState(prev => ({ ...prev, status: 'gameover', winType: '流局' }));
-                        return;
+            const startGame = () => {
+                const deck = generateDeck();
+                const hands = [[], [], [], []];
+                for (let i = 0; i < 4; i++) {
+                    for (let j = 0; j < 16; j++) {
+                        hands[i].push(deck.pop());
                     }
-                    const newHands = [...hands];
-                    // 摸牌時直接放在最後面，**不進行排序**
-                    newHands[0] = [...newHands[0], drawnTile];
-                    // 檢查玩家是否自摸
-                    if (checkWin(newHands[0])) {
-                        const score = calculateScore(newHands[0], melds[0], '自摸');
-                        setGameState(prev => ({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: 0, winType: '自摸', drawnTileUid: drawnTile.uid, winScore: score }));
-                        return;
-                    }
-                    // 檢查槓選項
-                    const gangOpts = findGangOptions(newHands[0], melds[0]);
-                    setGameState(prev => ({
-                        ...prev, deck: newDeck, hands: newHands,
-                        drawnTileUid: drawnTile.uid,
-                        gangPrompt: gangOpts.length > 0 ? gangOpts : null,
-                    }));
+                    if (i === 0) hands[i].sort((a, b) => a.id - b.id); // 玩家起始的 16 張先理牌排序好
                 }
-            } else {
-                // AI 回合 (延遲以增加真實感)
-                const timer = setTimeout(() => {
-                    let newDeck = [...deck];
-                    let newHands = [...hands];
-                    let newMelds = [...melds];
-                    let newDiscards = [...gameState.discards];
+
+                // 莊家 (玩家 0) 多摸一張 (第 17 張牌，不加入排序)
+                const firstDraw = deck.pop();
+                hands[0].push(firstDraw);
+                setGameState({
+                    status: 'playing',
+                    deck,
+                    hands,
+                    melds: [[], [], [], []],
+                    discards: [],
+                    turn: 0,
+                    winner: null,
+                    winType: null,
+                    actionPrompt: null,
+                    drawnTileUid: firstDraw.uid,
+                    gangPrompt: null,
+                    winScore: null,
+                });
+            };
+
+            const backToMenu = () => {
+                setGameState({
+                    status: 'menu',
+                    deck: [],
+                    hands: [[], [], [], []],
+                    melds: [[], [], [], []],
+                    discards: [],
+                    turn: 0,
+                    winner: null,
+                    winType: null,
+                    actionPrompt: null,
+                    drawnTileUid: null,
+                    gangPrompt: null,
+                    winScore: null,
+                });
+            };
+
+            // 遊戲主迴圈
+            useEffect(() => {
+                if (gameState.status !== 'playing' || gameState.actionPrompt || gameState.gangPrompt) return;
+                const { turn, hands, deck, melds } = gameState;
+                const currentHand = hands[turn];
+                const needsToDraw = currentHand.length % 3 === 1; // 16, 13, 10 等狀態需要摸牌
+                if (turn === 0) {
+                    // 玩家回合
                     if (needsToDraw) {
+                        const newDeck = [...deck];
                         const drawnTile = newDeck.pop();
                         if (!drawnTile) {
                             setGameState(prev => ({ ...prev, status: 'gameover', winType: '流局' }));
                             return;
                         }
-                        newHands[turn] = [...newHands[turn], drawnTile];
-                        // AI 檢查自摸
-                        if (checkWin(newHands[turn])) {
-                            setGameState(prev => ({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: turn, winType: '自摸' }));
+                        const newHands = [...hands];
+                        // 摸牌時直接放在最後面，**不進行排序**
+                        newHands[0] = [...newHands[0], drawnTile];
+                        // 檢查玩家是否自摸
+                        if (checkWin(newHands[0])) {
+                            const score = calculateScore(newHands[0], melds[0], '自摸');
+                            setGameState(prev => ({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: 0, winType: '自摸', drawnTileUid: drawnTile.uid, winScore: score }));
                             return;
                         }
-                        // AI 自動宣告槓
-                        const aiGangs = findGangOptions(newHands[turn], newMelds[turn]);
-                        if (aiGangs.length > 0) {
-                            const g = aiGangs[0];
-                            if (g.type === 'angang') {
-                                const gangTiles = [];
-                                let removed = 0;
-                                newHands[turn] = newHands[turn].filter(t => {
-                                    if (t.id === g.tileId && removed < 4) { gangTiles.push(t); removed++; return false; }
-                                    return true;
-                                });
-                                newMelds[turn] = [...newMelds[turn], { type: 'angang', tiles: gangTiles }];
-                            } else {
-                                const mIdx = newMelds[turn].findIndex(m => m.type === 'pong' && m.tiles[0].id === g.tileId);
-                                const gt = newHands[turn].find(t => t.id === g.tileId);
-                                newHands[turn] = newHands[turn].filter(t => t !== gt);
-                                newMelds[turn] = newMelds[turn].map((m, i) =>
-                                    i === mIdx ? { ...m, type: 'minggang', tiles: [...m.tiles, gt] } : m
-                                );
-                            }
-                            const lingshang = newDeck.pop();
-                            if (!lingshang) { setGameState(prev => ({ ...prev, status: 'gameover', winType: '流局' })); return; }
-                            newHands[turn] = [...newHands[turn], lingshang];
-                            if (checkWin(newHands[turn])) {
-                                setGameState(prev => ({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, status: 'gameover', winner: turn, winType: '嶺上自摸' }));
-                                return;
-                            }
-                        }
-                    }
-                    // AI 隨機出牌
-                    const discardIndex = Math.floor(Math.random() * newHands[turn].length);
-                    const discardedTile = newHands[turn][discardIndex];
-                    newHands[turn] = newHands[turn].filter((_, i) => i !== discardIndex);
-                    newDiscards.push({ ...discardedTile, by: turn, claimed: false });
-                    // --- 檢查玩家 (0) 是否可以吃碰胡 ---
-                    const pHand = newHands[0];
-                    let options = [];
-                    let chowCombos = [];
-                    // 檢查胡牌
-                    if (checkWin([...pHand, discardedTile])) options.push('win');
-                    // 檢查碰牌
-                    const pongTiles = pHand.filter(t => t.id === discardedTile.id);
-                    if (pongTiles.length >= 2) options.push('pong');
-                    if (pongTiles.length >= 3) options.push('dagang'); // 大明槓
-                    // 檢查吃牌 (只有當上家 AI 3 打牌時)
-                    if (turn === 3 && discardedTile.id < 27) {
-                        const id = discardedTile.id;
-                        const has = (offset) => pHand.find(t => t.id === id + offset);
-                        const tM2 = has(-2), tM1 = has(-1), tP1 = has(1), tP2 = has(2);
-                        if (id % 9 >= 2 && tM2 && tM1) chowCombos.push([tM2, tM1]);
-                        if (id % 9 >= 1 && id % 9 <= 7 && tM1 && tP1) chowCombos.push([tM1, tP1]);
-                        if (id % 9 <= 6 && tP1 && tP2) chowCombos.push([tP1, tP2]);
-                        if (chowCombos.length > 0) options.push('chow');
-                    }
-                    if (options.length > 0) {
-                        // 等待玩家反應
+                        // 檢查槓選項
+                        const gangOpts = findGangOptions(newHands[0], melds[0]);
                         setGameState(prev => ({
-                            ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards,
-                            actionPrompt: { options, tile: discardedTile, from: turn, chowCombos }
+                            ...prev, deck: newDeck, hands: newHands,
+                            drawnTileUid: drawnTile.uid,
+                            gangPrompt: gangOpts.length > 0 ? gangOpts : null,
                         }));
-                    } else {
-                        // 換下一位
-                        setGameState(prev => ({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, turn: (turn + 1) % 4 }));
                     }
-                }, 800);
-                return () => clearTimeout(timer);
-            }
-        }, [gameState.status, gameState.actionPrompt, gameState.gangPrompt, gameState.turn, gameState.hands[gameState.turn]?.length]);
+                } else {
+                    // AI 回合 (延遲以增加真實感)
+                    // 注意：timer 內改用 setGameState(prev=>) 取得最新狀態，
+                    // 避免 closure 捕獲舊的 hands[0]（玩家手牌），導致碰牌判斷失準。
+                    const timer = setTimeout(() => {
+                        setGameState(prev => {
+                            // 每次 timer 觸發時，從最新 state 取資料，確保不會用到過期資料
+                            const latestHands = prev.hands;
+                            const latestDeck = prev.deck;
+                            const latestMelds = prev.melds;
+                            const latestDiscards = prev.discards;
+                            const latestTurn = prev.turn;
 
-        // 玩家出牌
-        const handlePlayerDiscard = (tile) => {
-            if (gameState.turn !== 0 || gameState.actionPrompt || gameState.hands[0].length % 3 !== 2) return;
-            setGameState(prev => {
-                const newHands = [...prev.hands];
-                // 玩家出牌後，清掉剛打出的牌，並且 **進行手牌排序(理牌)**
-                newHands[0] = newHands[0].filter(t => t.uid !== tile.uid).sort((a, b) => a.id - b.id);
-                const newDiscards = [...prev.discards, { ...tile, by: 0, claimed: false }];
-                return { ...prev, hands: newHands, discards: newDiscards, turn: 1, drawnTileUid: null }; // 清除摸牌提示
-            });
-        };
+                            // 若狀態已改變（例如在 timer 期間已切換回合），則不執行
+                            if (prev.status !== 'playing' || prev.actionPrompt || prev.gangPrompt || latestTurn !== turn) {
+                                return prev;
+                            }
 
-        // 處理玩家的吃碰胡操作
-        const handleAction = (action, chowCombo = null) => {
-            setGameState(prev => {
-                const { actionPrompt, hands, melds, discards } = prev;
-                const tile = actionPrompt.tile;
-                let newHands = [...hands];
-                let newMelds = [...melds];
-                let newDiscards = [...discards];
-                if (action === 'skip') {
-                    return { ...prev, actionPrompt: null, turn: (actionPrompt.from + 1) % 4 };
+                            let newDeck = [...latestDeck];
+                            let newHands = latestHands.map(h => [...h]);
+                            let newMelds = latestMelds.map(m => [...m]);
+                            let newDiscards = [...latestDiscards];
+                            const latestCurrentHand = newHands[turn];
+                            const latestNeedsToDraw = latestCurrentHand.length % 3 === 1;
+
+                            if (latestNeedsToDraw) {
+                                const drawnTile = newDeck.pop();
+                                if (!drawnTile) {
+                                    return { ...prev, status: 'gameover', winType: '流局' };
+                                }
+                                newHands[turn] = [...newHands[turn], drawnTile];
+                                // AI 檢查自摸
+                                if (checkWin(newHands[turn])) {
+                                    return { ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: turn, winType: '自摸' };
+                                }
+                                // AI 自動宣告槓
+                                const aiGangs = findGangOptions(newHands[turn], newMelds[turn]);
+                                if (aiGangs.length > 0) {
+                                    const g = aiGangs[0];
+                                    if (g.type === 'angang') {
+                                        const gangTiles = [];
+                                        let removed = 0;
+                                        newHands[turn] = newHands[turn].filter(t => {
+                                            if (t.id === g.tileId && removed < 4) { gangTiles.push(t); removed++; return false; }
+                                            return true;
+                                        });
+                                        newMelds[turn] = [...newMelds[turn], { type: 'angang', tiles: gangTiles }];
+                                    } else {
+                                        const mIdx = newMelds[turn].findIndex(m => m.type === 'pong' && m.tiles[0].id === g.tileId);
+                                        const gt = newHands[turn].find(t => t.id === g.tileId);
+                                        newHands[turn] = newHands[turn].filter(t => t !== gt);
+                                        newMelds[turn] = newMelds[turn].map((m, i) =>
+                                            i === mIdx ? { ...m, type: 'minggang', tiles: [...m.tiles, gt] } : m
+                                        );
+                                    }
+                                    const lingshang = newDeck.pop();
+                                    if (!lingshang) return { ...prev, status: 'gameover', winType: '流局' };
+                                    newHands[turn] = [...newHands[turn], lingshang];
+                                    if (checkWin(newHands[turn])) {
+                                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, status: 'gameover', winner: turn, winType: '嶺上自摸' };
+                                    }
+                                }
+                            }
+                            // AI 隨機出牌
+                            const discardIndex = Math.floor(Math.random() * newHands[turn].length);
+                            const discardedTile = newHands[turn][discardIndex];
+                            newHands[turn] = newHands[turn].filter((_, i) => i !== discardIndex);
+                            newDiscards.push({ ...discardedTile, by: turn, claimed: false });
+                            // --- 檢查玩家 (0) 是否可以吃碰胡（使用最新手牌）---
+                            const pHand = newHands[0]; // 已是最新的玩家手牌
+                            let options = [];
+                            let chowCombos = [];
+                            // 檢查胡牌
+                            if (checkWin([...pHand, discardedTile])) options.push('win');
+                            // 檢查碰牌
+                            const pongTiles = pHand.filter(t => t.id === discardedTile.id);
+                            if (pongTiles.length >= 2) options.push('pong');
+                            if (pongTiles.length >= 3) options.push('dagang'); // 大明槓
+                            // 檢查吃牌 (只有當上家 AI 3 打牌時)
+                            if (turn === 3 && discardedTile.id < 27) {
+                                const id = discardedTile.id;
+                                const has = (offset) => pHand.find(t => t.id === id + offset);
+                                const tM2 = has(-2), tM1 = has(-1), tP1 = has(1), tP2 = has(2);
+                                if (id % 9 >= 2 && tM2 && tM1) chowCombos.push([tM2, tM1]);
+                                if (id % 9 >= 1 && id % 9 <= 7 && tM1 && tP1) chowCombos.push([tM1, tP1]);
+                                if (id % 9 <= 6 && tP1 && tP2) chowCombos.push([tP1, tP2]);
+                                if (chowCombos.length > 0) options.push('chow');
+                            }
+                            if (options.length > 0) {
+                                return {
+                                    ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards,
+                                    actionPrompt: { options, tile: discardedTile, from: turn, chowCombos }
+                                };
+                            } else {
+                                return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, turn: (turn + 1) % 4 };
+                            }
+                        });
+                    }, 800);
+                    return () => clearTimeout(timer);
                 }
-                // 若選擇吃、碰、胡，將海底最後一張牌標記為「已取走 (claimed)」
-                if (newDiscards.length > 0) {
-                    newDiscards[newDiscards.length - 1] = { ...newDiscards[newDiscards.length - 1], claimed: true };
+            }, [gameState.status, gameState.actionPrompt, gameState.gangPrompt, gameState.turn, gameState.hands[gameState.turn]?.length]);
+
+            // 玩家出牌
+            const handlePlayerDiscard = (tile) => {
+                if (gameState.turn !== 0 || gameState.actionPrompt || gameState.hands[0].length % 3 !== 2) return;
+                setGameState(prev => {
+                    const newHands = [...prev.hands];
+                    // 玩家出牌後，清掉剛打出的牌，並且 **進行手牌排序(理牌)**
+                    newHands[0] = newHands[0].filter(t => t.uid !== tile.uid).sort((a, b) => a.id - b.id);
+                    const newDiscards = [...prev.discards, { ...tile, by: 0, claimed: false }];
+                    return { ...prev, hands: newHands, discards: newDiscards, turn: 1, drawnTileUid: null }; // 清除摸牌提示
+                });
+            };
+
+            // 處理玩家的吃碰胡操作
+            const handleAction = (action, chowCombo = null) => {
+                setGameState(prev => {
+                    const { actionPrompt, hands, melds, discards } = prev;
+                    const tile = actionPrompt.tile;
+                    let newHands = [...hands];
+                    let newMelds = [...melds];
+                    let newDiscards = [...discards];
+                    if (action === 'skip') {
+                        return { ...prev, actionPrompt: null, turn: (actionPrompt.from + 1) % 4 };
+                    }
+                    // 若選擇吃、碰、胡，將海底最後一張牌標記為「已取走 (claimed)」
+                    if (newDiscards.length > 0) {
+                        newDiscards[newDiscards.length - 1] = { ...newDiscards[newDiscards.length - 1], claimed: true };
+                    }
+                    if (action === 'win') {
+                        newHands[0] = [...newHands[0], tile].sort((a, b) => a.id - b.id);
+                        const score = calculateScore(newHands[0], newMelds[0], '放槍');
+                        return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, status: 'gameover', winner: 0, winType: '放槍', winScore: score };
+                    }
+                    if (action === 'pong') {
+                        const pHand = newHands[0];
+                        const matches = pHand.filter(t => t.id === tile.id).slice(0, 2);
+                        newHands[0] = pHand.filter(t => !matches.includes(t));
+                        newMelds[0] = [...newMelds[0], { type: 'pong', tiles: [tile, ...matches] }];
+                        // 吃碰後不需要再提示摸牌狀態，所以 drawnTileUid 維持 null
+                        return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
+                    }
+                    if (action === 'dagang') {
+                        const newDeck = [...prev.deck];
+                        const pHand = newHands[0];
+                        const matches = pHand.filter(t => t.id === tile.id).slice(0, 3);
+                        newHands[0] = pHand.filter(t => !matches.includes(t));
+                        newMelds[0] = [...newMelds[0], { type: 'minggang', tiles: [tile, ...matches] }];
+                        const lingshang = newDeck.pop();
+                        if (!lingshang) return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winType: '流局' };
+                        newHands[0] = [...newHands[0], lingshang];
+                        if (checkWin(newHands[0])) {
+                            const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
+                            return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid };
+                        }
+                        const moreGangs = findGangOptions(newHands[0], newMelds[0]);
+                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0, drawnTileUid: lingshang.uid, gangPrompt: moreGangs.length > 0 ? moreGangs : null };
+                    }
+                    if (action === 'chow' && chowCombo) {
+                        const pHand = newHands[0];
+                        newHands[0] = pHand.filter(t => t.uid !== chowCombo[0].uid && t.uid !== chowCombo[1].uid);
+                        newMelds[0] = [...newMelds[0], { type: 'chow', tiles: [tile, ...chowCombo].sort((a, b) => a.id - b.id) }];
+                        return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
+                    }
+                    return prev;
+                });
+            };
+
+            // 處理玩家的槓操作
+            const handleGang = (gangOpt) => {
+                if (!gangOpt) {
+                    setGameState(prev => ({ ...prev, gangPrompt: null }));
+                    return;
                 }
-                if (action === 'win') {
-                    newHands[0] = [...newHands[0], tile].sort((a, b) => a.id - b.id);
-                    const score = calculateScore(newHands[0], newMelds[0], '放槍');
-                    return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, status: 'gameover', winner: 0, winType: '放槍', winScore: score };
-                }
-                if (action === 'pong') {
-                    const pHand = newHands[0];
-                    const matches = pHand.filter(t => t.id === tile.id).slice(0, 2);
-                    newHands[0] = pHand.filter(t => !matches.includes(t));
-                    newMelds[0] = [...newMelds[0], { type: 'pong', tiles: [tile, ...matches] }];
-                    // 吃碰後不需要再提示摸牌狀態，所以 drawnTileUid 維持 null
-                    return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
-                }
-                if (action === 'dagang') {
-                    const newDeck = [...prev.deck];
-                    const pHand = newHands[0];
-                    const matches = pHand.filter(t => t.id === tile.id).slice(0, 3);
-                    newHands[0] = pHand.filter(t => !matches.includes(t));
-                    newMelds[0] = [...newMelds[0], { type: 'minggang', tiles: [tile, ...matches] }];
+                setGameState(prev => {
+                    let newHands = [...prev.hands];
+                    let newMelds = [...prev.melds];
+                    let newDeck = [...prev.deck];
+                    if (gangOpt.type === 'angang') {
+                        const gangTiles = [];
+                        let removed = 0;
+                        newHands[0] = newHands[0].filter(t => {
+                            if (t.id === gangOpt.tileId && removed < 4) { gangTiles.push(t); removed++; return false; }
+                            return true;
+                        });
+                        newMelds[0] = [...newMelds[0], { type: 'angang', tiles: gangTiles }];
+                    } else {
+                        const mIdx = newMelds[0].findIndex(m => m.type === 'pong' && m.tiles[0].id === gangOpt.tileId);
+                        const gt = newHands[0].find(t => t.id === gangOpt.tileId);
+                        newHands[0] = newHands[0].filter(t => t !== gt);
+                        newMelds[0] = newMelds[0].map((m, i) =>
+                            i === mIdx ? { ...m, type: 'minggang', tiles: [...m.tiles, gt] } : m
+                        );
+                    }
+                    // 摸嶺上牌
                     const lingshang = newDeck.pop();
-                    if (!lingshang) return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winType: '流局' };
+                    if (!lingshang) return { ...prev, status: 'gameover', winType: '流局' };
                     newHands[0] = [...newHands[0], lingshang];
+                    // 嶺上自摸判定
                     if (checkWin(newHands[0])) {
                         const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
-                        return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid };
+                        return {
+                            ...prev, hands: newHands, melds: newMelds, deck: newDeck,
+                            drawnTileUid: lingshang.uid, gangPrompt: null,
+                            status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score
+                        };
                     }
+                    // 檢查是否還可以再槓
                     const moreGangs = findGangOptions(newHands[0], newMelds[0]);
-                    return { ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0, drawnTileUid: lingshang.uid, gangPrompt: moreGangs.length > 0 ? moreGangs : null };
-                }
-                if (action === 'chow' && chowCombo) {
-                    const pHand = newHands[0];
-                    newHands[0] = pHand.filter(t => t.uid !== chowCombo[0].uid && t.uid !== chowCombo[1].uid);
-                    newMelds[0] = [...newMelds[0], { type: 'chow', tiles: [tile, ...chowCombo].sort((a, b) => a.id - b.id) }];
-                    return { ...prev, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0 };
-                }
-                return prev;
-            });
-        };
+                    return {
+                        ...prev, hands: newHands, melds: newMelds, deck: newDeck,
+                        drawnTileUid: lingshang.uid,
+                        gangPrompt: moreGangs.length > 0 ? moreGangs : null
+                    };
+                });
+            };
 
-        // 處理玩家的槓操作
-        const handleGang = (gangOpt) => {
-            if (!gangOpt) {
-                setGameState(prev => ({ ...prev, gangPrompt: null }));
-                return;
+            // --- 畫面渲染 ---
+            if (gameState.status === 'menu') {
+                return (
+                    <div className="h-screen w-full flex flex-col items-center justify-center bg-green-900 text-white font-sans">
+                        <h1 className="text-5xl sm:text-7xl font-bold mb-4 tracking-widest drop-shadow-lg text-yellow-400">台灣麻將</h1>
+                        <p className="text-xl mb-12 text-green-200">單機 16 張練習版</p>
+                        <button
+                            className="bg-red-700 hover:bg-red-600 px-10 py-4 rounded-full text-2xl font-bold shadow-xl transition-transform hover:scale-105"
+                            onClick={startGame}
+                        >
+                            開始對局
+                        </button>
+                    </div>
+                );
             }
-            setGameState(prev => {
-                let newHands = [...prev.hands];
-                let newMelds = [...prev.melds];
-                let newDeck = [...prev.deck];
-                if (gangOpt.type === 'angang') {
-                    const gangTiles = [];
-                    let removed = 0;
-                    newHands[0] = newHands[0].filter(t => {
-                        if (t.id === gangOpt.tileId && removed < 4) { gangTiles.push(t); removed++; return false; }
-                        return true;
-                    });
-                    newMelds[0] = [...newMelds[0], { type: 'angang', tiles: gangTiles }];
-                } else {
-                    const mIdx = newMelds[0].findIndex(m => m.type === 'pong' && m.tiles[0].id === gangOpt.tileId);
-                    const gt = newHands[0].find(t => t.id === gangOpt.tileId);
-                    newHands[0] = newHands[0].filter(t => t !== gt);
-                    newMelds[0] = newMelds[0].map((m, i) =>
-                        i === mIdx ? { ...m, type: 'minggang', tiles: [...m.tiles, gt] } : m
-                    );
-                }
-                // 摸嶺上牌
-                const lingshang = newDeck.pop();
-                if (!lingshang) return { ...prev, status: 'gameover', winType: '流局' };
-                newHands[0] = [...newHands[0], lingshang];
-                // 嶺上自摸判定
-                if (checkWin(newHands[0])) {
-                    const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
-                    return { ...prev, hands: newHands, melds: newMelds, deck: newDeck,
-                             drawnTileUid: lingshang.uid, gangPrompt: null,
-                             status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score };
-                }
-                // 檢查是否還可以再槓
-                const moreGangs = findGangOptions(newHands[0], newMelds[0]);
-                return { ...prev, hands: newHands, melds: newMelds, deck: newDeck,
-                         drawnTileUid: lingshang.uid,
-                         gangPrompt: moreGangs.length > 0 ? moreGangs : null };
-            });
-        };
 
-        // --- 畫面渲染 ---
-        if (gameState.status === 'menu') {
+            const playerNames = ['玩家', 'AI 右', 'AI 上', 'AI 左'];
             return (
-                <div className="h-screen w-full flex flex-col items-center justify-center bg-green-900 text-white font-sans">
-                    <h1 className="text-5xl sm:text-7xl font-bold mb-4 tracking-widest drop-shadow-lg text-yellow-400">台灣麻將</h1>
-                    <p className="text-xl mb-12 text-green-200">單機 16 張練習版</p>
-                    <button
-                        className="bg-red-700 hover:bg-red-600 px-10 py-4 rounded-full text-2xl font-bold shadow-xl transition-transform hover:scale-105"
-                        onClick={startGame}
-                    >
-                        開始對局
-                    </button>
+                <div className="h-screen w-full bg-green-800 flex flex-col justify-between font-sans overflow-hidden">
+
+                    {/* 狀態提示 */}
+                    <div className="absolute top-4 left-4 bg-black/50 text-white px-4 py-2 rounded-lg z-10 text-sm sm:text-base">
+                        <p>牌庫剩餘: <span className="font-bold text-yellow-300">{gameState.deck.length}</span> 張</p>
+                        <p className="mt-1">
+                            目前回合: <span className={gameState.turn === 0 ? "text-red-400 font-bold" : "text-green-300"}>
+                                {playerNames[gameState.turn]}
+                            </span>
+                        </p>
+                    </div>
+
+                    {/* 上方 AI (對家) */}
+                    <div className="flex justify-center mt-2 h-16 sm:h-20 opacity-80">
+                        <div className="flex -space-x-1">
+                            {gameState.hands[2]?.map((_, i) => <Tile key={i} isHidden />)}
+                        </div>
+                    </div>
+
+                    {/* 中間區域 (左AI + 海底 + 右AI) */}
+                    <div className="flex flex-1 items-center justify-between px-2 sm:px-8 relative">
+                        {/* 左方 AI */}
+                        <div className="flex flex-col -space-y-4 opacity-80">
+                            {gameState.hands[3]?.map((_, i) => <Tile key={i} isHidden />)}
+                        </div>
+
+                        {/* 海底 (棄牌區) */}
+                        <div className="flex-1 max-w-2xl mx-4 sm:mx-8 bg-green-900/50 rounded-xl p-4 h-64 sm:h-80 overflow-y-auto flex flex-wrap content-start gap-1 shadow-inner relative">
+                            {gameState.discards.map((t, i) => (
+                                <div key={i} className="relative">
+                                    <Tile tile={t} isDiscard isClaimed={t.claimed} />
+                                    {/* 標示最新打出的牌 (若被吃碰走則不顯示紅點) */}
+                                    {i === gameState.discards.length - 1 && !gameState.actionPrompt && !t.claimed && (
+                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping"></div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* 右方 AI */}
+                        <div className="flex flex-col -space-y-4 opacity-80">
+                            {gameState.hands[1]?.map((_, i) => <Tile key={i} isHidden />)}
+                        </div>
+
+                        {/* 玩家互動按鈕面板 */}
+                        {gameState.actionPrompt && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/30">
+                                {/* 提示對話框上移一點，避免擋到手牌 */}
+                                <div className="bg-green-800/95 p-6 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center border-4 border-yellow-600 mb-20">
+                                    <p className="text-white text-lg mb-3 font-bold tracking-wider">
+                                        {playerNames[gameState.actionPrompt.from]} 打出了：
+                                    </p>
+
+                                    {/* 放大的提示牌 */}
+                                    <div className="mb-6 transform scale-110">
+                                        <Tile tile={gameState.actionPrompt.tile} large />
+                                    </div>
+                                    <div className="flex gap-3 flex-wrap justify-center">
+                                        {gameState.actionPrompt.options.includes('win') && (
+                                            <button className="bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-red-400 font-bold" onClick={() => handleAction('win')}>胡</button>
+                                        )}
+                                        {gameState.actionPrompt.options.includes('pong') && (
+                                            <button className="bg-yellow-600 hover:bg-yellow-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-yellow-400 font-bold" onClick={() => handleAction('pong')}>碰</button>
+                                        )}
+                                        {gameState.actionPrompt.options.includes('dagang') && (
+                                            <button className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-purple-400 font-bold" onClick={() => handleAction('dagang')}>槓</button>
+                                        )}
+                                        {gameState.actionPrompt.options.includes('chow') && gameState.actionPrompt.chowCombos.map((combo, idx) => (
+                                            <button key={idx} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl text-lg shadow-lg border-2 border-blue-400 font-bold" onClick={() => handleAction('chow', combo)}>
+                                                吃 {combo[0].label}{combo[1].label}
+                                            </button>
+                                        ))}
+                                        <button className="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-gray-400 font-bold" onClick={() => handleAction('skip')}>過</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 下方 玩家手牌區 */}
+                    <div className="flex flex-col sm:flex-row items-center sm:items-end justify-center mb-2 w-full px-2 z-10 relative">
+                        {/* 副露牌 — 手機垂直排列、電腦水平排列，平放效果 */}
+                        {gameState.melds[0]?.length > 0 && (
+                            <div className="flex flex-col sm:flex-row gap-1.5 flex-shrink-0 sm:mr-3 mb-1 sm:mb-0 sm:self-end">
+                                {gameState.melds[0].map((meld, i) => (
+                                    <div key={i} className="flex gap-px bg-green-950/40 px-1 py-0.5 rounded-lg border border-green-800">
+                                        {meld.tiles.map((t, ti) => (
+                                            <Tile key={t.uid} tile={t} isOpenMeld
+                                                isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* 玩家手牌 */}
+                        <div className="flex flex-wrap justify-center gap-1 sm:gap-2">
+                            {gameState.hands[0]?.map((tile) => (
+                                <Tile
+                                    key={tile.uid}
+                                    tile={tile}
+                                    onClick={() => handlePlayerDiscard(tile)}
+                                    isDrawn={gameState.drawnTileUid === tile.uid}
+                                />
+                            ))}
+                        </div>
+
+                        {/* 提示狀態時強調玩家手牌區域 (微亮的背景) */}
+                        {gameState.actionPrompt && (
+                            <div className="absolute inset-0 bg-yellow-500/10 rounded-xl pointer-events-none -z-10 animate-pulse"></div>
+                        )}
+                    </div>
+
+                    {/* 槓宣告提示面板 */}
+                    {gameState.gangPrompt && (
+                        <div className="absolute bottom-28 sm:bottom-32 left-0 right-0 flex justify-center z-30">
+                            <div className="bg-green-800/95 px-5 py-3 rounded-xl border-2 border-purple-500 flex gap-3 items-center shadow-xl">
+                                <span className="text-white text-sm font-bold mr-1">可宣告：</span>
+                                {gameState.gangPrompt.map((opt, i) => (
+                                    <button key={i}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-bold border border-purple-400 transition-colors"
+                                        onClick={() => handleGang(opt)}>
+                                        {opt.type === 'angang' ? '暗' : '明'}槓 {TILE_TYPES[opt.tileId].label}
+                                    </button>
+                                ))}
+                                <button
+                                    className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-bold border border-gray-400 transition-colors"
+                                    onClick={() => handleGang(null)}>不槓</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 遊戲結束結算畫面 */}
+                    {gameState.status === 'gameover' && (
+                        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-50 p-4 backdrop-blur-md">
+                            <h2 className={`text-5xl sm:text-7xl font-bold mb-4 drop-shadow-2xl ${gameState.winner === 0 ? 'text-yellow-400' : 'text-gray-200'}`}>
+                                {gameState.winType === '流局' ? '流局 (平手)' : (gameState.winner === 0 ? '恭喜！您胡牌了！' : `${playerNames[gameState.winner]} 胡牌了`)}
+                            </h2>
+                            <h3 className="text-3xl sm:text-4xl text-white mb-4 tracking-widest">{gameState.winType}</h3>
+                            {/* 計分結果 */}
+                            {gameState.winScore && gameState.winner === 0 && (
+                                <div className="bg-black/40 rounded-xl px-6 py-3 mb-6 text-center">
+                                    <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-2">
+                                        {gameState.winScore.yaku.map((y, i) => (
+                                            <span key={i} className="text-green-300 text-lg">{y.name} <span className="text-yellow-300">+{y.fan}台</span></span>
+                                        ))}
+                                    </div>
+                                    <div className="text-yellow-400 text-3xl font-bold">合計：{gameState.winScore.totalFan} 台</div>
+                                </div>
+                            )}
+                            {/* 顯示胡牌者的手牌 */}
+                            {gameState.winner !== null && (
+                                <div className="flex flex-wrap justify-center gap-1 sm:gap-2 mb-10 bg-green-900/50 p-6 rounded-2xl border-2 border-green-700 shadow-2xl max-w-5xl">
+                                    {/* 先顯示吃碰的牌 */}
+                                    {gameState.melds[gameState.winner].map((meld, i) => (
+                                        <div key={`meld-${i}`} className="flex gap-1 mr-4 bg-black/30 p-1 rounded">
+                                            {meld.tiles.map(t => <Tile key={`m-${t.uid}`} tile={t} isMeld />)}
+                                        </div>
+                                    ))}
+                                    {/* 再顯示手牌 */}
+                                    {gameState.hands[gameState.winner].map(t => <Tile key={t.uid} tile={t} />)}
+                                </div>
+                            )}
+                            <button
+                                className="bg-green-600 hover:bg-green-500 text-white border-2 border-green-400 px-12 py-4 rounded-full text-2xl font-bold shadow-2xl transition-transform hover:scale-105"
+                                onClick={backToMenu}
+                            >
+                                返回主選單
+                            </button>
+                        </div>
+                    )}
                 </div>
             );
         }
 
-        const playerNames = ['玩家', 'AI 右', 'AI 上', 'AI 左'];
-        return (
-            <div className="h-screen w-full bg-green-800 flex flex-col justify-between font-sans overflow-hidden">
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 
-                {/* 狀態提示 */}
-                <div className="absolute top-4 left-4 bg-black/50 text-white px-4 py-2 rounded-lg z-10 text-sm sm:text-base">
-                    <p>牌庫剩餘: <span className="font-bold text-yellow-300">{gameState.deck.length}</span> 張</p>
-                    <p className="mt-1">
-                        目前回合: <span className={gameState.turn === 0 ? "text-red-400 font-bold" : "text-green-300"}>
-                            {playerNames[gameState.turn]}
-                        </span>
-                    </p>
-                </div>
-
-                {/* 上方 AI (對家) */}
-                <div className="flex justify-center mt-2 h-16 sm:h-20 opacity-80">
-                    <div className="flex -space-x-1">
-                        {gameState.hands[2]?.map((_, i) => <Tile key={i} isHidden />)}
-                    </div>
-                </div>
-
-                {/* 中間區域 (左AI + 海底 + 右AI) */}
-                <div className="flex flex-1 items-center justify-between px-2 sm:px-8 relative">
-                    {/* 左方 AI */}
-                    <div className="flex flex-col -space-y-4 opacity-80">
-                        {gameState.hands[3]?.map((_, i) => <Tile key={i} isHidden />)}
-                    </div>
-
-                    {/* 海底 (棄牌區) */}
-                    <div className="flex-1 max-w-2xl mx-4 sm:mx-8 bg-green-900/50 rounded-xl p-4 h-64 sm:h-80 overflow-y-auto flex flex-wrap content-start gap-1 shadow-inner relative">
-                        {gameState.discards.map((t, i) => (
-                            <div key={i} className="relative">
-                                <Tile tile={t} isDiscard isClaimed={t.claimed} />
-                                {/* 標示最新打出的牌 (若被吃碰走則不顯示紅點) */}
-                                {i === gameState.discards.length - 1 && !gameState.actionPrompt && !t.claimed && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping"></div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* 右方 AI */}
-                    <div className="flex flex-col -space-y-4 opacity-80">
-                        {gameState.hands[1]?.map((_, i) => <Tile key={i} isHidden />)}
-                    </div>
-
-                    {/* 玩家互動按鈕面板 */}
-                    {gameState.actionPrompt && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/30">
-                            {/* 提示對話框上移一點，避免擋到手牌 */}
-                            <div className="bg-green-800/95 p-6 rounded-2xl shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col items-center border-4 border-yellow-600 mb-20">
-                                <p className="text-white text-lg mb-3 font-bold tracking-wider">
-                                    {playerNames[gameState.actionPrompt.from]} 打出了：
-                                </p>
-
-                                {/* 放大的提示牌 */}
-                                <div className="mb-6 transform scale-110">
-                                    <Tile tile={gameState.actionPrompt.tile} large />
-                                </div>
-                                <div className="flex gap-3 flex-wrap justify-center">
-                                    {gameState.actionPrompt.options.includes('win') && (
-                                        <button className="bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-red-400 font-bold" onClick={() => handleAction('win')}>胡</button>
-                                    )}
-                                    {gameState.actionPrompt.options.includes('pong') && (
-                                        <button className="bg-yellow-600 hover:bg-yellow-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-yellow-400 font-bold" onClick={() => handleAction('pong')}>碰</button>
-                                    )}
-                                    {gameState.actionPrompt.options.includes('dagang') && (
-                                        <button className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-purple-400 font-bold" onClick={() => handleAction('dagang')}>槓</button>
-                                    )}
-                                    {gameState.actionPrompt.options.includes('chow') && gameState.actionPrompt.chowCombos.map((combo, idx) => (
-                                        <button key={idx} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl text-lg shadow-lg border-2 border-blue-400 font-bold" onClick={() => handleAction('chow', combo)}>
-                                            吃 {combo[0].label}{combo[1].label}
-                                        </button>
-                                    ))}
-                                    <button className="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-xl text-xl shadow-lg border-2 border-gray-400 font-bold" onClick={() => handleAction('skip')}>過</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* 下方 玩家手牌區 */}
-                <div className="flex flex-col sm:flex-row items-center sm:items-end justify-center mb-2 w-full px-2 z-10 relative">
-                    {/* 副露牌 — 手機垂直排列、電腦水平排列，平放效果 */}
-                    {gameState.melds[0]?.length > 0 && (
-                        <div className="flex flex-col sm:flex-row gap-1.5 flex-shrink-0 sm:mr-3 mb-1 sm:mb-0 sm:self-end">
-                            {gameState.melds[0].map((meld, i) => (
-                                <div key={i} className="flex gap-px bg-green-950/40 px-1 py-0.5 rounded-lg border border-green-800">
-                                    {meld.tiles.map((t, ti) => (
-                                        <Tile key={t.uid} tile={t} isOpenMeld
-                                            isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
-                                    ))}
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* 玩家手牌 */}
-                    <div className="flex flex-wrap justify-center gap-1 sm:gap-2">
-                        {gameState.hands[0]?.map((tile) => (
-                            <Tile
-                                key={tile.uid}
-                                tile={tile}
-                                onClick={() => handlePlayerDiscard(tile)}
-                                isDrawn={gameState.drawnTileUid === tile.uid}
-                            />
-                        ))}
-                    </div>
-
-                    {/* 提示狀態時強調玩家手牌區域 (微亮的背景) */}
-                    {gameState.actionPrompt && (
-                       <div className="absolute inset-0 bg-yellow-500/10 rounded-xl pointer-events-none -z-10 animate-pulse"></div>
-                    )}
-                </div>
-
-                {/* 槓宣告提示面板 */}
-                {gameState.gangPrompt && (
-                    <div className="absolute bottom-28 sm:bottom-32 left-0 right-0 flex justify-center z-30">
-                        <div className="bg-green-800/95 px-5 py-3 rounded-xl border-2 border-purple-500 flex gap-3 items-center shadow-xl">
-                            <span className="text-white text-sm font-bold mr-1">可宣告：</span>
-                            {gameState.gangPrompt.map((opt, i) => (
-                                <button key={i}
-                                    className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-bold border border-purple-400 transition-colors"
-                                    onClick={() => handleGang(opt)}>
-                                    {opt.type === 'angang' ? '暗' : '明'}槓 {TILE_TYPES[opt.tileId].label}
-                                </button>
-                            ))}
-                            <button
-                                className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-bold border border-gray-400 transition-colors"
-                                onClick={() => handleGang(null)}>不槓</button>
-                        </div>
-                    </div>
-                )}
-
-                {/* 遊戲結束結算畫面 */}
-                {gameState.status === 'gameover' && (
-                    <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-50 p-4 backdrop-blur-md">
-                        <h2 className={`text-5xl sm:text-7xl font-bold mb-4 drop-shadow-2xl ${gameState.winner === 0 ? 'text-yellow-400' : 'text-gray-200'}`}>
-                            {gameState.winType === '流局' ? '流局 (平手)' : (gameState.winner === 0 ? '恭喜！您胡牌了！' : `${playerNames[gameState.winner]} 胡牌了`)}
-                        </h2>
-                        <h3 className="text-3xl sm:text-4xl text-white mb-4 tracking-widest">{gameState.winType}</h3>
-                        {/* 計分結果 */}
-                        {gameState.winScore && gameState.winner === 0 && (
-                            <div className="bg-black/40 rounded-xl px-6 py-3 mb-6 text-center">
-                                <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-2">
-                                    {gameState.winScore.yaku.map((y, i) => (
-                                        <span key={i} className="text-green-300 text-lg">{y.name} <span className="text-yellow-300">+{y.fan}台</span></span>
-                                    ))}
-                                </div>
-                                <div className="text-yellow-400 text-3xl font-bold">合計：{gameState.winScore.totalFan} 台</div>
-                            </div>
-                        )}
-                        {/* 顯示胡牌者的手牌 */}
-                        {gameState.winner !== null && (
-                            <div className="flex flex-wrap justify-center gap-1 sm:gap-2 mb-10 bg-green-900/50 p-6 rounded-2xl border-2 border-green-700 shadow-2xl max-w-5xl">
-                                {/* 先顯示吃碰的牌 */}
-                                {gameState.melds[gameState.winner].map((meld, i) => (
-                                    <div key={`meld-${i}`} className="flex gap-1 mr-4 bg-black/30 p-1 rounded">
-                                        {meld.tiles.map(t => <Tile key={`m-${t.uid}`} tile={t} isMeld />)}
-                                    </div>
-                                ))}
-                                {/* 再顯示手牌 */}
-                                {gameState.hands[gameState.winner].map(t => <Tile key={t.uid} tile={t} />)}
-                            </div>
-                        )}
-                        <button
-                            className="bg-green-600 hover:bg-green-500 text-white border-2 border-green-400 px-12 py-4 rounded-full text-2xl font-bold shadow-2xl transition-transform hover:scale-105"
-                            onClick={backToMenu}
-                        >
-                            返回主選單
-                        </button>
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-
-  <!-- Service Worker registration -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () =>
-        navigator.serviceWorker.register('./sw.js')
-          .catch(err => console.warn('[SW] Registration failed:', err))
-      );
-    }
-  </script>
+    <!-- Service Worker registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () =>
+                navigator.serviceWorker.register('./sw.js')
+                    .catch(err => console.warn('[SW] Registration failed:', err))
+            );
+        }
+    </script>
 </body>
+
 </html>
