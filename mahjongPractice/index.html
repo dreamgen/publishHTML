@@ -364,7 +364,11 @@
                     drawnTileUid: firstDraw.uid,
                     gangPrompt: null,
                     winScore: null,
-                    gameLog: [`=== 對局開始 ===`, `[莊家] 玩家摸牌(首張): ${firstDraw.label}`],
+                    gameLog: [
+                        `=== 對局開始 ===`,
+                        `[起始手牌 16張] ${hands[0].map(t => t.label).join(' ')}`,
+                        `[莊家] 玩家摸牌(首張): ${firstDraw.label}`,
+                    ],
                 });
             };
 
