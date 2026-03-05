@@ -1,0 +1,50 @@
+{
+  "id": "liveInteraction",
+  "name": "即時互動大廳 - Live Interaction",
+  "short_name": "即時互動",
+  "description": "親友聚會即時互動平台，支援多人房間、即時表情反應",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1e1b4b",
+  "theme_color": "#4338ca",
+  "lang": "zh-TW",
+  "categories": ["social", "entertainment"],
+  "icons": [
+    {
+      "src": "./icons/liveInteraction-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/liveInteraction-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/liveInteraction-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "建立房間",
+      "short_name": "建立",
+      "description": "快速建立新互動房間",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./icons/liveInteraction-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

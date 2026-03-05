@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>即時互動大廳</title>
+    <meta name="description" content="親友聚會即時互動平台，隨開即連，分享表情反應">
+    <meta name="theme-color" content="#4338ca">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="即時互動">
+    <link rel="apple-touch-icon" href="./icons/liveInteraction-192.png">
+    <link rel="manifest" href="./manifest.webmanifest">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Firebase SDK (modular) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getDatabase, ref, set, onValue, update, push, onChildAdded, remove, onDisconnect, off } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // ==========================================
+        // 1. Firebase 初始化
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyAi2QYt_Cnl7X9wC3h-IUfOkUli7qMLrIM",
+            authDomain: "pwa-boardgame.firebaseapp.com",
+            databaseURL: "https://pwa-boardgame-default-rtdb.firebaseio.com",
+            projectId: "pwa-boardgame",
+            storageBucket: "pwa-boardgame.firebasestorage.app",
+            messagingSenderId: "1079279430768",
+            appId: "1:1079279430768:web:644823331e777e10b018b5"
+        };
+
+        const DB_ROOT = 'liveInteraction/rooms';
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const auth = getAuth(app);
+
+        // ==========================================
+        // 2. 應用狀態
+        // ==========================================
+        let currentUser = null;
+        let currentRoomId = null;
+        let isHost = false;
+        let myPlayerId = null;
+        let myPlayerName = "匿名玩家";
+
+        // Active Firebase listeners (for cleanup)
+        let unsubPlayers = null;
+        let unsubReactions = null;
+
+        // ==========================================
+        // 3. UI 元素
+        // ==========================================
+        const screenLogin = document.getElementById('screen-login');
+        const screenRoom = document.getElementById('screen-room');
+
+        const btnCreateRoom = document.getElementById('btn-create-room');
+        const btnJoinRoom = document.getElementById('btn-join-room');
+        const inputPlayerName = document.getElementById('input-player-name');
+        const inputRoomId = document.getElementById('input-room-id');
+        const displayRoomId = document.getElementById('display-room-id');
+        const playerListContainer = document.getElementById('player-list');
+        const btnLeaveRoom = document.getElementById('btn-leave-room');
+        const btnCopyCode = document.getElementById('btn-copy-code');
+        const reactionButtons = document.querySelectorAll('.reaction-btn');
+        const reactionContainer = document.getElementById('reaction-container');
+        const playerCountBadge = document.getElementById('player-count-badge');
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        // ==========================================
+        // 4. 工具函數
+        // ==========================================
+        function showScreen(name) {
+            screenLogin.classList.toggle('hidden', name !== 'login');
+            screenRoom.classList.toggle('hidden', name !== 'room');
+            if (name === 'room') screenRoom.classList.remove('hidden');
+        }
+
+        function generateRoomCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            return Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        }
+
+        function showToast(message, type = 'default') {
+            const colors = {
+                default: 'bg-gray-800 text-white',
+                success: 'bg-emerald-600 text-white',
+                error: 'bg-red-600 text-white',
+                info: 'bg-indigo-600 text-white',
+            };
+            const toast = document.createElement('div');
+            toast.className = `fixed top-5 left-1/2 -translate-x-1/2 ${colors[type] || colors.default} px-5 py-2.5 rounded-2xl shadow-2xl z-[100] text-sm font-medium transition-all duration-300 opacity-0 scale-90 pointer-events-none`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.classList.replace('opacity-0', 'opacity-100');
+                toast.classList.replace('scale-90', 'scale-100');
+            });
+
+            setTimeout(() => {
+                toast.classList.replace('opacity-100', 'opacity-0');
+                toast.classList.replace('scale-100', 'scale-90');
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        function setLoading(visible, text = '請稍候...') {
+            loadingOverlay.querySelector('p').textContent = text;
+            loadingOverlay.classList.toggle('hidden', !visible);
+        }
+
+        // ==========================================
+        // 5. Firebase 邏輯
+        // ==========================================
+        async function createRoom() {
+            if (!currentUser) return;
+            const name = inputPlayerName.value.trim() || "房主";
+            myPlayerName = name;
+            const roomId = generateRoomCode();
+            currentRoomId = roomId;
+            isHost = true;
+            myPlayerId = currentUser.uid;
+
+            setLoading(true, '建立房間中...');
+            try {
+                const roomRef = ref(db, `${DB_ROOT}/${roomId}`);
+                const myPlayerRef = ref(db, `${DB_ROOT}/${roomId}/players/${myPlayerId}`);
+
+                await set(roomRef, {
+                    hostId: myPlayerId,
+                    createdAt: Date.now(),
+                    status: 'waiting'
+                });
+
+                await set(myPlayerRef, {
+                    name: myPlayerName,
+                    joinedAt: Date.now(),
+                    isOnline: true
+                });
+
+                onDisconnect(myPlayerRef).update({ isOnline: false });
+
+                setupRoomListeners(roomId);
+                displayRoomId.textContent = roomId;
+                showScreen('room');
+                showToast(`✅ 房間 ${roomId} 已建立`, 'success');
+            } catch (err) {
+                console.error("建立房間失敗:", err);
+                showToast("建立房間失敗，請重試", 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function joinRoom() {
+            if (!currentUser) return;
+            const roomId = inputRoomId.value.trim().toUpperCase();
+            const name = inputPlayerName.value.trim() || "玩家_" + Math.floor(Math.random() * 1000);
+
+            if (roomId.length !== 4) {
+                showToast("請輸入 4 碼房間代號", 'error');
+                return;
+            }
+
+            setLoading(true, '加入房間中...');
+            const roomRef = ref(db, `${DB_ROOT}/${roomId}`);
+
+            onValue(roomRef, async (snapshot) => {
+                off(roomRef); // read once
+                if (!snapshot.exists()) {
+                    showToast("找不到該房間，請確認代號", 'error');
+                    setLoading(false);
+                    return;
+                }
+
+                currentRoomId = roomId;
+                isHost = false;
+                myPlayerId = currentUser.uid;
+                myPlayerName = name;
+
+                const myPlayerRef = ref(db, `${DB_ROOT}/${roomId}/players/${myPlayerId}`);
+
+                try {
+                    await set(myPlayerRef, {
+                        name: myPlayerName,
+                        joinedAt: Date.now(),
+                        isOnline: true
+                    });
+                    onDisconnect(myPlayerRef).update({ isOnline: false });
+
+                    setupRoomListeners(roomId);
+                    displayRoomId.textContent = roomId;
+                    showScreen('room');
+                    showToast("🎉 成功加入房間！", 'success');
+                } catch (err) {
+                    console.error("加入房間失敗:", err);
+                    showToast("加入房間失敗", 'error');
+                } finally {
+                    setLoading(false);
+                }
+            }, { onlyOnce: true });
+        }
+
+        async function leaveRoom() {
+            if (!currentRoomId || !myPlayerId) return;
+            const myPlayerRef = ref(db, `${DB_ROOT}/${currentRoomId}/players/${myPlayerId}`);
+            try {
+                await update(myPlayerRef, { isOnline: false });
+            } catch (_) { }
+
+            // Detach listeners
+            if (unsubPlayers) { off(ref(db, `${DB_ROOT}/${currentRoomId}/players`)); unsubPlayers = null; }
+            if (unsubReactions) { off(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`)); unsubReactions = null; }
+
+            currentRoomId = null;
+            isHost = false;
+            playerListContainer.innerHTML = '';
+            playerCountBadge.textContent = '0';
+            showScreen('login');
+            showToast("已離開房間");
+        }
+
+        function setupRoomListeners(roomId) {
+            // ── Players ──────────────────────────────
+            const playersRef = ref(db, `${DB_ROOT}/${roomId}/players`);
+            unsubPlayers = onValue(playersRef, (snapshot) => {
+                playerListContainer.innerHTML = '';
+                let onlineCount = 0;
+                if (snapshot.exists()) {
+                    const players = snapshot.val();
+                    Object.entries(players).forEach(([id, player]) => {
+                        if (player.isOnline) {
+                            onlineCount++;
+                            renderPlayerCard(id, player.name);
+                        }
+                    });
+                }
+                if (onlineCount === 0) {
+                    playerListContainer.innerHTML = `
+                        <div class="text-center text-gray-400 py-10 text-sm">
+                            <i class="ph ph-users-three text-3xl mb-2 block opacity-30"></i>
+                            尚無玩家在線
+                        </div>`;
+                }
+                playerCountBadge.textContent = onlineCount;
+            });
+
+            // ── Reactions ─────────────────────────────
+            const reactionsRef = ref(db, `${DB_ROOT}/${roomId}/reactions`);
+            unsubReactions = onChildAdded(reactionsRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data?.emoji && data?.senderName) {
+                    showFlyingReaction(data.emoji, data.senderName);
+                    if (isHost) {
+                        setTimeout(() => remove(snapshot.ref), 5000);
+                    }
+                }
+            });
+        }
+
+        async function sendReaction(emoji) {
+            if (!currentRoomId || !myPlayerId) return;
+            const reactionsRef = ref(db, `${DB_ROOT}/${currentRoomId}/reactions`);
+            try {
+                await push(reactionsRef, {
+                    emoji: emoji,
+                    senderName: myPlayerName,
+                    timestamp: Date.now()
+                });
+            } catch (err) {
+                console.error("發送表情失敗:", err);
+            }
+        }
+
+        // ==========================================
+        // 6. UI 渲染與動畫
+        // ==========================================
+        function renderPlayerCard(id, name) {
+            const isMe = id === myPlayerId;
+            const hue = Array.from(name).reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 360;
+
+            const card = document.createElement('div');
+            card.className = `flex items-center space-x-3 p-3 rounded-2xl border-2 transition-all duration-200 animate-cardIn ${isMe ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100 bg-white shadow-sm'
+                }`;
+
+            card.innerHTML = `
+                <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-inner flex-shrink-0"
+                     style="background: linear-gradient(135deg, hsl(${hue},70%,55%), hsl(${(hue + 40) % 360},70%,50%))">
+                    ${name.charAt(0).toUpperCase()}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="font-semibold text-gray-800 flex items-center gap-2 flex-wrap">
+                        <span class="truncate">${name}</span>
+                        ${isMe ? '<span class="text-xs bg-indigo-500 text-white px-2 py-0.5 rounded-full shrink-0">我</span>' : ''}
+                    </div>
+                    <div class="text-xs text-emerald-500 flex items-center gap-1 mt-0.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+                        連線中
+                    </div>
+                </div>
+            `;
+            playerListContainer.appendChild(card);
+        }
+
+        function showFlyingReaction(emoji, senderName) {
+            const el = document.createElement('div');
+            el.className = 'absolute pointer-events-none select-none flex flex-col items-center';
+
+            const startX = 15 + Math.random() * 70;
+            const randomTx = (Math.random() - 0.5) * 120;
+
+            el.style.cssText = `left:${startX}%;bottom:120px;--tx:${randomTx}px;animation:floatUp 2.8s cubic-bezier(0.25,0.46,0.45,0.94) forwards;`;
+            el.innerHTML = `
+                <div class="text-5xl drop-shadow-2xl">${emoji}</div>
+                <div class="text-xs text-gray-700 bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full mt-1 font-medium shadow-sm whitespace-nowrap max-w-[120px] truncate">${senderName}</div>
+            `;
+            reactionContainer.appendChild(el);
+            setTimeout(() => el.remove(), 2800);
+        }
+
+        // ==========================================
+        // 7. 複製房間代碼
+        // ==========================================
+        btnCopyCode.addEventListener('click', async () => {
+            if (!currentRoomId) return;
+            try {
+                await navigator.clipboard.writeText(currentRoomId);
+                showToast("已複製房間代碼 📋", 'info');
+            } catch (_) {
+                showToast("代碼：" + currentRoomId, 'info');
+            }
+        });
+
+        // ==========================================
+        // 8. 初始化與事件綁定
+        // ==========================================
+        async function initAuth() {
+            try {
+                await signInAnonymously(auth);
+            } catch (err) {
+                console.error("匿名登入失敗:", err);
+                showToast("初始化失敗，請重新整理", 'error');
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user || null;
+            btnCreateRoom.disabled = !user;
+            btnJoinRoom.disabled = !user;
+            if (user) console.log("匿名登入成功:", user.uid);
+        });
+
+        btnCreateRoom.addEventListener('click', createRoom);
+        btnJoinRoom.addEventListener('click', joinRoom);
+        btnLeaveRoom.addEventListener('click', leaveRoom);
+
+        // Auto-uppercase room code input
+        inputRoomId.addEventListener('input', () => {
+            inputRoomId.value = inputRoomId.value.toUpperCase();
+        });
+
+        // Allow Enter key in room id input
+        inputRoomId.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') joinRoom();
+        });
+
+        reactionButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const emoji = e.currentTarget.dataset.emoji;
+                sendReaction(emoji);
+                // Haptic feedback (supported on iOS/Android)
+                if (navigator.vibrate) navigator.vibrate(30);
+                // Visual feedback
+                btn.classList.add('scale-90', 'brightness-90');
+                setTimeout(() => btn.classList.remove('scale-90', 'brightness-90'), 150);
+            });
+        });
+
+        initAuth();
+
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * {
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        /* ─── Float-up reaction animation ─── */
+        @keyframes floatUp {
+            0% {
+                transform: translateY(0) scale(0.4) rotate(-5deg);
+                opacity: 0;
+            }
+
+            15% {
+                transform: translateY(-30px) scale(1.3) rotate(8deg);
+                opacity: 1;
+            }
+
+            30% {
+                transform: translateY(-70px) scale(1) rotate(-5deg);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(var(--tx, 0), -320px) scale(0.8) rotate(0deg);
+                opacity: 0;
+            }
+        }
+
+        /* ─── Player card entrance ─── */
+        @keyframes cardIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-cardIn {
+            animation: cardIn 0.25s ease-out both;
+        }
+
+        /* ─── Reaction button ring ripple ─── */
+        .reaction-btn {
+            position: relative;
+            transition: transform 0.12s, filter 0.12s;
+        }
+
+        .reaction-btn::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 9999px;
+            background: currentColor;
+            opacity: 0;
+            transform: scale(1);
+            transition: opacity 0.3s, transform 0.3s;
+        }
+
+        .reaction-btn:active::after {
+            opacity: 0.12;
+            transform: scale(1.5);
+        }
+
+        /* ─── Prevent overscroll/bounce ─── */
+        body {
+            overscroll-behavior-y: contain;
+        }
+
+        /* ─── iOS safe area ─── */
+        .pb-safe {
+            padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+        }
+
+        .pt-safe {
+            padding-top: env(safe-area-inset-top, 0);
+        }
+
+        /* Room code font */
+        .font-code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            letter-spacing: 0.15em;
+        }
+
+        /* Gradient hero */
+        .hero-gradient {
+            background: linear-gradient(135deg, #4338ca 0%, #6d28d9 60%, #be185d 100%);
+        }
+
+        /* Glass card */
+        .glass {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+    </style>
+
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js', { scope: './' })
+                    .then(reg => console.log('SW registered, scope:', reg.scope))
+                    .catch(err => console.warn('SW registration failed:', err));
+            });
+        }
+    </script>
+</head>
+
+<body
+    class="bg-gray-50 text-gray-800 antialiased h-[100dvh] overflow-hidden flex flex-col relative selection:bg-indigo-200">
+
+    <!-- ── Flying-reaction container ── -->
+    <div id="reaction-container" class="absolute inset-0 pointer-events-none overflow-hidden z-40"></div>
+
+    <!-- ── Loading Overlay ── -->
+    <div id="loading-overlay"
+        class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="bg-white rounded-3xl p-8 flex flex-col items-center gap-4 shadow-2xl">
+            <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-sm font-medium text-gray-600">請稍候...</p>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         畫面 1：登入 / 大廳
+    ══════════════════════════════════════════ -->
+    <main id="screen-login" class="flex-1 flex flex-col h-full">
+
+        <!-- Hero header -->
+        <div class="hero-gradient pt-safe px-6 pt-10 pb-10 text-center text-white flex-shrink-0">
+            <div
+                class="inline-flex items-center justify-center w-20 h-20 bg-white/20 rounded-3xl shadow-xl backdrop-blur-sm mb-5 rotate-3 border border-white/30">
+                <i class="ph ph-lightning text-5xl"></i>
+            </div>
+            <h1 class="text-3xl font-extrabold tracking-tight">即時互動大廳</h1>
+            <p class="text-indigo-200 mt-1.5 text-sm">親友聚會 ‧ 隨開即連 ‧ 零安裝</p>
+        </div>
+
+        <!-- Card -->
+        <div class="flex-1 overflow-y-auto px-5 -mt-5 pb-8">
+            <div class="glass rounded-3xl shadow-xl border border-white/50 p-6 space-y-5">
+
+                <!-- Nickname -->
+                <div>
+                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">你的暱稱</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-3.5 flex items-center pointer-events-none">
+                            <i class="ph ph-user text-gray-400 text-lg"></i>
+                        </div>
+                        <input type="text" id="input-player-name" placeholder="例如：愛打牌的爸爸" maxlength="16"
+                            class="block w-full pl-10 pr-4 py-3.5 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 bg-white text-gray-900 placeholder-gray-400 transition-all text-sm">
+                    </div>
+                </div>
+
+                <div class="relative flex items-center gap-3">
+                    <div class="flex-grow h-px bg-gray-100"></div>
+                    <span class="text-gray-400 text-xs uppercase tracking-wider shrink-0">選擇動作</span>
+                    <div class="flex-grow h-px bg-gray-100"></div>
+                </div>
+
+                <!-- Create room -->
+                <button id="btn-create-room" disabled
+                    class="w-full flex items-center justify-center gap-2.5 py-4 bg-gray-900 hover:bg-gray-800 text-white rounded-2xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-gray-900/20">
+                    <i class="ph ph-plus-circle text-xl"></i>
+                    建立新房間
+                </button>
+
+                <!-- Join room -->
+                <div class="bg-indigo-50 rounded-2xl p-4 border border-indigo-100 space-y-3">
+                    <label
+                        class="block text-xs font-semibold text-indigo-700 uppercase tracking-widest">或輸入朋友的代碼</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="input-room-id" placeholder="輸入 4 碼" maxlength="4" autocomplete="off"
+                            autocorrect="off" spellcheck="false"
+                            class="block flex-1 text-center font-code font-bold text-xl py-3.5 border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-indigo-900 placeholder-indigo-300 uppercase tracking-widest transition-all">
+                        <button id="btn-join-room" disabled
+                            class="flex items-center justify-center gap-1.5 py-3.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-indigo-500/25 shrink-0">
+                            加入
+                            <i class="ph ph-arrow-right font-bold"></i>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Install hint -->
+            <div class="mt-4 text-center text-xs text-gray-400 flex items-center justify-center gap-1.5 pb-4">
+                <i class="ph ph-device-mobile text-base"></i>
+                <span>點選分享 → 加入主畫面 即可安裝為 App</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- ══════════════════════════════════════════
+         畫面 2：房間內部
+    ══════════════════════════════════════════ -->
+    <main id="screen-room" class="hidden flex-col h-[100dvh] w-full bg-gray-50">
+
+        <!-- Header -->
+        <header class="bg-white border-b border-gray-100 shadow-sm sticky top-0 pt-safe z-20">
+            <div class="px-4 py-3 flex items-center gap-3">
+                <!-- Room code block -->
+                <div class="flex-1 flex items-center gap-3">
+                    <div
+                        class="w-10 h-10 hero-gradient rounded-xl flex items-center justify-center text-white shrink-0">
+                        <i class="ph ph-door-open text-xl"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] text-gray-400 font-semibold uppercase tracking-widest">房間代碼</div>
+                        <div id="display-room-id" class="text-2xl font-bold font-code text-gray-900 leading-tight">----
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Online badge -->
+                <div
+                    class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-xs font-semibold px-3 py-1.5 rounded-full border border-emerald-100">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+                    <span id="player-count-badge">0</span> 人在線
+                </div>
+
+                <!-- Copy button -->
+                <button id="btn-copy-code"
+                    class="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                    title="複製代碼">
+                    <i class="ph ph-copy text-xl"></i>
+                </button>
+
+                <!-- Leave button -->
+                <button id="btn-leave-room"
+                    class="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-colors flex flex-col items-center"
+                    title="離開房間">
+                    <i class="ph ph-sign-out text-xl"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Scrollable content -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4 pb-2">
+            <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest flex items-center gap-2 px-1">
+                <i class="ph ph-users text-base"></i> 目前在線玩家
+            </h2>
+            <div id="player-list" class="space-y-2.5">
+                <div class="text-center text-gray-400 py-12 text-sm animate-pulse">
+                    <i class="ph ph-spinner text-4xl mb-2 block opacity-30"></i>
+                    載入中...
+                </div>
+            </div>
+
+            <!-- Instruction tip -->
+            <div class="mt-4 flex gap-3 bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                <i class="ph ph-lightbulb text-amber-500 text-xl shrink-0 mt-0.5"></i>
+                <p class="text-xs text-amber-800 leading-relaxed">
+                    請朋友打開這個網頁，輸入 <strong class="font-bold text-amber-900">4 碼房間代碼</strong> 加入。試著點擊下方的表情符號，看看大家是否能即時看到！
+                </p>
+            </div>
+        </div>
+
+        <!-- Reaction bar -->
+        <div
+            class="bg-white border-t border-gray-100 shadow-[0_-8px_30px_-10px_rgba(0,0,0,0.08)] pb-safe z-20 sticky bottom-0">
+            <div class="text-[10px] font-semibold text-gray-400 text-center pt-3 mb-2 uppercase tracking-widest">點擊即時反應
+            </div>
+            <div class="flex justify-around items-center px-2 pb-2">
+                <button
+                    class="reaction-btn w-14 h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-2xl text-3xl shadow-sm flex items-center justify-center"
+                    data-emoji="👍">👍</button>
+                <button
+                    class="reaction-btn w-14 h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-2xl text-3xl shadow-sm flex items-center justify-center"
+                    data-emoji="😂">😂</button>
+                <button
+                    class="reaction-btn w-14 h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-2xl text-3xl shadow-sm flex items-center justify-center"
+                    data-emoji="🔥">🔥</button>
+                <button
+                    class="reaction-btn w-14 h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-2xl text-3xl shadow-sm flex items-center justify-center"
+                    data-emoji="🎉">🎉</button>
+                <button
+                    class="reaction-btn w-14 h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-2xl text-3xl shadow-sm flex items-center justify-center"
+                    data-emoji="😮">😮</button>
+                <button
+                    class="reaction-btn w-14 h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-2xl text-3xl shadow-sm flex items-center justify-center"
+                    data-emoji="❤️">❤️</button>
+            </div>
+        </div>
+    </main>
+
+</body>
+
+</html>
