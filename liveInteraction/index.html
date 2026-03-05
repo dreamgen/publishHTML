@@ -12,21 +12,17 @@
     <meta name="apple-mobile-web-app-title" content="即時互動">
     <link rel="apple-touch-icon" href="./icons/liveInteraction-192.png">
     <link rel="manifest" href="./manifest.webmanifest">
-
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Phosphor Icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
-    <!-- Firebase SDK (modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getDatabase, ref, set, onValue, update, push, onChildAdded, remove, onDisconnect, off } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+        import { getDatabase, ref, set, get, onValue, update, push, onChildAdded, remove, onDisconnect, off } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // ==========================================
+        // ══════════════════════════════════════════════
         // 1. Firebase 初始化
-        // ==========================================
+        // ══════════════════════════════════════════════
         const firebaseConfig = {
             apiKey: "AIzaSyAi2QYt_Cnl7X9wC3h-IUfOkUli7qMLrIM",
             authDomain: "pwa-boardgame.firebaseapp.com",
@@ -36,356 +32,438 @@
             messagingSenderId: "1079279430768",
             appId: "1:1079279430768:web:644823331e777e10b018b5"
         };
-
-        // Firebase Realtime DB rules typically allow: artifacts/{appId}/public/data/**
         const DB_ROOT = 'artifacts/liveInteraction/public/data/rooms';
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         const auth = getAuth(app);
 
-        // ==========================================
-        // 2. 應用狀態
-        // ==========================================
+        // ══════════════════════════════════════════════
+        // 2. localStorage 工具層
+        // ══════════════════════════════════════════════
+        const LS = { ID: 'li_userId', NICK: 'li_nickname', ROOMS: 'li_rooms' };
+
+        /** 首次訪問時生成穩定裝置 ID，之後永久保留 */
+        function getOrCreateUserId() {
+            let id = localStorage.getItem(LS.ID);
+            if (!id) {
+                const b = new Uint8Array(8);
+                crypto.getRandomValues(b);
+                id = 'u_' + Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+                localStorage.setItem(LS.ID, id);
+            }
+            return id;
+        }
+
+        const loadNick = () => localStorage.getItem(LS.NICK) || '';
+        const saveNick = n => n && localStorage.setItem(LS.NICK, n);
+        const loadRooms = () => { try { return JSON.parse(localStorage.getItem(LS.ROOMS) || '[]'); } catch { return []; } };
+
+        function saveRoom(roomId, hostFlag, playerName) {
+            let rooms = loadRooms().filter(r => r.roomId !== roomId);
+            rooms.unshift({ roomId, isHost: hostFlag, playerName, joinedAt: Date.now() });
+            localStorage.setItem(LS.ROOMS, JSON.stringify(rooms.slice(0, 5)));
+        }
+        function forgetRoom(roomId) {
+            localStorage.setItem(LS.ROOMS, JSON.stringify(loadRooms().filter(r => r.roomId !== roomId)));
+        }
+
+        // ══════════════════════════════════════════════
+        // 3. 應用狀態
+        // ══════════════════════════════════════════════
         let currentUser = null;
         let currentRoomId = null;
         let isHost = false;
-        let myPlayerId = null;
-        let myPlayerName = "匿名玩家";
+        let roomHostId = null;
+        let myPlayerId = getOrCreateUserId();  // 穩定裝置 ID（非 Firebase UID）
+        let myPlayerName = '匿名玩家';
+        let reactionsFrom = 0;   // 只顯示加入後的表情
+        let roomExisted = false;
 
-        // Active Firebase listeners (for cleanup)
-        let unsubPlayers = null;
-        let unsubReactions = null;
+        let unsubMeta = null;
+        let unsubPlyr = null;
+        let unsubReact = null;
 
-        // ==========================================
-        // 3. UI 元素
-        // ==========================================
+        // ══════════════════════════════════════════════
+        // 4. UI 元素
+        // ══════════════════════════════════════════════
         const screenLogin = document.getElementById('screen-login');
         const screenRoom = document.getElementById('screen-room');
+        const btnCreate = document.getElementById('btn-create-room');
+        const btnJoin = document.getElementById('btn-join-room');
+        const inputName = document.getElementById('input-player-name');
+        const inputCode = document.getElementById('input-room-id');
+        const displayCode = document.getElementById('display-room-id');
+        const playerList = document.getElementById('player-list');
+        const btnLeave = document.getElementById('btn-leave-room');
+        const btnCopy = document.getElementById('btn-copy-code');
+        const btnDelete = document.getElementById('btn-delete-room');
+        const reactionBtns = document.querySelectorAll('.reaction-btn');
+        const reactionBox = document.getElementById('reaction-container');
+        const countBadge = document.getElementById('player-count-badge');
+        const loadingEl = document.getElementById('loading-overlay');
+        const reconnBanner = document.getElementById('reconnect-banner');
+        const savedSection = document.getElementById('saved-rooms-section');
 
-        const btnCreateRoom = document.getElementById('btn-create-room');
-        const btnJoinRoom = document.getElementById('btn-join-room');
-        const inputPlayerName = document.getElementById('input-player-name');
-        const inputRoomId = document.getElementById('input-room-id');
-        const displayRoomId = document.getElementById('display-room-id');
-        const playerListContainer = document.getElementById('player-list');
-        const btnLeaveRoom = document.getElementById('btn-leave-room');
-        const btnCopyCode = document.getElementById('btn-copy-code');
-        const reactionButtons = document.querySelectorAll('.reaction-btn');
-        const reactionContainer = document.getElementById('reaction-container');
-        const playerCountBadge = document.getElementById('player-count-badge');
-        const loadingOverlay = document.getElementById('loading-overlay');
+        inputName.value = loadNick();
 
-        // ==========================================
-        // 4. 工具函數
-        // ==========================================
+        // ══════════════════════════════════════════════
+        // 5. 工具函數
+        // ══════════════════════════════════════════════
         function showScreen(name) {
             screenLogin.classList.toggle('hidden', name !== 'login');
             screenRoom.classList.toggle('hidden', name !== 'room');
-            if (name === 'room') screenRoom.classList.remove('hidden');
+            if (name === 'login') renderSavedRooms();
         }
 
-        function generateRoomCode() {
-            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-            return Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        function rndCode() {
+            const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            return Array.from({ length: 4 }, () => c[Math.floor(Math.random() * c.length)]).join('');
         }
 
-        function showToast(message, type = 'default') {
-            const colors = {
-                default: 'bg-gray-800 text-white',
-                success: 'bg-emerald-600 text-white',
-                error: 'bg-red-600 text-white',
-                info: 'bg-indigo-600 text-white',
+        function toast(msg, type = 'default') {
+            const pal = {
+                default: 'bg-gray-800 text-white', success: 'bg-emerald-600 text-white',
+                error: 'bg-red-600 text-white', info: 'bg-indigo-600 text-white', warning: 'bg-amber-500 text-white'
             };
-            const toast = document.createElement('div');
-            toast.className = `fixed top-5 left-1/2 -translate-x-1/2 ${colors[type] || colors.default} px-5 py-2.5 rounded-2xl shadow-2xl z-[100] text-sm font-medium transition-all duration-300 opacity-0 scale-90 pointer-events-none`;
-            toast.textContent = message;
-            document.body.appendChild(toast);
-
-            requestAnimationFrame(() => {
-                toast.classList.replace('opacity-0', 'opacity-100');
-                toast.classList.replace('scale-90', 'scale-100');
-            });
-
-            setTimeout(() => {
-                toast.classList.replace('opacity-100', 'opacity-0');
-                toast.classList.replace('scale-100', 'scale-90');
-                setTimeout(() => toast.remove(), 300);
-            }, 2500);
+            const el = document.createElement('div');
+            el.className = `fixed top-5 left-1/2 -translate-x-1/2 ${pal[type] || pal.default} px-5 py-2.5 rounded-2xl shadow-2xl z-[100] text-sm font-medium transition-all duration-300 opacity-0 scale-90 pointer-events-none`;
+            el.textContent = msg;
+            document.body.appendChild(el);
+            requestAnimationFrame(() => { el.classList.replace('opacity-0', 'opacity-100'); el.classList.replace('scale-90', 'scale-100'); });
+            setTimeout(() => { el.classList.replace('opacity-100', 'opacity-0'); el.classList.replace('scale-100', 'scale-90'); setTimeout(() => el.remove(), 300); }, 2500);
         }
 
-        function setLoading(visible, text = '請稍候...') {
-            loadingOverlay.querySelector('p').textContent = text;
-            loadingOverlay.classList.toggle('hidden', !visible);
+        function setLoading(v, txt = '請稍候...') {
+            loadingEl.querySelector('p').textContent = txt;
+            loadingEl.classList.toggle('hidden', !v);
         }
 
-        // ==========================================
-        // 5. Firebase 邏輯
-        // ==========================================
+        // ══════════════════════════════════════════════
+        // 6. Firebase 輔助
+        // ══════════════════════════════════════════════
+        const myRef = roomId => ref(db, `${DB_ROOT}/${roomId}/players/${myPlayerId}`);
+
+        function armDisconnect(roomId) {
+            onDisconnect(myRef(roomId)).update({ isOnline: false });
+        }
+
+        // ══════════════════════════════════════════════
+        // 7. 房間生命週期
+        // ══════════════════════════════════════════════
+
+        /** 建立新房間 */
         async function createRoom() {
             if (!currentUser) return;
-            const name = inputPlayerName.value.trim() || "房主";
-            myPlayerName = name;
-            const roomId = generateRoomCode();
-            currentRoomId = roomId;
-            isHost = true;
-            myPlayerId = currentUser.uid;
-
+            const name = inputName.value.trim() || '房主';
+            myPlayerName = name; saveNick(name);
+            const roomId = rndCode();
+            currentRoomId = roomId; isHost = true; roomHostId = myPlayerId;
             setLoading(true, '建立房間中...');
             try {
-                const roomRef = ref(db, `${DB_ROOT}/${roomId}`);
-                const myPlayerRef = ref(db, `${DB_ROOT}/${roomId}/players/${myPlayerId}`);
-
-                await set(roomRef, {
-                    hostId: myPlayerId,
-                    createdAt: Date.now(),
-                    status: 'waiting'
-                });
-
-                await set(myPlayerRef, {
-                    name: myPlayerName,
-                    joinedAt: Date.now(),
-                    isOnline: true
-                });
-
-                onDisconnect(myPlayerRef).update({ isOnline: false });
-
-                setupRoomListeners(roomId);
-                displayRoomId.textContent = roomId;
+                await set(ref(db, `${DB_ROOT}/${roomId}`), { hostId: myPlayerId, createdAt: Date.now(), status: 'waiting' });
+                await set(myRef(roomId), { name: myPlayerName, joinedAt: Date.now(), isOnline: true });
+                armDisconnect(roomId);
+                saveRoom(roomId, true, myPlayerName);
+                listen(roomId);
+                displayCode.textContent = roomId;
+                btnDelete.classList.remove('hidden');
                 showScreen('room');
-                showToast(`✅ 房間 ${roomId} 已建立`, 'success');
+                toast(`✅ 房間 ${roomId} 已建立`, 'success');
             } catch (err) {
-                console.error("建立房間失敗:", err?.code, err?.message, err);
-                showToast(`建立房間失敗：${err?.message || err}`, 'error');
-            } finally {
+                console.error('建立失敗:', err?.code, err?.message);
+                toast(`建立房間失敗：${err?.message || err}`, 'error');
+            } finally { setLoading(false); }
+        }
+
+        /** 加入/重新加入房間（通用） */
+        async function joinRoomById(roomId, name) {
+            if (!currentUser) return;
+            myPlayerName = name || inputName.value.trim() || '玩家';
+            saveNick(myPlayerName);
+            setLoading(true, '加入房間中...');
+            try {
+                const snap = await get(ref(db, `${DB_ROOT}/${roomId}`));
+                if (!snap.exists()) {
+                    toast('找不到該房間，請確認代號', 'error');
+                    forgetRoom(roomId); renderSavedRooms();
+                    setLoading(false); return;
+                }
+                const d = snap.val();
+                isHost = (d.hostId === myPlayerId); roomHostId = d.hostId; currentRoomId = roomId;
+                const existed = d.players?.[myPlayerId];
+                if (existed) {
+                    await update(myRef(roomId), { name: myPlayerName, isOnline: true });
+                } else {
+                    await set(myRef(roomId), { name: myPlayerName, joinedAt: Date.now(), isOnline: true });
+                }
+                armDisconnect(roomId);
+                saveRoom(roomId, isHost, myPlayerName);
+                listen(roomId);
+                displayCode.textContent = roomId;
+                btnDelete.classList.toggle('hidden', !isHost);
+                showScreen('room');
+                toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！', 'success');
+            } catch (err) {
+                console.error('加入失敗:', err?.code, err?.message);
+                toast(`加入房間失敗：${err?.message || err}`, 'error');
+            } finally { setLoading(false); }
+        }
+
+        /** 從輸入框加入 */
+        function joinRoom() {
+            if (!currentUser) return;
+            const roomId = inputCode.value.trim().toUpperCase();
+            if (roomId.length !== 4) { toast('請輸入 4 碼房間代號', 'error'); return; }
+            const name = inputName.value.trim() || '玩家_' + Math.floor(Math.random() * 1000);
+            joinRoomById(roomId, name);
+        }
+
+        /** 短暫斷線後重連（不重新加入，只刷新 isOnline 狀態） */
+        async function reEnter() {
+            if (!currentRoomId || !currentUser) return;
+            try {
+                await update(myRef(currentRoomId), { isOnline: true });
+                armDisconnect(currentRoomId);
+                reconnBanner.classList.add('hidden');
+                toast('✅ 已重新連線', 'success');
+            } catch (err) { console.error('重連失敗:', err); }
+        }
+
+        /** 主動離開房間 */
+        async function leaveRoom() {
+            if (!currentRoomId) return;
+            try { await update(myRef(currentRoomId), { isOnline: false }); } catch (_) { }
+            cleanup(); showScreen('login'); toast('已離開房間');
+        }
+
+        /** 房主刪除整個房間 */
+        async function deleteRoom() {
+            if (!isHost || !currentRoomId) return;
+            if (!confirm(`確定要刪除房間 ${currentRoomId}？所有人將被移出。`)) return;
+            setLoading(true, '刪除房間中...');
+            try {
+                const rid = currentRoomId;
+                forgetRoom(rid);
+                await remove(ref(db, `${DB_ROOT}/${rid}`));
+                // roomMeta listener 會偵測到 null → 觸發 onRoomDeleted()
+            } catch (err) {
+                console.error('刪除失敗:', err);
+                toast('刪除失敗，請重試', 'error');
                 setLoading(false);
             }
         }
 
-        async function joinRoom() {
-            if (!currentUser) return;
-            const roomId = inputRoomId.value.trim().toUpperCase();
-            const name = inputPlayerName.value.trim() || "玩家_" + Math.floor(Math.random() * 1000);
-
-            if (roomId.length !== 4) {
-                showToast("請輸入 4 碼房間代號", 'error');
-                return;
-            }
-
-            setLoading(true, '加入房間中...');
-            const roomRef = ref(db, `${DB_ROOT}/${roomId}`);
-
-            onValue(roomRef, async (snapshot) => {
-                off(roomRef); // read once
-                if (!snapshot.exists()) {
-                    showToast("找不到該房間，請確認代號", 'error');
-                    setLoading(false);
-                    return;
-                }
-
-                currentRoomId = roomId;
-                isHost = false;
-                myPlayerId = currentUser.uid;
-                myPlayerName = name;
-
-                const myPlayerRef = ref(db, `${DB_ROOT}/${roomId}/players/${myPlayerId}`);
-
-                try {
-                    await set(myPlayerRef, {
-                        name: myPlayerName,
-                        joinedAt: Date.now(),
-                        isOnline: true
-                    });
-                    onDisconnect(myPlayerRef).update({ isOnline: false });
-
-                    setupRoomListeners(roomId);
-                    displayRoomId.textContent = roomId;
-                    showScreen('room');
-                    showToast("🎉 成功加入房間！", 'success');
-                } catch (err) {
-                    console.error("加入房間失敗:", err?.code, err?.message, err);
-                    showToast(`加入房間失敗：${err?.message || err}`, 'error');
-                } finally {
-                    setLoading(false);
-                }
-            }, { onlyOnce: true });
-        }
-
-        async function leaveRoom() {
-            if (!currentRoomId || !myPlayerId) return;
-            const myPlayerRef = ref(db, `${DB_ROOT}/${currentRoomId}/players/${myPlayerId}`);
+        /** 房主踢除離線玩家 */
+        async function kick(id, name) {
+            if (!isHost || !currentRoomId) return;
             try {
-                await update(myPlayerRef, { isOnline: false });
-            } catch (_) { }
-
-            // Detach listeners
-            if (unsubPlayers) { off(ref(db, `${DB_ROOT}/${currentRoomId}/players`)); unsubPlayers = null; }
-            if (unsubReactions) { off(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`)); unsubReactions = null; }
-
-            currentRoomId = null;
-            isHost = false;
-            playerListContainer.innerHTML = '';
-            playerCountBadge.textContent = '0';
-            showScreen('login');
-            showToast("已離開房間");
+                await remove(ref(db, `${DB_ROOT}/${currentRoomId}/players/${id}`));
+                toast(`已移除 ${name}`, 'info');
+            } catch (err) { console.error('踢除失敗:', err); }
         }
 
-        function setupRoomListeners(roomId) {
-            // ── Players ──────────────────────────────
-            const playersRef = ref(db, `${DB_ROOT}/${roomId}/players`);
-            unsubPlayers = onValue(playersRef, (snapshot) => {
-                playerListContainer.innerHTML = '';
-                let onlineCount = 0;
-                if (snapshot.exists()) {
-                    const players = snapshot.val();
-                    Object.entries(players).forEach(([id, player]) => {
-                        if (player.isOnline) {
-                            onlineCount++;
-                            renderPlayerCard(id, player.name);
-                        }
-                    });
-                }
-                if (onlineCount === 0) {
-                    playerListContainer.innerHTML = `
-                        <div class="text-center text-gray-400 py-10 text-sm">
-                            <i class="ph ph-users-three text-3xl mb-2 block opacity-30"></i>
-                            尚無玩家在線
-                        </div>`;
-                }
-                playerCountBadge.textContent = onlineCount;
+        /** 房間被刪除時重導所有人 */
+        function onRoomDeleted() {
+            cleanup(); showScreen('login');
+            toast('房間已被刪除', 'warning'); setLoading(false);
+        }
+
+        /** 清理所有本地狀態與監聽器 */
+        function cleanup() {
+            if (currentRoomId) {
+                if (unsubMeta) { off(ref(db, `${DB_ROOT}/${currentRoomId}`)); unsubMeta = null; }
+                if (unsubPlyr) { off(ref(db, `${DB_ROOT}/${currentRoomId}/players`)); unsubPlyr = null; }
+                if (unsubReact) { off(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`)); unsubReact = null; }
+            }
+            currentRoomId = null; isHost = false; roomHostId = null;
+            roomExisted = false; playerList.innerHTML = ''; countBadge.textContent = '0';
+            reconnBanner.classList.add('hidden'); btnDelete.classList.add('hidden');
+        }
+
+        // ══════════════════════════════════════════════
+        // 8. Firebase 監聽器
+        // ══════════════════════════════════════════════
+        function listen(roomId) {
+            reactionsFrom = Date.now() - 500;
+
+            // ── 房間根節點（偵測刪除） ─────────────────
+            unsubMeta = onValue(ref(db, `${DB_ROOT}/${roomId}`), snap => {
+                if (snap.exists()) { roomExisted = true; }
+                else if (roomExisted) { onRoomDeleted(); }
             });
 
-            // ── Reactions ─────────────────────────────
-            const reactionsRef = ref(db, `${DB_ROOT}/${roomId}/reactions`);
-            unsubReactions = onChildAdded(reactionsRef, (snapshot) => {
-                const data = snapshot.val();
-                if (data?.emoji && data?.senderName) {
-                    showFlyingReaction(data.emoji, data.senderName);
-                    if (isHost) {
-                        setTimeout(() => remove(snapshot.ref), 5000);
-                    }
+            // ── 玩家列表 ───────────────────────────────
+            unsubPlyr = onValue(ref(db, `${DB_ROOT}/${roomId}/players`), snap => {
+                playerList.innerHTML = '';
+                let online = 0;
+                if (snap.exists()) {
+                    const players = snap.val();
+                    Object.entries(players).forEach(([id, p]) => {
+                        if (p.isOnline) online++;
+                        renderCard(id, p);
+                    });
                 }
+                if (!snap.exists() || Object.keys(snap.val() || {}).length === 0) {
+                    playerList.innerHTML = `<div class="text-center text-gray-400 py-10 text-sm"><i class="ph ph-users-three text-3xl mb-2 block opacity-30"></i>尚無玩家在線</div>`;
+                }
+                countBadge.textContent = online;
+            });
+
+            // ── 表情反應 ───────────────────────────────
+            unsubReact = onChildAdded(ref(db, `${DB_ROOT}/${roomId}/reactions`), snap => {
+                const d = snap.val();
+                if (!d?.emoji || !d?.senderName) return;
+                if ((d.timestamp || 0) < reactionsFrom) return; // 過濾舊表情
+                showFly(d.emoji, d.senderName);
+                if (isHost) setTimeout(() => remove(snap.ref), 5000);
             });
         }
 
         async function sendReaction(emoji) {
-            if (!currentRoomId || !myPlayerId) return;
-            const reactionsRef = ref(db, `${DB_ROOT}/${currentRoomId}/reactions`);
+            if (!currentRoomId) return;
             try {
-                await push(reactionsRef, {
-                    emoji: emoji,
-                    senderName: myPlayerName,
-                    timestamp: Date.now()
+                await push(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`), {
+                    emoji, senderName: myPlayerName, timestamp: Date.now()
                 });
-            } catch (err) {
-                console.error("發送表情失敗:", err);
-            }
+            } catch (err) { console.error('發送表情失敗:', err); }
         }
 
-        // ==========================================
-        // 6. UI 渲染與動畫
-        // ==========================================
-        function renderPlayerCard(id, name) {
-            const isMe = id === myPlayerId;
-            const hue = Array.from(name).reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 360;
+        // ══════════════════════════════════════════════
+        // 9. UI 渲染
+        // ══════════════════════════════════════════════
 
+        /** 玩家卡片（含離線/重連狀態與房主踢除按鈕） */
+        function renderCard(id, p) {
+            const isMe = id === myPlayerId;
+            const hue = Array.from(p.name).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
             const card = document.createElement('div');
-            card.className = `flex items-center space-x-3 p-3 rounded-2xl border-2 transition-all duration-200 animate-cardIn ${isMe ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100 bg-white shadow-sm'
+            card.className = `flex items-center gap-3 p-3 rounded-2xl border-2 transition-all duration-300 animate-cardIn ${isMe && p.isOnline ? 'border-indigo-400 bg-indigo-50' :
+                    p.isOnline ? 'border-gray-100 bg-white shadow-sm' :
+                        'border-amber-200 bg-amber-50/60'
                 }`;
 
+            const statusHtml = p.isOnline
+                ? `<div class="text-xs text-emerald-500 flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>連線中</div>`
+                : `<div class="text-xs text-amber-500 flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block"></span>重連中...</div>`;
+
+            const hostBadge = (id === roomHostId)
+                ? `<span class="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full shrink-0">房主</span>` : '';
+            const meBadge = isMe
+                ? `<span class="text-xs bg-indigo-500 text-white px-2 py-0.5 rounded-full shrink-0">我</span>` : '';
+            const kickBtn = (isHost && !isMe && !p.isOnline)
+                ? `<button class="kick-btn text-[11px] text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors shrink-0" data-id="${id}" data-name="${p.name}">移除</button>` : '';
+
             card.innerHTML = `
-                <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-inner flex-shrink-0"
-                     style="background: linear-gradient(135deg, hsl(${hue},70%,55%), hsl(${(hue + 40) % 360},70%,50%))">
-                    ${name.charAt(0).toUpperCase()}
+                <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-inner flex-shrink-0 ${p.isOnline ? '' : 'opacity-40'}"
+                     style="background:linear-gradient(135deg,hsl(${hue},70%,55%),hsl(${(hue + 40) % 360},70%,50%))">
+                    ${p.name.charAt(0).toUpperCase()}
                 </div>
                 <div class="flex-1 min-w-0">
-                    <div class="font-semibold text-gray-800 flex items-center gap-2 flex-wrap">
-                        <span class="truncate">${name}</span>
-                        ${isMe ? '<span class="text-xs bg-indigo-500 text-white px-2 py-0.5 rounded-full shrink-0">我</span>' : ''}
+                    <div class="font-semibold text-gray-800 flex items-center gap-1.5 flex-wrap">
+                        <span class="truncate ${p.isOnline ? '' : 'opacity-60'}">${p.name}</span>
+                        ${hostBadge}${meBadge}
                     </div>
-                    <div class="text-xs text-emerald-500 flex items-center gap-1 mt-0.5">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
-                        連線中
-                    </div>
+                    ${statusHtml}
                 </div>
-            `;
-            playerListContainer.appendChild(card);
+                ${kickBtn}`;
+
+            card.querySelector('.kick-btn')?.addEventListener('click', e => kick(e.currentTarget.dataset.id, e.currentTarget.dataset.name));
+            playerList.appendChild(card);
         }
 
-        function showFlyingReaction(emoji, senderName) {
+        /** 漂浮表情動畫 */
+        function showFly(emoji, sender) {
             const el = document.createElement('div');
+            const sx = 15 + Math.random() * 70, tx = (Math.random() - .5) * 120;
             el.className = 'absolute pointer-events-none select-none flex flex-col items-center';
-
-            const startX = 15 + Math.random() * 70;
-            const randomTx = (Math.random() - 0.5) * 120;
-
-            el.style.cssText = `left:${startX}%;bottom:120px;--tx:${randomTx}px;animation:floatUp 2.8s cubic-bezier(0.25,0.46,0.45,0.94) forwards;`;
-            el.innerHTML = `
-                <div class="text-5xl drop-shadow-2xl">${emoji}</div>
-                <div class="text-xs text-gray-700 bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full mt-1 font-medium shadow-sm whitespace-nowrap max-w-[120px] truncate">${senderName}</div>
-            `;
-            reactionContainer.appendChild(el);
+            el.style.cssText = `left:${sx}%;bottom:120px;--tx:${tx}px;animation:floatUp 2.8s cubic-bezier(0.25,0.46,0.45,0.94) forwards;`;
+            el.innerHTML = `<div class="text-5xl drop-shadow-2xl">${emoji}</div>
+                <div class="text-xs text-gray-700 bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full mt-1 font-medium shadow-sm whitespace-nowrap max-w-[120px] truncate">${sender}</div>`;
+            reactionBox.appendChild(el);
             setTimeout(() => el.remove(), 2800);
         }
 
-        // ==========================================
-        // 7. 複製房間代碼
-        // ==========================================
-        btnCopyCode.addEventListener('click', async () => {
-            if (!currentRoomId) return;
-            try {
-                await navigator.clipboard.writeText(currentRoomId);
-                showToast("已複製房間代碼 📋", 'info');
-            } catch (_) {
-                showToast("代碼：" + currentRoomId, 'info');
-            }
-        });
-
-        // ==========================================
-        // 8. 初始化與事件綁定
-        // ==========================================
-        async function initAuth() {
-            try {
-                await signInAnonymously(auth);
-            } catch (err) {
-                console.error("匿名登入失敗:", err);
-                showToast("初始化失敗，請重新整理", 'error');
-            }
+        /** 已儲存的房間清單（登入頁） */
+        function renderSavedRooms() {
+            const rooms = loadRooms();
+            savedSection.classList.toggle('hidden', rooms.length === 0);
+            const list = document.getElementById('saved-rooms-list');
+            list.innerHTML = '';
+            rooms.forEach(r => {
+                const d = new Date(r.joinedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+                const item = document.createElement('div');
+                item.className = 'flex items-center gap-2.5 bg-white rounded-2xl p-3 border border-gray-100 shadow-sm';
+                item.innerHTML = `
+                    <div class="font-code font-bold text-lg text-indigo-700 w-14 shrink-0 tracking-widest">${r.roomId}</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-700 truncate">${r.playerName}</div>
+                        <div class="text-[10px] text-gray-400">${r.isHost ? '🏠 房主' : '👤 成員'} · ${d}</div>
+                    </div>
+                    <button class="rejoin-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0" data-room="${r.roomId}" data-name="${r.playerName}">重新加入</button>
+                    <button class="forget-btn p-1.5 text-gray-300 hover:text-red-400 transition-colors shrink-0" data-room="${r.roomId}" title="刪除記錄"><i class="ph ph-trash text-base"></i></button>`;
+                item.querySelector('.rejoin-btn').addEventListener('click', e => {
+                    const name = inputName.value.trim() || e.currentTarget.dataset.name;
+                    joinRoomById(e.currentTarget.dataset.room, name);
+                });
+                item.querySelector('.forget-btn').addEventListener('click', e => {
+                    forgetRoom(e.currentTarget.dataset.room); renderSavedRooms();
+                });
+                list.appendChild(item);
+            });
         }
 
-        onAuthStateChanged(auth, (user) => {
+        // ══════════════════════════════════════════════
+        // 10. 斷線重連事件
+        // ══════════════════════════════════════════════
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && currentRoomId) reEnter();
+        });
+        window.addEventListener('offline', () => {
+            if (currentRoomId) reconnBanner.classList.remove('hidden');
+        });
+        window.addEventListener('online', () => {
+            if (currentRoomId) { reconnBanner.classList.add('hidden'); reEnter(); }
+        });
+
+        // ══════════════════════════════════════════════
+        // 11. 初始化 & 事件綁定
+        // ══════════════════════════════════════════════
+        async function initAuth() {
+            try { await signInAnonymously(auth); }
+            catch (err) { console.error('匿名登入失敗:', err); toast('初始化失敗，請重新整理', 'error'); }
+        }
+
+        onAuthStateChanged(auth, user => {
             currentUser = user || null;
-            btnCreateRoom.disabled = !user;
-            btnJoinRoom.disabled = !user;
-            if (user) console.log("匿名登入成功:", user.uid);
+            btnCreate.disabled = !user; btnJoin.disabled = !user;
+            if (user) console.log('Auth OK / deviceId:', myPlayerId);
         });
 
-        btnCreateRoom.addEventListener('click', createRoom);
-        btnJoinRoom.addEventListener('click', joinRoom);
-        btnLeaveRoom.addEventListener('click', leaveRoom);
+        btnCreate.addEventListener('click', createRoom);
+        btnJoin.addEventListener('click', joinRoom);
+        btnLeave.addEventListener('click', leaveRoom);
+        btnDelete.addEventListener('click', deleteRoom);
 
-        // Auto-uppercase room code input
-        inputRoomId.addEventListener('input', () => {
-            inputRoomId.value = inputRoomId.value.toUpperCase();
+        btnCopy.addEventListener('click', async () => {
+            if (!currentRoomId) return;
+            try { await navigator.clipboard.writeText(currentRoomId); toast('已複製房間代碼 📋', 'info'); }
+            catch (_) { toast('代碼：' + currentRoomId, 'info'); }
         });
 
-        // Allow Enter key in room id input
-        inputRoomId.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') joinRoom();
-        });
+        inputCode.addEventListener('input', () => { inputCode.value = inputCode.value.toUpperCase(); });
+        inputCode.addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
 
-        reactionButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const emoji = e.currentTarget.dataset.emoji;
-                sendReaction(emoji);
-                // Haptic feedback (supported on iOS/Android)
+        reactionBtns.forEach(btn => {
+            btn.addEventListener('click', e => {
+                sendReaction(e.currentTarget.dataset.emoji);
                 if (navigator.vibrate) navigator.vibrate(30);
-                // Visual feedback
                 btn.classList.add('scale-90', 'brightness-90');
                 setTimeout(() => btn.classList.remove('scale-90', 'brightness-90'), 150);
             });
         });
 
+        renderSavedRooms();
         initAuth();
 
     </script>
@@ -397,7 +475,6 @@
             font-family: 'Inter', system-ui, sans-serif;
         }
 
-        /* ─── Float-up reaction animation ─── */
         @keyframes floatUp {
             0% {
                 transform: translateY(0) scale(0.4) rotate(-5deg);
@@ -415,12 +492,11 @@
             }
 
             100% {
-                transform: translate(var(--tx, 0), -320px) scale(0.8) rotate(0deg);
+                transform: translate(var(--tx, 0), -320px) scale(0.8);
                 opacity: 0;
             }
         }
 
-        /* ─── Player card entrance ─── */
         @keyframes cardIn {
             from {
                 opacity: 0;
@@ -437,7 +513,22 @@
             animation: cardIn 0.25s ease-out both;
         }
 
-        /* ─── Reaction button ring ripple ─── */
+        @keyframes slideDown {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .animate-slideDown {
+            animation: slideDown 0.3s ease-out both;
+        }
+
         .reaction-btn {
             position: relative;
             transition: transform 0.12s, filter 0.12s;
@@ -459,12 +550,10 @@
             transform: scale(1.5);
         }
 
-        /* ─── Prevent overscroll/bounce ─── */
         body {
             overscroll-behavior-y: contain;
         }
 
-        /* ─── iOS safe area ─── */
         .pb-safe {
             padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
         }
@@ -473,32 +562,28 @@
             padding-top: env(safe-area-inset-top, 0);
         }
 
-        /* Room code font */
         .font-code {
             font-family: 'SF Mono', 'Fira Code', monospace;
             letter-spacing: 0.15em;
         }
 
-        /* Gradient hero */
-        .hero-gradient {
+        .hero-grad {
             background: linear-gradient(135deg, #4338ca 0%, #6d28d9 60%, #be185d 100%);
         }
 
-        /* Glass card */
         .glass {
-            background: rgba(255, 255, 255, 0.85);
+            background: rgba(255, 255, 255, 0.88);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
     </style>
 
     <script>
-        // Register Service Worker
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js', { scope: './' })
-                    .then(reg => console.log('SW registered, scope:', reg.scope))
-                    .catch(err => console.warn('SW registration failed:', err));
+                    .then(r => console.log('SW OK:', r.scope))
+                    .catch(e => console.warn('SW fail:', e));
             });
         }
     </script>
@@ -507,10 +592,10 @@
 <body
     class="bg-gray-50 text-gray-800 antialiased h-[100dvh] overflow-hidden flex flex-col relative selection:bg-indigo-200">
 
-    <!-- ── Flying-reaction container ── -->
+    <!-- ── 漂浮表情容器 ── -->
     <div id="reaction-container" class="absolute inset-0 pointer-events-none overflow-hidden z-40"></div>
 
-    <!-- ── Loading Overlay ── -->
+    <!-- ── 載入遮罩 ── -->
     <div id="loading-overlay"
         class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center">
         <div class="bg-white rounded-3xl p-8 flex flex-col items-center gap-4 shadow-2xl">
@@ -524,8 +609,8 @@
     ══════════════════════════════════════════ -->
     <main id="screen-login" class="flex-1 flex flex-col h-full">
 
-        <!-- Hero header -->
-        <div class="hero-gradient pt-safe px-6 pt-10 pb-10 text-center text-white flex-shrink-0">
+        <!-- Hero -->
+        <div class="hero-grad pt-safe px-6 pt-10 pb-10 text-center text-white flex-shrink-0">
             <div
                 class="inline-flex items-center justify-center w-20 h-20 bg-white/20 rounded-3xl shadow-xl backdrop-blur-sm mb-5 rotate-3 border border-white/30">
                 <i class="ph ph-lightning text-5xl"></i>
@@ -534,8 +619,9 @@
             <p class="text-indigo-200 mt-1.5 text-sm">親友聚會 ‧ 隨開即連 ‧ 零安裝</p>
         </div>
 
-        <!-- Card -->
-        <div class="flex-1 overflow-y-auto px-5 -mt-5 pb-8">
+        <!-- Card + saved rooms -->
+        <div class="flex-1 overflow-y-auto px-5 -mt-5 pb-8 space-y-4">
+
             <div class="glass rounded-3xl shadow-xl border border-white/50 p-6 space-y-5">
 
                 <!-- Nickname -->
@@ -556,14 +642,13 @@
                     <div class="flex-grow h-px bg-gray-100"></div>
                 </div>
 
-                <!-- Create room -->
+                <!-- Create -->
                 <button id="btn-create-room" disabled
                     class="w-full flex items-center justify-center gap-2.5 py-4 bg-gray-900 hover:bg-gray-800 text-white rounded-2xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-gray-900/20">
-                    <i class="ph ph-plus-circle text-xl"></i>
-                    建立新房間
+                    <i class="ph ph-plus-circle text-xl"></i>建立新房間
                 </button>
 
-                <!-- Join room -->
+                <!-- Join -->
                 <div class="bg-indigo-50 rounded-2xl p-4 border border-indigo-100 space-y-3">
                     <label
                         class="block text-xs font-semibold text-indigo-700 uppercase tracking-widest">或輸入朋友的代碼</label>
@@ -573,16 +658,23 @@
                             class="block flex-1 text-center font-code font-bold text-xl py-3.5 border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-indigo-900 placeholder-indigo-300 uppercase tracking-widest transition-all">
                         <button id="btn-join-room" disabled
                             class="flex items-center justify-center gap-1.5 py-3.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-indigo-500/25 shrink-0">
-                            加入
-                            <i class="ph ph-arrow-right font-bold"></i>
+                            加入<i class="ph ph-arrow-right"></i>
                         </button>
                     </div>
                 </div>
+            </div>
 
+            <!-- ── 已儲存的房間清單 ── -->
+            <div id="saved-rooms-section" class="hidden">
+                <div class="flex items-center gap-2 px-1 mb-3">
+                    <i class="ph ph-bookmarks text-indigo-500 text-base"></i>
+                    <span class="text-xs font-semibold text-gray-500 uppercase tracking-widest">已儲存的房間連線</span>
+                </div>
+                <div id="saved-rooms-list" class="space-y-2"></div>
             </div>
 
             <!-- Install hint -->
-            <div class="mt-4 text-center text-xs text-gray-400 flex items-center justify-center gap-1.5 pb-4">
+            <div class="text-center text-xs text-gray-400 flex items-center justify-center gap-1.5">
                 <i class="ph ph-device-mobile text-base"></i>
                 <span>點選分享 → 加入主畫面 即可安裝為 App</span>
             </div>
@@ -596,11 +688,16 @@
 
         <!-- Header -->
         <header class="bg-white border-b border-gray-100 shadow-sm sticky top-0 pt-safe z-20">
-            <div class="px-4 py-3 flex items-center gap-3">
-                <!-- Room code block -->
+
+            <!-- 斷線重連橫幅 -->
+            <div id="reconnect-banner"
+                class="hidden bg-amber-400 text-amber-900 text-xs font-semibold text-center py-2 px-4 animate-slideDown">
+                <i class="ph ph-wifi-slash mr-1"></i>網路中斷，嘗試重新連線中...
+            </div>
+
+            <div class="px-4 py-3 flex items-center gap-2">
                 <div class="flex-1 flex items-center gap-3">
-                    <div
-                        class="w-10 h-10 hero-gradient rounded-xl flex items-center justify-center text-white shrink-0">
+                    <div class="w-10 h-10 hero-grad rounded-xl flex items-center justify-center text-white shrink-0">
                         <i class="ph ph-door-open text-xl"></i>
                     </div>
                     <div>
@@ -610,46 +707,51 @@
                     </div>
                 </div>
 
-                <!-- Online badge -->
+                <!-- Online count -->
                 <div
-                    class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-xs font-semibold px-3 py-1.5 rounded-full border border-emerald-100">
+                    class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1.5 rounded-full border border-emerald-100 shrink-0">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
-                    <span id="player-count-badge">0</span> 人在線
+                    <span id="player-count-badge">0</span> 人
                 </div>
 
-                <!-- Copy button -->
+                <!-- Copy -->
                 <button id="btn-copy-code"
-                    class="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                    class="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
                     title="複製代碼">
                     <i class="ph ph-copy text-xl"></i>
                 </button>
 
-                <!-- Leave button -->
+                <!-- Delete room (host only) -->
+                <button id="btn-delete-room"
+                    class="hidden p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                    title="刪除房間">
+                    <i class="ph ph-trash text-xl"></i>
+                </button>
+
+                <!-- Leave -->
                 <button id="btn-leave-room"
-                    class="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-colors flex flex-col items-center"
+                    class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
                     title="離開房間">
                     <i class="ph ph-sign-out text-xl"></i>
                 </button>
             </div>
         </header>
 
-        <!-- Scrollable content -->
+        <!-- Player list -->
         <div class="flex-1 overflow-y-auto p-4 space-y-4 pb-2">
             <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest flex items-center gap-2 px-1">
-                <i class="ph ph-users text-base"></i> 目前在線玩家
+                <i class="ph ph-users text-base"></i> 在線玩家
             </h2>
             <div id="player-list" class="space-y-2.5">
                 <div class="text-center text-gray-400 py-12 text-sm animate-pulse">
-                    <i class="ph ph-spinner text-4xl mb-2 block opacity-30"></i>
-                    載入中...
+                    <i class="ph ph-spinner text-4xl mb-2 block opacity-30"></i>載入中...
                 </div>
             </div>
 
-            <!-- Instruction tip -->
             <div class="mt-4 flex gap-3 bg-amber-50 border border-amber-100 rounded-2xl p-4">
                 <i class="ph ph-lightbulb text-amber-500 text-xl shrink-0 mt-0.5"></i>
                 <p class="text-xs text-amber-800 leading-relaxed">
-                    請朋友打開這個網頁，輸入 <strong class="font-bold text-amber-900">4 碼房間代碼</strong> 加入。試著點擊下方的表情符號，看看大家是否能即時看到！
+                    請朋友打開這個網頁，輸入上方的 <strong>4 碼房間代碼</strong> 加入。切換 App 後回來會自動重新連線，無需重新輸入代碼。
                 </p>
             </div>
         </div>
