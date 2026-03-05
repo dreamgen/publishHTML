@@ -30,14 +30,14 @@
         const firebaseConfig = {
             apiKey: "AIzaSyAi2QYt_Cnl7X9wC3h-IUfOkUli7qMLrIM",
             authDomain: "pwa-boardgame.firebaseapp.com",
-            databaseURL: "https://pwa-boardgame-default-rtdb.firebaseio.com",
             projectId: "pwa-boardgame",
             storageBucket: "pwa-boardgame.firebasestorage.app",
             messagingSenderId: "1079279430768",
             appId: "1:1079279430768:web:644823331e777e10b018b5"
         };
 
-        const DB_ROOT = 'liveInteraction/rooms';
+        // Firebase Realtime DB rules typically allow: artifacts/{appId}/public/data/**
+        const DB_ROOT = 'artifacts/liveInteraction/public/data/rooms';
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
@@ -154,8 +154,8 @@
                 showScreen('room');
                 showToast(`✅ 房間 ${roomId} 已建立`, 'success');
             } catch (err) {
-                console.error("建立房間失敗:", err);
-                showToast("建立房間失敗，請重試", 'error');
+                console.error("建立房間失敗:", err?.code, err?.message, err);
+                showToast(`建立房間失敗：${err?.message || err}`, 'error');
             } finally {
                 setLoading(false);
             }
@@ -202,8 +202,8 @@
                     showScreen('room');
                     showToast("🎉 成功加入房間！", 'success');
                 } catch (err) {
-                    console.error("加入房間失敗:", err);
-                    showToast("加入房間失敗", 'error');
+                    console.error("加入房間失敗:", err?.code, err?.message, err);
+                    showToast(`加入房間失敗：${err?.message || err}`, 'error');
                 } finally {
                     setLoading(false);
                 }
