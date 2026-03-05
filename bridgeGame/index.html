@@ -552,6 +552,7 @@
             lastCompletedTrick: null,
             rubberOver: false,
             rubberWinner: null,
+            autoPlayDummy: false,
         };
 
         // ══════════════════════════════════════════════════════════════
@@ -712,9 +713,14 @@
 
         function isHumanTurn(turnSeat, state) {
             const HUMAN_SEAT = 2; // South
+            // 南家永遠由人類操控（含當南家為明手時）
             if (turnSeat === HUMAN_SEAT) return true;
-            // Human also plays dummy if South is declarer and opening lead made
-            if (state.openingLeadMade && state.contract && state.contract.declarer === HUMAN_SEAT && turnSeat === state.dummySeat) return true;
+            // 北家為明手（南家叫牌）且設定為人類操控明手
+            if (!state.autoPlayDummy &&
+                state.openingLeadMade &&
+                state.contract &&
+                state.contract.declarer === HUMAN_SEAT &&
+                turnSeat === state.dummySeat) return true;
             return false;
         }
 
@@ -974,7 +980,7 @@
                     dealer, vulnerable, rubberScore, gamesWon, dummySeat,
                     currentLeader, currentTrick, tricksTaken, openingLeadMade,
                     dummyRevealed, lastHandResult, lastCompletedTrick,
-                    rubberOver, rubberWinner } = gameState;
+                    rubberOver, rubberWinner, autoPlayDummy } = gameState;
 
             const HUMAN_SEAT = 2;
             const trumpSuit = contract && contract.strain !== 'N' ? contract.strain : null;
@@ -1074,11 +1080,15 @@
                 ? trickWinner(lastCompletedTrick, contract && contract.strain !== 'N' ? contract.strain : null)
                 : -1;
 
+            // 明手控制權
+            const humanControlsDummy = !autoPlayDummy;
+
             // 玩家手牌的合法牌
             const southLegal = phase === 'playing' && turnSeat === HUMAN_SEAT
                 ? legalCards(hands[HUMAN_SEAT], currentTrick, trumpSuit).map(c => c.id)
                 : [];
-            const northLegal = phase === 'playing' && turnSeat === dummySeat && dummySeat === 0 && openingLeadMade && contract && contract.declarer === HUMAN_SEAT
+            const northLegal = phase === 'playing' && turnSeat === dummySeat && dummySeat === 0 &&
+                openingLeadMade && contract && contract.declarer === HUMAN_SEAT && humanControlsDummy
                 ? legalCards(hands[0], currentTrick, trumpSuit).map(c => c.id)
                 : [];
 
@@ -1104,6 +1114,15 @@
                                 onClick={() => setGameState(prev => startHand(prev))}
                                 className="w-full bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold py-3 rounded-xl text-lg shadow-lg transition-colors">
                                 {hasGame ? '繼續下一局' : '開始遊戲'}
+                            </button>
+                            <button
+                                onClick={() => setGameState(prev => ({ ...prev, autoPlayDummy: !prev.autoPlayDummy }))}
+                                className={`w-full font-bold py-2 rounded-xl text-sm shadow transition-colors border-2
+                                    ${autoPlayDummy
+                                        ? 'bg-gray-800 border-gray-500 text-gray-300 hover:bg-gray-700'
+                                        : 'bg-blue-900 border-blue-500 text-blue-200 hover:bg-blue-800'
+                                    }`}>
+                                明手由我出牌：{autoPlayDummy ? '❌ 關閉（AI代出）' : '✅ 開啟（我自己出）'}
                             </button>
                             <button
                                 onClick={() => setGameState({
@@ -1210,8 +1229,9 @@
                 const isNorthTurn = turnSeat === 0;
                 const isSouthTurn = turnSeat === HUMAN_SEAT;
 
-                // 北家：明手後翻面，南家叫牌時可點擊
-                const northClickable = isNorthTurn && openingLeadMade && contract && contract.declarer === HUMAN_SEAT;
+                // 北家：明手後翻面，南家叫牌且人類操控明手時可點擊
+                const northClickable = isNorthTurn && openingLeadMade && contract &&
+                    contract.declarer === HUMAN_SEAT && humanControlsDummy;
                 // 南家：自己輪到
                 const southClickable = isSouthTurn;
 
@@ -1224,6 +1244,7 @@
                                 {contract && (
                                     <span className="text-gray-300 text-xs">
                                         {declarerName}家叫牌 · {contract.strain === 'N' ? '無王' : `${SUIT_SYMBOL[contract.strain]}將`}
+                                        {contract.declarer === HUMAN_SEAT ? (autoPlayDummy ? ' · 明手AI' : ' · 明手自控') : ''}
                                     </span>
                                 )}
                             </div>
