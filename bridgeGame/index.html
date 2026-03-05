@@ -725,10 +725,11 @@
         // 單張牌
         const Card = ({ card, onClick, isHidden, size = 'md', selected, disabled }) => {
             if (isHidden) {
-                const hw = size === 'sm' ? 34 : 36;
+                const hw = size === 'sm' ? 42 : 36;
+                const hh = size === 'sm' ? 62 : 52;
                 return (
                     <div className="flex-shrink-0 bg-blue-800 rounded border-2 border-blue-500 shadow-md"
-                         style={{ width: hw, height: 52, minWidth: hw }}>
+                         style={{ width: hw, height: hh, minWidth: hw }}>
                         <div className="w-full h-full rounded bg-gradient-to-br from-blue-700 to-blue-900 flex items-center justify-center">
                             <span className="text-blue-400 text-xs">🂠</span>
                         </div>
@@ -736,7 +737,8 @@
                 );
             }
 
-            const color = ['H', 'D'].includes(card.suit) ? '#dc2626' : '#111827';
+            const SUIT_COLOR_CSS = { S: '#0f172a', H: '#dc2626', D: '#dc2626', C: '#14532d' };
+            const color = SUIT_COLOR_CSS[card.suit];
             const rank = RANK_LABEL[card.rank];
             const sym  = SUIT_SYMBOL[card.suit];
 
@@ -749,10 +751,10 @@
                             ${!disabled ? 'cursor-pointer' : ''}
                             ${selected ? 'card-selected ring-2 ring-yellow-400' : (!disabled ? 'card-hover' : '')}
                         `}
-                        style={{ width: 34, height: 52, minWidth: 34 }}
+                        style={{ width: 42, height: 62, minWidth: 42 }}
                     >
-                        <span className="text-sm font-black leading-none" style={{ color }}>{rank}</span>
-                        <span className="text-base font-black leading-none" style={{ color }}>{sym}</span>
+                        <span className="text-base font-black leading-none" style={{ color }}>{rank}</span>
+                        <span className="text-xl font-black leading-none" style={{ color }}>{sym}</span>
                     </div>
                 );
             }
@@ -1299,22 +1301,22 @@
                                             <div className="flex justify-center">
                                                 {displayTrick.find(t => t.seat === 0) ? (
                                                     <Card card={displayTrick.find(t => t.seat === 0).card} size="sm" disabled />
-                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
+                                                ) : <div style={{ width: 42, height: 62 }} className="opacity-0" />}
                                             </div>
                                             {/* 西 東 */}
                                             <div className="flex justify-between items-center w-full px-1">
                                                 {displayTrick.find(t => t.seat === 3) ? (
                                                     <Card card={displayTrick.find(t => t.seat === 3).card} size="sm" disabled />
-                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
+                                                ) : <div style={{ width: 42, height: 62 }} className="opacity-0" />}
                                                 {displayTrick.find(t => t.seat === 1) ? (
                                                     <Card card={displayTrick.find(t => t.seat === 1).card} size="sm" disabled />
-                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
+                                                ) : <div style={{ width: 42, height: 62 }} className="opacity-0" />}
                                             </div>
                                             {/* 南 */}
                                             <div className="flex justify-center">
                                                 {displayTrick.find(t => t.seat === 2) ? (
                                                     <Card card={displayTrick.find(t => t.seat === 2).card} size="sm" disabled />
-                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
+                                                ) : <div style={{ width: 42, height: 62 }} className="opacity-0" />}
                                             </div>
                                         </>
                                     )}
