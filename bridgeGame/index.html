@@ -549,6 +549,7 @@
             openingLeadMade: false,
             dummyRevealed: false,
             lastHandResult: null,
+            lastCompletedTrick: null,
             rubberOver: false,
             rubberWinner: null,
         };
@@ -579,6 +580,7 @@
                 openingLeadMade: false,
                 dummyRevealed: false,
                 lastHandResult: null,
+                lastCompletedTrick: null,
                 rubberOver: false,
                 rubberWinner: null,
             };
@@ -609,6 +611,7 @@
                     phase: 'playing',
                     currentLeader: openingLeader,
                     currentTrick: [],
+                    lastCompletedTrick: null,
                     openingLeadMade: false,
                     dummyRevealed: false,
                 };
@@ -671,6 +674,7 @@
                     ...state,
                     hands: newHands,
                     currentTrick: [],
+                    lastCompletedTrick: newTrick,
                     completedTricks,
                     tricksTaken: newTricksTaken,
                     currentLeader: winnerSeat,
@@ -689,6 +693,7 @@
                 ...state,
                 hands: newHands,
                 currentTrick: [],
+                lastCompletedTrick: newTrick,
                 completedTricks,
                 tricksTaken: newTricksTaken,
                 currentLeader: winnerSeat,
@@ -719,14 +724,11 @@
 
         // 單張牌
         const Card = ({ card, onClick, isHidden, size = 'md', selected, disabled }) => {
-            const w = size === 'sm' ? 'w-7' : size === 'lg' ? 'w-12' : 'w-9';
-            const h = size === 'sm' ? 'h-10' : size === 'lg' ? 'h-16' : 'h-13';
-            const textSize = size === 'sm' ? 'text-[9px]' : 'text-xs';
-
             if (isHidden) {
+                const hw = size === 'sm' ? 34 : 36;
                 return (
-                    <div className={`${w} h-12 bg-blue-800 rounded border-2 border-blue-500 shadow-md flex-shrink-0`}
-                         style={{ minWidth: size === 'sm' ? '28px' : '36px' }}>
+                    <div className="flex-shrink-0 bg-blue-800 rounded border-2 border-blue-500 shadow-md"
+                         style={{ width: hw, height: 52, minWidth: hw }}>
                         <div className="w-full h-full rounded bg-gradient-to-br from-blue-700 to-blue-900 flex items-center justify-center">
                             <span className="text-blue-400 text-xs">🂠</span>
                         </div>
@@ -738,6 +740,26 @@
             const rank = RANK_LABEL[card.rank];
             const sym  = SUIT_SYMBOL[card.suit];
 
+            // sm 尺寸：居中單行顯示，手機友善
+            if (size === 'sm') {
+                return (
+                    <div
+                        onClick={disabled ? undefined : onClick}
+                        className={`flex-shrink-0 bg-white rounded border border-gray-300 shadow-md flex flex-col items-center justify-center select-none
+                            ${!disabled ? 'cursor-pointer' : ''}
+                            ${selected ? 'card-selected ring-2 ring-yellow-400' : (!disabled ? 'card-hover' : '')}
+                        `}
+                        style={{ width: 34, height: 52, minWidth: 34 }}
+                    >
+                        <span className="text-sm font-black leading-none" style={{ color }}>{rank}</span>
+                        <span className="text-base font-black leading-none" style={{ color }}>{sym}</span>
+                    </div>
+                );
+            }
+
+            // md / lg 尺寸：雙角落樣式
+            const w = size === 'lg' ? 48 : 36;
+            const textSize = 'text-xs';
             return (
                 <div
                     onClick={disabled ? undefined : onClick}
@@ -745,7 +767,7 @@
                         ${!disabled ? 'cursor-pointer' : ''}
                         ${selected ? 'card-selected ring-2 ring-yellow-400' : (!disabled ? 'card-hover' : '')}
                     `}
-                    style={{ width: size === 'sm' ? 28 : 36, height: 48, minWidth: size === 'sm' ? 28 : 36 }}
+                    style={{ width: w, height: 52, minWidth: w }}
                 >
                     <span className={`${textSize} font-bold leading-none`} style={{ color }}>{rank}{sym}</span>
                     <span className={`${textSize} font-bold leading-none self-end`} style={{ color, transform: 'rotate(180deg)' }}>{rank}{sym}</span>
@@ -949,7 +971,8 @@
             const { phase, hands, biddingSequence, currentBidder, contract,
                     dealer, vulnerable, rubberScore, gamesWon, dummySeat,
                     currentLeader, currentTrick, tricksTaken, openingLeadMade,
-                    dummyRevealed, lastHandResult, rubberOver, rubberWinner } = gameState;
+                    dummyRevealed, lastHandResult, lastCompletedTrick,
+                    rubberOver, rubberWinner } = gameState;
 
             const HUMAN_SEAT = 2;
             const trumpSuit = contract && contract.strain !== 'N' ? contract.strain : null;
@@ -998,6 +1021,15 @@
                 return () => clearTimeout(t);
             }, [phase, currentTrick.length, currentLeader, openingLeadMade]);
 
+            // ── 5 秒後清除上一墩殘留顯示 ─────────────────────────
+            useEffect(() => {
+                if (!lastCompletedTrick) return;
+                const t = setTimeout(() => {
+                    setGameState(prev => ({ ...prev, lastCompletedTrick: null }));
+                }, 5000);
+                return () => clearTimeout(t);
+            }, [lastCompletedTrick]);
+
             // ── 人類出牌 ──────────────────────────────────────────
             const handleCardClick = (seat, card) => {
                 if (phase !== 'playing') return;
@@ -1032,6 +1064,13 @@
             // ── 計算當前回合 ──────────────────────────────────────
             const turnSeat = phase === 'playing' ? (currentLeader + currentTrick.length) % 4 : -1;
             const isMyTurn = phase === 'playing' && isHumanTurn(turnSeat, gameState);
+
+            // 桌面顯示的墩（當前進行中優先，否則顯示上一墩殘留）
+            const displayTrick = currentTrick.length > 0 ? currentTrick : lastCompletedTrick;
+            const isLastTrick  = currentTrick.length === 0 && lastCompletedTrick !== null;
+            const lastTrickWinner = isLastTrick
+                ? trickWinner(lastCompletedTrick, contract && contract.strain !== 'N' ? contract.strain : null)
+                : -1;
 
             // 玩家手牌的合法牌
             const southLegal = phase === 'playing' && turnSeat === HUMAN_SEAT
@@ -1242,34 +1281,40 @@
 
                             {/* 桌面中心 */}
                             <div className="flex-1 flex flex-col items-center justify-center gap-2 px-2">
-                                {/* 當前墩 */}
-                                <div className="bg-green-700/50 rounded-xl p-2 min-h-[80px] flex flex-col items-center gap-1 w-full max-w-[180px]">
-                                    {currentTrick.length === 0 ? (
-                                        <div className="text-gray-400 text-xs text-center">
+                                {/* 當前墩 / 上一墩殘留 */}
+                                <div className={`rounded-xl p-2 min-h-[100px] flex flex-col items-center gap-1 w-full max-w-[190px]
+                                    ${isLastTrick ? 'bg-green-900/60 border border-green-600/40' : 'bg-green-700/50'}`}>
+                                    {!displayTrick ? (
+                                        <div className="text-gray-400 text-xs text-center py-2">
                                             {openingLeadMade ? '新的一墩' : '等待首攻...'}
                                         </div>
                                     ) : (
                                         <>
+                                            {isLastTrick && (
+                                                <div className="text-yellow-400 text-[10px] font-bold text-center mb-0.5">
+                                                    {SEAT_NAME[lastTrickWinner]}家贏得此墩
+                                                </div>
+                                            )}
                                             {/* 北 */}
                                             <div className="flex justify-center">
-                                                {currentTrick.find(t => t.seat === 0) ? (
-                                                    <Card card={currentTrick.find(t => t.seat === 0).card} size="sm" disabled />
-                                                ) : <div className="w-7 h-10 opacity-0" />}
+                                                {displayTrick.find(t => t.seat === 0) ? (
+                                                    <Card card={displayTrick.find(t => t.seat === 0).card} size="sm" disabled />
+                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
                                             </div>
                                             {/* 西 東 */}
-                                            <div className="flex justify-between items-center w-full px-2">
-                                                {currentTrick.find(t => t.seat === 3) ? (
-                                                    <Card card={currentTrick.find(t => t.seat === 3).card} size="sm" disabled />
-                                                ) : <div className="w-7 h-10 opacity-0" />}
-                                                {currentTrick.find(t => t.seat === 1) ? (
-                                                    <Card card={currentTrick.find(t => t.seat === 1).card} size="sm" disabled />
-                                                ) : <div className="w-7 h-10 opacity-0" />}
+                                            <div className="flex justify-between items-center w-full px-1">
+                                                {displayTrick.find(t => t.seat === 3) ? (
+                                                    <Card card={displayTrick.find(t => t.seat === 3).card} size="sm" disabled />
+                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
+                                                {displayTrick.find(t => t.seat === 1) ? (
+                                                    <Card card={displayTrick.find(t => t.seat === 1).card} size="sm" disabled />
+                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
                                             </div>
                                             {/* 南 */}
                                             <div className="flex justify-center">
-                                                {currentTrick.find(t => t.seat === 2) ? (
-                                                    <Card card={currentTrick.find(t => t.seat === 2).card} size="sm" disabled />
-                                                ) : <div className="w-7 h-10 opacity-0" />}
+                                                {displayTrick.find(t => t.seat === 2) ? (
+                                                    <Card card={displayTrick.find(t => t.seat === 2).card} size="sm" disabled />
+                                                ) : <div style={{ width: 34, height: 52 }} className="opacity-0" />}
                                             </div>
                                         </>
                                     )}
