@@ -14,6 +14,8 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- QR Code generator -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -339,8 +341,8 @@
             const hue = Array.from(p.name).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
             const card = document.createElement('div');
             card.className = `flex items-center gap-3 p-3 rounded-2xl border-2 transition-all duration-300 animate-cardIn ${isMe && p.isOnline ? 'border-indigo-400 bg-indigo-50' :
-                    p.isOnline ? 'border-gray-100 bg-white shadow-sm' :
-                        'border-amber-200 bg-amber-50/60'
+                p.isOnline ? 'border-gray-100 bg-white shadow-sm' :
+                    'border-amber-200 bg-amber-50/60'
                 }`;
 
             const statusHtml = p.isOnline
@@ -466,6 +468,71 @@
         renderSavedRooms();
         initAuth();
 
+        // ══════════════════════════════════════════════
+        // 12. QR Code 功能
+        // ══════════════════════════════════════════════
+        const btnQR = document.getElementById('btn-qr-code');
+        const qrModal = document.getElementById('qr-modal');
+        const qrCanvas = document.getElementById('qr-canvas');
+        const qrRoomLabel = document.getElementById('qr-room-label');
+        const btnQRClose = document.getElementById('btn-qr-close');
+        const btnQRShare = document.getElementById('btn-qr-share');
+
+        function getRoomUrl(roomId) {
+            const base = window.location.origin + window.location.pathname;
+            return `${base}?room=${roomId}`;
+        }
+
+        function showQR(roomId) {
+            const url = getRoomUrl(roomId);
+            qrRoomLabel.textContent = roomId;
+            QRCode.toCanvas(qrCanvas, url, {
+                width: 220, margin: 2,
+                color: { dark: '#1e1b4b', light: '#ffffff' }
+            }, err => { if (err) console.error('QR生成失敗:', err); });
+            qrModal.classList.remove('hidden');
+            qrModal.classList.add('flex');
+        }
+
+        function hideQR() {
+            qrModal.classList.add('hidden');
+            qrModal.classList.remove('flex');
+        }
+
+        btnQR.addEventListener('click', () => { if (currentRoomId) showQR(currentRoomId); });
+        btnQRClose.addEventListener('click', hideQR);
+        document.getElementById('btn-qr-close2').addEventListener('click', hideQR);
+        qrModal.addEventListener('click', e => { if (e.target === qrModal) hideQR(); });
+
+        btnQRShare.addEventListener('click', async () => {
+            if (!currentRoomId) return;
+            const url = getRoomUrl(currentRoomId);
+            const shareData = { title: '即時互動大廳', text: `掃描或點此加入房間 ${currentRoomId}`, url };
+            if (navigator.share && navigator.canShare?.(shareData)) {
+                try { await navigator.share(shareData); }
+                catch (e) { if (e.name !== 'AbortError') toast('分享失敗', 'error'); }
+            } else {
+                try { await navigator.clipboard.writeText(url); toast('已複製分享連結 🔗', 'info'); }
+                catch { toast('連結：' + url, 'info'); }
+            }
+        });
+
+        // ── URL 參數自動加入 ─────────────────────────
+        // 掃描 QR code 後網址帶 ?room=XXXX，等 Auth 完成後自動加入
+        const urlRoom = new URLSearchParams(window.location.search).get('room')?.toUpperCase();
+        if (urlRoom && urlRoom.length === 4) {
+            inputCode.value = urlRoom;
+            // 等 Auth 狀態就緒後自動加入
+            const unsubAutoJoin = onAuthStateChanged(auth, user => {
+                if (user) {
+                    unsubAutoJoin();
+                    const name = loadNick() || '玩家_' + Math.floor(Math.random() * 1000);
+                    // 短暫延遲確保 UI 初始化完畢
+                    setTimeout(() => joinRoomById(urlRoom, name), 600);
+                }
+            });
+        }
+
     </script>
 
     <style>
@@ -527,6 +594,22 @@
 
         .animate-slideDown {
             animation: slideDown 0.3s ease-out both;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(40px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .animate-slideUp {
+            animation: slideUp 0.3s ease-out both;
         }
 
         .reaction-btn {
@@ -594,6 +677,39 @@
 
     <!-- ── 漂浮表情容器 ── -->
     <div id="reaction-container" class="absolute inset-0 pointer-events-none overflow-hidden z-40"></div>
+
+    <!-- ── QR Code Modal ── -->
+    <div id="qr-modal"
+        class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 items-end justify-center pb-8 px-4">
+        <div
+            class="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 flex flex-col items-center gap-4 animate-slideUp">
+            <div class="flex items-center justify-between w-full">
+                <div>
+                    <div class="text-xs text-gray-400 font-semibold uppercase tracking-widest">掃描加入房間</div>
+                    <div id="qr-room-label" class="text-2xl font-bold font-code text-indigo-700 tracking-widest mt-0.5">
+                        ----</div>
+                </div>
+                <button id="btn-qr-close"
+                    class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+                    <i class="ph ph-x text-xl"></i>
+                </button>
+            </div>
+            <div class="bg-indigo-50 rounded-2xl p-4 border border-indigo-100">
+                <canvas id="qr-canvas" class="block rounded-xl"></canvas>
+            </div>
+            <p class="text-xs text-gray-400 text-center">朋友掃描後將自動進入此房間</p>
+            <div class="flex gap-3 w-full">
+                <button id="btn-qr-share"
+                    class="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-semibold text-sm transition-all active:scale-[0.97] shadow-md shadow-indigo-500/25">
+                    <i class="ph ph-share-network text-lg"></i>分享連結
+                </button>
+                <button id="btn-qr-close2"
+                    class="px-5 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl font-semibold text-sm transition-all active:scale-[0.97]">
+                    關閉
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- ── 載入遮罩 ── -->
     <div id="loading-overlay"
@@ -713,6 +829,13 @@
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
                     <span id="player-count-badge">0</span> 人
                 </div>
+
+                <!-- QR Code -->
+                <button id="btn-qr-code"
+                    class="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                    title="QR Code 分享">
+                    <i class="ph ph-qr-code text-xl"></i>
+                </button>
 
                 <!-- Copy -->
                 <button id="btn-copy-code"
