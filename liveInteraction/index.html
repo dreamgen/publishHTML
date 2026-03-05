@@ -14,8 +14,6 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <!-- QR Code generator -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -473,7 +471,7 @@
         // ══════════════════════════════════════════════
         const btnQR = document.getElementById('btn-qr-code');
         const qrModal = document.getElementById('qr-modal');
-        const qrCanvas = document.getElementById('qr-canvas');
+        const qrImg = document.getElementById('qr-img');
         const qrRoomLabel = document.getElementById('qr-room-label');
         const btnQRClose = document.getElementById('btn-qr-close');
         const btnQRShare = document.getElementById('btn-qr-share');
@@ -486,10 +484,8 @@
         function showQR(roomId) {
             const url = getRoomUrl(roomId);
             qrRoomLabel.textContent = roomId;
-            QRCode.toCanvas(qrCanvas, url, {
-                width: 220, margin: 2,
-                color: { dark: '#1e1b4b', light: '#ffffff' }
-            }, err => { if (err) console.error('QR生成失敗:', err); });
+            // 使用 qrserver.com 公開 API 產生 QR Code 圖片（無需任何 JS 函式庫）
+            qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}&color=1e1b4b&bgcolor=eef2ff&margin=8`;
             qrModal.classList.remove('hidden');
             qrModal.classList.add('flex');
         }
@@ -695,7 +691,7 @@
                 </button>
             </div>
             <div class="bg-indigo-50 rounded-2xl p-4 border border-indigo-100">
-                <canvas id="qr-canvas" class="block rounded-xl"></canvas>
+                <img id="qr-img" src="" alt="QR Code" class="block rounded-xl w-[220px] h-[220px] bg-indigo-50">
             </div>
             <p class="text-xs text-gray-400 text-center">朋友掃描後將自動進入此房間</p>
             <div class="flex gap-3 w-full">
