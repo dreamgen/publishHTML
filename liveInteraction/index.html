@@ -63,7 +63,7 @@
 
         function saveRoom(roomId, hostFlag, playerName) {
             let rooms = loadRooms().filter(r => r.roomId !== roomId);
-            rooms.unshift({ roomId, isHost: hostFlag, playerName, joinedAt: Date.now() });
+            rooms.unshift({ roomId, isHost: hostFlag, playerName, joinedAt: Date.now(), mode: useSocketMode ? 'socket' : 'firebase' });
             localStorage.setItem(LS.ROOMS, JSON.stringify(rooms.slice(0, 5)));
         }
         function forgetRoom(roomId) {
@@ -656,19 +656,30 @@
             list.innerHTML = '';
             rooms.forEach(r => {
                 const d = new Date(r.joinedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+                const isSocket = r.mode === 'socket';
+                const modeBadge = isSocket
+                    ? `<span class="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-semibold">🌐 雲端</span>`
+                    : `<span class="text-[9px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full font-semibold">🏠 區域</span>`;
                 const item = document.createElement('div');
                 item.className = 'flex items-center gap-2.5 bg-white rounded-2xl p-3 border border-gray-100 shadow-sm';
                 item.innerHTML = `
                     <div class="font-code font-bold text-lg text-indigo-700 w-14 shrink-0 tracking-widest">${r.roomId}</div>
                     <div class="flex-1 min-w-0">
                         <div class="text-xs font-semibold text-gray-700 truncate">${r.playerName}</div>
-                        <div class="text-[10px] text-gray-400">${r.isHost ? '🏠 房主' : '👤 成員'} · ${d}</div>
+                        <div class="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">${r.isHost ? '🏠 房主' : '👤 成員'} · ${d} ${modeBadge}</div>
                     </div>
-                    <button class="rejoin-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0" data-room="${r.roomId}" data-name="${r.playerName}">重新加入</button>
+                    <button class="rejoin-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0" data-room="${r.roomId}" data-name="${r.playerName}" data-mode="${r.mode || 'firebase'}">重新加入</button>
                     <button class="forget-btn p-1.5 text-gray-300 hover:text-red-400 transition-colors shrink-0" data-room="${r.roomId}" title="刪除記錄"><i class="ph ph-trash text-base"></i></button>`;
                 item.querySelector('.rejoin-btn').addEventListener('click', e => {
-                    const name = inputName.value.trim() || e.currentTarget.dataset.name;
-                    joinRoomById(e.currentTarget.dataset.room, name);
+                    const btn = e.currentTarget;
+                    const savedMode = btn.dataset.mode === 'socket';
+                    // 恢復当初建立房間所用的模式
+                    useSocketMode = savedMode;
+                    document.querySelectorAll('input[name="backend-mode"]').forEach(r => {
+                        r.checked = (r.value === btn.dataset.mode);
+                    });
+                    const name = inputName.value.trim() || btn.dataset.name;
+                    joinRoomById(btn.dataset.room, name);
                 });
                 item.querySelector('.forget-btn').addEventListener('click', e => {
                     forgetRoom(e.currentTarget.dataset.room); renderSavedRooms();
