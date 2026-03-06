@@ -759,14 +759,15 @@
 
         function isHumanTurn(turnSeat, state) {
             const HUMAN_SEAT = 2; // South
-            // 南家永遠由人類操控（含當南家為明手時）
+            // 南家永遠由人類操控
             if (turnSeat === HUMAN_SEAT) return true;
-            // 北家為明手（南家叫牌）且設定為人類操控明手
-            if (!state.autoPlayDummy &&
-                state.openingLeadMade &&
-                state.contract &&
-                state.contract.declarer === HUMAN_SEAT &&
-                turnSeat === state.dummySeat) return true;
+            // 北家全權由人類操控（設定開啟時，任何情境）
+            if (!state.autoPlayDummy && turnSeat === 0) {
+                // 北家作為明手（南家叫牌，dummySeat===0）：需等首攻完成後才翻牌操控
+                if (state.dummySeat === 0) return state.openingLeadMade;
+                // 其他情境（北家防守、或北家叫牌時南家為明手）：隨時可出牌
+                return true;
+            }
             return false;
         }
 
@@ -1197,8 +1198,9 @@
             const southLegal = phase === 'playing' && turnSeat === HUMAN_SEAT
                 ? legalCards(hands[HUMAN_SEAT], currentTrick, trumpSuit).map(c => c.id)
                 : [];
-            const northLegal = phase === 'playing' && turnSeat === dummySeat && dummySeat === 0 &&
-                openingLeadMade && contract && contract.declarer === HUMAN_SEAT && humanControlsDummy
+            // 北家可出牌：非明手隨時可控；作為明手需首攻完成
+            const northIsHumanControlled = humanControlsDummy && (dummySeat !== 0 || openingLeadMade);
+            const northLegal = phase === 'playing' && turnSeat === 0 && northIsHumanControlled
                 ? legalCards(hands[0], currentTrick, trumpSuit).map(c => c.id)
                 : [];
 
@@ -1241,7 +1243,7 @@
                                         ? 'glass-panel border-gray-500/50 text-gray-300'
                                         : 'glass-panel border-blue-400/50 text-blue-200'
                                     }`}>
-                                明手由我出牌：{autoPlayDummy ? '❌ 關閉（AI代出）' : '✅ 開啟（我自己出）'}
+                                北家全權由我出牌：{autoPlayDummy ? '❌ 關閉（AI代出）' : '✅ 開啟（我自己出）'}
                             </button>
                             <button
                                 onClick={() => setGameState({
@@ -1348,9 +1350,8 @@
                 const isNorthTurn = turnSeat === 0;
                 const isSouthTurn = turnSeat === HUMAN_SEAT;
 
-                // 北家：明手後翻面，南家叫牌且人類操控明手時可點擊
-                const northClickable = isNorthTurn && openingLeadMade && contract &&
-                    contract.declarer === HUMAN_SEAT && humanControlsDummy;
+                // 北家：人類操控時，非明手隨時可點；作為明手需首攻後
+                const northClickable = isNorthTurn && northIsHumanControlled;
                 // 南家：自己輪到
                 const southClickable = isSouthTurn;
 
@@ -1366,8 +1367,7 @@
                                 <span className="text-white font-bold text-sm">{contractStr}</span>
                                 {contract && (
                                     <span className="text-gray-300 text-xs">
-                                        {declarerName}家
-                                        {contract.declarer === HUMAN_SEAT ? (autoPlayDummy ? ' · 明手AI' : ' · 明手自控') : ''}
+                                        {declarerName}家{autoPlayDummy ? ' · 北家AI' : ' · 北家自控'}
                                     </span>
                                 )}
                             </div>
@@ -1379,29 +1379,36 @@
                             </div>
                         </div>
 
-                        {/* 北家手牌（明手） */}
-                        <div className="glass-light mx-2 mt-1.5 rounded-2xl p-1.5 shrink-0">
-                            <div className="flex flex-col items-center gap-1">
-                                <span className={`text-[10px] font-bold ${isNorthTurn ? 'text-yellow-300' : 'text-gray-400'}`}>
-                                    北家{dummyRevealed ? '（明手）' : ''}{isNorthTurn ? ' ← 出牌' : ''}
-                                </span>
-                                {dummyRevealed ? (
-                                    <HandFan
-                                        cards={hands[0]}
-                                        onCardClick={(c) => handleCardClick(0, c)}
-                                        legalIds={northLegal}
-                                        selectedId={selectedCard && northClickable ? selectedCard.id : null}
-                                        clickable={northClickable}
-                                    />
-                                ) : (
-                                    <div className="flex -space-x-3">
-                                        {Array.from({ length: Math.min(hands[0].length, 13) }).map((_, i) => (
-                                            <div key={i} className="w-7 h-10 bg-blue-900 rounded-lg border border-blue-600" style={{ zIndex: i }} />
-                                        ))}
+                        {/* 北家手牌 */}
+                        {(() => {
+                            // 明手已翻牌，或北家非明手且人類操控 → 顯示牌面
+                            const northFaceUp = dummyRevealed || (humanControlsDummy && dummySeat !== 0);
+                            const northLabel = dummyRevealed ? '（明手）' : (humanControlsDummy && dummySeat !== 0 ? '（防守）' : '');
+                            return (
+                                <div className="glass-light mx-2 mt-1.5 rounded-2xl p-1.5 shrink-0">
+                                    <div className="flex flex-col items-center gap-1">
+                                        <span className={`text-[10px] font-bold ${isNorthTurn ? 'text-yellow-300' : 'text-gray-400'}`}>
+                                            北家{northLabel}{isNorthTurn ? ' ← 出牌' : ''}
+                                        </span>
+                                        {northFaceUp ? (
+                                            <HandFan
+                                                cards={hands[0]}
+                                                onCardClick={(c) => handleCardClick(0, c)}
+                                                legalIds={northLegal}
+                                                selectedId={selectedCard && northClickable ? selectedCard.id : null}
+                                                clickable={northClickable}
+                                            />
+                                        ) : (
+                                            <div className="flex -space-x-3">
+                                                {Array.from({ length: Math.min(hands[0].length, 13) }).map((_, i) => (
+                                                    <div key={i} className="w-7 h-10 bg-blue-900 rounded-lg border border-blue-600" style={{ zIndex: i }} />
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                        </div>
+                                </div>
+                            );
+                        })()}
 
                         {/* 中間桌面：東、牌桌中心（十字形）、西 */}
                         <div className="flex-1 flex items-center justify-between px-2 min-h-0">
