@@ -40,9 +40,9 @@ npm run dev        # nodemon 熱重載
 
 | Key | Value |
 |-----|-------|
-| `ALLOWED_ORIGIN` | `https://your-github-username.github.io` |
+| `ALLOWED_ORIGIN` | `https://dreamgen.github.io` |
 
-5. 點擊 **Deploy** → 約 1 分鐘後取得網址（如 `https://live-interaction-backend.onrender.com`）
+5. 點擊 **Deploy** → 部署網址：**`https://publishhtml-liveinteraction.onrender.com`**
 
 > ⚠️ **Render 免費方案**：15 分鐘無流量後伺服器休眠，下次連線需等約 30~50 秒冷啟動。
 
@@ -55,7 +55,7 @@ npm run dev        # nodemon 熱重載
 ```html
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
-  const socket = io("https://your-backend.onrender.com");
+  const socket = io("https://publishhtml-liveinteraction.onrender.com");
   socket.on("connect", () => console.log("已連上伺服器"));
 </script>
 ```

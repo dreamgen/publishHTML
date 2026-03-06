@@ -15,7 +15,8 @@ const app = express();
 const server = http.createServer(app);
 
 // ── CORS 設定（允許 GitHub Pages 前端連線）─────────────
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*'; // 部署後請改為您的 GitHub Pages 網址
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://dreamgen.github.io';
+// Render 部署網址：https://publishhtml-liveinteraction.onrender.com
 const io = new Server(server, {
     cors: { origin: ALLOWED_ORIGIN, methods: ['GET', 'POST'] },
     pingInterval: 25000,
