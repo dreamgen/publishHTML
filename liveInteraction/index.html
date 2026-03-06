@@ -93,6 +93,7 @@
 
         let activeTab = 'players'; // 'players' | 'chat'
         let unreadMsgCount = 0;
+        let historyLoadedRoomId = null; // prevent duplicate history loads per room session
         let wakeLock = null;
         let roomPlayers = {};  // { playerId: { name, isOnline } }
 
@@ -177,11 +178,17 @@
             } catch (e) { console.warn('備份玩家失敗:', e); }
         }
 
-        /** 雲端房間備份：追加公開訊息至 Firebase（僅房主執行） */
+        /** 雲端房間備份：追加訊息至 Firebase（含私訊，僅房主執行） */
         async function backupMessage(msg) {
             if (!useSocketMode || !isHost || !currentUser || !currentRoomId) return;
             try {
-                await push(ref(db, `${CLOUD_BACKUP_ROOT}/${currentRoomId}/messages`), msg);
+                const entry = {
+                    sender: msg.sender, senderId: msg.senderId,
+                    text: msg.text, timestamp: msg.timestamp,
+                    isPrivate: !!msg.isPrivate
+                };
+                if (msg.isPrivate && msg.recipients) entry.recipients = msg.recipients;
+                await push(ref(db, `${CLOUD_BACKUP_ROOT}/${currentRoomId}/messages`), entry);
                 await update(cloudBackupRef(currentRoomId), { lastUpdated: Date.now() });
             } catch (e) { console.warn('備份訊息失敗:', e); }
         }
@@ -193,6 +200,23 @@
                 const snap = await get(cloudBackupRef(roomId));
                 return snap.exists() ? snap.val() : null;
             } catch (e) { return null; }
+        }
+
+        /** 從 Firebase 備份載入歷史訊息，含私訊過濾，每個 roomId 只載入一次 */
+        async function loadHistoryFromBackup(roomId) {
+            if (historyLoadedRoomId === roomId || !currentUser) return;
+            historyLoadedRoomId = roomId; // 立即標記，防止 race condition 重複載入
+            const backup = await loadCloudBackup(roomId);
+            if (!backup?.messages) return;
+            const msgs = Object.values(backup.messages)
+                .filter(m => !m.isPrivate || m.senderId === myPlayerId || m.recipients?.includes(myPlayerId) || isHost)
+                .sort((a, b) => a.timestamp - b.timestamp);
+            if (msgs.length === 0) return;
+            const sep = document.createElement('div');
+            sep.className = 'text-center text-[10px] text-gray-400 py-2 select-none';
+            sep.textContent = '── 歷史訊息 ──';
+            chatList.appendChild(sep);
+            msgs.forEach(m => renderMsg(m, !!m.isPrivate));
         }
 
         async function requestWakeLock() {
@@ -255,7 +279,7 @@
             // ─ 訊息 ─
             socket.on('new_message', m => {
                 renderMsg(m, m.isPrivate);
-                if (!m.isPrivate && isHost) backupMessage(m); // 房主備份公開訊息
+                if (isHost) backupMessage(m); // 房主備份所有訊息（含私訊）
             });
 
             // ─ 表情（只在房間內顯示）─
@@ -361,6 +385,7 @@
                     displayCode.textContent = roomId;
                     btnDelete.classList.toggle('hidden', !isHost);
                     showScreen('room');
+                    loadHistoryFromBackup(roomId); // fire-and-forget；guard 防止重複載入
                     toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！（雲端）', 'success');
                 } else {
                     const snap = await get(ref(db, `${DB_ROOT}/${roomId}`));
@@ -405,11 +430,7 @@
                             displayCode.textContent = roomId;
                             btnDelete.classList.toggle('hidden', !isHost);
                             showScreen('room');
-                            // 載入備份訊息（僅公開）
-                            if (backup.messages) {
-                                const msgs = Object.values(backup.messages).sort((a, b) => a.timestamp - b.timestamp);
-                                msgs.forEach(m => renderMsg(m, false));
-                            }
+                            await loadHistoryFromBackup(roomId); // 載入備份訊息（含私訊過濾）
                             toast('🔄 已從備份還原雲端房間', 'success');
                         } catch (restoreErr) {
                             toast(`還原失敗：${restoreErr.message}`, 'error');
@@ -506,7 +527,7 @@
                 if (unsubPending) { off(ref(db, `${DB_ROOT}/${currentRoomId}/actions/pendingMessage`)); unsubPending = null; }
             }
             releaseWakeLock();
-            currentRoomId = null; isHost = false; roomHostId = null;
+            currentRoomId = null; isHost = false; roomHostId = null; historyLoadedRoomId = null;
             roomExisted = false; playerList.innerHTML = ''; countBadge.textContent = '0';
             roomPlayers = {}; chatList.innerHTML = '';
             reconnBanner.classList.add('hidden'); btnDelete.classList.add('hidden');
