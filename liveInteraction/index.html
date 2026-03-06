@@ -278,8 +278,11 @@
 
             // ─ 訊息 ─
             socket.on('new_message', m => {
-                renderMsg(m, m.isPrivate);
-                if (isHost) backupMessage(m); // 房主備份所有訊息（含私訊）
+                const shouldDisplay = !m.isPrivate
+                    || m.senderId === myPlayerId
+                    || (Array.isArray(m.recipients) && m.recipients.includes(myPlayerId));
+                if (shouldDisplay) renderMsg(m, m.isPrivate);
+                if (isHost) backupMessage(m); // 房主仍備份所有訊息（含他人私訊，不顯示）
             });
 
             // ─ 表情（只在房間內顯示）─
@@ -639,10 +642,7 @@
                     for (const id of ids) {
                         await push(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${id}`), payload);
                     }
-                    // 房主自己也收到
-                    if (!ids.includes(myPlayerId)) {
-                        await push(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${myPlayerId}`), payload);
-                    }
+                    // 注意：房主只在被明確指定為收件人時才收到（id 在 ids 中），不強制加入
                 }
                 // 清除 pending
                 await remove(snap.ref);
@@ -668,6 +668,11 @@
             if (isHost) startHostRouting(roomId);
         }
 
+        /** 判斷聊天列表是否捲動到底部（60px 容差） */
+        function isAtBottom() {
+            return chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight < 60;
+        }
+
         /** 渲染訊息氣泡 */
         function renderMsg(m, isPrivate) {
             const isMe = m.senderId === myPlayerId;
@@ -682,9 +687,9 @@
                 }">${privBadge}${escHtml(m.text)}</div>
                 </div>`;
             chatList.appendChild(wrap);
-            chatList.scrollTop = chatList.scrollHeight;
-            // 未讀計數（只在不在留言板時遞增）
-            if (activeTab !== 'chat') {
+            if (isMe || isAtBottom()) chatList.scrollTop = chatList.scrollHeight;
+            // 未讀計數：不在留言板，或在留言板但已捲離底部
+            if (activeTab !== 'chat' || !isAtBottom()) {
                 unreadMsgCount++;
                 const badge = document.getElementById('chat-unread-badge');
                 if (badge) { badge.textContent = unreadMsgCount > 99 ? '99+' : unreadMsgCount; badge.classList.remove('hidden'); }
@@ -756,6 +761,12 @@
         chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
         document.getElementById('tab-players').addEventListener('click', () => switchTab('players'));
         document.getElementById('tab-chat').addEventListener('click', () => switchTab('chat'));
+        chatList.addEventListener('scroll', () => {
+            if (isAtBottom() && activeTab === 'chat' && unreadMsgCount > 0) {
+                unreadMsgCount = 0;
+                document.getElementById('chat-unread-badge')?.classList.add('hidden');
+            }
+        });
 
         // ══════════════════════════════════════════════
         // 9. UI 渲染
