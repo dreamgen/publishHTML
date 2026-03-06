@@ -14,6 +14,8 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Socket.io client (Mode B) -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -89,7 +91,12 @@
 
         let activeTab = 'players'; // 'players' | 'chat'
         let wakeLock = null;
-        let roomPlayers = {};  // { playerId: { name, isOnline } } — kept in sync for recipient picker
+        let roomPlayers = {};  // { playerId: { name, isOnline } }
+
+        // ── 後端模式 ────────────────────────────────
+        const RENDER_URL = 'https://publishhtml-liveinteraction.onrender.com';
+        let useSocketMode = false;   // false = Firebase (Mode A), true = Socket.io (Mode B)
+        let socket = null;    // Socket.io 連線物件
 
         // ══════════════════════════════════════════════
         // 4. UI 元素
@@ -161,11 +168,77 @@
                 if (wakeLock) await wakeLock.release();
                 wakeLock = await navigator.wakeLock.request('screen');
                 wakeLock.addEventListener('release', () => { wakeLock = null; });
-                console.log('🔆 Wake Lock 已啟動');
             } catch (e) { console.warn('Wake Lock 失敗:', e.message); }
         }
         async function releaseWakeLock() {
             if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+        }
+
+        // ══════════════════════════════════════════════
+        // 7b. Socket.io 後端函式 (Mode B)
+        // ══════════════════════════════════════════════
+
+        function connectSocket() {
+            if (socket?.connected) return;
+            socket = io(RENDER_URL, { transports: ['websocket', 'polling'] });
+
+            socket.on('connect', () => {
+                reconnBanner.classList.add('hidden');
+                console.log('🟢 Socket.io 連線 OK');
+            });
+            socket.on('disconnect', () => {
+                if (currentRoomId) reconnBanner.classList.remove('hidden');
+            });
+            socket.on('connect_error', () => {
+                toast('雲端伺服器連線失敗，請確認伺服器狀態', 'error');
+            });
+
+            // ─ 玩家列表 ─
+            socket.on('players_updated', ({ players, hostId }) => {
+                roomHostId = hostId; isHost = (hostId === myPlayerId);
+                btnDelete.classList.toggle('hidden', !isHost);
+                playerList.innerHTML = ''; roomPlayers = {}; let online = 0;
+                players.forEach(p => {
+                    roomPlayers[p.id] = p;
+                    if (p.isOnline) online++;
+                    renderCard(p.id, p);
+                });
+                if (players.length === 0) playerList.innerHTML = `<div class="text-center text-gray-400 py-10 text-sm"><i class="ph ph-users-three text-3xl mb-2 block opacity-30"></i>尚無玩家在線</div>`;
+                countBadge.textContent = online;
+                updateRecipientPicker();
+            });
+
+            // ─ 訊息 ─
+            socket.on('new_message', m => renderMsg(m, m.isPrivate));
+
+            // ─ 表情 ─
+            socket.on('new_reaction', ({ emoji, senderName }) => showFly(emoji, senderName));
+
+            // ─ 房間被刪除 ─
+            socket.on('room_deleted', () => { cleanup(); showScreen('login'); toast('房間已被削除', 'warning'); });
+
+            // ─ 錯誤 ─
+            socket.on('error', ({ message }) => toast(message, 'error'));
+        }
+
+        async function socketCreateRoom(roomId, name) {
+            connectSocket();
+            return new Promise((resolve, reject) => {
+                socket.once('room_created', resolve);
+                socket.once('error', e => reject(new Error(e.message)));
+                socket.emit('create_room', { roomId, playerId: myPlayerId, playerName: name });
+                setTimeout(() => reject(new Error('逾時')), 8000);
+            });
+        }
+
+        async function socketJoinRoom(roomId, name) {
+            connectSocket();
+            return new Promise((resolve, reject) => {
+                socket.once('room_joined', resolve);
+                socket.once('error', e => reject(new Error(e.message)));
+                socket.emit('join_room', { roomId, playerId: myPlayerId, playerName: name });
+                setTimeout(() => reject(new Error('逾時')), 8000);
+            });
         }
 
         // ══════════════════════════════════════════════
@@ -174,23 +247,31 @@
 
         /** 建立新房間 */
         async function createRoom() {
-            if (!currentUser) return;
+            if (!currentUser && !useSocketMode) return;
             const name = inputName.value.trim() || '房主';
             myPlayerName = name; saveNick(name);
             const roomId = rndCode();
             currentRoomId = roomId; isHost = true; roomHostId = myPlayerId;
             setLoading(true, '建立房間中...');
             try {
-                await set(ref(db, `${DB_ROOT}/${roomId}`), { hostId: myPlayerId, createdAt: Date.now(), status: 'waiting' });
-                await set(myRef(roomId), { name: myPlayerName, joinedAt: Date.now(), isOnline: true });
-                armDisconnect(roomId);
-                saveRoom(roomId, true, myPlayerName);
-                listen(roomId);
-                displayCode.textContent = roomId;
-                btnDelete.classList.remove('hidden');
-                requestWakeLock(); // 房主啟用螢幕長亮
-                showScreen('room');
-                toast(`✅ 房間 ${roomId} 已建立`, 'success');
+                if (useSocketMode) {
+                    await socketCreateRoom(roomId, name);
+                    saveRoom(roomId, true, myPlayerName);
+                    displayCode.textContent = roomId;
+                    showScreen('room');
+                    toast(`✅ 房間 ${roomId} 已建立（雲端）`, 'success');
+                } else {
+                    await set(ref(db, `${DB_ROOT}/${roomId}`), { hostId: myPlayerId, createdAt: Date.now(), status: 'waiting' });
+                    await set(myRef(roomId), { name: myPlayerName, joinedAt: Date.now(), isOnline: true });
+                    armDisconnect(roomId);
+                    saveRoom(roomId, true, myPlayerName);
+                    listen(roomId);
+                    displayCode.textContent = roomId;
+                    btnDelete.classList.remove('hidden');
+                    requestWakeLock();
+                    showScreen('room');
+                    toast(`✅ 房間 ${roomId} 已建立`, 'success');
+                }
             } catch (err) {
                 console.error('建立失敗:', err?.code, err?.message);
                 toast(`建立房間失敗：${err?.message || err}`, 'error');
@@ -199,32 +280,39 @@
 
         /** 加入/重新加入房間（通用） */
         async function joinRoomById(roomId, name) {
-            if (!currentUser) return;
+            if (!currentUser && !useSocketMode) return;
             myPlayerName = name || inputName.value.trim() || '玩家';
             saveNick(myPlayerName);
             setLoading(true, '加入房間中...');
             try {
-                const snap = await get(ref(db, `${DB_ROOT}/${roomId}`));
-                if (!snap.exists()) {
-                    toast('找不到該房間，請確認代號', 'error');
-                    forgetRoom(roomId); renderSavedRooms();
-                    setLoading(false); return;
-                }
-                const d = snap.val();
-                isHost = (d.hostId === myPlayerId); roomHostId = d.hostId; currentRoomId = roomId;
-                const existed = d.players?.[myPlayerId];
-                if (existed) {
-                    await update(myRef(roomId), { name: myPlayerName, isOnline: true });
+                if (useSocketMode) {
+                    const { isHost: h, existed } = await socketJoinRoom(roomId, myPlayerName);
+                    isHost = h; currentRoomId = roomId;
+                    saveRoom(roomId, isHost, myPlayerName);
+                    displayCode.textContent = roomId;
+                    btnDelete.classList.toggle('hidden', !isHost);
+                    showScreen('room');
+                    toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！（雲端）', 'success');
                 } else {
-                    await set(myRef(roomId), { name: myPlayerName, joinedAt: Date.now(), isOnline: true });
+                    const snap = await get(ref(db, `${DB_ROOT}/${roomId}`));
+                    if (!snap.exists()) {
+                        toast('找不到該房間，請確認代號', 'error');
+                        forgetRoom(roomId); renderSavedRooms();
+                        setLoading(false); return;
+                    }
+                    const d = snap.val();
+                    isHost = (d.hostId === myPlayerId); roomHostId = d.hostId; currentRoomId = roomId;
+                    const existed = d.players?.[myPlayerId];
+                    if (existed) { await update(myRef(roomId), { name: myPlayerName, isOnline: true }); }
+                    else { await set(myRef(roomId), { name: myPlayerName, joinedAt: Date.now(), isOnline: true }); }
+                    armDisconnect(roomId);
+                    saveRoom(roomId, isHost, myPlayerName);
+                    listen(roomId);
+                    displayCode.textContent = roomId;
+                    btnDelete.classList.toggle('hidden', !isHost);
+                    showScreen('room');
+                    toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！', 'success');
                 }
-                armDisconnect(roomId);
-                saveRoom(roomId, isHost, myPlayerName);
-                listen(roomId);
-                displayCode.textContent = roomId;
-                btnDelete.classList.toggle('hidden', !isHost);
-                showScreen('room');
-                toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！', 'success');
             } catch (err) {
                 console.error('加入失敗:', err?.code, err?.message);
                 toast(`加入房間失敗：${err?.message || err}`, 'error');
@@ -254,7 +342,8 @@
         /** 主動離開房間 */
         async function leaveRoom() {
             if (!currentRoomId) return;
-            try { await update(myRef(currentRoomId), { isOnline: false }); } catch (_) { }
+            if (useSocketMode) { socket?.emit('leave_room'); }
+            else { try { await update(myRef(currentRoomId), { isOnline: false }); } catch (_) { } }
             cleanup(); showScreen('login'); toast('已離開房間');
         }
 
@@ -266,13 +355,9 @@
             try {
                 const rid = currentRoomId;
                 forgetRoom(rid);
-                await remove(ref(db, `${DB_ROOT}/${rid}`));
-                // roomMeta listener 會偵測到 null → 觸發 onRoomDeleted()
-            } catch (err) {
-                console.error('刪除失敗:', err);
-                toast('刪除失敗，請重試', 'error');
-                setLoading(false);
-            }
+                if (useSocketMode) { socket?.emit('delete_room', { roomId: rid }); cleanup(); showScreen('login'); toast('房間已刪除'); }
+                else { await remove(ref(db, `${DB_ROOT}/${rid}`)); }
+            } catch (err) { console.error('刪除失敗:', err); toast('刪除失敗，請重試', 'error'); setLoading(false); }
         }
 
         /** 房主踢除離線玩家 */
@@ -353,11 +438,15 @@
 
         async function sendReaction(emoji) {
             if (!currentRoomId) return;
-            try {
-                await push(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`), {
-                    emoji, senderName: myPlayerName, timestamp: Date.now()
-                });
-            } catch (err) { console.error('發送表情失敗:', err); }
+            if (useSocketMode) {
+                socket?.emit('send_reaction', { emoji });
+            } else {
+                try {
+                    await push(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`), {
+                        emoji, senderName: myPlayerName, timestamp: Date.now()
+                    });
+                } catch (err) { console.error('發送表情失敗:', err); }
+            }
         }
 
         // ══════════════════════════════════════════════
@@ -369,19 +458,23 @@
         const recipientSel = document.getElementById('recipient-select');
         const chatStartTime = { v: 0 };
 
-        /** 玩家發送留言 → 寫入 pendingMessage（房主中繼路由） */
+        /** 玩家發送留言 */
         async function sendMessage() {
             const text = chatInput.value.trim();
             if (!text || !currentRoomId) return;
             chatInput.value = '';
-            const recipientVal = recipientSel.value; // 'all' or playerId
+            const recipientVal = recipientSel.value;
             const recipients = recipientVal === 'all' ? 'all' : [recipientVal];
-            try {
-                await set(ref(db, `${DB_ROOT}/${currentRoomId}/actions/pendingMessage`), {
-                    sender: myPlayerName, senderId: myPlayerId,
-                    text, recipients, timestamp: Date.now()
-                });
-            } catch (err) { console.error('發送留言失敗:', err); }
+            if (useSocketMode) {
+                socket?.emit('send_message', { text, recipients });
+            } else {
+                try {
+                    await set(ref(db, `${DB_ROOT}/${currentRoomId}/actions/pendingMessage`), {
+                        sender: myPlayerName, senderId: myPlayerId,
+                        text, recipients, timestamp: Date.now()
+                    });
+                } catch (err) { console.error('發送留言失敗:', err); }
+            }
         }
 
         /** 房主：監聽 pendingMessage → 路由到 public 或各人 inbox */
@@ -616,6 +709,22 @@
 
         renderSavedRooms();
         initAuth();
+
+        // ── 後端模式選擇器 ───────────────────────────
+        document.querySelectorAll('input[name="backend-mode"]').forEach(radio => {
+            radio.addEventListener('change', e => {
+                useSocketMode = (e.target.value === 'socket');
+                const badge = document.getElementById('room-mode-badge');
+                if (useSocketMode) {
+                    badge.textContent = '🌐 雲端';
+                    badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0 bg-purple-100 text-purple-700';
+                } else {
+                    badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0 hidden';
+                }
+                // Socket.io 模式下選擇雲端时預先連線以測試伺服器
+                if (useSocketMode) connectSocket();
+            });
+        });
 
         // ══════════════════════════════════════════════
         // 12. QR Code 功能
@@ -917,6 +1026,29 @@
 
             <div class="glass rounded-3xl shadow-xl border border-white/50 p-6 space-y-5">
 
+                <!-- 後端模式選擇 -->
+                <div class="bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <div class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">連線方式</div>
+                    <div class="space-y-2.5" id="mode-selector">
+                        <label class="flex items-start gap-3 cursor-pointer group">
+                            <input type="radio" name="backend-mode" value="firebase" checked
+                                class="mt-0.5 accent-indigo-600 w-4 h-4 shrink-0">
+                            <div>
+                                <div class="text-sm font-semibold text-gray-800">★ 區域連線</div>
+                                <div class="text-xs text-gray-500 mt-0.5">面對面同樂、適合同一空間</div>
+                            </div>
+                        </label>
+                        <label class="flex items-start gap-3 cursor-pointer group">
+                            <input type="radio" name="backend-mode" value="socket"
+                                class="mt-0.5 accent-indigo-600 w-4 h-4 shrink-0">
+                            <div>
+                                <div class="text-sm font-semibold text-gray-800">○ 雲端連線</div>
+                                <div class="text-xs text-gray-500 mt-0.5">遠距約戰、穩定連線</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Nickname -->
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">你的暱稱</label>
@@ -1006,6 +1138,9 @@
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
                     <span id="player-count-badge">0</span> 人
                 </div>
+
+                <!-- Mode badge -->
+                <div id="room-mode-badge" class="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0 hidden"></div>
 
                 <!-- QR Code -->
                 <button id="btn-qr-code"
