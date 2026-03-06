@@ -186,6 +186,10 @@
                 reconnBanner.classList.add('hidden');
                 setLoading(false); // 連線成功，關閉 loading
                 console.log('🟢 Socket.io 連線 OK');
+                // 重連後自動重新加入房間（新 socket.id，伺服器不認識，需重新 join）
+                if (currentRoomId && myPlayerName) {
+                    socket.emit('join_room', { roomId: currentRoomId, playerId: myPlayerId, playerName: myPlayerName });
+                }
             });
             socket.on('disconnect', () => {
                 if (currentRoomId) reconnBanner.classList.remove('hidden');
@@ -361,9 +365,17 @@
             joinRoomById(roomId, name);
         }
 
-        /** 短暫斷線後重連（不重新加入，只刷新 isOnline 狀態） */
+        /** 短暫斷線後重連（Socket.io：重新 join_room；Firebase：刷新 isOnline 狀態） */
         async function reEnter() {
-            if (!currentRoomId || !currentUser) return;
+            if (!currentRoomId) return;
+            if (useSocketMode) {
+                // Socket.io 模式：若已連線就直接重新加入房間，否則等 connect 事件觸發
+                if (socket?.connected) {
+                    socket.emit('join_room', { roomId: currentRoomId, playerId: myPlayerId, playerName: myPlayerName });
+                }
+                return;
+            }
+            if (!currentUser) return;
             try {
                 await update(myRef(currentRoomId), { isOnline: true });
                 armDisconnect(currentRoomId);
