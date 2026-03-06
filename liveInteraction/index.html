@@ -184,13 +184,19 @@
 
             socket.on('connect', () => {
                 reconnBanner.classList.add('hidden');
+                setLoading(false); // 連線成功，關閉 loading
                 console.log('🟢 Socket.io 連線 OK');
             });
             socket.on('disconnect', () => {
                 if (currentRoomId) reconnBanner.classList.remove('hidden');
             });
+            // 冷啟動提示：只警告一次，防止重試期間變瘼串 toast
+            let coldStartWarned = false;
             socket.on('connect_error', () => {
-                toast('雲端伺服器連線失敗，請確認伺服器狀態', 'error');
+                if (!coldStartWarned) {
+                    coldStartWarned = true;
+                    toast('雲端啟動中，首次連線需 30～50 秒，請稍候再試…', 'warning');
+                }
             });
 
             // ─ 玩家列表 ─
@@ -223,21 +229,38 @@
 
         async function socketCreateRoom(roomId, name) {
             connectSocket();
+            // 如果未連線，境端提示冷啟動
+            if (!socket.connected) {
+                setLoading(true, '雲端啟動中...（首次連線需 30～50 秒，請耐心等候）');
+                await new Promise((res, rej) => {
+                    const ok = () => { socket.off('connect_error', err); res(); };
+                    const err = () => { }; // 已由 connect_error handler 提示
+                    socket.once('connect', ok);
+                    setTimeout(() => { socket.off('connect', ok); rej(new Error('雲端伺服器針時無回應，請稍候再試（冷啟動最長需 50 秒）')); }, 60000);
+                });
+            }
             return new Promise((resolve, reject) => {
                 socket.once('room_created', resolve);
                 socket.once('error', e => reject(new Error(e.message)));
                 socket.emit('create_room', { roomId, playerId: myPlayerId, playerName: name });
-                setTimeout(() => reject(new Error('逾時')), 8000);
+                setTimeout(() => reject(new Error('雲端伺服器針時無回應，請稍候再試')), 10000);
             });
         }
 
         async function socketJoinRoom(roomId, name) {
             connectSocket();
+            if (!socket.connected) {
+                setLoading(true, '雲端啟動中...（首次連線需 30～50 秒，請耐心等候）');
+                await new Promise((res, rej) => {
+                    socket.once('connect', res);
+                    setTimeout(() => rej(new Error('雲端伺服器針時無回應，請稍候再試（冷啟動最長需 50 秒）')), 60000);
+                });
+            }
             return new Promise((resolve, reject) => {
                 socket.once('room_joined', resolve);
                 socket.once('error', e => reject(new Error(e.message)));
                 socket.emit('join_room', { roomId, playerId: myPlayerId, playerName: name });
-                setTimeout(() => reject(new Error('逾時')), 8000);
+                setTimeout(() => reject(new Error('雲端伺服器針時無回應，請稍候再試')), 10000);
             });
         }
 
