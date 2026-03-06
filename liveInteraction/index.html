@@ -83,6 +83,13 @@
         let unsubMeta = null;
         let unsubPlyr = null;
         let unsubReact = null;
+        let unsubChatPub = null;
+        let unsubChatInbox = null;
+        let unsubPending = null;  // host listens for pending messages
+
+        let activeTab = 'players'; // 'players' | 'chat'
+        let wakeLock = null;
+        let roomPlayers = {};  // { playerId: { name, isOnline } } — kept in sync for recipient picker
 
         // ══════════════════════════════════════════════
         // 4. UI 元素
@@ -140,12 +147,25 @@
         }
 
         // ══════════════════════════════════════════════
-        // 6. Firebase 輔助
+        // 6. Firebase 輔助 & Wake Lock
         // ══════════════════════════════════════════════
         const myRef = roomId => ref(db, `${DB_ROOT}/${roomId}/players/${myPlayerId}`);
 
         function armDisconnect(roomId) {
             onDisconnect(myRef(roomId)).update({ isOnline: false });
+        }
+
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            try {
+                if (wakeLock) await wakeLock.release();
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+                console.log('🔆 Wake Lock 已啟動');
+            } catch (e) { console.warn('Wake Lock 失敗:', e.message); }
+        }
+        async function releaseWakeLock() {
+            if (wakeLock) { await wakeLock.release(); wakeLock = null; }
         }
 
         // ══════════════════════════════════════════════
@@ -168,6 +188,7 @@
                 listen(roomId);
                 displayCode.textContent = roomId;
                 btnDelete.classList.remove('hidden');
+                requestWakeLock(); // 房主啟用螢幕長亮
                 showScreen('room');
                 toast(`✅ 房間 ${roomId} 已建立`, 'success');
             } catch (err) {
@@ -275,10 +296,16 @@
                 if (unsubMeta) { off(ref(db, `${DB_ROOT}/${currentRoomId}`)); unsubMeta = null; }
                 if (unsubPlyr) { off(ref(db, `${DB_ROOT}/${currentRoomId}/players`)); unsubPlyr = null; }
                 if (unsubReact) { off(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`)); unsubReact = null; }
+                if (unsubChatPub) { off(ref(db, `${DB_ROOT}/${currentRoomId}/messages/public`)); unsubChatPub = null; }
+                if (unsubChatInbox) { off(ref(db, `${DB_ROOT}/${currentRoomId}/messages/inbox/${myPlayerId}`)); unsubChatInbox = null; }
+                if (unsubPending) { off(ref(db, `${DB_ROOT}/${currentRoomId}/actions/pendingMessage`)); unsubPending = null; }
             }
+            releaseWakeLock();
             currentRoomId = null; isHost = false; roomHostId = null;
             roomExisted = false; playerList.innerHTML = ''; countBadge.textContent = '0';
+            roomPlayers = {}; chatList.innerHTML = '';
             reconnBanner.classList.add('hidden'); btnDelete.classList.add('hidden');
+            switchTab('players');
         }
 
         // ══════════════════════════════════════════════
@@ -295,29 +322,33 @@
 
             // ── 玩家列表 ───────────────────────────────
             unsubPlyr = onValue(ref(db, `${DB_ROOT}/${roomId}/players`), snap => {
-                playerList.innerHTML = '';
+                playerList.innerHTML = ''; roomPlayers = {};
                 let online = 0;
                 if (snap.exists()) {
                     const players = snap.val();
                     Object.entries(players).forEach(([id, p]) => {
                         if (p.isOnline) online++;
+                        roomPlayers[id] = p;
                         renderCard(id, p);
                     });
                 }
-                if (!snap.exists() || Object.keys(snap.val() || {}).length === 0) {
+                if (Object.keys(roomPlayers).length === 0)
                     playerList.innerHTML = `<div class="text-center text-gray-400 py-10 text-sm"><i class="ph ph-users-three text-3xl mb-2 block opacity-30"></i>尚無玩家在線</div>`;
-                }
                 countBadge.textContent = online;
+                updateRecipientPicker();
             });
 
             // ── 表情反應 ───────────────────────────────
             unsubReact = onChildAdded(ref(db, `${DB_ROOT}/${roomId}/reactions`), snap => {
                 const d = snap.val();
                 if (!d?.emoji || !d?.senderName) return;
-                if ((d.timestamp || 0) < reactionsFrom) return; // 過濾舊表情
+                if ((d.timestamp || 0) < reactionsFrom) return;
                 showFly(d.emoji, d.senderName);
                 if (isHost) setTimeout(() => remove(snap.ref), 5000);
             });
+
+            // ── 留言板 ─────────────────────────────────
+            listenMessages(roomId);
         }
 
         async function sendReaction(emoji) {
@@ -328,6 +359,123 @@
                 });
             } catch (err) { console.error('發送表情失敗:', err); }
         }
+
+        // ══════════════════════════════════════════════
+        // 9. 留言板（Chat）
+        // ══════════════════════════════════════════════
+        const chatList = document.getElementById('chat-list');
+        const chatInput = document.getElementById('chat-input');
+        const btnSendMsg = document.getElementById('btn-send-msg');
+        const recipientSel = document.getElementById('recipient-select');
+        const chatStartTime = { v: 0 };
+
+        /** 玩家發送留言 → 寫入 pendingMessage（房主中繼路由） */
+        async function sendMessage() {
+            const text = chatInput.value.trim();
+            if (!text || !currentRoomId) return;
+            chatInput.value = '';
+            const recipientVal = recipientSel.value; // 'all' or playerId
+            const recipients = recipientVal === 'all' ? 'all' : [recipientVal];
+            try {
+                await set(ref(db, `${DB_ROOT}/${currentRoomId}/actions/pendingMessage`), {
+                    sender: myPlayerName, senderId: myPlayerId,
+                    text, recipients, timestamp: Date.now()
+                });
+            } catch (err) { console.error('發送留言失敗:', err); }
+        }
+
+        /** 房主：監聽 pendingMessage → 路由到 public 或各人 inbox */
+        function startHostRouting(roomId) {
+            unsubPending = onValue(ref(db, `${DB_ROOT}/${roomId}/actions/pendingMessage`), async snap => {
+                if (!snap.exists()) return;
+                const m = snap.val();
+                if (!m?.text || !m?.sender) return;
+                const payload = { sender: m.sender, senderId: m.senderId, text: m.text, timestamp: m.timestamp };
+                // 確認是 host 才能路由（防止重複處理）
+                if (!isHost) return;
+                if (m.recipients === 'all') {
+                    await push(ref(db, `${DB_ROOT}/${roomId}/messages/public`), payload);
+                } else {
+                    const ids = Array.isArray(m.recipients) ? m.recipients : [m.recipients];
+                    // 寫入每個收件人的 inbox
+                    for (const id of ids) {
+                        await push(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${id}`), payload);
+                    }
+                    // 房主自己也收到
+                    if (!ids.includes(myPlayerId)) {
+                        await push(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${myPlayerId}`), payload);
+                    }
+                }
+                // 清除 pending
+                await remove(snap.ref);
+            });
+        }
+
+        /** 設置訊息監聽器（public + 自己的 inbox） */
+        function listenMessages(roomId) {
+            chatStartTime.v = Date.now() - 300;
+            // 公開訊息
+            unsubChatPub = onChildAdded(ref(db, `${DB_ROOT}/${roomId}/messages/public`), snap => {
+                const m = snap.val();
+                if (!m || m.timestamp < chatStartTime.v) return;
+                renderMsg(m, false);
+            });
+            // 私人信箱
+            unsubChatInbox = onChildAdded(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${myPlayerId}`), snap => {
+                const m = snap.val();
+                if (!m || m.timestamp < chatStartTime.v) return;
+                renderMsg(m, true);
+            });
+            // 房主啟動路由器
+            if (isHost) startHostRouting(roomId);
+        }
+
+        /** 渲染訊息氣泡 */
+        function renderMsg(m, isPrivate) {
+            const isMe = m.senderId === myPlayerId;
+            const wrap = document.createElement('div');
+            wrap.className = `flex ${isMe ? 'justify-end' : 'justify-start'} mb-2 animate-cardIn`;
+            const privBadge = isPrivate
+                ? `<span class="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full mr-1">🔒私訊</span>` : '';
+            wrap.innerHTML = `
+                <div class="max-w-[75%]">
+                    ${!isMe ? `<div class="text-[10px] text-gray-400 mb-1 ml-1">${m.sender}</div>` : ''}
+                    <div class="px-3 py-2 rounded-2xl text-sm leading-relaxed ${isMe ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white text-gray-800 rounded-bl-sm shadow-sm border border-gray-100'
+                }">${privBadge}${escHtml(m.text)}</div>
+                </div>`;
+            chatList.appendChild(wrap);
+            chatList.scrollTop = chatList.scrollHeight;
+        }
+
+        function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        /** 更新收件人選擇器 */
+        function updateRecipientPicker() {
+            const cur = recipientSel.value;
+            recipientSel.innerHTML = '<option value="all">📢 所有人</option>';
+            Object.entries(roomPlayers).forEach(([id, p]) => {
+                if (id === myPlayerId || !p.isOnline) return;
+                const opt = document.createElement('option');
+                opt.value = id; opt.textContent = `🔒 ${p.name}`;
+                recipientSel.appendChild(opt);
+            });
+            if ([...recipientSel.options].some(o => o.value === cur)) recipientSel.value = cur;
+        }
+
+        /** 切換分頁 */
+        function switchTab(name) {
+            activeTab = name;
+            document.getElementById('tab-players').classList.toggle('tab-active', name === 'players');
+            document.getElementById('tab-chat').classList.toggle('tab-active', name === 'chat');
+            document.getElementById('panel-players').classList.toggle('hidden', name !== 'players');
+            document.getElementById('panel-chat').classList.toggle('hidden', name !== 'chat');
+            if (name === 'chat') chatList.scrollTop = chatList.scrollHeight;
+        }
+
+        btnSendMsg.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+        document.getElementById('tab-players').addEventListener('click', () => switchTab('players'));
+        document.getElementById('tab-chat').addEventListener('click', () => switchTab('chat'));
 
         // ══════════════════════════════════════════════
         // 9. UI 渲染
@@ -417,7 +565,10 @@
         // 10. 斷線重連事件
         // ══════════════════════════════════════════════
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && currentRoomId) reEnter();
+            if (document.visibilityState === 'visible' && currentRoomId) {
+                reEnter();
+                if (isHost) requestWakeLock(); // 房主切回前景時重新申請 Wake Lock
+            }
         });
         window.addEventListener('offline', () => {
             if (currentRoomId) reconnBanner.classList.remove('hidden');
@@ -606,6 +757,36 @@
 
         .animate-slideUp {
             animation: slideUp 0.3s ease-out both;
+        }
+
+        /* Tab navigation */
+        .tab-btn {
+            color: #9ca3af;
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: #4f46e5;
+        }
+
+        .tab-active {
+            color: #4f46e5 !important;
+            border-bottom-color: #4f46e5 !important;
+        }
+
+        /* Chat panel flex layout */
+        #panel-chat {
+            display: flex;
+        }
+
+        #panel-chat.hidden {
+            display: none;
+        }
+
+        #chat-list {
+            flex: 1;
+            min-height: 0;
         }
 
         .reaction-btn {
@@ -856,22 +1037,55 @@
             </div>
         </header>
 
-        <!-- Player list -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-4 pb-2">
-            <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest flex items-center gap-2 px-1">
-                <i class="ph ph-users text-base"></i> 在線玩家
-            </h2>
+        <!-- Tab Bar -->
+        <div class="flex border-b border-gray-100 bg-white sticky top-[68px] z-10">
+            <button id="tab-players"
+                class="tab-btn tab-active flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2">
+                <i class="ph ph-users text-base"></i>玩家列表
+            </button>
+            <button id="tab-chat"
+                class="tab-btn flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2">
+                <i class="ph ph-chat-dots text-base"></i>留言板
+            </button>
+        </div>
+
+        <!-- Panel: Players -->
+        <div id="panel-players" class="flex-1 overflow-y-auto p-4 space-y-4 pb-2">
             <div id="player-list" class="space-y-2.5">
                 <div class="text-center text-gray-400 py-12 text-sm animate-pulse">
                     <i class="ph ph-spinner text-4xl mb-2 block opacity-30"></i>載入中...
                 </div>
             </div>
-
-            <div class="mt-4 flex gap-3 bg-amber-50 border border-amber-100 rounded-2xl p-4">
+            <div class="flex gap-3 bg-amber-50 border border-amber-100 rounded-2xl p-4">
                 <i class="ph ph-lightbulb text-amber-500 text-xl shrink-0 mt-0.5"></i>
                 <p class="text-xs text-amber-800 leading-relaxed">
                     請朋友打開這個網頁，輸入上方的 <strong>4 碼房間代碼</strong> 加入。切換 App 後回來會自動重新連線，無需重新輸入代碼。
                 </p>
+            </div>
+        </div>
+
+        <!-- Panel: Chat -->
+        <div id="panel-chat" class="hidden flex-col flex-1 min-h-0">
+            <!-- Messages -->
+            <div id="chat-list" class="flex-1 overflow-y-auto p-4 space-y-1 bg-gray-50"></div>
+            <!-- Recipient picker + Input -->
+            <div class="bg-white border-t border-gray-100 px-3 pt-2 pb-1">
+                <div class="flex items-center gap-2 mb-2">
+                    <i class="ph ph-paper-plane-tilt text-indigo-400 text-base shrink-0"></i>
+                    <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider shrink-0">傳給</span>
+                    <select id="recipient-select"
+                        class="flex-1 text-xs py-1 px-2 border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none">
+                        <option value="all">📢 所有人</option>
+                    </select>
+                </div>
+                <div class="flex gap-2 pb-safe">
+                    <textarea id="chat-input" rows="1" placeholder="輸入訊息…" maxlength="200"
+                        class="flex-1 resize-none px-3 py-2 border border-gray-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none bg-gray-50 leading-snug"></textarea>
+                    <button id="btn-send-msg"
+                        class="w-11 h-11 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center shadow-md shadow-indigo-500/25 transition-all active:scale-90 shrink-0 self-end">
+                        <i class="ph ph-paper-plane-tilt text-lg"></i>
+                    </button>
+                </div>
             </div>
         </div>
 
