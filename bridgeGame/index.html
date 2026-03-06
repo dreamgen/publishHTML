@@ -928,18 +928,47 @@
             );
         };
 
-        // 底抽屜叫牌面板（南家用）
+        // 底抽屜叫牌面板（南家用，可收合）
         const BiddingSheet = ({ onBid, sequence, visible }) => {
+            const [isExpanded, setIsExpanded] = useState(true);
+
+            useEffect(() => {
+                if (visible) setIsExpanded(true);
+            }, [visible]);
+
             if (!visible) return null;
+
             const highest = getCurrentHighestBid(sequence);
             const canDbl  = canDoubleNow(sequence, 2);
             const canRdbl = canRedoubleNow(sequence, 2);
 
+            // 收合狀態：只顯示可點擊的細橫條
+            if (!isExpanded) {
+                return (
+                    <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+                        <div
+                            className="glass-panel rounded-t-2xl px-4 py-2.5 flex items-center justify-center gap-2 cursor-pointer"
+                            onClick={() => setIsExpanded(true)}
+                        >
+                            <div className="w-10 h-1 bg-gray-400 rounded-full" />
+                            <span className="text-yellow-300 text-xs font-bold">展開叫牌</span>
+                            <span className="text-yellow-400 text-xs">▲</span>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
                     <div className="glass-panel rounded-t-3xl p-4 pb-safe max-h-[65vh] overflow-y-auto hide-scrollbar">
-                        {/* 拖曳條 */}
-                        <div className="w-10 h-1 bg-gray-500 rounded-full mx-auto mb-3" />
+                        {/* 拖曳條（點擊收合） */}
+                        <div
+                            className="flex items-center justify-center gap-2 cursor-pointer mb-3"
+                            onClick={() => setIsExpanded(false)}
+                        >
+                            <div className="w-10 h-1 bg-gray-500 rounded-full" />
+                            <span className="text-gray-400 text-[10px]">收合 ▼</span>
+                        </div>
                         <p className="text-yellow-300 text-center text-xs font-bold mb-3">您的叫牌</p>
                         <div className="grid grid-cols-5 gap-1 mb-3">
                             {[1,2,3,4,5,6,7].flatMap(level =>
