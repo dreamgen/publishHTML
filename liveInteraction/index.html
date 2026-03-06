@@ -223,8 +223,9 @@
             // ─ 房間被刪除 ─
             socket.on('room_deleted', () => { cleanup(); showScreen('login'); toast('房間已被削除', 'warning'); });
 
-            // ─ 錯誤 ─
-            socket.on('error', ({ message }) => toast(message, 'error'));
+            // ─ 錯誤（來自房間操作）─
+            // 不設全局 error handler，避免與 socketJoinRoom/CreateRoom 內的 once('error') 重複 toast
+            // 這些錯誤由 joinRoomById / createRoom 的 catch 處理
         }
 
         async function socketCreateRoom(roomId, name) {
@@ -337,8 +338,15 @@
                     toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！', 'success');
                 }
             } catch (err) {
-                console.error('加入失敗:', err?.code, err?.message);
-                toast(`加入房間失敗：${err?.message || err}`, 'error');
+                const msg = err?.message || String(err);
+                // 雲端房間已失效（伺服器重啟後記憶體清空）
+                if (useSocketMode && msg.includes('找不到房間')) {
+                    toast('雲端房間已失效（伺服器重啟後會清空記憶體），請重新建立房間', 'warning');
+                    forgetRoom(roomId); renderSavedRooms();
+                } else {
+                    toast(`加入房間失敗：${msg}`, 'error');
+                }
+                console.error('加入失敗:', msg);
             } finally { setLoading(false); }
         }
 
