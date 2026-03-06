@@ -217,8 +217,10 @@
             // ─ 訊息 ─
             socket.on('new_message', m => renderMsg(m, m.isPrivate));
 
-            // ─ 表情 ─
-            socket.on('new_reaction', ({ emoji, senderName }) => showFly(emoji, senderName));
+            // ─ 表情（只在房間內顯示）─
+            socket.on('new_reaction', ({ emoji, senderName }) => {
+                if (currentRoomId) showFly(emoji, senderName);
+            });
 
             // ─ 房間被刪除 ─
             socket.on('room_deleted', () => { cleanup(); showScreen('login'); toast('房間已被削除', 'warning'); });
@@ -408,7 +410,9 @@
 
         /** 清理所有本地狀態與監聽器 */
         function cleanup() {
-            if (currentRoomId) {
+            // Socket.io: 移除濺入房間的流量
+            if (useSocketMode && socket) socket.emit('leave_room');
+            if (currentRoomId && !useSocketMode) {
                 if (unsubMeta) { off(ref(db, `${DB_ROOT}/${currentRoomId}`)); unsubMeta = null; }
                 if (unsubPlyr) { off(ref(db, `${DB_ROOT}/${currentRoomId}/players`)); unsubPlyr = null; }
                 if (unsubReact) { off(ref(db, `${DB_ROOT}/${currentRoomId}/reactions`)); unsubReact = null; }
@@ -668,6 +672,10 @@
                 const modeBadge = isSocket
                     ? `<span class="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-semibold">🌐 雲端</span>`
                     : `<span class="text-[9px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full font-semibold">🏠 區域</span>`;
+                // 房主：垂梒吥刺房間（真實刪除）；成員：斷連將儓（只移除本地記錄）
+                const actionBtn = r.isHost
+                    ? `<button class="host-del-btn p-1.5 text-red-300 hover:text-red-500 transition-colors shrink-0" data-room="${r.roomId}" data-mode="${r.mode || 'firebase'}" title="刪除房間"><i class="ph ph-trash text-base"></i></button>`
+                    : `<button class="forget-btn p-1.5 text-gray-300 hover:text-gray-500 transition-colors shrink-0" data-room="${r.roomId}" title="移除記錄"><i class="ph ph-plug-x text-base"></i></button>`;
                 const item = document.createElement('div');
                 item.className = 'flex items-center gap-2.5 bg-white rounded-2xl p-3 border border-gray-100 shadow-sm';
                 item.innerHTML = `
@@ -677,11 +685,10 @@
                         <div class="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">${r.isHost ? '🏠 房主' : '👤 成員'} · ${d} ${modeBadge}</div>
                     </div>
                     <button class="rejoin-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0" data-room="${r.roomId}" data-name="${r.playerName}" data-mode="${r.mode || 'firebase'}">重新加入</button>
-                    <button class="forget-btn p-1.5 text-gray-300 hover:text-red-400 transition-colors shrink-0" data-room="${r.roomId}" title="刪除記錄"><i class="ph ph-trash text-base"></i></button>`;
+                    ${actionBtn}`;
                 item.querySelector('.rejoin-btn').addEventListener('click', e => {
                     const btn = e.currentTarget;
                     const savedMode = btn.dataset.mode === 'socket';
-                    // 恢復当初建立房間所用的模式
                     useSocketMode = savedMode;
                     document.querySelectorAll('input[name="backend-mode"]').forEach(r => {
                         r.checked = (r.value === btn.dataset.mode);
@@ -689,9 +696,29 @@
                     const name = inputName.value.trim() || btn.dataset.name;
                     joinRoomById(btn.dataset.room, name);
                 });
-                item.querySelector('.forget-btn').addEventListener('click', e => {
-                    forgetRoom(e.currentTarget.dataset.room); renderSavedRooms();
-                });
+                const hostDelBtn = item.querySelector('.host-del-btn');
+                if (hostDelBtn) {
+                    hostDelBtn.addEventListener('click', async e => {
+                        const roomId = e.currentTarget.dataset.room;
+                        const mode = e.currentTarget.dataset.mode;
+                        if (!confirm(`確定要刪除房間 ${roomId}？所有人將被移出。`)) return;
+                        forgetRoom(roomId);
+                        if (mode === 'socket') {
+                            useSocketMode = true; connectSocket();
+                            socket?.emit('delete_room', { roomId });
+                        } else {
+                            try { await remove(ref(db, `${DB_ROOT}/${roomId}`)); } catch (_) { }
+                        }
+                        renderSavedRooms();
+                        toast('房間已刪除', 'info');
+                    });
+                }
+                const forgetBtn = item.querySelector('.forget-btn');
+                if (forgetBtn) {
+                    forgetBtn.addEventListener('click', e => {
+                        forgetRoom(e.currentTarget.dataset.room); renderSavedRooms();
+                    });
+                }
                 list.appendChild(item);
             });
         }
@@ -780,7 +807,8 @@
 
         function getRoomUrl(roomId) {
             const base = window.location.origin + window.location.pathname;
-            return `${base}?room=${roomId}`;
+            const mode = useSocketMode ? 'socket' : 'firebase';
+            return `${base}?room=${roomId}&mode=${mode}`;
         }
 
         function showQR(roomId) {
@@ -816,16 +844,21 @@
         });
 
         // ── URL 參數自動加入 ─────────────────────────
-        // 掃描 QR code 後網址帶 ?room=XXXX，等 Auth 完成後自動加入
-        const urlRoom = new URLSearchParams(window.location.search).get('room')?.toUpperCase();
+        const _urlParams = new URLSearchParams(window.location.search);
+        const urlRoom = _urlParams.get('room')?.toUpperCase();
+        const urlMode = _urlParams.get('mode');
         if (urlRoom && urlRoom.length === 4) {
+            setLoading(true, '準備進入房間…');  // 立即遮蔽畫面
             inputCode.value = urlRoom;
-            // 等 Auth 狀態就緒後自動加入
+            if (urlMode === 'socket') {
+                useSocketMode = true;
+                document.querySelectorAll('input[name="backend-mode"]').forEach(r => { r.checked = (r.value === 'socket'); });
+                connectSocket();
+            }
             const unsubAutoJoin = onAuthStateChanged(auth, user => {
                 if (user) {
                     unsubAutoJoin();
                     const name = loadNick() || '玩家_' + Math.floor(Math.random() * 1000);
-                    // 短暫延遲確保 UI 初始化完畢
                     setTimeout(() => joinRoomById(urlRoom, name), 600);
                 }
             });

@@ -116,6 +116,17 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('new_reaction', { emoji, senderName: sender });
     });
 
+    // ── 刪除房間（房主）────────────────────────────────
+    socket.on('delete_room', ({ roomId }) => {
+        const info = socketMap.get(socket.id);
+        if (!info || info.roomId !== roomId) return;
+        const room = rooms.get(roomId);
+        if (!room || room.hostId !== info.playerId) return;
+        io.to(roomId).emit('room_deleted');
+        rooms.delete(roomId);
+        console.log(`房間 ${roomId} 被房主刪除`);
+    });
+
     // ── 離開房間 ──────────────────────────────────────
     socket.on('leave_room', () => handleDisconnect(socket));
 
@@ -135,7 +146,8 @@ function handleDisconnect(socket, isAbrupt = false) {
         // 短暫斷線：標記離線但保留座位
         if (room.players[playerId]) room.players[playerId].isOnline = false;
         broadcastPlayers(roomId);
-        // 60 秒後若仍未重連則移除
+        // 60秒後若仍未重連則移除，最後一人離開則保留 15 分鐘
+        const GRACE_MS = Object.keys(room.players).length === 0 ? 900000 : 60000;
         setTimeout(() => {
             const r = rooms.get(roomId);
             if (!r?.players[playerId]) return;
@@ -144,7 +156,7 @@ function handleDisconnect(socket, isAbrupt = false) {
                 broadcastPlayers(roomId);
                 if (Object.keys(r.players).length === 0) rooms.delete(roomId);
             }
-        }, 60000);
+        }, GRACE_MS);
     } else {
         delete room.players[playerId];
         broadcastPlayers(roomId);
