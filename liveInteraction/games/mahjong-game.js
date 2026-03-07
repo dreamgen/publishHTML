@@ -177,7 +177,7 @@
         // 牌背 (隱藏的牌)
         if (isHidden) {
             return (
-                <div className="w-[6vw] max-w-[28px] h-[9vw] max-h-[40px] sm:w-8 sm:h-12 md:w-10 md:h-14 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.4)] border-b-[3px] border-l-[1px] border-emerald-900 m-px flex-shrink-0 transition-transform"></div>
+                <div className="w-[5.5vw] max-w-[28px] h-[8.5vw] max-h-[40px] sm:w-8 sm:h-12 md:w-10 md:h-14 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.4)] border-b-[3px] border-l-[1px] border-emerald-900 m-px flex-shrink-0 transition-transform"></div>
             );
         }
 
@@ -191,20 +191,20 @@
             if (tile.value === 'fa') textColor = "text-green-600";
         }
 
-        // 依據不同情境設定尺寸
-        let sizeClass = "w-[11.5vw] max-w-[48px] h-[17vw] max-h-[72px] sm:w-12 sm:h-16 md:w-16 md:h-24 text-[5vw] sm:text-xl md:text-3xl border-b-[4px] border-l-[1px] shadow-md hover:-translate-y-2 cursor-pointer";
+        // 依據不同情境設定尺寸：縮小基本寬度確保 17 張牌不破版
+        let sizeClass = "w-[5.5vw] min-w-[20px] max-w-[48px] h-[8.5vw] min-h-[32px] max-h-[72px] sm:w-10 sm:h-14 md:w-14 md:h-20 text-[4vw] sm:text-xl md:text-3xl border-b-[3px] border-l-[1px] shadow-md hover:-translate-y-2 cursor-pointer";
 
         if (small) {
-            sizeClass = "w-[6vw] max-w-[28px] h-[9vw] max-h-[40px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
+            sizeClass = "w-[5vw] max-w-[28px] h-[7.5vw] max-h-[40px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
         }
         if (isDiscard) {
-            sizeClass = "w-[7.5vw] max-w-[34px] h-[11vw] max-h-[50px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
+            sizeClass = "w-[5.8vw] max-w-[34px] h-[8.5vw] max-h-[50px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
         }
         if (isOpenMeld) {
-            sizeClass = "w-[8.5vw] max-w-[38px] h-[12.5vw] max-h-[56px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4.5vw] sm:text-lg md:text-xl border-b-[3px] border-l-[1px] shadow-sm cursor-default";
+            sizeClass = "w-[6vw] max-w-[38px] h-[9vw] max-h-[56px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4vw] sm:text-lg md:text-xl border-b-[2px] border-l-[1px] shadow-sm cursor-default";
         }
         if (large) {
-            sizeClass = "w-14 h-20 sm:w-20 sm:h-28 md:w-24 md:h-36 text-3xl sm:text-5xl md:text-6xl border-b-[6px] border-l-[2px] shadow-2xl";
+            sizeClass = "w-14 h-20 sm:w-20 sm:h-28 md:w-24 md:h-36 text-3xl sm:text-5xl md:text-6xl border-b-[4px] border-l-[2px] shadow-2xl";
         }
 
         const claimedStyle = isClaimed ? "opacity-40 grayscale brightness-50 pointer-events-none" : "";
@@ -661,6 +661,7 @@
     // 8. PlayerHandView（玩家手牌視圖）
     // ══════════════════════════════════════════════════════════════════
     function PlayerHandView({ gameState: gs, mySeat, myPlayerId, backend }) {
+        const discardAreaRef = useRef(null);
         const seatKey = `seat${mySeat}`;
         const hand = gs.hands?.[seatKey] || [];
         const myMelds = gs.melds?.[seatKey] || [];
@@ -683,6 +684,13 @@
         const handleAction = async (type, extra = {}) => {
             await backend.postAction({ seat: mySeat, type, ...extra });
         };
+
+        // 棄牌區自動置底
+        useEffect(() => {
+            if (discardAreaRef.current) {
+                discardAreaRef.current.scrollTop = discardAreaRef.current.scrollHeight;
+            }
+        }, [gs.discards?.length]);
 
         if (mySeat < 0) {
             return (
@@ -729,7 +737,7 @@
 
                 {/* 中央棄牌區 */}
                 <div className="flex-1 min-h-0 relative flex justify-center items-center p-2 sm:p-4 z-0">
-                    <div className="w-full h-full max-w-3xl bg-black/20 rounded-2xl p-2 sm:p-4 overflow-y-auto flex flex-wrap content-start gap-1 sm:gap-1.5 shadow-[inset_0_4px_15px_rgba(0,0,0,0.3)] border border-emerald-800/50 scroll-smooth">
+                    <div ref={discardAreaRef} className="w-full h-full max-w-3xl bg-black/20 rounded-2xl p-2 sm:p-4 overflow-y-auto flex flex-wrap content-start gap-1 sm:gap-1.5 shadow-[inset_0_4px_15px_rgba(0,0,0,0.3)] border border-emerald-800/50 scroll-smooth hide-scrollbar">
                         {(gs.discards || []).map((t, i) => (
                             <div key={`d${i}`} className="relative">
                                 <Tile tile={t} isDiscard isClaimed={t.claimed} />
@@ -776,8 +784,8 @@
                         </div>
                     )}
 
-                    {/* 我的手牌 (修改為橫向無捲軸滑動設計，避免多牌換行遮擋畫面) */}
-                    <div className={`flex flex-nowrap justify-start sm:justify-center items-end -space-x-[2px] sm:-space-x-[1px] md:space-x-1 px-2 pb-2 sm:pb-4 max-w-5xl mx-auto w-full overflow-x-auto no-scrollbar ${canDiscard ? 'cursor-pointer' : ''}`}>
+                    {/* 我的手牌 (改為單行不換行並可橫向滑動，避免遮擋) */}
+                    <div className={`flex flex-nowrap justify-start sm:justify-center items-end -space-x-[1px] md:space-x-1 px-2 pb-2 sm:pb-4 max-w-5xl mx-auto w-full overflow-x-auto no-scrollbar ${canDiscard ? 'cursor-pointer' : ''}`}>
                         {hand.map((tile) => (
                             <div key={tile.uid} className="relative group shrink-0">
                                 <Tile tile={tile}
@@ -797,9 +805,9 @@
                     </div>
                 </div>
 
-                {/* 動作提示 Popup (吃碰槓胡) - 加入高度限制以避免選項過多遮擋 */}
+                {/* 動作提示 Popup (吃碰槓胡) - 調整為置中並限制高度 */}
                 {isMyActionPrompt && (
-                    <div className="absolute inset-x-0 top-[15%] flex flex-col items-center justify-start z-50 pointer-events-none">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center z-50 pointer-events-none pb-20">
                         <div className="bg-emerald-900/95 p-4 sm:p-5 rounded-2xl border-[2px] sm:border-[3px] border-yellow-500 flex flex-col items-center gap-2 sm:gap-3 shadow-[0_10px_40px_rgba(0,0,0,0.8)] mx-4 min-w-[260px] max-w-[340px] max-h-[60vh] overflow-y-auto no-scrollbar animate-[slideDown_0.2s_ease-out] pointer-events-auto backdrop-blur-md">
                             <p className="text-yellow-300 font-bold text-xs sm:text-sm tracking-widest bg-black/50 px-4 py-1 rounded-full shadow-inner">
                                 {seatNames[ap.from] || `座位${ap.from + 1}`} 打出了
