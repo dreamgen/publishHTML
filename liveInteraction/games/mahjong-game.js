@@ -153,7 +153,7 @@
         return {
             onGameState: (cb) => {
                 const r = gRef();
-                ctx.onValue(r, snap => cb(snap.exists() ? snap.val() : null));
+                ctx.onValue(r, snap => cb(snap.exists() ? snap.val() : { status: 'idle' }));
                 return () => ctx.off(r);
             },
             setGameState: (patch) => ctx.update(gRef(), patch),
