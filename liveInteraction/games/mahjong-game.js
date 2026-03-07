@@ -177,7 +177,7 @@
         // 牌背 (隱藏的牌)
         if (isHidden) {
             return (
-                <div className="w-[5.5vw] max-w-[28px] h-[8.5vw] max-h-[40px] sm:w-8 sm:h-12 md:w-10 md:h-14 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.4)] border-b-[3px] border-l-[1px] border-emerald-900 m-px flex-shrink-0 transition-transform"></div>
+                <div className="w-[8.5vw] max-w-[28px] h-[12.5vw] max-h-[40px] sm:w-8 sm:h-12 md:w-10 md:h-14 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.4)] border-b-[3px] border-l-[1px] border-emerald-900 m-px flex-shrink-0 transition-transform"></div>
             );
         }
 
@@ -191,20 +191,20 @@
             if (tile.value === 'fa') textColor = "text-green-600";
         }
 
-        // 依據不同情境設定尺寸：縮小基本寬度確保 17 張牌不破版
-        let sizeClass = "w-[5.5vw] min-w-[20px] max-w-[48px] h-[8.5vw] min-h-[32px] max-h-[72px] sm:w-10 sm:h-14 md:w-14 md:h-20 text-[4vw] sm:text-xl md:text-3xl border-b-[3px] border-l-[1px] shadow-md hover:-translate-y-2 cursor-pointer";
+        // 依據不同情境設定尺寸：放大基本寬度提升直式手機易讀性，並防止橫式過大
+        let sizeClass = "w-[8.5vw] min-w-[24px] max-w-[56px] h-[12.5vw] min-h-[36px] max-h-[84px] sm:w-12 sm:h-16 md:w-16 md:h-24 text-[4.5vw] sm:text-xl md:text-3xl border-b-[3px] border-l-[1px] shadow-md hover:-translate-y-2 cursor-pointer";
 
         if (small) {
-            sizeClass = "w-[5vw] max-w-[28px] h-[7.5vw] max-h-[40px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
+            sizeClass = "w-[6vw] max-w-[32px] h-[8.5vw] max-h-[48px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3.5vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
         }
         if (isDiscard) {
-            sizeClass = "w-[5.8vw] max-w-[34px] h-[8.5vw] max-h-[50px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
+            sizeClass = "w-[6vw] max-w-[38px] h-[9vw] max-h-[56px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
         }
         if (isOpenMeld) {
-            sizeClass = "w-[6vw] max-w-[38px] h-[9vw] max-h-[56px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4vw] sm:text-lg md:text-xl border-b-[2px] border-l-[1px] shadow-sm cursor-default";
+            sizeClass = "w-[7vw] max-w-[40px] h-[10vw] max-h-[60px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4vw] sm:text-lg md:text-xl border-b-[2px] border-l-[1px] shadow-sm cursor-default";
         }
         if (large) {
-            sizeClass = "w-14 h-20 sm:w-20 sm:h-28 md:w-24 md:h-36 text-3xl sm:text-5xl md:text-6xl border-b-[4px] border-l-[2px] shadow-2xl";
+            sizeClass = "w-14 h-20 sm:w-16 sm:h-24 md:w-20 md:h-28 text-3xl sm:text-4xl md:text-5xl border-b-[4px] border-l-[2px] shadow-xl";
         }
 
         const claimedStyle = isClaimed ? "opacity-40 grayscale brightness-50 pointer-events-none" : "";
@@ -595,17 +595,17 @@
 
         return (
             <div className="flex-1 h-full min-h-0 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-green-700 to-green-950 relative overflow-hidden select-none">
-                {/* 輪次資訊橫幅 */}
-                <div className="flex items-center justify-between px-3 py-2 bg-black/60 text-xs sm:text-sm text-white flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
+                {/* 輪次資訊橫幅 - 電腦版字體加大 */}
+                <div className="flex items-center justify-between px-3 py-2 bg-black/60 text-sm sm:text-base md:text-lg text-white flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
                     <div className="flex items-center gap-2">
-                        <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm">
-                            <i className="ph ph-arrow-left mr-1"></i>隱藏遊戲
+                        <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm text-xs sm:text-sm md:text-base">
+                            <i className="ph ph-arrow-left mr-1"></i>大廳
                         </button>
                     </div>
-                    <span className="font-bold text-yellow-400 text-center flex-1 mx-2 truncate tracking-widest bg-black/40 py-1 rounded-full">
+                    <span className="font-bold text-yellow-400 text-center flex-1 mx-2 truncate tracking-widest bg-black/40 py-1 md:py-1.5 rounded-full">
                         {gs.status === 'playing' ? `▶ ${seatNames[gs.currentSeat]} 的回合` : '等待開始'}
                     </span>
-                    <span className="text-emerald-300 font-bold shrink-0 bg-black/40 px-3 py-1 rounded-full">牌庫: <span className="text-yellow-400">{gs.deck?.length ?? 0}</span></span>
+                    <span className="text-emerald-300 font-bold shrink-0 bg-black/40 px-3 py-1 md:py-1.5 rounded-full text-xs sm:text-sm md:text-base">牌庫: <span className="text-yellow-400">{gs.deck?.length ?? 0}</span></span>
                 </div>
 
                 {/* 遊戲桌面區域 (十字佈局優化) */}
@@ -706,17 +706,17 @@
 
         return (
             <div className="flex-1 h-full min-h-0 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-800 to-emerald-950 overflow-hidden text-white relative">
-                {/* 狀態列 */}
-                <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-black/50 text-xs sm:text-sm flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
+                {/* 狀態列 - 電腦版字體加大 */}
+                <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-black/50 text-sm sm:text-base md:text-lg flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
                     <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm">
-                            <i className="ph ph-arrow-left mr-1"></i>隱藏遊戲
+                        <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm text-xs sm:text-sm md:text-base">
+                            <i className="ph ph-arrow-left mr-1"></i>名單
                         </button>
                     </div>
-                    <span className={`font-bold flex-1 text-center mx-2 truncate tracking-widest bg-black/40 py-1.5 rounded-full ${isMyTurn ? 'text-yellow-400 ring-1 ring-yellow-400/50 shadow-[0_0_10px_rgba(250,204,21,0.3)]' : 'text-gray-300'}`}>
+                    <span className={`font-bold flex-1 text-center mx-2 truncate tracking-widest bg-black/40 py-1.5 md:py-2 rounded-full ${isMyTurn ? 'text-yellow-400 ring-1 ring-yellow-400/50 shadow-[0_0_10px_rgba(250,204,21,0.3)]' : 'text-gray-300'}`}>
                         {isMyTurn ? '▶ 你的回合' : `等待 ${seatNames[gs.currentSeat] || '?'} 出牌`}
                     </span>
-                    <span className="text-emerald-300 font-bold shrink-0 bg-black/40 px-3 py-1.5 rounded-full">
+                    <span className="text-emerald-300 font-bold shrink-0 bg-black/40 px-3 py-1.5 md:py-2 rounded-full text-xs sm:text-sm md:text-base">
                         庫:<span className="text-yellow-400 ml-1">{gs.deck?.length ?? 0}</span>
                     </span>
                 </div>
@@ -784,8 +784,8 @@
                         </div>
                     )}
 
-                    {/* 我的手牌 (改為單行不換行並可橫向滑動，避免遮擋) */}
-                    <div className={`flex flex-nowrap justify-start sm:justify-center items-end -space-x-[1px] md:space-x-1 px-2 pb-2 sm:pb-4 max-w-5xl mx-auto w-full overflow-x-auto no-scrollbar ${canDiscard ? 'cursor-pointer' : ''}`}>
+                    {/* 我的手牌 (統一 justify-start，避免手機橫屏置中導致左側被截斷) */}
+                    <div className={`flex flex-nowrap justify-start xl:justify-center items-end -space-x-[2px] md:space-x-1 px-4 pb-2 sm:pb-4 w-full overflow-x-auto no-scrollbar ${canDiscard ? 'cursor-pointer' : ''}`}>
                         {hand.map((tile) => (
                             <div key={tile.uid} className="relative group shrink-0">
                                 <Tile tile={tile}
@@ -805,33 +805,33 @@
                     </div>
                 </div>
 
-                {/* 動作提示 Popup (吃碰槓胡) - 調整為置中並限制高度 */}
+                {/* 動作提示 Popup (吃碰槓胡) - 縮小且置中避免遮擋 */}
                 {isMyActionPrompt && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center z-50 pointer-events-none pb-20">
-                        <div className="bg-emerald-900/95 p-4 sm:p-5 rounded-2xl border-[2px] sm:border-[3px] border-yellow-500 flex flex-col items-center gap-2 sm:gap-3 shadow-[0_10px_40px_rgba(0,0,0,0.8)] mx-4 min-w-[260px] max-w-[340px] max-h-[60vh] overflow-y-auto no-scrollbar animate-[slideDown_0.2s_ease-out] pointer-events-auto backdrop-blur-md">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center z-50 pointer-events-none pb-10 sm:pb-20">
+                        <div className="bg-emerald-900/95 p-3 sm:p-5 rounded-2xl border-[2px] sm:border-[3px] border-yellow-500 flex flex-col items-center gap-2 sm:gap-3 shadow-[0_10px_40px_rgba(0,0,0,0.8)] mx-4 w-max min-w-[200px] max-w-[90vw] sm:max-w-[340px] max-h-[85vh] overflow-y-auto no-scrollbar animate-[slideDown_0.2s_ease-out] pointer-events-auto backdrop-blur-md">
                             <p className="text-yellow-300 font-bold text-xs sm:text-sm tracking-widest bg-black/50 px-4 py-1 rounded-full shadow-inner">
                                 {seatNames[ap.from] || `座位${ap.from + 1}`} 打出了
                             </p>
-                            <div className="transform scale-110 sm:scale-125 my-1 sm:my-2 shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-md">
+                            <div className="my-1 shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-md">
                                 <Tile tile={ap.tile} large />
                             </div>
                             <div className="flex gap-2 flex-wrap justify-center mt-1 w-full relative z-50">
                                 {ap.options.includes('win') && (
-                                    <button onClick={() => handleAction('win')} className="flex-1 min-w-[70px] bg-gradient-to-b from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white px-2 py-2.5 rounded-xl font-black text-lg shadow-lg border-2 border-red-300 transition-transform active:scale-95 leading-none">胡</button>
+                                    <button onClick={() => handleAction('win')} className="flex-1 min-w-[60px] bg-gradient-to-b from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white px-2 py-2 rounded-xl font-black text-base sm:text-lg shadow-lg border-2 border-red-300 transition-transform active:scale-95 leading-none">胡</button>
                                 )}
                                 {ap.options.includes('pong') && (
-                                    <button onClick={() => handleAction('pong')} className="flex-1 min-w-[70px] bg-gradient-to-b from-yellow-500 to-yellow-700 hover:from-yellow-400 hover:to-yellow-600 text-white px-2 py-2.5 rounded-xl font-black text-lg shadow-lg border-2 border-yellow-300 transition-transform active:scale-95 leading-none">碰</button>
+                                    <button onClick={() => handleAction('pong')} className="flex-1 min-w-[60px] bg-gradient-to-b from-yellow-500 to-yellow-700 hover:from-yellow-400 hover:to-yellow-600 text-white px-2 py-2 rounded-xl font-black text-base sm:text-lg shadow-lg border-2 border-yellow-300 transition-transform active:scale-95 leading-none">碰</button>
                                 )}
                                 {ap.options.includes('dagang') && (
-                                    <button onClick={() => handleAction('dagang')} className="flex-1 min-w-[70px] bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 text-white px-2 py-2.5 rounded-xl font-black text-lg shadow-lg border-2 border-purple-300 transition-transform active:scale-95 leading-none">槓</button>
+                                    <button onClick={() => handleAction('dagang')} className="flex-1 min-w-[60px] bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 text-white px-2 py-2 rounded-xl font-black text-base sm:text-lg shadow-lg border-2 border-purple-300 transition-transform active:scale-95 leading-none">槓</button>
                                 )}
                                 {ap.options.includes('chow') && (ap.chowCombos || []).map((combo, ci) => (
                                     <button key={ci} onClick={() => handleAction('chow', { combo })}
-                                        className="flex-1 min-w-[80px] bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white px-2 py-2 rounded-xl font-black text-base shadow-lg border-2 border-blue-300 flex flex-col items-center justify-center leading-none transition-transform active:scale-95">
+                                        className="flex-1 min-w-[80px] bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white px-2 py-1.5 rounded-xl font-black text-sm sm:text-base shadow-lg border-2 border-blue-300 flex flex-col items-center justify-center leading-tight transition-transform active:scale-95">
                                         吃 <span className="text-[10px] font-normal opacity-90 mt-0.5">{combo[0].label}{combo[1].label}</span>
                                     </button>
                                 ))}
-                                <button onClick={() => handleAction('skip')} className="min-w-[70px] bg-gradient-to-b from-gray-600 to-gray-800 hover:from-gray-500 hover:to-gray-700 text-white px-3 py-2.5 rounded-xl font-bold text-base shadow-lg border-2 border-gray-500 transition-transform active:scale-95 ml-auto leading-none">過</button>
+                                <button onClick={() => handleAction('skip')} className="min-w-[60px] bg-gradient-to-b from-gray-600 to-gray-800 hover:from-gray-500 hover:to-gray-700 text-white px-3 py-2 rounded-xl font-bold text-sm sm:text-base shadow-lg border-2 border-gray-500 transition-transform active:scale-95 ml-auto leading-none">過</button>
                             </div>
                         </div>
                     </div>
