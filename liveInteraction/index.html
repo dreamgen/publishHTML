@@ -767,18 +767,9 @@
             if (name === 'game') {
                 if (roomHeader) roomHeader.classList.add('hidden');
                 if (roomTabBar) roomTabBar.classList.add('hidden');
-                try {
-                    const el = document.documentElement;
-                    if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
-                    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen().catch(() => { });
-                } catch (e) { }
             } else {
                 if (roomHeader) roomHeader.classList.remove('hidden');
                 if (roomTabBar) roomTabBar.classList.remove('hidden');
-                try {
-                    if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
-                    else if (document.webkitFullscreenElement) document.webkitExitFullscreen().catch(() => { });
-                } catch (e) { }
             }
 
             if (name === 'chat') {
