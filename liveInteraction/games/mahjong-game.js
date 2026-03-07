@@ -925,10 +925,15 @@
 
         const seatWinds = ['東', '南', '西', '北'];
         return (
-            <div className="flex-1 flex flex-col p-4 overflow-y-auto text-white">
-                <div className="text-center mb-5">
+            <div className="flex-1 flex flex-col p-4 overflow-y-auto text-white relative">
+                <div className="absolute top-4 left-4 z-10">
+                    <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-500 transition-colors flex items-center shadow-md">
+                        <i className="ph ph-arrow-left mr-1"></i> 返回名單
+                    </button>
+                </div>
+                <div className="text-center mb-5 mt-2">
                     <h2 className="text-2xl font-bold text-yellow-400">🀄 台灣麻將</h2>
-                    <p className="text-green-300 text-sm mt-1">區域多人 · 4 座位（未滿由 AI 補）</p>
+                    <p className="text-green-300 text-sm mt-1">區域多人 · 4 座位 (未滿由 AI 補)</p>
                 </div>
 
                 {/* 座位選擇 */}
