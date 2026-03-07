@@ -35,6 +35,8 @@
             appId: "1:1079279430768:web:644823331e777e10b018b5"
         };
         const DB_ROOT = 'artifacts/liveInteraction/public/data/rooms';
+        const CLOUD_BACKUP_ROOT = 'artifacts/liveInteraction/public/data/cloudBackup';
+        const cloudBackupRef = roomId => ref(db, `${CLOUD_BACKUP_ROOT}/${roomId}`);
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
@@ -90,6 +92,8 @@
         let unsubPending = null;  // host listens for pending messages
 
         let activeTab = 'players'; // 'players' | 'chat'
+        let unreadMsgCount = 0;
+        let historyLoadedRoomId = null; // prevent duplicate history loads per room session
         let wakeLock = null;
         let roomPlayers = {};  // { playerId: { name, isOnline } }
 
@@ -162,6 +166,59 @@
             onDisconnect(myRef(roomId)).update({ isOnline: false });
         }
 
+        /** 雲端房間備份：更新玩家快照至 Firebase（僅房主執行） */
+        async function backupPlayers(players) {
+            if (!useSocketMode || !isHost || !currentUser || !currentRoomId) return;
+            try {
+                await update(cloudBackupRef(currentRoomId), {
+                    hostId: roomHostId,
+                    lastUpdated: Date.now(),
+                    players: players.map(p => ({ id: p.id, name: p.name }))
+                });
+            } catch (e) { console.warn('備份玩家失敗:', e); }
+        }
+
+        /** 雲端房間備份：追加訊息至 Firebase（含私訊，僅房主執行） */
+        async function backupMessage(msg) {
+            if (!useSocketMode || !isHost || !currentUser || !currentRoomId) return;
+            try {
+                const entry = {
+                    sender: msg.sender, senderId: msg.senderId,
+                    text: msg.text, timestamp: msg.timestamp,
+                    isPrivate: !!msg.isPrivate
+                };
+                if (msg.isPrivate && msg.recipients) entry.recipients = msg.recipients;
+                await push(ref(db, `${CLOUD_BACKUP_ROOT}/${currentRoomId}/messages`), entry);
+                await update(cloudBackupRef(currentRoomId), { lastUpdated: Date.now() });
+            } catch (e) { console.warn('備份訊息失敗:', e); }
+        }
+
+        /** 雲端房間備份：讀取 Firebase 備份，回傳物件或 null */
+        async function loadCloudBackup(roomId) {
+            if (!currentUser) return null;
+            try {
+                const snap = await get(cloudBackupRef(roomId));
+                return snap.exists() ? snap.val() : null;
+            } catch (e) { return null; }
+        }
+
+        /** 從 Firebase 備份載入歷史訊息，含私訊過濾，每個 roomId 只載入一次 */
+        async function loadHistoryFromBackup(roomId) {
+            if (historyLoadedRoomId === roomId || !currentUser) return;
+            historyLoadedRoomId = roomId; // 立即標記，防止 race condition 重複載入
+            const backup = await loadCloudBackup(roomId);
+            if (!backup?.messages) return;
+            const msgs = Object.values(backup.messages)
+                .filter(m => !m.isPrivate || m.senderId === myPlayerId || m.recipients?.includes(myPlayerId) || isHost)
+                .sort((a, b) => a.timestamp - b.timestamp);
+            if (msgs.length === 0) return;
+            const sep = document.createElement('div');
+            sep.className = 'text-center text-[10px] text-gray-400 py-2 select-none';
+            sep.textContent = '── 歷史訊息 ──';
+            chatList.appendChild(sep);
+            msgs.forEach(m => renderMsg(m, !!m.isPrivate));
+        }
+
         async function requestWakeLock() {
             if (!('wakeLock' in navigator)) return;
             try {
@@ -186,6 +243,10 @@
                 reconnBanner.classList.add('hidden');
                 setLoading(false); // 連線成功，關閉 loading
                 console.log('🟢 Socket.io 連線 OK');
+                // 重連後自動重新加入房間（新 socket.id，伺服器不認識，需重新 join）
+                if (currentRoomId && myPlayerName) {
+                    socket.emit('join_room', { roomId: currentRoomId, playerId: myPlayerId, playerName: myPlayerName });
+                }
             });
             socket.on('disconnect', () => {
                 if (currentRoomId) reconnBanner.classList.remove('hidden');
@@ -212,10 +273,17 @@
                 if (players.length === 0) playerList.innerHTML = `<div class="text-center text-gray-400 py-10 text-sm"><i class="ph ph-users-three text-3xl mb-2 block opacity-30"></i>尚無玩家在線</div>`;
                 countBadge.textContent = online;
                 updateRecipientPicker();
+                backupPlayers(players); // 房主備份玩家快照
             });
 
             // ─ 訊息 ─
-            socket.on('new_message', m => renderMsg(m, m.isPrivate));
+            socket.on('new_message', m => {
+                const shouldDisplay = !m.isPrivate
+                    || m.senderId === myPlayerId
+                    || (Array.isArray(m.recipients) && m.recipients.includes(myPlayerId));
+                if (shouldDisplay) renderMsg(m, m.isPrivate);
+                if (isHost) backupMessage(m); // 房主仍備份所有訊息（含他人私訊，不顯示）
+            });
 
             // ─ 表情（只在房間內顯示）─
             socket.on('new_reaction', ({ emoji, senderName }) => {
@@ -282,6 +350,8 @@
             try {
                 if (useSocketMode) {
                     await socketCreateRoom(roomId, name);
+                    // 初始化 Firebase 備份
+                    if (currentUser) update(cloudBackupRef(roomId), { hostId: myPlayerId, createdAt: Date.now(), lastUpdated: Date.now() }).catch(() => {});
                     saveRoom(roomId, true, myPlayerName);
                     displayCode.textContent = roomId;
                     showScreen('room');
@@ -318,6 +388,7 @@
                     displayCode.textContent = roomId;
                     btnDelete.classList.toggle('hidden', !isHost);
                     showScreen('room');
+                    loadHistoryFromBackup(roomId); // fire-and-forget；guard 防止重複載入
                     toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！（雲端）', 'success');
                 } else {
                     const snap = await get(ref(db, `${DB_ROOT}/${roomId}`));
@@ -341,10 +412,37 @@
                 }
             } catch (err) {
                 const msg = err?.message || String(err);
-                // 雲端房間已失效（伺服器重啟後記憶體清空）
+                // 雲端房間已失效：嘗試從 Firebase 備份還原
                 if (useSocketMode && msg.includes('找不到房間')) {
-                    toast('雲端房間已失效（伺服器重啟後會清空記憶體），請重新建立房間', 'warning');
-                    forgetRoom(roomId); renderSavedRooms();
+                    const backup = await loadCloudBackup(roomId);
+                    if (backup) {
+                        try {
+                            // 嘗試重建雲端房間；若已被他人搶先建立則直接加入
+                            try {
+                                await socketCreateRoom(roomId, myPlayerName);
+                                isHost = true;
+                                if (currentUser) update(cloudBackupRef(roomId), { hostId: myPlayerId, lastUpdated: Date.now() }).catch(() => {});
+                            } catch (createErr) {
+                                if (createErr.message?.includes('已存在')) {
+                                    const joinResult = await socketJoinRoom(roomId, myPlayerName);
+                                    isHost = joinResult.isHost;
+                                } else { throw createErr; }
+                            }
+                            currentRoomId = roomId;
+                            saveRoom(roomId, isHost, myPlayerName);
+                            displayCode.textContent = roomId;
+                            btnDelete.classList.toggle('hidden', !isHost);
+                            showScreen('room');
+                            await loadHistoryFromBackup(roomId); // 載入備份訊息（含私訊過濾）
+                            toast('🔄 已從備份還原雲端房間', 'success');
+                        } catch (restoreErr) {
+                            toast(`還原失敗：${restoreErr.message}`, 'error');
+                            console.error('備份還原失敗:', restoreErr);
+                        }
+                    } else {
+                        toast('雲端房間已失效（伺服器重啟後會清空記憶體），請重新建立房間', 'warning');
+                        forgetRoom(roomId); renderSavedRooms();
+                    }
                 } else {
                     toast(`加入房間失敗：${msg}`, 'error');
                 }
@@ -361,9 +459,17 @@
             joinRoomById(roomId, name);
         }
 
-        /** 短暫斷線後重連（不重新加入，只刷新 isOnline 狀態） */
+        /** 短暫斷線後重連（Socket.io：重新 join_room；Firebase：刷新 isOnline 狀態） */
         async function reEnter() {
-            if (!currentRoomId || !currentUser) return;
+            if (!currentRoomId) return;
+            if (useSocketMode) {
+                // Socket.io 模式：若已連線就直接重新加入房間，否則等 connect 事件觸發
+                if (socket?.connected) {
+                    socket.emit('join_room', { roomId: currentRoomId, playerId: myPlayerId, playerName: myPlayerName });
+                }
+                return;
+            }
+            if (!currentUser) return;
             try {
                 await update(myRef(currentRoomId), { isOnline: true });
                 armDisconnect(currentRoomId);
@@ -388,7 +494,10 @@
             try {
                 const rid = currentRoomId;
                 forgetRoom(rid);
-                if (useSocketMode) { socket?.emit('delete_room', { roomId: rid }); cleanup(); showScreen('login'); toast('房間已刪除'); }
+                if (useSocketMode) {
+                    if (currentUser) remove(cloudBackupRef(rid)).catch(() => {}); // 同步清除 Firebase 備份
+                    socket?.emit('delete_room', { roomId: rid }); cleanup(); showScreen('login'); toast('房間已刪除');
+                }
                 else { await remove(ref(db, `${DB_ROOT}/${rid}`)); }
             } catch (err) { console.error('刪除失敗:', err); toast('刪除失敗，請重試', 'error'); setLoading(false); }
         }
@@ -421,11 +530,14 @@
                 if (unsubPending) { off(ref(db, `${DB_ROOT}/${currentRoomId}/actions/pendingMessage`)); unsubPending = null; }
             }
             releaseWakeLock();
-            currentRoomId = null; isHost = false; roomHostId = null;
+            currentRoomId = null; isHost = false; roomHostId = null; historyLoadedRoomId = null;
             roomExisted = false; playerList.innerHTML = ''; countBadge.textContent = '0';
             roomPlayers = {}; chatList.innerHTML = '';
             reconnBanner.classList.add('hidden'); btnDelete.classList.add('hidden');
+            currentRecipient = 'all';
             switchTab('players');
+            unreadMsgCount = 0;
+            document.getElementById('chat-unread-badge')?.classList.add('hidden');
         }
 
         // ══════════════════════════════════════════════
@@ -490,7 +602,9 @@
         const chatList = document.getElementById('chat-list');
         const chatInput = document.getElementById('chat-input');
         const btnSendMsg = document.getElementById('btn-send-msg');
-        const recipientSel = document.getElementById('recipient-select');
+        const recipientContainer = document.getElementById('recipient-container');
+        let currentRecipient = 'all'; // 'all' | playerId string
+        const MAX_RECIPIENT_BTNS = 5; // 含溢出下拉的最大槽位數
         const chatStartTime = { v: 0 };
 
         /** 玩家發送留言 */
@@ -498,8 +612,7 @@
             const text = chatInput.value.trim();
             if (!text || !currentRoomId) return;
             chatInput.value = '';
-            const recipientVal = recipientSel.value;
-            const recipients = recipientVal === 'all' ? 'all' : [recipientVal];
+            const recipients = currentRecipient === 'all' ? 'all' : [currentRecipient];
             if (useSocketMode) {
                 socket?.emit('send_message', { text, recipients });
             } else {
@@ -529,10 +642,7 @@
                     for (const id of ids) {
                         await push(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${id}`), payload);
                     }
-                    // 房主自己也收到
-                    if (!ids.includes(myPlayerId)) {
-                        await push(ref(db, `${DB_ROOT}/${roomId}/messages/inbox/${myPlayerId}`), payload);
-                    }
+                    // 注意：房主只在被明確指定為收件人時才收到（id 在 ids 中），不強制加入
                 }
                 // 清除 pending
                 await remove(snap.ref);
@@ -558,6 +668,11 @@
             if (isHost) startHostRouting(roomId);
         }
 
+        /** 判斷聊天列表是否捲動到底部（60px 容差） */
+        function isAtBottom() {
+            return chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight < 60;
+        }
+
         /** 渲染訊息氣泡 */
         function renderMsg(m, isPrivate) {
             const isMe = m.senderId === myPlayerId;
@@ -572,22 +687,59 @@
                 }">${privBadge}${escHtml(m.text)}</div>
                 </div>`;
             chatList.appendChild(wrap);
-            chatList.scrollTop = chatList.scrollHeight;
+            if (isMe || isAtBottom()) chatList.scrollTop = chatList.scrollHeight;
+            // 未讀計數：不在留言板，或在留言板但已捲離底部
+            if (activeTab !== 'chat' || !isAtBottom()) {
+                unreadMsgCount++;
+                const badge = document.getElementById('chat-unread-badge');
+                if (badge) { badge.textContent = unreadMsgCount > 99 ? '99+' : unreadMsgCount; badge.classList.remove('hidden'); }
+            }
         }
 
         function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
-        /** 更新收件人選擇器 */
+        /** 更新收件人選擇器（按鈕式，超量才用下拉） */
         function updateRecipientPicker() {
-            const cur = recipientSel.value;
-            recipientSel.innerHTML = '<option value="all">📢 所有人</option>';
+            const items = [{ id: 'all', label: '📢 所有人' }];
             Object.entries(roomPlayers).forEach(([id, p]) => {
                 if (id === myPlayerId || !p.isOnline) return;
-                const opt = document.createElement('option');
-                opt.value = id; opt.textContent = `🔒 ${p.name}`;
-                recipientSel.appendChild(opt);
+                items.push({ id, label: p.name });
             });
-            if ([...recipientSel.options].some(o => o.value === cur)) recipientSel.value = cur;
+            // 若當前選擇已不存在則回到「所有人」
+            if (!items.some(it => it.id === currentRecipient)) currentRecipient = 'all';
+
+            recipientContainer.innerHTML = '';
+
+            const makeBtn = (item) => {
+                const btn = document.createElement('button');
+                const active = currentRecipient === item.id;
+                btn.className = `text-xs px-2.5 py-1 rounded-xl font-medium transition-colors shrink-0 ${active ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`;
+                btn.textContent = item.label;
+                btn.addEventListener('click', () => { currentRecipient = item.id; updateRecipientPicker(); });
+                return btn;
+            };
+
+            if (items.length <= MAX_RECIPIENT_BTNS) {
+                items.forEach(it => recipientContainer.appendChild(makeBtn(it)));
+            } else {
+                // 前 (MAX-1) 個為按鈕，其餘放入下拉
+                items.slice(0, MAX_RECIPIENT_BTNS - 1).forEach(it => recipientContainer.appendChild(makeBtn(it)));
+                const overflow = items.slice(MAX_RECIPIENT_BTNS - 1);
+                const sel = document.createElement('select');
+                sel.className = 'text-xs py-1 px-1.5 border border-gray-200 rounded-xl bg-white text-gray-700 outline-none max-w-[90px]';
+                const overflowSel = overflow.find(it => it.id === currentRecipient);
+                const ph = document.createElement('option');
+                ph.value = ''; ph.textContent = overflowSel ? overflowSel.label : '更多…'; ph.disabled = !overflowSel;
+                sel.appendChild(ph);
+                overflow.forEach(it => {
+                    const opt = document.createElement('option');
+                    opt.value = it.id; opt.textContent = it.label;
+                    if (it.id === currentRecipient) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+                sel.addEventListener('change', () => { if (sel.value) { currentRecipient = sel.value; updateRecipientPicker(); } });
+                recipientContainer.appendChild(sel);
+            }
         }
 
         /** 切換分頁 */
@@ -597,13 +749,24 @@
             document.getElementById('tab-chat').classList.toggle('tab-active', name === 'chat');
             document.getElementById('panel-players').classList.toggle('hidden', name !== 'players');
             document.getElementById('panel-chat').classList.toggle('hidden', name !== 'chat');
-            if (name === 'chat') chatList.scrollTop = chatList.scrollHeight;
+            if (name === 'chat') {
+                unreadMsgCount = 0;
+                const badge = document.getElementById('chat-unread-badge');
+                if (badge) badge.classList.add('hidden');
+                chatList.scrollTop = chatList.scrollHeight;
+            }
         }
 
         btnSendMsg.addEventListener('click', sendMessage);
         chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
         document.getElementById('tab-players').addEventListener('click', () => switchTab('players'));
         document.getElementById('tab-chat').addEventListener('click', () => switchTab('chat'));
+        chatList.addEventListener('scroll', () => {
+            if (isAtBottom() && activeTab === 'chat' && unreadMsgCount > 0) {
+                unreadMsgCount = 0;
+                document.getElementById('chat-unread-badge')?.classList.add('hidden');
+            }
+        });
 
         // ══════════════════════════════════════════════
         // 9. UI 渲染
@@ -1256,6 +1419,8 @@
             <button id="tab-chat"
                 class="tab-btn flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2">
                 <i class="ph ph-chat-dots text-base"></i>留言板
+                <span id="chat-unread-badge"
+                    class="hidden min-w-[1.1rem] h-[1.1rem] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none"></span>
             </button>
         </div>
 
@@ -1283,10 +1448,7 @@
                 <div class="flex items-center gap-2 mb-2">
                     <i class="ph ph-paper-plane-tilt text-indigo-400 text-base shrink-0"></i>
                     <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider shrink-0">傳給</span>
-                    <select id="recipient-select"
-                        class="flex-1 text-xs py-1 px-2 border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none">
-                        <option value="all">📢 所有人</option>
-                    </select>
+                    <div id="recipient-container" class="flex-1 flex flex-wrap gap-1.5 min-w-0"></div>
                 </div>
                 <div class="flex gap-2 pb-safe">
                     <textarea id="chat-input" rows="1" placeholder="輸入訊息…" maxlength="200"

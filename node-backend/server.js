@@ -146,8 +146,10 @@ function handleDisconnect(socket, isAbrupt = false) {
         // 短暫斷線：標記離線但保留座位
         if (room.players[playerId]) room.players[playerId].isOnline = false;
         broadcastPlayers(roomId);
-        // 60秒後若仍未重連則移除，最後一人離開則保留 15 分鐘
-        const GRACE_MS = Object.keys(room.players).length === 0 ? 900000 : 60000;
+        // 60秒後若仍未重連則移除；若已無其他在線玩家則保留 15 分鐘
+        const hasOtherOnline = Object.entries(room.players)
+            .some(([id, p]) => id !== playerId && p.isOnline);
+        const GRACE_MS = hasOtherOnline ? 60000 : 900000;
         setTimeout(() => {
             const r = rooms.get(roomId);
             if (!r?.players[playerId]) return;
@@ -160,7 +162,13 @@ function handleDisconnect(socket, isAbrupt = false) {
     } else {
         delete room.players[playerId];
         broadcastPlayers(roomId);
-        if (Object.keys(room.players).length === 0) rooms.delete(roomId);
+        if (Object.keys(room.players).length === 0) {
+            // 最後一人主動離開：保留房間 15 分鐘，讓玩家可立即重連
+            setTimeout(() => {
+                const r = rooms.get(roomId);
+                if (r && Object.keys(r.players).length === 0) rooms.delete(roomId);
+            }, 900000);
+        }
     }
 }
 
