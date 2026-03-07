@@ -16,6 +16,12 @@
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <!-- Socket.io client (Mode B) -->
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- React + Babel for Game Panel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 遊戲腳本（每個遊戲一個獨立檔案） -->
+    <script type="text/babel" src="./games/mahjong-game.js" data-presets="react"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -366,6 +372,7 @@
                     btnDelete.classList.remove('hidden');
                     requestWakeLock();
                     showScreen('room');
+                    window.dispatchEvent(new CustomEvent('mahjong:room-enter', { detail: { roomId: currentRoomId, isHost, myPlayerId, myPlayerName } }));
                     toast(`✅ 房間 ${roomId} 已建立`, 'success');
                 }
             } catch (err) {
@@ -408,6 +415,7 @@
                     displayCode.textContent = roomId;
                     btnDelete.classList.toggle('hidden', !isHost);
                     showScreen('room');
+                    window.dispatchEvent(new CustomEvent('mahjong:room-enter', { detail: { roomId: currentRoomId, isHost, myPlayerId, myPlayerName } }));
                     toast(existed ? '✅ 已重新連上房間！' : '🎉 成功加入房間！', 'success');
                 }
             } catch (err) {
@@ -538,6 +546,7 @@
             switchTab('players');
             unreadMsgCount = 0;
             document.getElementById('chat-unread-badge')?.classList.add('hidden');
+            window.dispatchEvent(new CustomEvent('mahjong:room-leave'));
         }
 
         // ══════════════════════════════════════════════
@@ -747,8 +756,11 @@
             activeTab = name;
             document.getElementById('tab-players').classList.toggle('tab-active', name === 'players');
             document.getElementById('tab-chat').classList.toggle('tab-active', name === 'chat');
+            document.getElementById('tab-game').classList.toggle('tab-active', name === 'game');
             document.getElementById('panel-players').classList.toggle('hidden', name !== 'players');
             document.getElementById('panel-chat').classList.toggle('hidden', name !== 'chat');
+            document.getElementById('panel-game').classList.toggle('hidden', name !== 'game');
+            document.getElementById('reaction-bar-wrapper').classList.toggle('hidden', name === 'game');
             if (name === 'chat') {
                 unreadMsgCount = 0;
                 const badge = document.getElementById('chat-unread-badge');
@@ -761,6 +773,7 @@
         chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
         document.getElementById('tab-players').addEventListener('click', () => switchTab('players'));
         document.getElementById('tab-chat').addEventListener('click', () => switchTab('chat'));
+        document.getElementById('tab-game').addEventListener('click', () => switchTab('game'));
         chatList.addEventListener('scroll', () => {
             if (isAtBottom() && activeTab === 'chat' && unreadMsgCount > 0) {
                 unreadMsgCount = 0;
@@ -1027,6 +1040,16 @@
             });
         }
 
+        // ══════════════════════════════════════════════
+        // 13. Firebase Bridge for Game Panel
+        // ══════════════════════════════════════════════
+        window._gameContext = {
+            db, ref, set, get, onValue, update, push, remove, off,
+            DB_ROOT,
+            GAME_ROOT: (roomId) => `${DB_ROOT}/${roomId}/game`,
+            getMyState: () => ({ myPlayerId, myPlayerName, isHost, currentRoomId, roomHostId, roomPlayers })
+        };
+
     </script>
 
     <style>
@@ -1128,6 +1151,15 @@
         }
 
         #panel-chat.hidden {
+            display: none;
+        }
+
+        /* Game panel flex layout */
+        #panel-game {
+            display: flex;
+        }
+
+        #panel-game.hidden {
             display: none;
         }
 
@@ -1422,6 +1454,10 @@
                 <span id="chat-unread-badge"
                     class="hidden min-w-[1.1rem] h-[1.1rem] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none"></span>
             </button>
+            <button id="tab-game"
+                class="tab-btn flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2">
+                <i class="ph ph-game-controller text-base"></i>遊戲
+            </button>
         </div>
 
         <!-- Panel: Players -->
@@ -1461,8 +1497,13 @@
             </div>
         </div>
 
+        <!-- Panel: Game -->
+        <div id="panel-game" class="hidden flex-col flex-1 min-h-0 overflow-hidden bg-green-900">
+            <div id="mahjong-root" class="flex-1 flex flex-col overflow-hidden"></div>
+        </div>
+
         <!-- Reaction bar -->
-        <div
+        <div id="reaction-bar-wrapper"
             class="bg-white border-t border-gray-100 shadow-[0_-8px_30px_-10px_rgba(0,0,0,0.08)] pb-safe z-20 sticky bottom-0">
             <div class="text-[10px] font-semibold text-gray-400 text-center pt-3 mb-2 uppercase tracking-widest">點擊即時反應
             </div>
