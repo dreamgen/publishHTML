@@ -177,7 +177,7 @@
     // ── Tile 元件（同 mahjongPractice，稍作尺寸調整）─────────────────
     const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn, small }) => {
         if (isHidden) {
-            return <div className="w-7 h-10 sm:w-8 sm:h-12 bg-green-700 rounded shadow-[inset_0_0_6px_rgba(0,0,0,0.4)] border-b-4 border-green-900 m-px flex-shrink-0"></div>;
+            return <div className="w-5 h-7 sm:w-6 sm:h-9 md:w-8 md:h-12 bg-green-700 rounded shadow-[inset_0_0_6px_rgba(0,0,0,0.4)] border-b-[3px] sm:border-b-4 border-green-900 m-px flex-shrink-0"></div>;
         }
         let textColor = "text-gray-900";
         if (tile.suit === 'wan') textColor = "text-red-700";
@@ -186,13 +186,13 @@
         if (tile.suit === 'yuan') {
             if (tile.value === 'zhong') textColor = "text-red-600";
             if (tile.value === 'fa') textColor = "text-green-600";
-            if (tile.value === 'bai') textColor = isOpenMeld ? "text-blue-500" : "text-blue-500 border border-blue-500 rounded-sm m-1 px-1";
+            if (tile.value === 'bai') textColor = isOpenMeld ? "text-blue-500" : "text-blue-500 border border-blue-500 rounded-sm m-0.5 sm:m-1 px-1";
         }
-        let sizeClass = "w-9 h-13 sm:w-11 sm:h-16 text-base sm:text-lg border-b-4 hover:-translate-y-2 cursor-pointer";
-        if (small) sizeClass = "w-6 h-9 text-[10px] border-b-2";
-        if (isDiscard) sizeClass = "w-6 h-9 sm:w-7 sm:h-10 text-[10px] sm:text-xs border-b-2";
-        if (isOpenMeld) sizeClass = "w-9 h-6 text-[9px] border border-gray-400 cursor-default";
-        if (large) sizeClass = "w-14 h-20 text-2xl border-b-[6px] shadow-xl";
+        let sizeClass = "w-7 h-10 sm:w-9 sm:h-13 md:w-11 md:h-16 text-sm sm:text-base md:text-lg border-b-[3px] sm:border-b-4 hover:-translate-y-2 cursor-pointer";
+        if (small) sizeClass = "w-5 h-7 sm:w-6 sm:h-9 md:w-7 md:h-10 text-[9px] sm:text-[10px] md:text-xs border-b-[2px]";
+        if (isDiscard) sizeClass = "w-5 h-7 sm:w-6 sm:h-9 md:w-7 md:h-10 text-[9px] sm:text-[10px] md:text-xs border-b-[2px]";
+        if (isOpenMeld) sizeClass = "w-6 h-5 sm:w-7 sm:h-6 md:w-9 md:h-7 text-[8px] sm:text-[9px] md:text-[10px] border border-gray-400 cursor-default p-0 flex items-center justify-center leading-none";
+        if (large) sizeClass = "w-10 h-14 sm:w-12 sm:h-16 md:w-14 md:h-20 text-lg sm:text-xl md:text-2xl border-b-[4px] sm:border-b-[6px] shadow-xl";
         const claimedStyle = isClaimed ? "opacity-30 grayscale brightness-50 pointer-events-none" : "";
         const bgStyle = isOpenMeld
             ? "bg-amber-50 shadow-sm"
@@ -203,7 +203,7 @@
             <div onClick={onClick}
                 className={`relative rounded border-gray-300 flex flex-col justify-center items-center m-px font-bold select-none transition-transform ${isOpenMeld ? '' : 'shadow-md'} ${sizeClass} ${claimedStyle} ${bgStyle}`}>
                 {isOpenMeld ? (
-                    <span className={`${textColor} whitespace-nowrap leading-none`}>{tile.label}</span>
+                    <span className={`${textColor} whitespace-nowrap leading-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full text-center block`}>{tile.label}</span>
                 ) : (
                     <>
                         <span className={textColor}>{tile.label.substring(0, 1)}</span>
@@ -630,30 +630,30 @@
                 </div>
 
                 {/* 上方 座位2（對家） */}
-                <div className="flex justify-center items-start pt-2 px-4 flex-shrink-0" style={{ minHeight: '80px' }}>
+                <div className="flex justify-center items-start pt-1 sm:pt-2 px-2 flex-shrink-0" style={{ minHeight: '60px' }}>
                     <SeatDisplay idx={2} gs={gs} seatNames={seatNames} compact={false} />
                 </div>
 
                 {/* 中間行：左 座位3 + 棄牌區 + 右 座位1 */}
-                <div className="flex flex-1 items-center gap-2 px-2 min-h-0">
+                <div className="flex flex-1 items-stretch justify-between px-1 min-h-0 w-full overflow-hidden">
                     {/* 左方 座位3 */}
-                    <div className="flex flex-col items-center flex-shrink-0" style={{ width: '70px' }}>
+                    <div className="flex flex-col items-center justify-center flex-shrink-0" style={{ minWidth: '50px' }}>
                         <SeatDisplay idx={3} gs={gs} seatNames={seatNames} vertical compact />
                     </div>
 
                     {/* 中央棄牌區 */}
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 max-w-2xl mx-1 max-h-full">
                         <HostDiscardArea gs={gs} />
                     </div>
 
                     {/* 右方 座位1 */}
-                    <div className="flex flex-col items-center flex-shrink-0" style={{ width: '70px' }}>
+                    <div className="flex flex-col items-center justify-center flex-shrink-0" style={{ minWidth: '50px' }}>
                         <SeatDisplay idx={1} gs={gs} seatNames={seatNames} vertical compact />
                     </div>
                 </div>
 
                 {/* 下方 座位0（莊家/東家） */}
-                <div className="flex justify-center items-end pb-2 px-4 flex-shrink-0" style={{ minHeight: '80px' }}>
+                <div className="flex justify-center items-end pb-1 sm:pb-2 px-2 flex-shrink-0" style={{ minHeight: '60px' }}>
                     <SeatDisplay idx={0} gs={gs} seatNames={seatNames} compact={false} />
                 </div>
 
@@ -733,12 +733,12 @@
                 </div>
 
                 {/* 其他座位牌數概覽 */}
-                <div className="flex justify-around px-2 py-1.5 bg-green-900/60 text-xs flex-shrink-0">
+                <div className="flex justify-around px-1 py-1 bg-green-900/60 text-xs sm:text-sm flex-shrink-0 shadow-inner">
                     {[0, 1, 2, 3].filter(s => s !== mySeat).map(s => {
                         const n = gs.hands?.[`seat${s}`]?.length ?? 0;
                         return (
                             <div key={s} className={`text-center px-2 py-0.5 rounded ${gs.currentSeat === s ? 'bg-yellow-900/60 border border-yellow-600' : ''}`}>
-                                <div className="text-gray-300 truncate max-w-[60px]">{seatNames[s] || `座${s + 1}`}</div>
+                                <div className="text-gray-300 truncate max-w-[50px] sm:max-w-[80px] text-[10px] sm:text-xs">{seatNames[s] || `座${s + 1}`}</div>
                                 <div className="text-yellow-300 font-bold">{n}張</div>
                             </div>
                         );
