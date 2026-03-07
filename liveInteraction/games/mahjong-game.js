@@ -193,7 +193,7 @@
 
         // 依據不同情境設定尺寸
         let sizeClass = "w-[11.5vw] max-w-[48px] h-[17vw] max-h-[72px] sm:w-12 sm:h-16 md:w-16 md:h-24 text-[5vw] sm:text-xl md:text-3xl border-b-[4px] border-l-[1px] shadow-md hover:-translate-y-2 cursor-pointer";
-        
+
         if (small) {
             sizeClass = "w-[6vw] max-w-[28px] h-[9vw] max-h-[40px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
         }
@@ -219,7 +219,7 @@
         return (
             <div onClick={onClick}
                 className={`relative rounded-md border-gray-400 flex flex-col justify-center items-center m-[1px] sm:m-[1.5px] font-bold select-none transition-all duration-200 ${sizeClass} ${claimedStyle} ${bgStyle}`}>
-                
+
                 {/* 白板特殊處理：藍色空心框 */}
                 {isBai ? (
                     <div className="w-[70%] h-[70%] border-[2px] sm:border-[3px] border-blue-500 rounded-sm"></div>
@@ -229,7 +229,7 @@
                         {tile.label.length > 1 && <span className={`${textColor} text-[0.6em] leading-none mt-1`}>{tile.label.substring(1)}</span>}
                     </>
                 )}
-                
+
                 {/* 暗槓覆蓋層 */}
                 {isAngangHidden && <div className="absolute inset-0 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-md border-b-[3px] border-l-[1px] border-emerald-950"></div>}
             </div>
@@ -256,12 +256,12 @@
         return (
             <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-50 p-4 animate-[fadeIn_0.3s_ease-out]">
                 {!isFlowGame && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-500/20 via-transparent to-transparent animate-pulse pointer-events-none"></div>}
-                
+
                 <h2 className={`text-4xl sm:text-6xl md:text-7xl font-black mb-3 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] z-10 ${isFlowGame ? 'text-gray-300' : 'text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-yellow-600'}`}>
                     {isFlowGame ? '流局（平手）' : `${winnerName} 胡牌！`}
                 </h2>
                 {winType && !isFlowGame && <p className="text-yellow-200 text-xl sm:text-2xl mb-6 tracking-[0.2em] font-bold z-10 drop-shadow-md">{winType}</p>}
-                
+
                 {yaku && yaku.length > 0 && (
                     <div className="bg-black/50 border border-yellow-600/50 rounded-2xl px-6 sm:px-10 py-5 mb-8 text-center z-10 shadow-2xl backdrop-blur-sm max-w-2xl w-full">
                         <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mb-4">
@@ -287,13 +287,13 @@
         const myMelds = gs.melds?.[seatKey] || [];
         const isCurrent = gs.currentSeat === idx;
         const tileCount = hand.length;
-        
+
         return (
             <div className={`flex flex-col items-center gap-1 sm:gap-2 transition-opacity duration-300 ${isCurrent ? 'opacity-100 scale-105' : 'opacity-70 scale-100'}`}>
                 <div className={`text-[10px] sm:text-xs font-bold px-3 py-1 rounded-full shadow-md ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}`}>
                     {seatNames[idx] || `座位${idx + 1}`} {isCurrent && ' ▶'}
                 </div>
-                
+
                 {compact ? (
                     <div className="text-yellow-300 text-xs font-bold bg-black/40 px-3 py-1.5 rounded-lg border border-black/50">{tileCount}張</div>
                 ) : (
@@ -303,7 +303,7 @@
                         ))}
                     </div>
                 )}
-                
+
                 {myMelds.length > 0 && (
                     <div className={`flex gap-1 flex-wrap justify-center ${vertical ? 'flex-col mt-2' : ''}`}>
                         {myMelds.map((meld, mi) => (
@@ -572,7 +572,7 @@
             }
             const timer = setTimeout(() => runAITurn(gs, backend, curSeat), 800);
             return () => clearTimeout(timer);
-        }, [ gs.status, gs.currentSeat, gs.pendingAction, gs.actionPrompt, gs.gangPrompt, gs.hands?.seat0?.length, gs.hands?.seat1?.length, gs.hands?.seat2?.length, gs.hands?.seat3?.length ]);
+        }, [gs.status, gs.currentSeat, gs.pendingAction, gs.actionPrompt, gs.gangPrompt, gs.hands?.seat0?.length, gs.hands?.seat1?.length, gs.hands?.seat2?.length, gs.hands?.seat3?.length]);
 
         const seatNames = gs.seatNames || ['座位1', '座位2', '座位3', '座位4'];
 
@@ -593,7 +593,7 @@
 
                 {/* 遊戲桌面區域 (十字佈局優化) */}
                 <div className="flex-1 flex flex-col min-h-0 relative p-2 sm:p-4 justify-between">
-                    
+
                     {/* 上方 座位2 (對家) */}
                     <div className="flex justify-center items-start flex-shrink-0 h-20 sm:h-28">
                         <SeatDisplay idx={2} gs={gs} seatNames={seatNames} compact={false} />
@@ -729,7 +729,7 @@
 
                 {/* 底部玩家區域 (副露 + 手牌 + 操作區) */}
                 <div className="flex-shrink-0 flex flex-col items-center pb-safe pt-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent z-10 w-full">
-                    
+
                     {/* 動作按鈕區 (自摸、槓) 浮動在手牌上方 */}
                     {canDiscard && (mySelfDrawWin || myGangOptions.length > 0) && (
                         <div className="flex gap-2 items-center mb-3 animate-[slideUp_0.2s_ease-out]">
@@ -782,31 +782,31 @@
 
                 {/* 動作提示 Popup (吃碰槓胡) */}
                 {isMyActionPrompt && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-[2px] z-50">
-                        <div className="bg-emerald-900/95 p-6 sm:p-8 rounded-3xl border-[3px] border-yellow-500 flex flex-col items-center gap-4 shadow-[0_10px_40px_rgba(0,0,0,0.6)] mx-4 min-w-[320px] animate-[slideDown_0.2s_ease-out]">
-                            <p className="text-yellow-300 font-bold text-sm sm:text-base tracking-wider bg-black/40 px-5 py-1.5 rounded-full shadow-inner">
+                    <div className="absolute inset-x-0 top-[15%] flex flex-col items-center justify-start z-50 pointer-events-none">
+                        <div className="bg-emerald-900/95 p-4 sm:p-5 rounded-2xl border-[2px] sm:border-[3px] border-yellow-500 flex flex-col items-center gap-2 sm:gap-3 shadow-[0_10px_40px_rgba(0,0,0,0.8)] mx-4 min-w-[260px] max-w-[340px] animate-[slideDown_0.2s_ease-out] pointer-events-auto backdrop-blur-md">
+                            <p className="text-yellow-300 font-bold text-xs sm:text-sm tracking-widest bg-black/50 px-4 py-1 rounded-full shadow-inner">
                                 {seatNames[ap.from] || `座位${ap.from + 1}`} 打出了
                             </p>
-                            <div className="transform scale-125 sm:scale-150 my-3 shadow-[0_0_20px_rgba(255,255,255,0.2)] rounded-md">
+                            <div className="transform scale-110 sm:scale-125 my-1 sm:my-2 shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-md">
                                 <Tile tile={ap.tile} large />
                             </div>
-                            <div className="flex gap-2 sm:gap-3 flex-wrap justify-center mt-2 w-full">
+                            <div className="flex gap-2 flex-wrap justify-center mt-1 w-full relative z-50">
                                 {ap.options.includes('win') && (
-                                    <button onClick={() => handleAction('win')} className="flex-1 min-w-[80px] bg-gradient-to-b from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white px-4 py-3 rounded-2xl font-black text-xl shadow-lg border-2 border-red-300 transition-transform active:scale-95">胡</button>
+                                    <button onClick={() => handleAction('win')} className="flex-1 min-w-[70px] bg-gradient-to-b from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white px-2 py-2.5 rounded-xl font-black text-lg shadow-lg border-2 border-red-300 transition-transform active:scale-95 leading-none">胡</button>
                                 )}
                                 {ap.options.includes('pong') && (
-                                    <button onClick={() => handleAction('pong')} className="flex-1 min-w-[80px] bg-gradient-to-b from-yellow-500 to-yellow-700 hover:from-yellow-400 hover:to-yellow-600 text-white px-4 py-3 rounded-2xl font-black text-xl shadow-lg border-2 border-yellow-300 transition-transform active:scale-95">碰</button>
+                                    <button onClick={() => handleAction('pong')} className="flex-1 min-w-[70px] bg-gradient-to-b from-yellow-500 to-yellow-700 hover:from-yellow-400 hover:to-yellow-600 text-white px-2 py-2.5 rounded-xl font-black text-lg shadow-lg border-2 border-yellow-300 transition-transform active:scale-95 leading-none">碰</button>
                                 )}
                                 {ap.options.includes('dagang') && (
-                                    <button onClick={() => handleAction('dagang')} className="flex-1 min-w-[80px] bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 text-white px-4 py-3 rounded-2xl font-black text-xl shadow-lg border-2 border-purple-300 transition-transform active:scale-95">槓</button>
+                                    <button onClick={() => handleAction('dagang')} className="flex-1 min-w-[70px] bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 text-white px-2 py-2.5 rounded-xl font-black text-lg shadow-lg border-2 border-purple-300 transition-transform active:scale-95 leading-none">槓</button>
                                 )}
                                 {ap.options.includes('chow') && (ap.chowCombos || []).map((combo, ci) => (
                                     <button key={ci} onClick={() => handleAction('chow', { combo })}
-                                        className="flex-1 min-w-[90px] bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white px-3 py-3 rounded-2xl font-black text-lg shadow-lg border-2 border-blue-300 flex flex-col items-center justify-center leading-none transition-transform active:scale-95">
-                                        吃 <span className="text-xs font-normal opacity-90 mt-1">{combo[0].label}{combo[1].label}</span>
+                                        className="flex-1 min-w-[80px] bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white px-2 py-2 rounded-xl font-black text-base shadow-lg border-2 border-blue-300 flex flex-col items-center justify-center leading-none transition-transform active:scale-95">
+                                        吃 <span className="text-[10px] font-normal opacity-90 mt-0.5">{combo[0].label}{combo[1].label}</span>
                                     </button>
                                 ))}
-                                <button onClick={() => handleAction('skip')} className="min-w-[80px] bg-gradient-to-b from-gray-500 to-gray-700 hover:from-gray-400 hover:to-gray-600 text-white px-4 py-3 rounded-2xl font-bold text-xl shadow-lg border-2 border-gray-400 transition-transform active:scale-95 ml-auto">過</button>
+                                <button onClick={() => handleAction('skip')} className="min-w-[70px] bg-gradient-to-b from-gray-600 to-gray-800 hover:from-gray-500 hover:to-gray-700 text-white px-3 py-2.5 rounded-xl font-bold text-base shadow-lg border-2 border-gray-500 transition-transform active:scale-95 ml-auto leading-none">過</button>
                             </div>
                         </div>
                     </div>

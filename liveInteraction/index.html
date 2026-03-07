@@ -767,9 +767,13 @@
             if (name === 'game') {
                 if (roomHeader) roomHeader.classList.add('hidden');
                 if (roomTabBar) roomTabBar.classList.add('hidden');
+                document.body.classList.remove('bg-gray-50');
+                document.body.classList.add('bg-emerald-950');
             } else {
                 if (roomHeader) roomHeader.classList.remove('hidden');
                 if (roomTabBar) roomTabBar.classList.remove('hidden');
+                document.body.classList.remove('bg-emerald-950');
+                document.body.classList.add('bg-gray-50');
             }
 
             if (name === 'chat') {
