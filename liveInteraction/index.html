@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>即時互動大廳</title>
     <meta name="description" content="親友聚會即時互動平台，隨開即連，分享表情反應">
     <meta name="theme-color" content="#4338ca">
@@ -1215,11 +1216,11 @@
         }
 
         body {
-            overscroll-behavior-y: contain;
+            overscroll-behavior: none;
         }
 
         .pb-safe {
-            padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+            padding-bottom: env(safe-area-inset-bottom, 8px);
         }
 
         .pt-safe {
