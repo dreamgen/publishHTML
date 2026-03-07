@@ -21,7 +21,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- 遊戲腳本（每個遊戲一個獨立檔案） -->
-    <script type="text/babel" src="./games/mahjong-game.js" data-presets="react"></script>
+    <script type="text/babel" src="liveInteraction/games/mahjong-game.js" data-presets="react"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -1220,7 +1220,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js', { scope: './' })
+                navigator.serviceWorker.register('liveInteraction/sw.js')
                     .then(r => console.log('SW OK:', r.scope))
                     .catch(e => console.warn('SW fail:', e));
             });
