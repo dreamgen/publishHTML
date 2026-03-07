@@ -769,12 +769,18 @@
 
             const roomHeader = document.getElementById('room-header');
             const roomTabBar = document.getElementById('room-tab-bar');
+            const screenRoom = document.getElementById('screen-room');
+            
             if (name === 'game') {
                 if (metaTheme) metaTheme.setAttribute('content', '#022c22'); // 深綠色，匹配遊戲桌
                 if (roomHeader) roomHeader.classList.add('hidden');
                 if (roomTabBar) roomTabBar.classList.add('hidden');
                 document.body.classList.remove('bg-gray-50');
                 document.body.classList.add('bg-emerald-950');
+                if (screenRoom) {
+                    screenRoom.classList.remove('bg-gray-50');
+                    screenRoom.classList.add('bg-emerald-950');
+                }
                 try {
                     const el = document.documentElement;
                     if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
@@ -786,6 +792,10 @@
                 if (roomTabBar) roomTabBar.classList.remove('hidden');
                 document.body.classList.remove('bg-emerald-950');
                 document.body.classList.add('bg-gray-50');
+                if (screenRoom) {
+                    screenRoom.classList.remove('bg-emerald-950');
+                    screenRoom.classList.add('bg-gray-50');
+                }
                 try {
                     if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
                     else if (document.webkitFullscreenElement) document.webkitExitFullscreen().catch(() => { });
@@ -1185,6 +1195,14 @@
             border-bottom-color: #4f46e5 !important;
         }
 
+        /* 確保畫面容器維持 Flex 排版，解決下方留白問題 */
+        #screen-room {
+            display: flex;
+        }
+        #screen-room.hidden {
+            display: none;
+        }
+
         /* Chat panel flex layout */
         #panel-chat {
             display: flex;
@@ -1427,7 +1445,7 @@
     <!-- ══════════════════════════════════════════
          畫面 2：房間內部
     ══════════════════════════════════════════ -->
-    <main id="screen-room" class="hidden flex-col flex-1 h-full min-h-0 w-full bg-gray-50">
+    <main id="screen-room" class="hidden flex flex-col flex-1 h-full min-h-0 w-full bg-gray-50">
 
         <!-- Header -->
         <header id="room-header" class="bg-white border-b border-gray-100 shadow-sm sticky top-0 pt-safe z-20">
@@ -1547,7 +1565,7 @@
 
         <!-- Panel: Game -->
         <div id="panel-game" class="hidden flex-col flex-1 min-h-0 overflow-hidden bg-green-900">
-            <div id="mahjong-root" class="flex-1 flex flex-col overflow-hidden"></div>
+            <div id="mahjong-root" class="flex-1 flex flex-col overflow-hidden w-full h-full"></div>
         </div>
 
         <!-- Reaction bar -->
