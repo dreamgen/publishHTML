@@ -153,7 +153,13 @@
         return {
             onGameState: (cb) => {
                 const r = gRef();
-                ctx.onValue(r, snap => cb(snap.exists() ? snap.val() : { status: 'idle' }));
+                ctx.onValue(r, snap => {
+                    const val = snap.exists() ? snap.val() : { status: 'idle' };
+                    // Firebase truncates sparse arrays (null values dropped), normalize to 4 slots
+                    if (val.seats)     val.seats     = Array.from({ length: 4 }, (_, i) => val.seats[i]     ?? null);
+                    if (val.seatNames) val.seatNames = Array.from({ length: 4 }, (_, i) => val.seatNames[i] ?? '');
+                    cb(val);
+                });
                 return () => ctx.off(r);
             },
             setGameState: (patch) => ctx.update(gRef(), patch),
