@@ -12,16 +12,16 @@
     // 1. 麻將常數與牌庫（同 mahjongPractice）
     // ══════════════════════════════════════════════════════════════════
     const TILE_TYPES = [
-        ...Array.from({ length: 9 }, (_, i) => ({ id: i,      suit: 'wan',  value: i + 1, label: `${i + 1}萬` })),
-        ...Array.from({ length: 9 }, (_, i) => ({ id: i + 9,  suit: 'tong', value: i + 1, label: `${i + 1}筒` })),
-        ...Array.from({ length: 9 }, (_, i) => ({ id: i + 18, suit: 'suo',  value: i + 1, label: `${i + 1}索` })),
+        ...Array.from({ length: 9 }, (_, i) => ({ id: i, suit: 'wan', value: i + 1, label: `${i + 1}萬` })),
+        ...Array.from({ length: 9 }, (_, i) => ({ id: i + 9, suit: 'tong', value: i + 1, label: `${i + 1}筒` })),
+        ...Array.from({ length: 9 }, (_, i) => ({ id: i + 18, suit: 'suo', value: i + 1, label: `${i + 1}索` })),
         { id: 27, suit: 'feng', value: 'dong', label: '東' },
-        { id: 28, suit: 'feng', value: 'nan',  label: '南' },
-        { id: 29, suit: 'feng', value: 'xi',   label: '西' },
-        { id: 30, suit: 'feng', value: 'bei',  label: '北' },
-        { id: 31, suit: 'yuan', value: 'zhong',label: '中' },
-        { id: 32, suit: 'yuan', value: 'fa',   label: '發' },
-        { id: 33, suit: 'yuan', value: 'bai',  label: '白' },
+        { id: 28, suit: 'feng', value: 'nan', label: '南' },
+        { id: 29, suit: 'feng', value: 'xi', label: '西' },
+        { id: 30, suit: 'feng', value: 'bei', label: '北' },
+        { id: 31, suit: 'yuan', value: 'zhong', label: '中' },
+        { id: 32, suit: 'yuan', value: 'fa', label: '發' },
+        { id: 33, suit: 'yuan', value: 'bai', label: '白' },
     ];
 
     function generateDeck() {
@@ -149,24 +149,24 @@
     // ══════════════════════════════════════════════════════════════════
     function makeLocalGameBackend(ctx, roomId) {
         const gPath = ctx.GAME_ROOT(roomId);
-        const gRef  = (sub) => ctx.ref(ctx.db, sub ? `${gPath}/${sub}` : gPath);
+        const gRef = (sub) => ctx.ref(ctx.db, sub ? `${gPath}/${sub}` : gPath);
         return {
             onGameState: (cb) => {
                 const r = gRef();
                 ctx.onValue(r, snap => {
                     const val = snap.exists() ? snap.val() : { status: 'idle' };
                     // Firebase truncates sparse arrays (null values dropped), normalize to 4 slots
-                    if (val.seats)     val.seats     = Array.from({ length: 4 }, (_, i) => val.seats[i]     ?? null);
+                    if (val.seats) val.seats = Array.from({ length: 4 }, (_, i) => val.seats[i] ?? null);
                     if (val.seatNames) val.seatNames = Array.from({ length: 4 }, (_, i) => val.seatNames[i] ?? '');
                     cb(val);
                 });
                 return () => ctx.off(r);
             },
             setGameState: (patch) => ctx.update(gRef(), patch),
-            initGame:     (state) => ctx.set(gRef(), state),
-            postAction:   (action) => ctx.set(gRef('pendingAction'), action),
-            clearAction:  ()       => ctx.set(gRef('pendingAction'), null),
-            resetGame:    ()       => ctx.update(gRef(), { status: 'idle', pendingAction: null, winResult: null }),
+            initGame: (state) => ctx.set(gRef(), state),
+            postAction: (action) => ctx.set(gRef('pendingAction'), action),
+            clearAction: () => ctx.set(gRef('pendingAction'), null),
+            resetGame: () => ctx.update(gRef(), { status: 'idle', pendingAction: null, winResult: null }),
         };
     }
 
@@ -180,19 +180,19 @@
             return <div className="w-7 h-10 sm:w-8 sm:h-12 bg-green-700 rounded shadow-[inset_0_0_6px_rgba(0,0,0,0.4)] border-b-4 border-green-900 m-px flex-shrink-0"></div>;
         }
         let textColor = "text-gray-900";
-        if (tile.suit === 'wan')  textColor = "text-red-700";
+        if (tile.suit === 'wan') textColor = "text-red-700";
         if (tile.suit === 'tong') textColor = "text-blue-700";
-        if (tile.suit === 'suo')  textColor = "text-green-700";
+        if (tile.suit === 'suo') textColor = "text-green-700";
         if (tile.suit === 'yuan') {
             if (tile.value === 'zhong') textColor = "text-red-600";
-            if (tile.value === 'fa')    textColor = "text-green-600";
-            if (tile.value === 'bai')   textColor = isOpenMeld ? "text-blue-500" : "text-blue-500 border border-blue-500 rounded-sm m-1 px-1";
+            if (tile.value === 'fa') textColor = "text-green-600";
+            if (tile.value === 'bai') textColor = isOpenMeld ? "text-blue-500" : "text-blue-500 border border-blue-500 rounded-sm m-1 px-1";
         }
         let sizeClass = "w-9 h-13 sm:w-11 sm:h-16 text-base sm:text-lg border-b-4 hover:-translate-y-2 cursor-pointer";
-        if (small)      sizeClass = "w-6 h-9 text-[10px] border-b-2";
-        if (isDiscard)  sizeClass = "w-6 h-9 sm:w-7 sm:h-10 text-[10px] sm:text-xs border-b-2";
+        if (small) sizeClass = "w-6 h-9 text-[10px] border-b-2";
+        if (isDiscard) sizeClass = "w-6 h-9 sm:w-7 sm:h-10 text-[10px] sm:text-xs border-b-2";
         if (isOpenMeld) sizeClass = "w-9 h-6 text-[9px] border border-gray-400 cursor-default";
-        if (large)      sizeClass = "w-14 h-20 text-2xl border-b-[6px] shadow-xl";
+        if (large) sizeClass = "w-14 h-20 text-2xl border-b-[6px] shadow-xl";
         const claimedStyle = isClaimed ? "opacity-30 grayscale brightness-50 pointer-events-none" : "";
         const bgStyle = isOpenMeld
             ? "bg-amber-50 shadow-sm"
@@ -259,7 +259,7 @@
     // ── SeatDisplay（給桌面視圖用）────────────────────────────────────
     function SeatDisplay({ idx, gs, seatNames, vertical, compact }) {
         const seatKey = `seat${idx}`;
-        const hand    = gs.hands?.[seatKey] || [];
+        const hand = gs.hands?.[seatKey] || [];
         const myMelds = gs.melds?.[seatKey] || [];
         const isCurrent = gs.currentSeat === idx;
         const tileCount = hand.length;
@@ -327,13 +327,13 @@
         if (!pa || !pa.type) return;
         const { seat, type } = pa;
         const seatKey = `seat${seat}`;
-        let hands    = mapCopy(gs.hands);
-        let melds    = mapCopy(gs.melds);
+        let hands = mapCopy(gs.hands);
+        let melds = mapCopy(gs.melds);
         let discards = [...(gs.discards || [])];
-        let deck     = [...(gs.deck || [])];
-        let log      = [...(gs.gameLog || [])];
-        const names  = gs.seatNames || [];
-        const ap     = gs.actionPrompt;
+        let deck = [...(gs.deck || [])];
+        let log = [...(gs.gameLog || [])];
+        const names = gs.seatNames || [];
+        const ap = gs.actionPrompt;
 
         if (type === 'skip') {
             const nextSeat = ap ? (ap.from + 1) % 4 : (seat + 1) % 4;
@@ -393,7 +393,7 @@
             return;
         }
         if (type === 'chow') {
-            const tile  = ap.tile;
+            const tile = ap.tile;
             const combo = pa.combo;
             let hand = [...(hands[seatKey] || [])].filter(t => t.uid !== combo[0].uid && t.uid !== combo[1].uid);
             melds[seatKey] = [...(melds[seatKey] || []), { type: 'chow', tiles: [tile, ...combo].sort((a, b) => a.id - b.id) }];
@@ -486,13 +486,13 @@
     // AI 回合
     async function runAITurn(gs, backend, seat) {
         const seatKey = `seat${seat}`;
-        let deck     = [...(gs.deck || [])];
-        let hands    = mapCopy(gs.hands);
-        let melds    = mapCopy(gs.melds);
+        let deck = [...(gs.deck || [])];
+        let hands = mapCopy(gs.hands);
+        let melds = mapCopy(gs.melds);
         let discards = [...(gs.discards || [])];
-        const names  = gs.seatNames || [];
-        let hand     = [...(hands[seatKey] || [])];
-        let log      = [...(gs.gameLog || [])];
+        const names = gs.seatNames || [];
+        let hand = [...(hands[seatKey] || [])];
+        let log = [...(gs.gameLog || [])];
 
         const needsDraw = hand.length % 3 === 1;
         if (needsDraw) {
@@ -533,7 +533,7 @@
 
         // AI 隨機棄牌
         const discardIdx = Math.floor(Math.random() * hand.length);
-        const discarded  = hand[discardIdx];
+        const discarded = hand[discardIdx];
         hand = hand.filter((_, i) => i !== discardIdx);
         discards.push({ ...discarded, by: seat, claimed: false });
         log.push(`[${names[seat]}] 打出: ${discarded.label}`);
@@ -577,7 +577,27 @@
             const curSeat = gs.currentSeat;
             const pid = seats[curSeat];
             const isAI = !pid || pid.startsWith('ai_');
-            if (!isAI) return;
+
+            if (!isAI) {
+                const chairHand = gs.hands?.[`seat${curSeat}`] || [];
+                if (chairHand.length % 3 === 1) {
+                    const timer = setTimeout(() => {
+                        let deck = [...(gs.deck || [])];
+                        const drawn = deck.pop();
+                        if (!drawn) {
+                            backend.setGameState({ status: 'gameover', winResult: { winnerSeat: -1, winType: '流局' }, gameLog: [...(gs.gameLog || []), '=== 流局 ==='] });
+                            return;
+                        }
+                        const seatKey = `seat${curSeat}`;
+                        let hands = mapCopy(gs.hands);
+                        hands[seatKey] = [...(hands[seatKey] || []), drawn];
+                        const seatNames = gs.seatNames || [];
+                        backend.setGameState({ deck, hands, drawnTileUid: drawn.uid, gameLog: [...(gs.gameLog || []), `[${seatNames[curSeat] || '玩家'}] 摸牌`] });
+                    }, 300);
+                    return () => clearTimeout(timer);
+                }
+                return;
+            }
 
             const timer = setTimeout(() => runAITurn(gs, backend, curSeat), 800);
             return () => clearTimeout(timer);
@@ -594,11 +614,19 @@
             <div className="flex-1 flex flex-col bg-green-800 relative overflow-hidden select-none">
                 {/* 輪次資訊橫幅 */}
                 <div className="flex items-center justify-between px-3 py-1.5 bg-black/40 text-xs text-white flex-shrink-0">
-                    <span className="text-green-300">牌庫 <span className="text-yellow-300 font-bold">{gs.deck?.length ?? 0}</span> 張</span>
-                    <span className="font-bold text-yellow-400">
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-2 py-0.5 rounded text-[10px] sm:text-xs min-w-max border border-gray-500 transition-colors">
+                            <i className="ph ph-arrow-left mr-1"></i>名單
+                        </button>
+                        <span className="text-green-300 hidden sm:inline">牌庫 <span className="text-yellow-300 font-bold">{gs.deck?.length ?? 0}</span> 張</span>
+                    </div>
+                    <span className="font-bold text-yellow-400 text-center flex-1 mx-2 truncate">
                         {gs.status === 'playing' ? `${seatNames[gs.currentSeat]} 的回合` : '等待開始'}
                     </span>
-                    <span className="text-green-300">桌面視圖</span>
+                    <span className="text-green-300 hidden sm:inline shrink-0">桌面視圖</span>
+                    <div className="sm:hidden text-green-300 text-[10px]">
+                        庫:<span className="text-yellow-300 font-bold">{gs.deck?.length ?? 0}</span>
+                    </div>
                 </div>
 
                 {/* 上方 座位2（對家） */}
@@ -651,16 +679,18 @@
     // ══════════════════════════════════════════════════════════════════
     function PlayerHandView({ gameState: gs, mySeat, myPlayerId, backend }) {
         const seatKey = `seat${mySeat}`;
-        const hand    = gs.hands?.[seatKey] || [];
+        const hand = gs.hands?.[seatKey] || [];
         const myMelds = gs.melds?.[seatKey] || [];
-        const ap      = gs.actionPrompt;
-        const gp      = gs.gangPrompt;
-        const isMyTurn         = gs.currentSeat === mySeat;
+        const ap = gs.actionPrompt;
+        const gp = gs.gangPrompt;
+        const isMyTurn = gs.currentSeat === mySeat;
         const isMyActionPrompt = ap && ap.forSeat === mySeat;
-        const isMyGangPrompt   = gp && gp.forSeat === mySeat;
+        const isMyGangPrompt = gp && gp.forSeat === mySeat;
         const seatNames = gs.seatNames || [];
 
         const canDiscard = isMyTurn && !ap && !gp && hand.length % 3 === 2;
+        const mySelfDrawWin = canDiscard && checkWin(hand);
+        const myGangOptions = canDiscard ? findGangOptions(hand, myMelds) : [];
 
         const handleDiscard = async (tile) => {
             if (!canDiscard) return;
@@ -687,11 +717,19 @@
             <div className="flex-1 flex flex-col bg-green-800 overflow-hidden text-white relative">
                 {/* 狀態列 */}
                 <div className="flex items-center justify-between px-3 py-2 bg-black/30 text-xs flex-shrink-0">
-                    <span>牌庫: <span className="text-yellow-300 font-bold">{gs.deck?.length ?? 0}</span></span>
-                    <span className={`font-bold ${isMyTurn ? 'text-yellow-400 animate-pulse' : 'text-gray-300'}`}>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-2 py-1 rounded text-[10px] sm:text-xs border border-gray-500 transition-colors">
+                            <i className="ph ph-arrow-left mr-1"></i>名單
+                        </button>
+                        <span className="hidden sm:inline text-gray-300">牌庫: <span className="text-yellow-300 font-bold">{gs.deck?.length ?? 0}</span></span>
+                    </div>
+                    <span className={`font-bold flex-1 text-center mx-1 truncate ${isMyTurn ? 'text-yellow-400 animate-pulse' : 'text-gray-300'}`}>
                         {isMyTurn ? '▶ 你的回合' : `${seatNames[gs.currentSeat] || '?'} 的回合`}
                     </span>
-                    <span className="text-green-300">座位 {mySeat + 1}</span>
+                    <span className="text-green-300 shrink-0 text-right w-16">
+                        <span className="sm:hidden text-gray-300 mr-1">庫:<span className="text-yellow-300 font-bold">{gs.deck?.length ?? 0}</span></span>
+                        座位{mySeat + 1}
+                    </span>
                 </div>
 
                 {/* 其他座位牌數概覽 */}
@@ -747,6 +785,23 @@
                 {isMyTurn && !canDiscard && !ap && !gp && hand.length % 3 !== 2 && (
                     <div className="absolute bottom-16 left-0 right-0 flex justify-center pointer-events-none">
                         <div className="bg-black/60 text-yellow-300 text-xs px-3 py-1.5 rounded-full animate-pulse">等待摸牌...</div>
+                    </div>
+                )}
+
+                {/* 自摸與暗/加槓提示 */}
+                {canDiscard && (mySelfDrawWin || myGangOptions.length > 0) && (
+                    <div className="absolute bottom-24 left-0 right-0 flex justify-center z-30">
+                        <div className="bg-green-800/98 px-4 py-3 rounded-xl border-2 border-yellow-500 flex gap-2 items-center shadow-2xl">
+                            {mySelfDrawWin && (
+                                <button onClick={() => handleAction('win')} className="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-xl font-bold border-2 border-red-400 text-lg shadow-lg animate-bounce">自摸！</button>
+                            )}
+                            {myGangOptions.map((opt, i) => (
+                                <button key={i} onClick={() => handleAction('gang', { gangOpt: opt })}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg font-bold border border-purple-400 text-sm shadow">
+                                    {opt.type === 'angang' ? '暗' : '加'}槓 {TILE_TYPES[opt.tileId].label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 )}
 
@@ -809,16 +864,16 @@
     // 9. GameLobby（等待大廳）
     // ══════════════════════════════════════════════════════════════════
     function GameLobby({ gs, isHost, myPlayerId, myPlayerName, backend, roomId }) {
-        const seats     = gs?.seats     || [null, null, null, null];
+        const seats = gs?.seats || [null, null, null, null];
         const seatNames = gs?.seatNames || ['', '', '', ''];
-        const mySeat    = seats.indexOf(myPlayerId);
+        const mySeat = seats.indexOf(myPlayerId);
 
         const handleSitDown = async (seatIdx) => {
             if (seats[seatIdx] !== null) return;
             const newSeats = [...seats];
             const newNames = [...seatNames];
-            newSeats[seatIdx]  = myPlayerId;
-            newNames[seatIdx]  = myPlayerName;
+            newSeats[seatIdx] = myPlayerId;
+            newNames[seatIdx] = myPlayerName;
             await backend.setGameState({ seats: newSeats, seatNames: newNames });
         };
 
@@ -851,19 +906,19 @@
             hands['seat0'] = [...hands['seat0'], firstDraw];
 
             await backend.initGame({
-                status:       'playing',
-                seats:        finalSeats,
-                seatNames:    finalNames,
+                status: 'playing',
+                seats: finalSeats,
+                seatNames: finalNames,
                 deck,
                 hands,
-                melds:        { seat0: [], seat1: [], seat2: [], seat3: [] },
-                discards:     [],
-                currentSeat:  0,
+                melds: { seat0: [], seat1: [], seat2: [], seat3: [] },
+                discards: [],
+                currentSeat: 0,
                 drawnTileUid: firstDraw.uid,
                 actionPrompt: null,
-                gangPrompt:   null,
-                winResult:    null,
-                gameLog:      ['=== 對局開始 ===', `[座位0(${finalNames[0]})] 莊家摸牌: ${firstDraw.label}`],
+                gangPrompt: null,
+                winResult: null,
+                gameLog: ['=== 對局開始 ===', `[座位0(${finalNames[0]})] 莊家摸牌: ${firstDraw.label}`],
                 pendingAction: null,
             });
         };
@@ -879,20 +934,20 @@
                 {/* 座位選擇 */}
                 <div className="grid grid-cols-2 gap-3 mb-5">
                     {[0, 1, 2, 3].map(i => {
-                        const pid   = seats[i];
-                        const name  = seatNames[i];
-                        const isMe  = pid === myPlayerId;
-                        const isAI  = pid && pid.startsWith('ai_');
+                        const pid = seats[i];
+                        const name = seatNames[i];
+                        const isMe = pid === myPlayerId;
+                        const isAI = pid && pid.startsWith('ai_');
                         const empty = !pid;
                         return (
                             <button key={i}
                                 onClick={() => { if (empty && mySeat < 0) handleSitDown(i); }}
                                 className={`p-3 rounded-xl border-2 text-sm font-semibold transition-all text-left
-                                    ${isMe    ? 'border-yellow-400 bg-yellow-900/50 text-yellow-300' :
-                                      isAI    ? 'border-gray-600 bg-gray-800/50 text-gray-400 cursor-default' :
-                                      pid     ? 'border-green-500 bg-green-900/50 text-green-300 cursor-default' :
-                                      mySeat >= 0 ? 'border-dashed border-gray-600 bg-black/20 text-gray-500 cursor-default' :
-                                                'border-dashed border-gray-500 bg-black/20 text-gray-400 hover:border-yellow-400 hover:text-yellow-300 cursor-pointer'}`}
+                                    ${isMe ? 'border-yellow-400 bg-yellow-900/50 text-yellow-300' :
+                                        isAI ? 'border-gray-600 bg-gray-800/50 text-gray-400 cursor-default' :
+                                            pid ? 'border-green-500 bg-green-900/50 text-green-300 cursor-default' :
+                                                mySeat >= 0 ? 'border-dashed border-gray-600 bg-black/20 text-gray-500 cursor-default' :
+                                                    'border-dashed border-gray-500 bg-black/20 text-gray-400 hover:border-yellow-400 hover:text-yellow-300 cursor-pointer'}`}
                             >
                                 <div className="text-xs text-gray-400 mb-0.5">{seatWinds[i]}家</div>
                                 {empty
@@ -949,8 +1004,8 @@
 
         if (!gameState) return <LoadingView />;
 
-        const status  = gameState.status || 'idle';
-        const mySeat  = (gameState.seats || []).indexOf(myPlayerId);
+        const status = gameState.status || 'idle';
+        const mySeat = (gameState.seats || []).indexOf(myPlayerId);
         const seatNames = gameState.seatNames || [];
 
         if (status === 'idle') {

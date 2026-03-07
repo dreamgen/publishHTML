@@ -357,7 +357,7 @@
                 if (useSocketMode) {
                     await socketCreateRoom(roomId, name);
                     // 初始化 Firebase 備份
-                    if (currentUser) update(cloudBackupRef(roomId), { hostId: myPlayerId, createdAt: Date.now(), lastUpdated: Date.now() }).catch(() => {});
+                    if (currentUser) update(cloudBackupRef(roomId), { hostId: myPlayerId, createdAt: Date.now(), lastUpdated: Date.now() }).catch(() => { });
                     saveRoom(roomId, true, myPlayerName);
                     displayCode.textContent = roomId;
                     showScreen('room');
@@ -429,7 +429,7 @@
                             try {
                                 await socketCreateRoom(roomId, myPlayerName);
                                 isHost = true;
-                                if (currentUser) update(cloudBackupRef(roomId), { hostId: myPlayerId, lastUpdated: Date.now() }).catch(() => {});
+                                if (currentUser) update(cloudBackupRef(roomId), { hostId: myPlayerId, lastUpdated: Date.now() }).catch(() => { });
                             } catch (createErr) {
                                 if (createErr.message?.includes('已存在')) {
                                     const joinResult = await socketJoinRoom(roomId, myPlayerName);
@@ -503,7 +503,7 @@
                 const rid = currentRoomId;
                 forgetRoom(rid);
                 if (useSocketMode) {
-                    if (currentUser) remove(cloudBackupRef(rid)).catch(() => {}); // 同步清除 Firebase 備份
+                    if (currentUser) remove(cloudBackupRef(rid)).catch(() => { }); // 同步清除 Firebase 備份
                     socket?.emit('delete_room', { roomId: rid }); cleanup(); showScreen('login'); toast('房間已刪除');
                 }
                 else { await remove(ref(db, `${DB_ROOT}/${rid}`)); }
@@ -761,6 +761,26 @@
             document.getElementById('panel-chat').classList.toggle('hidden', name !== 'chat');
             document.getElementById('panel-game').classList.toggle('hidden', name !== 'game');
             document.getElementById('reaction-bar-wrapper').classList.toggle('hidden', name === 'game');
+
+            const roomHeader = document.getElementById('room-header');
+            const roomTabBar = document.getElementById('room-tab-bar');
+            if (name === 'game') {
+                if (roomHeader) roomHeader.classList.add('hidden');
+                if (roomTabBar) roomTabBar.classList.add('hidden');
+                try {
+                    const el = document.documentElement;
+                    if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
+                    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen().catch(() => { });
+                } catch (e) { }
+            } else {
+                if (roomHeader) roomHeader.classList.remove('hidden');
+                if (roomTabBar) roomTabBar.classList.remove('hidden');
+                try {
+                    if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
+                    else if (document.webkitFullscreenElement) document.webkitExitFullscreen().catch(() => { });
+                } catch (e) { }
+            }
+
             if (name === 'chat') {
                 unreadMsgCount = 0;
                 const badge = document.getElementById('chat-unread-badge');
@@ -774,6 +794,7 @@
         document.getElementById('tab-players').addEventListener('click', () => switchTab('players'));
         document.getElementById('tab-chat').addEventListener('click', () => switchTab('chat'));
         document.getElementById('tab-game').addEventListener('click', () => switchTab('game'));
+        window.addEventListener('mahjong:exit-game', () => switchTab('players'));
         chatList.addEventListener('scroll', () => {
             if (isAtBottom() && activeTab === 'chat' && unreadMsgCount > 0) {
                 unreadMsgCount = 0;
@@ -1382,7 +1403,8 @@
     <main id="screen-room" class="hidden flex-col h-[100dvh] w-full bg-gray-50">
 
         <!-- Header -->
-        <header class="bg-white border-b border-gray-100 shadow-sm sticky top-0 pt-safe z-20">
+        <!-- Header -->
+        <header id="room-header" class="bg-white border-b border-gray-100 shadow-sm sticky top-0 pt-safe z-20">
 
             <!-- 斷線重連橫幅 -->
             <div id="reconnect-banner"
@@ -1443,7 +1465,7 @@
         </header>
 
         <!-- Tab Bar -->
-        <div class="flex border-b border-gray-100 bg-white sticky top-[68px] z-10">
+        <div id="room-tab-bar" class="flex border-b border-gray-100 bg-white sticky top-[68px] z-10">
             <button id="tab-players"
                 class="tab-btn tab-active flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2">
                 <i class="ph ph-users text-base"></i>玩家列表
