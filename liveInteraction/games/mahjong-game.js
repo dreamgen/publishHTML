@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════════════
 // mahjong-game.js — 台灣麻將多人版（區域房間試作）
 // 使用 React 18 UMD + Babel Standalone，透過 window._gameContext 存取 Firebase
-// [2026 UI/UX 優化版]
+// [2026 UI/UX 優化版 - 支援防呆出牌、直向雙排、房主管理與特效]
 // ══════════════════════════════════════════════════════════════════════
 (function () {
     const { useState, useEffect, useRef, useCallback } = React;
@@ -173,11 +173,17 @@
     // ══════════════════════════════════════════════════════════════════
 
     // ── Tile 元件 ──────────────────────────────────────────────────────
-    const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn, small }) => {
+    const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn, small, isHostHidden, isHostDiscard, isHostMeld }) => {
         // 牌背 (隱藏的牌)
         if (isHidden) {
+            let hiddenClass = isHostHidden
+                ? "w-[7.5vw] max-w-[36px] h-[11.5vw] max-h-[54px] sm:w-10 sm:h-14 md:w-12 md:h-18" // 房主版隱藏牌較大
+                : small 
+                    ? "w-[5vw] max-w-[24px] h-[7.5vw] max-h-[36px] sm:w-6 sm:h-10" 
+                    : "w-[8.5vw] max-w-[28px] h-[12.5vw] max-h-[40px] sm:w-8 sm:h-12 md:w-10 md:h-14";
+            
             return (
-                <div className="w-[8.5vw] max-w-[28px] h-[12.5vw] max-h-[40px] sm:w-8 sm:h-12 md:w-10 md:h-14 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.4)] border-b-[3px] border-l-[1px] border-emerald-900 m-px flex-shrink-0 transition-transform"></div>
+                <div className={`${hiddenClass} bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.4)] border-b-[3px] border-l-[1px] border-emerald-900 m-[1px] flex-shrink-0 transition-transform`}></div>
             );
         }
 
@@ -191,17 +197,24 @@
             if (tile.value === 'fa') textColor = "text-green-600";
         }
 
-        // 依據不同情境設定尺寸：放大基本寬度提升直式手機易讀性，並防止橫式過大
-        let sizeClass = "w-[8.5vw] min-w-[24px] max-w-[56px] h-[12.5vw] min-h-[36px] max-h-[84px] sm:w-12 sm:h-16 md:w-16 md:h-24 text-[4.5vw] sm:text-xl md:text-3xl border-b-[3px] border-l-[1px] shadow-md hover:-translate-y-2 cursor-pointer";
+        // 依據不同情境與直橫向設定尺寸
+        // 玩家手牌 (區分 portrait 與 landscape)
+        let sizeClass = "w-[12vw] min-w-[36px] max-w-[64px] h-[18vw] min-h-[54px] max-h-[96px] text-[5.5vw] " + // portrait (直向放大)
+                        "landscape:w-[6.5vw] landscape:min-w-[24px] landscape:max-w-[48px] landscape:h-[10vw] landscape:min-h-[36px] landscape:max-h-[72px] landscape:text-[4vw] " + // landscape (橫向維持單排)
+                        "sm:w-12 sm:h-16 md:w-16 md:h-24 sm:text-xl md:text-3xl border-b-[3px] border-l-[1px] shadow-md cursor-pointer";
 
         if (small) {
             sizeClass = "w-[6vw] max-w-[32px] h-[8.5vw] max-h-[48px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3.5vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
         }
         if (isDiscard) {
-            sizeClass = "w-[6vw] max-w-[38px] h-[9vw] max-h-[56px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
+            sizeClass = isHostDiscard 
+                ? "w-[8vw] max-w-[48px] h-[12vw] max-h-[72px] sm:w-11 sm:h-16 md:w-14 md:h-20 text-[4.5vw] sm:text-lg md:text-2xl border-b-[3px] border-l-[1px] shadow-md"
+                : "w-[6vw] max-w-[38px] h-[9vw] max-h-[56px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
         }
         if (isOpenMeld) {
-            sizeClass = "w-[7vw] max-w-[40px] h-[10vw] max-h-[60px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4vw] sm:text-lg md:text-xl border-b-[2px] border-l-[1px] shadow-sm cursor-default";
+            sizeClass = isHostMeld
+                ? "w-[8vw] max-w-[42px] h-[12vw] max-h-[64px] sm:w-12 sm:h-16 md:w-14 md:h-20 text-[4.5vw] sm:text-xl md:text-2xl border-b-[2px] border-l-[1px] shadow-sm cursor-default"
+                : "w-[7vw] max-w-[40px] h-[10vw] max-h-[60px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4vw] sm:text-lg md:text-xl border-b-[2px] border-l-[1px] shadow-sm cursor-default";
         }
         if (large) {
             sizeClass = "w-14 h-20 sm:w-16 sm:h-24 md:w-20 md:h-28 text-3xl sm:text-4xl md:text-5xl border-b-[4px] border-l-[2px] shadow-xl";
@@ -211,14 +224,14 @@
         const bgStyle = isOpenMeld
             ? "bg-gradient-to-br from-[#fef3c7] to-[#fde68a]" // 副露略帶琥珀色
             : isDrawn
-                ? "ml-2 sm:ml-4 -translate-y-3 sm:-translate-y-4 ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.8)] z-10 bg-gradient-to-br from-[#fef08a] to-[#fde047]"
+                ? "ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.8)] z-10 bg-gradient-to-br from-[#fef08a] to-[#fde047]"
                 : "bg-gradient-to-br from-[#fdfbf7] to-[#fef3c7]"; // 帶點象牙白的麻將色
 
         const isBai = tile.suit === 'yuan' && tile.value === 'bai';
 
         return (
             <div onClick={onClick}
-                className={`relative rounded-md border-gray-400 flex flex-col justify-center items-center m-[1px] sm:m-[1.5px] font-bold select-none transition-all duration-200 ${sizeClass} ${claimedStyle} ${bgStyle}`}>
+                className={`relative rounded-md border-gray-400 flex flex-col justify-center items-center m-[1px] sm:m-[1.5px] font-bold select-none transition-colors duration-200 ${sizeClass} ${claimedStyle} ${bgStyle}`}>
 
                 {/* 白板特殊處理：藍色空心框 */}
                 {isBai ? (
@@ -249,12 +262,12 @@
     }
 
     // ── WinOverlay 結算畫面 ─────────────────────────────────────────────
-    function WinOverlay({ winResult, seatNames, backend }) {
+    function WinOverlay({ winResult, seatNames, isHost, onReturn }) {
         const { winnerSeat, winType, yaku, totalFan } = winResult;
         const isFlowGame = winnerSeat < 0 || winType === '流局';
         const winnerName = !isFlowGame ? (seatNames[winnerSeat] || `座位${winnerSeat + 1}`) : null;
         return (
-            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-50 p-4 animate-[fadeIn_0.3s_ease-out]">
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-[100] p-4 animate-[fadeIn_0.3s_ease-out]">
                 {!isFlowGame && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-500/20 via-transparent to-transparent animate-pulse pointer-events-none"></div>}
 
                 <h2 className={`text-4xl sm:text-6xl md:text-7xl font-black mb-3 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] z-10 ${isFlowGame ? 'text-gray-300' : 'text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-yellow-600'}`}>
@@ -272,16 +285,21 @@
                         <div className="text-yellow-400 text-3xl sm:text-4xl font-black border-t border-yellow-600/30 pt-4">共 {totalFan} 台</div>
                     </div>
                 )}
-                <button onClick={() => backend.resetGame()}
-                    className="bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white px-10 py-4 rounded-full text-xl sm:text-2xl font-black border-2 border-emerald-300 shadow-[0_0_30px_rgba(52,211,153,0.4)] mt-4 transition-transform hover:scale-105 active:scale-95 z-10">
-                    返回大廳
-                </button>
+                
+                {isHost ? (
+                    <button onClick={onReturn}
+                        className="bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white px-10 py-4 rounded-full text-xl sm:text-2xl font-black border-2 border-emerald-300 shadow-[0_0_30px_rgba(52,211,153,0.4)] mt-4 transition-transform hover:scale-105 active:scale-95 z-10">
+                        返回大廳 (重新入座)
+                    </button>
+                ) : (
+                    <div className="text-white text-lg mt-6 animate-pulse z-10 font-bold tracking-widest bg-black/50 px-6 py-3 rounded-full">等待房主返回大廳...</div>
+                )}
             </div>
         );
     }
 
     // ── SeatDisplay（桌面視圖旁觀用）────────────────────────────────────
-    function SeatDisplay({ idx, gs, seatNames, vertical, compact }) {
+    function SeatDisplay({ idx, gs, seatNames, vertical, compact, hostView }) {
         const seatKey = `seat${idx}`;
         const hand = gs.hands?.[seatKey] || [];
         const myMelds = gs.melds?.[seatKey] || [];
@@ -303,9 +321,9 @@
         }
 
         return (
-            <div className={`flex flex-col items-center gap-1 sm:gap-2 transition-opacity duration-300 ${isCurrent ? 'opacity-100 scale-105' : 'opacity-70 scale-100'}`}>
-                <div className={`text-[10px] sm:text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1
-                  ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}
+            <div className={`flex flex-col items-center gap-1 sm:gap-2 transition-all duration-300 ${isCurrent ? 'opacity-100 scale-105 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'opacity-70 scale-100'}`}>
+                <div className={`text-[10px] sm:text-xs md:text-sm font-bold px-3 py-1 md:px-5 md:py-2 rounded-full shadow-md flex items-center gap-1
+                  ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse ring-4 ring-yellow-400/80' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}
                   ${isOffline ? 'grayscale opacity-70' : ''}`}>
                     {isOffline && <i className="ph ph-wifi-slash text-red-400"></i>}
                     {seatNames[idx] || `座位${idx + 1}`} {isCurrent && ' ▶'}
@@ -314,9 +332,11 @@
                 {compact ? (
                     <div className="text-yellow-300 text-xs font-bold bg-black/40 px-3 py-1.5 rounded-lg border border-black/50">{tileCount}張</div>
                 ) : (
-                    <div className={`flex ${vertical ? 'flex-col -space-y-4 sm:-space-y-6' : '-space-x-1 sm:-space-x-2'} z-10`}>
+                    <div className={`flex ${vertical ? 'flex-col -space-y-4 sm:-space-y-6 md:-space-y-8' : '-space-x-1 sm:-space-x-2 md:-space-x-3'} z-10`}>
                         {hand.map((_, i) => (
-                            <div key={i} className="w-[6vw] max-w-[28px] h-[9vw] max-h-[40px] sm:w-8 sm:h-12 bg-gradient-to-b from-emerald-600 to-emerald-800 rounded-sm shadow-[1px_2px_4px_rgba(0,0,0,0.5)] border-b-[3px] border-l-[1px] border-emerald-900 m-[1px] flex-shrink-0" style={{ zIndex: i }}></div>
+                            <div key={i} style={{ zIndex: i }}>
+                                <Tile isHidden isHostHidden={hostView} small={vertical} />
+                            </div>
                         ))}
                     </div>
                 )}
@@ -327,7 +347,7 @@
                             <div key={mi} className={`flex ${vertical ? 'flex-col gap-0.5' : 'gap-px'} bg-black/30 p-1 rounded-md border border-black/50`}>
                                 {meld.tiles.map((t, ti) => (
                                     <div key={t.uid} className={vertical ? 'rotate-90 origin-center my-1' : ''}>
-                                        <Tile tile={t} isOpenMeld small={vertical}
+                                        <Tile tile={t} isOpenMeld isHostMeld={hostView} small={vertical}
                                             isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
                                     </div>
                                 ))}
@@ -347,10 +367,10 @@
         }, [gs.discards?.length]);
         return (
             <div ref={areaRef}
-                className="bg-black/20 rounded-2xl p-3 sm:p-5 overflow-y-auto flex flex-wrap content-start gap-1 shadow-[inset_0_4px_15px_rgba(0,0,0,0.3)] border border-green-800/50 h-full scroll-smooth">
+                className="bg-black/20 rounded-2xl p-3 sm:p-5 overflow-y-auto flex flex-wrap content-start gap-1 sm:gap-2 shadow-[inset_0_4px_15px_rgba(0,0,0,0.3)] border border-green-800/50 h-full scroll-smooth">
                 {(gs.discards || []).map((t, i) => (
                     <div key={`d${i}`} className="relative">
-                        <Tile tile={t} isDiscard isClaimed={t.claimed} />
+                        <Tile tile={t} isDiscard isHostDiscard isClaimed={t.claimed} />
                         {/* 最新打出的牌加上提示點 */}
                         {i === (gs.discards || []).length - 1 && !t.claimed && !gs.actionPrompt && (
                             <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping z-10 shadow-md"></div>
@@ -593,6 +613,23 @@
 
         const seatNames = gs.seatNames || ['座位1', '座位2', '座位3', '座位4'];
 
+        // 房主專屬：結束遊戲並清空AI返回大廳
+        const handleReturnToLobby = () => {
+            const currentSeats = gs.seats || [];
+            const currentNames = gs.seatNames || [];
+            // 保留真人玩家，清除 AI
+            const newSeats = currentSeats.map(s => (s && s.startsWith('ai_')) ? null : s);
+            const newNames = currentNames.map((n, i) => (newSeats[i] ? n : ''));
+            backend.setGameState({
+                status: 'idle',
+                pendingAction: null,
+                winResult: null,
+                seats: newSeats,
+                seatNames: newNames,
+                gameLog: []
+            });
+        };
+
         return (
             <div className="flex-1 h-full min-h-0 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-green-700 to-green-950 relative overflow-hidden select-none">
                 {/* 輪次資訊橫幅 - 電腦版字體加大 */}
@@ -600,6 +637,9 @@
                     <div className="flex items-center gap-2">
                         <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm text-xs sm:text-sm md:text-base">
                             <i className="ph ph-arrow-left mr-1"></i>大廳
+                        </button>
+                        <button onClick={() => { if (confirm('確定要提前結束遊戲並返回大廳嗎？')) handleReturnToLobby(); }} className="bg-red-700/80 hover:bg-red-600 px-3 py-1.5 rounded-lg font-bold border border-red-500 transition-colors shadow-sm text-xs sm:text-sm md:text-base">
+                            <i className="ph ph-stop-circle mr-1"></i>結束遊戲
                         </button>
                     </div>
                     <span className="font-bold text-yellow-400 text-center flex-1 mx-2 truncate tracking-widest bg-black/40 py-1 md:py-1.5 rounded-full">
@@ -612,31 +652,31 @@
                 <div className="flex-1 flex flex-col min-h-0 relative p-2 sm:p-4 justify-between">
 
                     {/* 上方 座位2 (對家) */}
-                    <div className="flex justify-center items-start flex-shrink-0 h-20 sm:h-28">
-                        <SeatDisplay idx={2} gs={gs} seatNames={seatNames} compact={false} />
+                    <div className="flex justify-center items-start flex-shrink-0 h-20 sm:h-28 md:h-36">
+                        <SeatDisplay idx={2} gs={gs} seatNames={seatNames} compact={false} hostView={true} />
                     </div>
 
                     {/* 中間行：左 座位3 + 棄牌區 + 右 座位1 */}
                     <div className="flex flex-1 items-stretch justify-between px-1 sm:px-6 min-h-0 w-full overflow-hidden gap-2 my-2">
                         {/* 左方 座位3 */}
-                        <div className="flex flex-col items-center justify-center flex-shrink-0 w-16 sm:w-24">
-                            <SeatDisplay idx={3} gs={gs} seatNames={seatNames} vertical={true} compact={false} />
+                        <div className="flex flex-col items-center justify-center flex-shrink-0 w-16 sm:w-24 md:w-32">
+                            <SeatDisplay idx={3} gs={gs} seatNames={seatNames} vertical={true} compact={false} hostView={true} />
                         </div>
 
                         {/* 中央棄牌區 */}
-                        <div className="flex-1 min-w-0 max-w-2xl mx-auto h-full flex flex-col justify-center py-2 sm:py-6 relative z-0">
+                        <div className="flex-1 min-w-0 max-w-3xl mx-auto h-full flex flex-col justify-center py-2 sm:py-6 relative z-0">
                             <HostDiscardArea gs={gs} />
                         </div>
 
                         {/* 右方 座位1 */}
-                        <div className="flex flex-col items-center justify-center flex-shrink-0 w-16 sm:w-24">
-                            <SeatDisplay idx={1} gs={gs} seatNames={seatNames} vertical={true} compact={false} />
+                        <div className="flex flex-col items-center justify-center flex-shrink-0 w-16 sm:w-24 md:w-32">
+                            <SeatDisplay idx={1} gs={gs} seatNames={seatNames} vertical={true} compact={false} hostView={true} />
                         </div>
                     </div>
 
                     {/* 下方 座位0 (莊家/自己) */}
-                    <div className="flex justify-center items-end flex-shrink-0 h-20 sm:h-28 mb-2">
-                        <SeatDisplay idx={0} gs={gs} seatNames={seatNames} compact={false} />
+                    <div className="flex justify-center items-end flex-shrink-0 h-20 sm:h-28 md:h-36 mb-2">
+                        <SeatDisplay idx={0} gs={gs} seatNames={seatNames} compact={false} hostView={true} />
                     </div>
                 </div>
 
@@ -651,7 +691,7 @@
 
                 {/* 結算 */}
                 {gs.status === 'gameover' && gs.winResult && (
-                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} backend={backend} />
+                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={true} onReturn={handleReturnToLobby} />
                 )}
             </div>
         );
@@ -662,6 +702,8 @@
     // ══════════════════════════════════════════════════════════════════
     function PlayerHandView({ gameState: gs, mySeat, myPlayerId, backend }) {
         const discardAreaRef = useRef(null);
+        const [selectedTileUid, setSelectedTileUid] = useState(null); // 用於出牌防呆確認
+
         const seatKey = `seat${mySeat}`;
         const hand = gs.hands?.[seatKey] || [];
         const myMelds = gs.melds?.[seatKey] || [];
@@ -676,14 +718,10 @@
         const mySelfDrawWin = canDiscard && checkWin(hand);
         const myGangOptions = canDiscard ? findGangOptions(hand, myMelds) : [];
 
-        const handleDiscard = async (tile) => {
-            if (!canDiscard) return;
-            await backend.postAction({ seat: mySeat, type: 'discard', tile });
-        };
-
-        const handleAction = async (type, extra = {}) => {
-            await backend.postAction({ seat: mySeat, type, ...extra });
-        };
+        // 當失去出牌權時，清空選牌狀態
+        useEffect(() => {
+            if (!canDiscard) setSelectedTileUid(null);
+        }, [canDiscard]);
 
         // 棄牌區自動置底
         useEffect(() => {
@@ -691,6 +729,27 @@
                 discardAreaRef.current.scrollTop = discardAreaRef.current.scrollHeight;
             }
         }, [gs.discards?.length]);
+
+        const handleTileClick = (tile) => {
+            if (!canDiscard) return;
+            if (selectedTileUid === tile.uid) {
+                // 第二次點擊，確認打出
+                handleDiscard(tile);
+            } else {
+                // 第一次點擊，選取
+                setSelectedTileUid(tile.uid);
+            }
+        };
+
+        const handleDiscard = async (tile) => {
+            if (!canDiscard) return;
+            setSelectedTileUid(null); // 清空狀態
+            await backend.postAction({ seat: mySeat, type: 'discard', tile });
+        };
+
+        const handleAction = async (type, extra = {}) => {
+            await backend.postAction({ seat: mySeat, type, ...extra });
+        };
 
         if (mySeat < 0) {
             return (
@@ -727,7 +786,7 @@
                         const n = gs.hands?.[`seat${s}`]?.length ?? 0;
                         const isTurn = gs.currentSeat === s;
                         return (
-                            <div key={s} className={`text-center px-3 py-1 rounded-lg transition-all ${isTurn ? 'bg-yellow-900/60 border border-yellow-500/50 shadow-md' : 'bg-black/30'}`}>
+                            <div key={s} className={`text-center px-3 py-1 rounded-lg transition-all ${isTurn ? 'bg-yellow-900/60 border border-yellow-500/50 shadow-md ring-2 ring-yellow-400/80' : 'bg-black/30'}`}>
                                 <div className={`truncate max-w-[60px] sm:max-w-[90px] text-[10px] sm:text-xs font-bold ${isTurn ? 'text-yellow-200' : 'text-gray-400'}`}>{seatNames[s] || `座${s + 1}`}</div>
                                 <div className={`font-bold text-sm ${isTurn ? 'text-yellow-400' : 'text-emerald-300'}`}>{n}張</div>
                             </div>
@@ -753,7 +812,7 @@
                 </div>
 
                 {/* 底部玩家區域 (副露 + 手牌 + 操作區) */}
-                <div className="flex-shrink-0 flex flex-col items-center pb-safe pt-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent z-10 w-full">
+                <div className="flex-shrink-0 flex flex-col items-center pb-safe pt-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent z-10 w-full relative">
 
                     {/* 動作按鈕區 (自摸、槓) 浮動在手牌上方 */}
                     {canDiscard && (mySelfDrawWin || myGangOptions.length > 0) && (
@@ -784,21 +843,33 @@
                         </div>
                     )}
 
-                    {/* 我的手牌 (統一 justify-start，避免手機橫屏置中導致左側被截斷) */}
-                    <div className={`flex flex-nowrap justify-start xl:justify-center items-end -space-x-[2px] md:space-x-1 px-4 pb-2 sm:pb-4 w-full overflow-x-auto no-scrollbar ${canDiscard ? 'cursor-pointer' : ''}`}>
-                        {hand.map((tile) => (
-                            <div key={tile.uid} className="relative group shrink-0">
-                                <Tile tile={tile}
-                                    onClick={() => handleDiscard(tile)}
-                                    isDrawn={gs.drawnTileUid === tile.uid} />
-                                {/* 出牌提示 (Hover 效果) */}
-                                {canDiscard && (
-                                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20 shadow-md">
-                                        打出
-                                    </div>
-                                )}
-                            </div>
-                        ))}
+                    {/* 我的手牌 (針對直橫向採用不同佈局) */}
+                    <div className={`w-full max-w-5xl mx-auto px-2 pb-6 sm:pb-8
+                        portrait:flex portrait:flex-wrap portrait:justify-center portrait:content-end portrait:gap-y-2 portrait:-space-x-[1px]
+                        landscape:flex landscape:flex-nowrap landscape:justify-start landscape:items-end landscape:-space-x-[2px] landscape:md:space-x-1 landscape:overflow-x-auto landscape:no-scrollbar
+                        ${canDiscard ? 'cursor-pointer' : ''}`}>
+                        {hand.map((tile) => {
+                            const isSelected = selectedTileUid === tile.uid;
+                            const isDrawnTile = gs.drawnTileUid === tile.uid;
+                            return (
+                                <div key={tile.uid} className={`relative group shrink-0 transition-transform duration-200
+                                    ${isSelected ? '-translate-y-4 sm:-translate-y-6 z-30' : 'z-10'}
+                                    ${isDrawnTile ? 'landscape:sticky landscape:-right-1 landscape:z-20 portrait:ml-2' : ''}`}>
+                                    
+                                    <Tile tile={tile}
+                                        onClick={() => handleTileClick(tile)}
+                                        isDrawn={isDrawnTile && !isSelected} />
+                                    
+                                    {/* 確認出牌按鈕 */}
+                                    {isSelected && (
+                                        <button onClick={(e) => { e.stopPropagation(); handleDiscard(tile); }}
+                                            className="absolute -top-8 sm:-top-10 left-1/2 -translate-x-1/2 bg-red-600 hover:bg-red-500 text-white text-[10px] sm:text-xs font-bold px-3 py-1.5 rounded-lg shadow-xl whitespace-nowrap pointer-events-auto animate-[slideUp_0.1s_ease-out]">
+                                            確認出牌
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
                         {hand.length === 0 && isMyTurn && (
                             <div className="text-emerald-400 font-bold text-base py-4 animate-pulse">等待摸牌...</div>
                         )}
@@ -856,7 +927,7 @@
 
                 {/* 結算 */}
                 {gs.status === 'gameover' && gs.winResult && (
-                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} backend={backend} />
+                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={false} />
                 )}
             </div>
         );
@@ -973,7 +1044,7 @@
                     <div className="max-w-lg mx-auto w-full mb-4">
                         <button onClick={handleStandUp}
                             className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-sm font-bold border border-gray-600 transition-colors shadow-sm">
-                            退出座位
+                            退出座位 / 僅觀戰
                         </button>
                     </div>
                 )}
@@ -992,7 +1063,7 @@
 
                     <div className="mt-6 p-4 bg-black/30 rounded-2xl border border-gray-800 text-xs text-gray-400 space-y-2 leading-relaxed">
                         <p className="flex items-start gap-2"><span className="text-lg leading-none">💡</span> <span><strong className="text-gray-300">房主介面</strong>是桌面大螢幕，可看到四家動態與完整棄牌區。</span></p>
-                        <p className="flex items-start gap-2"><span className="text-lg leading-none">🀄</span> <span><strong className="text-gray-300">玩家介面</strong>專注於自己的手牌，輪到時直接點擊牌面即可打出。</span></p>
+                        <p className="flex items-start gap-2"><span className="text-lg leading-none">🀄</span> <span><strong className="text-gray-300">玩家介面</strong>專注於自己的手牌，輪到時點擊牌面兩次即可打出。</span></p>
                         <p className="flex items-start gap-2"><span className="text-lg leading-none">🤖</span> <span>未滿 4 人時，空位將由 AI 自動替補運作。</span></p>
                     </div>
                 </div>
