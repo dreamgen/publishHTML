@@ -288,9 +288,26 @@
         const isCurrent = gs.currentSeat === idx;
         const tileCount = hand.length;
 
+        // 偵測是否離線
+        const pid = gs.seats ? gs.seats[idx] : null;
+        const isAI = pid && pid.startsWith('ai_');
+        let isOffline = false;
+        if (!isAI && pid) {
+            const ctx = getCtx();
+            if (ctx) {
+                const rp = ctx.getMyState().roomPlayers;
+                if (rp && rp[pid] && !rp[pid].isOnline) {
+                    isOffline = true;
+                }
+            }
+        }
+
         return (
             <div className={`flex flex-col items-center gap-1 sm:gap-2 transition-opacity duration-300 ${isCurrent ? 'opacity-100 scale-105' : 'opacity-70 scale-100'}`}>
-                <div className={`text-[10px] sm:text-xs font-bold px-3 py-1 rounded-full shadow-md ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}`}>
+                <div className={`text-[10px] sm:text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1
+                  ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}
+                  ${isOffline ? 'grayscale opacity-70' : ''}`}>
+                    {isOffline && <i className="ph ph-wifi-slash text-red-400"></i>}
                     {seatNames[idx] || `座位${idx + 1}`} {isCurrent && ' ▶'}
                 </div>
 
@@ -582,7 +599,7 @@
                 <div className="flex items-center justify-between px-3 py-2 bg-black/60 text-xs sm:text-sm text-white flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
                     <div className="flex items-center gap-2">
                         <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm">
-                            <i className="ph ph-arrow-left mr-1"></i>大廳
+                            <i className="ph ph-arrow-left mr-1"></i>隱藏遊戲
                         </button>
                     </div>
                     <span className="font-bold text-yellow-400 text-center flex-1 mx-2 truncate tracking-widest bg-black/40 py-1 rounded-full">
@@ -685,7 +702,7 @@
                 <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-black/50 text-xs sm:text-sm flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
                     <div className="flex items-center gap-2 shrink-0">
                         <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-700/80 hover:bg-gray-600 px-3 py-1.5 rounded-lg font-bold border border-gray-500 transition-colors shadow-sm">
-                            <i className="ph ph-arrow-left mr-1"></i>名單
+                            <i className="ph ph-arrow-left mr-1"></i>隱藏遊戲
                         </button>
                     </div>
                     <span className={`font-bold flex-1 text-center mx-2 truncate tracking-widest bg-black/40 py-1.5 rounded-full ${isMyTurn ? 'text-yellow-400 ring-1 ring-yellow-400/50 shadow-[0_0_10px_rgba(250,204,21,0.3)]' : 'text-gray-300'}`}>
@@ -759,10 +776,10 @@
                         </div>
                     )}
 
-                    {/* 我的手牌 (使用負間距重疊，允許換行) */}
-                    <div className={`flex flex-wrap justify-center items-end -space-x-[2px] sm:-space-x-[1px] md:space-x-1 px-1 pb-2 sm:pb-4 max-w-5xl mx-auto w-full ${canDiscard ? 'cursor-pointer' : ''}`}>
+                    {/* 我的手牌 (修改為橫向無捲軸滑動設計，避免多牌換行遮擋畫面) */}
+                    <div className={`flex flex-nowrap justify-start sm:justify-center items-end -space-x-[2px] sm:-space-x-[1px] md:space-x-1 px-2 pb-2 sm:pb-4 max-w-5xl mx-auto w-full overflow-x-auto no-scrollbar ${canDiscard ? 'cursor-pointer' : ''}`}>
                         {hand.map((tile) => (
-                            <div key={tile.uid} className="relative group">
+                            <div key={tile.uid} className="relative group shrink-0">
                                 <Tile tile={tile}
                                     onClick={() => handleDiscard(tile)}
                                     isDrawn={gs.drawnTileUid === tile.uid} />
@@ -780,10 +797,10 @@
                     </div>
                 </div>
 
-                {/* 動作提示 Popup (吃碰槓胡) */}
+                {/* 動作提示 Popup (吃碰槓胡) - 加入高度限制以避免選項過多遮擋 */}
                 {isMyActionPrompt && (
                     <div className="absolute inset-x-0 top-[15%] flex flex-col items-center justify-start z-50 pointer-events-none">
-                        <div className="bg-emerald-900/95 p-4 sm:p-5 rounded-2xl border-[2px] sm:border-[3px] border-yellow-500 flex flex-col items-center gap-2 sm:gap-3 shadow-[0_10px_40px_rgba(0,0,0,0.8)] mx-4 min-w-[260px] max-w-[340px] animate-[slideDown_0.2s_ease-out] pointer-events-auto backdrop-blur-md">
+                        <div className="bg-emerald-900/95 p-4 sm:p-5 rounded-2xl border-[2px] sm:border-[3px] border-yellow-500 flex flex-col items-center gap-2 sm:gap-3 shadow-[0_10px_40px_rgba(0,0,0,0.8)] mx-4 min-w-[260px] max-w-[340px] max-h-[60vh] overflow-y-auto no-scrollbar animate-[slideDown_0.2s_ease-out] pointer-events-auto backdrop-blur-md">
                             <p className="text-yellow-300 font-bold text-xs sm:text-sm tracking-widest bg-black/50 px-4 py-1 rounded-full shadow-inner">
                                 {seatNames[ap.from] || `座位${ap.from + 1}`} 打出了
                             </p>
@@ -901,7 +918,7 @@
             <div className="flex-1 flex flex-col p-4 sm:p-6 overflow-y-auto text-white relative bg-gray-900">
                 <div className="absolute top-4 left-4 z-10">
                     <button onClick={() => window.dispatchEvent(new CustomEvent('mahjong:exit-game'))} className="bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg text-sm font-bold border border-gray-600 transition-colors flex items-center shadow-md">
-                        <i className="ph ph-arrow-left mr-1"></i> 返回名單
+                        <i className="ph ph-arrow-left mr-1"></i> 隱藏遊戲
                     </button>
                 </div>
                 <div className="text-center mb-6 mt-10">
@@ -918,17 +935,24 @@
                         const empty = !pid;
                         return (
                             <button key={i}
-                                onClick={() => { if (empty && mySeat < 0) handleSitDown(i); }}
+                                onClick={() => { 
+                                    if (empty && isHost) {
+                                        alert('房主為桌面顯示端，無法入座。請朋友使用其他手機掃碼加入。');
+                                        return;
+                                    }
+                                    if (empty && mySeat < 0) handleSitDown(i); 
+                                }}
                                 className={`p-4 rounded-2xl border-2 text-sm font-bold transition-all text-left relative overflow-hidden shadow-sm
                                     ${isMe ? 'border-yellow-400 bg-yellow-900/40 text-yellow-300 ring-2 ring-yellow-400/30' :
                                         isAI ? 'border-gray-600 bg-gray-800/50 text-gray-400 cursor-default' :
                                             pid ? 'border-emerald-500 bg-emerald-900/40 text-emerald-300 cursor-default' :
-                                                mySeat >= 0 ? 'border-dashed border-gray-700 bg-black/20 text-gray-600 cursor-default' :
-                                                    'border-dashed border-gray-500 bg-black/20 text-gray-300 hover:border-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20 cursor-pointer active:scale-95'}`}
+                                                isHost ? 'border-dashed border-gray-700 bg-black/40 text-gray-500 cursor-not-allowed' :
+                                                    mySeat >= 0 ? 'border-dashed border-gray-700 bg-black/20 text-gray-600 cursor-default' :
+                                                        'border-dashed border-gray-500 bg-black/20 text-gray-300 hover:border-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20 cursor-pointer active:scale-95'}`}
                             >
                                 <div className="text-[10px] text-gray-400 mb-1 uppercase tracking-widest">{seatWinds[i]}家</div>
                                 {empty
-                                    ? <div className="text-base">空位（點擊入座）</div>
+                                    ? <div className="text-base">{isHost ? '空位' : '空位（點擊入座）'}</div>
                                     : <div className="text-base truncate pr-6">{name || '玩家'}</div>
                                 }
                                 {isMe && <div className="absolute top-0 right-0 bg-yellow-500 text-yellow-900 text-[10px] px-2 py-0.5 rounded-bl-lg font-black">YOU</div>}
