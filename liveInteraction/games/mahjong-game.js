@@ -577,7 +577,7 @@
         const seatNames = gs.seatNames || ['座位1', '座位2', '座位3', '座位4'];
 
         return (
-            <div className="flex-1 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-green-700 to-green-950 relative overflow-hidden select-none">
+            <div className="flex-1 h-full min-h-0 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-green-700 to-green-950 relative overflow-hidden select-none">
                 {/* 輪次資訊橫幅 */}
                 <div className="flex items-center justify-between px-3 py-2 bg-black/60 text-xs sm:text-sm text-white flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
                     <div className="flex items-center gap-2">
@@ -680,7 +680,7 @@
         }
 
         return (
-            <div className="flex-1 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-800 to-emerald-950 overflow-hidden text-white relative">
+            <div className="flex-1 h-full min-h-0 flex flex-col bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-800 to-emerald-950 overflow-hidden text-white relative">
                 {/* 狀態列 */}
                 <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-black/50 text-xs sm:text-sm flex-shrink-0 z-20 shadow-md backdrop-blur-sm">
                     <div className="flex items-center gap-2 shrink-0">
