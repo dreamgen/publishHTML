@@ -309,14 +309,16 @@
 
                 {/* 結算顯示 */}
                 {settlement && (
-                    <div className="bg-black/50 border border-white/20 rounded-2xl px-4 py-3 mb-3 z-10 shadow-xl backdrop-blur-sm max-w-2xl w-full">
-                        <div className="text-white/70 text-xs font-bold tracking-widest mb-2 text-center">結算</div>
-                        <div className="grid grid-cols-4 gap-2">
+                    <div className="bg-black/50 border border-white/20 rounded-2xl px-4 py-2 mb-2 z-10 shadow-xl backdrop-blur-sm max-w-2xl w-full">
+                        <div className="text-white/70 text-xs font-bold tracking-widest mb-1.5 text-center">結算</div>
+                        <div className="flex flex-col gap-1">
                             {[0, 1, 2, 3].map(s => (
-                                <div key={s} className={`text-center rounded-lg py-2 px-1 ${s === winnerSeat ? 'bg-yellow-900/60 border border-yellow-500/50' : settlement[s] < 0 ? 'bg-red-900/40 border border-red-500/30' : 'bg-black/30'}`}>
-                                    <div className="text-white/60 text-[10px] font-bold">{seatWinds[s]}</div>
-                                    <div className="text-white text-[10px] truncate font-medium">{seatNames[s] || `座${s + 1}`}</div>
-                                    <div className={`text-base font-black ${settlement[s] > 0 ? 'text-yellow-400' : settlement[s] < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                <div key={s} className={`flex items-center justify-between rounded-lg py-1 px-3 ${s === winnerSeat ? 'bg-yellow-900/60 border border-yellow-500/50' : settlement[s] < 0 ? 'bg-red-900/40 border border-red-500/30' : 'bg-black/30'}`}>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-white/60 text-xs font-bold">{seatWinds[s]}</span>
+                                        <span className="text-white text-xs font-medium">{seatNames[s] || `座${s + 1}`}</span>
+                                    </div>
+                                    <div className={`text-sm font-black ${settlement[s] > 0 ? 'text-yellow-400' : settlement[s] < 0 ? 'text-red-400' : 'text-gray-400'}`}>
                                         {settlement[s] > 0 ? `+${settlement[s]}` : settlement[s] === 0 ? '—' : settlement[s]}台
                                     </div>
                                 </div>
