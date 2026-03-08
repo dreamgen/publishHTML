@@ -280,7 +280,7 @@
     }
 
     // ── WinOverlay 結算畫面 ─────────────────────────────────────────────
-    function WinOverlay({ winResult, seatNames, isHost, onReturn, hands, melds }) {
+    function WinOverlay({ winResult, seatNames, isHost, onReturn, hands, melds, mySeat }) {
         const { winnerSeat, winType, yaku, totalFan } = winResult;
         const isFlowGame = winnerSeat < 0 || winType === '流局';
         const winnerName = !isFlowGame ? (seatNames[winnerSeat] || `座位${winnerSeat + 1}`) : null;
@@ -325,39 +325,31 @@
                     </div>
                 )}
 
-                {/* 各家手牌 */}
-                {hands && (
-                    <div className="bg-black/40 border border-white/10 rounded-2xl p-3 mb-3 z-10 shadow-xl max-w-2xl w-full">
-                        <div className="text-white/70 text-xs font-bold tracking-widest mb-2 text-center">各家手牌</div>
-                        <div className="grid grid-cols-2 gap-2">
-                            {[0, 1, 2, 3].map(s => {
-                                const sHand = hands?.[`seat${s}`] || [];
-                                const sMelds = melds?.[`seat${s}`] || [];
-                                return (
-                                    <div key={s} className={`rounded-xl p-2 border ${s === winnerSeat ? 'border-yellow-500 bg-yellow-900/20' : 'border-white/10 bg-black/30'}`}>
-                                        <div className={`text-xs font-bold mb-1.5 flex items-center gap-1 ${s === winnerSeat ? 'text-yellow-300' : 'text-white/60'}`}>
-                                            <span>{seatWinds[s]}</span>
-                                            <span className="truncate max-w-[80px]">{seatNames[s] || `座位${s + 1}`}</span>
-                                            {s === winnerSeat && <span className="text-yellow-400">🏆</span>}
-                                        </div>
-                                        <div className="flex flex-wrap gap-0.5">
-                                            {sMelds.map((meld, mi) => (
-                                                <div key={mi} className="flex gap-px bg-amber-900/40 p-0.5 rounded border border-amber-600/30 mr-0.5">
-                                                    {meld.tiles.map((t, ti) => (
-                                                        <Tile key={t.uid} tile={t} small isOpenMeld
-                                                            isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
-                                                    ))}
-                                                </div>
-                                            ))}
-                                            {sHand.map(t => <Tile key={t.uid} tile={t} small />)}
-                                            {sHand.length === 0 && sMelds.length === 0 && <span className="text-white/30 text-xs">—</span>}
-                                        </div>
+                {/* 手牌顯示 */}
+                {hands && (() => {
+                    const targetSeat = isHost ? winnerSeat : mySeat;
+                    if (targetSeat == null || targetSeat < 0) return null;
+                    const sHand = hands?.[`seat${targetSeat}`] || [];
+                    const sMelds = melds?.[`seat${targetSeat}`] || [];
+                    const label = isHost ? '胡牌手牌' : '我的手牌';
+                    return (
+                        <div className="bg-black/40 border border-white/10 rounded-2xl p-3 mb-3 z-10 shadow-xl max-w-2xl w-full">
+                            <div className="text-white/70 text-xs font-bold tracking-widest mb-2 text-center">{label}</div>
+                            <div className="flex flex-wrap gap-0.5 justify-center">
+                                {sMelds.map((meld, mi) => (
+                                    <div key={mi} className="flex gap-px bg-amber-900/40 p-0.5 rounded border border-amber-600/30 mr-0.5">
+                                        {meld.tiles.map((t, ti) => (
+                                            <Tile key={t.uid} tile={t} small isOpenMeld
+                                                isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
+                                        ))}
                                     </div>
-                                );
-                            })}
+                                ))}
+                                {sHand.map(t => <Tile key={t.uid} tile={t} small />)}
+                                {sHand.length === 0 && sMelds.length === 0 && <span className="text-white/30 text-xs">—</span>}
+                            </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
 
                 {isHost ? (
                     <button onClick={onReturn}
@@ -1031,7 +1023,7 @@
 
                 {/* 結算 */}
                 {gs.status === 'gameover' && gs.winResult && (
-                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={false} hands={gs.hands} melds={gs.melds} />
+                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={false} hands={gs.hands} melds={gs.melds} mySeat={mySeat} />
                 )}
             </div>
         );
