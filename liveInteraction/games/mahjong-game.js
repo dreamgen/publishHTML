@@ -128,6 +128,24 @@
         return { yaku, totalFan };
     }
 
+    function calculateSettlement(winResult) {
+        const { winnerSeat, winType, totalFan, loserSeat } = winResult;
+        if (!totalFan || winnerSeat < 0) return null;
+        const payments = [0, 0, 0, 0];
+        if (winType === '自摸' || winType === '嶺上自摸') {
+            for (let i = 0; i < 4; i++) {
+                if (i !== winnerSeat) {
+                    payments[i] -= totalFan;
+                    payments[winnerSeat] += totalFan;
+                }
+            }
+        } else if (winType === '放槍' && loserSeat >= 0) {
+            payments[loserSeat] -= totalFan;
+            payments[winnerSeat] += totalFan;
+        }
+        return payments;
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // 3. 吃牌組合
     // ══════════════════════════════════════════════════════════════════
@@ -207,13 +225,13 @@
             sizeClass = "w-[6vw] max-w-[32px] h-[8.5vw] max-h-[48px] sm:w-8 sm:h-11 md:w-10 md:h-14 text-[3.5vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px]";
         }
         if (isDiscard) {
-            sizeClass = isHostDiscard 
-                ? "w-[8vw] max-w-[48px] h-[12vw] max-h-[72px] sm:w-11 sm:h-16 md:w-14 md:h-20 text-[4.5vw] sm:text-lg md:text-2xl border-b-[3px] border-l-[1px] shadow-md"
+            sizeClass = isHostDiscard
+                ? "w-[5.5vw] max-w-[36px] h-[8vw] max-h-[52px] sm:w-9 sm:h-13 md:w-11 md:h-16 text-[3.2vw] sm:text-sm md:text-base border-b-[2px] border-l-[1px] shadow-sm"
                 : "w-[6vw] max-w-[38px] h-[9vw] max-h-[56px] sm:w-9 sm:h-12 md:w-11 md:h-16 text-[3.8vw] sm:text-base md:text-lg border-b-[2px] border-l-[1px] shadow-sm";
         }
         if (isOpenMeld) {
             sizeClass = isHostMeld
-                ? "w-[8vw] max-w-[42px] h-[12vw] max-h-[64px] sm:w-12 sm:h-16 md:w-14 md:h-20 text-[4.5vw] sm:text-xl md:text-2xl border-b-[2px] border-l-[1px] shadow-sm cursor-default"
+                ? "w-[5vw] max-w-[28px] h-[7.5vw] max-h-[42px] sm:w-7 sm:h-11 md:w-8 md:h-12 text-[3vw] sm:text-xs md:text-sm border-b-[2px] border-l-[1px] shadow-sm cursor-default"
                 : "w-[7vw] max-w-[40px] h-[10vw] max-h-[60px] sm:w-10 sm:h-14 md:w-12 md:h-18 text-[4vw] sm:text-lg md:text-xl border-b-[2px] border-l-[1px] shadow-sm cursor-default";
         }
         if (large) {
@@ -262,44 +280,100 @@
     }
 
     // ── WinOverlay 結算畫面 ─────────────────────────────────────────────
-    function WinOverlay({ winResult, seatNames, isHost, onReturn }) {
+    function WinOverlay({ winResult, seatNames, isHost, onReturn, hands, melds }) {
         const { winnerSeat, winType, yaku, totalFan } = winResult;
         const isFlowGame = winnerSeat < 0 || winType === '流局';
         const winnerName = !isFlowGame ? (seatNames[winnerSeat] || `座位${winnerSeat + 1}`) : null;
+        const settlement = !isFlowGame ? calculateSettlement(winResult) : null;
+        const seatWinds = ['東', '南', '西', '北'];
+
         return (
-            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-[100] p-4 animate-[fadeIn_0.3s_ease-out]">
+            <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-start z-[100] p-3 sm:p-4 animate-[fadeIn_0.3s_ease-out] overflow-y-auto">
                 {!isFlowGame && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-500/20 via-transparent to-transparent animate-pulse pointer-events-none"></div>}
 
-                <h2 className={`text-4xl sm:text-6xl md:text-7xl font-black mb-3 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] z-10 ${isFlowGame ? 'text-gray-300' : 'text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-yellow-600'}`}>
+                <h2 className={`text-3xl sm:text-5xl md:text-6xl font-black mb-2 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] z-10 mt-2 ${isFlowGame ? 'text-gray-300' : 'text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-yellow-600'}`}>
                     {isFlowGame ? '流局（平手）' : `${winnerName} 胡牌！`}
                 </h2>
-                {winType && !isFlowGame && <p className="text-yellow-200 text-xl sm:text-2xl mb-6 tracking-[0.2em] font-bold z-10 drop-shadow-md">{winType}</p>}
+                {winType && !isFlowGame && <p className="text-yellow-200 text-lg sm:text-xl mb-3 tracking-[0.2em] font-bold z-10 drop-shadow-md">{winType}</p>}
 
                 {yaku && yaku.length > 0 && (
-                    <div className="bg-black/50 border border-yellow-600/50 rounded-2xl px-6 sm:px-10 py-5 mb-8 text-center z-10 shadow-2xl backdrop-blur-sm max-w-2xl w-full">
-                        <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mb-4">
+                    <div className="bg-black/50 border border-yellow-600/50 rounded-2xl px-4 sm:px-8 py-3 mb-3 text-center z-10 shadow-2xl backdrop-blur-sm max-w-2xl w-full">
+                        <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mb-2">
                             {yaku.map((y, i) => (
-                                <span key={i} className="text-green-200 text-lg sm:text-xl">{y.name} <span className="text-yellow-400 font-bold ml-1">+{y.fan}台</span></span>
+                                <span key={i} className="text-green-200 text-base sm:text-lg">{y.name} <span className="text-yellow-400 font-bold ml-1">+{y.fan}台</span></span>
                             ))}
                         </div>
-                        <div className="text-yellow-400 text-3xl sm:text-4xl font-black border-t border-yellow-600/30 pt-4">共 {totalFan} 台</div>
+                        <div className="text-yellow-400 text-2xl sm:text-3xl font-black border-t border-yellow-600/30 pt-2">共 {totalFan} 台</div>
                     </div>
                 )}
-                
+
+                {/* 結算顯示 */}
+                {settlement && (
+                    <div className="bg-black/50 border border-white/20 rounded-2xl px-4 py-3 mb-3 z-10 shadow-xl backdrop-blur-sm max-w-2xl w-full">
+                        <div className="text-white/70 text-xs font-bold tracking-widest mb-2 text-center">結算</div>
+                        <div className="grid grid-cols-4 gap-2">
+                            {[0, 1, 2, 3].map(s => (
+                                <div key={s} className={`text-center rounded-lg py-2 px-1 ${s === winnerSeat ? 'bg-yellow-900/60 border border-yellow-500/50' : settlement[s] < 0 ? 'bg-red-900/40 border border-red-500/30' : 'bg-black/30'}`}>
+                                    <div className="text-white/60 text-[10px] font-bold">{seatWinds[s]}</div>
+                                    <div className="text-white text-[10px] truncate font-medium">{seatNames[s] || `座${s + 1}`}</div>
+                                    <div className={`text-base font-black ${settlement[s] > 0 ? 'text-yellow-400' : settlement[s] < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                        {settlement[s] > 0 ? `+${settlement[s]}` : settlement[s] === 0 ? '—' : settlement[s]}台
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* 各家手牌 */}
+                {hands && (
+                    <div className="bg-black/40 border border-white/10 rounded-2xl p-3 mb-3 z-10 shadow-xl max-w-2xl w-full">
+                        <div className="text-white/70 text-xs font-bold tracking-widest mb-2 text-center">各家手牌</div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {[0, 1, 2, 3].map(s => {
+                                const sHand = hands?.[`seat${s}`] || [];
+                                const sMelds = melds?.[`seat${s}`] || [];
+                                return (
+                                    <div key={s} className={`rounded-xl p-2 border ${s === winnerSeat ? 'border-yellow-500 bg-yellow-900/20' : 'border-white/10 bg-black/30'}`}>
+                                        <div className={`text-xs font-bold mb-1.5 flex items-center gap-1 ${s === winnerSeat ? 'text-yellow-300' : 'text-white/60'}`}>
+                                            <span>{seatWinds[s]}</span>
+                                            <span className="truncate max-w-[80px]">{seatNames[s] || `座位${s + 1}`}</span>
+                                            {s === winnerSeat && <span className="text-yellow-400">🏆</span>}
+                                        </div>
+                                        <div className="flex flex-wrap gap-0.5">
+                                            {sMelds.map((meld, mi) => (
+                                                <div key={mi} className="flex gap-px bg-amber-900/40 p-0.5 rounded border border-amber-600/30 mr-0.5">
+                                                    {meld.tiles.map((t, ti) => (
+                                                        <Tile key={t.uid} tile={t} small isOpenMeld
+                                                            isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
+                                                    ))}
+                                                </div>
+                                            ))}
+                                            {sHand.map(t => <Tile key={t.uid} tile={t} small />)}
+                                            {sHand.length === 0 && sMelds.length === 0 && <span className="text-white/30 text-xs">—</span>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {isHost ? (
                     <button onClick={onReturn}
-                        className="bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white px-10 py-4 rounded-full text-xl sm:text-2xl font-black border-2 border-emerald-300 shadow-[0_0_30px_rgba(52,211,153,0.4)] mt-4 transition-transform hover:scale-105 active:scale-95 z-10">
+                        className="bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white px-8 py-3 rounded-full text-lg sm:text-xl font-black border-2 border-emerald-300 shadow-[0_0_30px_rgba(52,211,153,0.4)] mt-2 mb-4 transition-transform hover:scale-105 active:scale-95 z-10">
                         返回大廳 (重新入座)
                     </button>
                 ) : (
-                    <div className="text-white text-lg mt-6 animate-pulse z-10 font-bold tracking-widest bg-black/50 px-6 py-3 rounded-full">等待房主返回大廳...</div>
+                    <div className="text-white text-base mt-4 mb-4 animate-pulse z-10 font-bold tracking-widest bg-black/50 px-6 py-3 rounded-full">等待房主返回大廳...</div>
                 )}
             </div>
         );
     }
 
     // ── SeatDisplay（桌面視圖旁觀用）────────────────────────────────────
-    function SeatDisplay({ idx, gs, seatNames, vertical, compact, hostView }) {
+    // side: 'left' | 'right' | undefined (上下玩家不設定 side)
+    function SeatDisplay({ idx, gs, seatNames, vertical, compact, hostView, side }) {
         const seatKey = `seat${idx}`;
         const hand = gs.hands?.[seatKey] || [];
         const myMelds = gs.melds?.[seatKey] || [];
@@ -320,41 +394,70 @@
             }
         }
 
+        // 名稱標籤
+        const nameLabel = (
+            <div className={`text-[9px] sm:text-[10px] font-bold px-2 py-1 rounded-lg shadow-md flex items-center gap-0.5 flex-shrink-0
+              ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse ring-2 ring-yellow-400/80' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}
+              ${isOffline ? 'grayscale opacity-70' : ''}
+              ${side ? 'writing-mode-vertical max-w-[28px]' : ''}`}
+              style={side ? { writingMode: 'vertical-rl', textOrientation: 'mixed', maxWidth: '28px' } : {}}>
+                {isOffline && <i className="ph ph-wifi-slash text-red-400"></i>}
+                {seatNames[idx] || `座${idx + 1}`}{isCurrent ? '▶' : ''}
+            </div>
+        );
+
+        // 手牌顯示（左右側用垂直疊牌，上下用水平）
+        const tilesDisplay = compact ? (
+            <div className="text-yellow-300 text-xs font-bold bg-black/40 px-2 py-1 rounded-lg border border-black/50">{tileCount}張</div>
+        ) : (
+            <div className={`flex ${vertical ? 'flex-col -space-y-3 sm:-space-y-5' : '-space-x-1 sm:-space-x-2'} z-10`}>
+                {hand.map((_, i) => (
+                    <div key={i} style={{ zIndex: i }}>
+                        <Tile isHidden isHostHidden={hostView} small={true} />
+                    </div>
+                ))}
+            </div>
+        );
+
+        // 副露顯示：左右側垂直堆疊（每組直排），上下水平排列
+        const meldsDisplay = myMelds.length > 0 && (
+            <div className={`flex gap-1 ${side ? 'flex-col items-center' : 'flex-row flex-wrap justify-center'}`}>
+                {myMelds.map((meld, mi) => (
+                    <div key={mi} className={`flex ${side ? 'flex-row gap-px' : 'gap-px'} bg-black/30 p-0.5 rounded border border-black/40`}>
+                        {meld.tiles.map((t, ti) => (
+                            <Tile key={t.uid} tile={t} isOpenMeld isHostMeld={hostView} small={true}
+                                isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
+                        ))}
+                    </div>
+                ))}
+            </div>
+        );
+
+        // 左右玩家：水平排列（名稱在外側 + 牌面+副露在內側）
+        if (side) {
+            return (
+                <div className={`flex ${side === 'left' ? 'flex-row' : 'flex-row-reverse'} items-center gap-1 transition-all duration-300 max-w-full overflow-hidden
+                    ${isCurrent ? 'opacity-100 drop-shadow-[0_0_12px_rgba(250,204,21,0.6)]' : 'opacity-70'}`}>
+                    {nameLabel}
+                    <div className="flex flex-col items-center gap-1 min-w-0 overflow-hidden">
+                        {tilesDisplay}
+                        {meldsDisplay}
+                    </div>
+                </div>
+            );
+        }
+
+        // 上下玩家：垂直排列（名稱在頂部）
         return (
-            <div className={`flex flex-col items-center gap-1 sm:gap-2 transition-all duration-300 ${isCurrent ? 'opacity-100 scale-105 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'opacity-70 scale-100'}`}>
-                <div className={`text-[10px] sm:text-xs md:text-sm font-bold px-3 py-1 md:px-5 md:py-2 rounded-full shadow-md flex items-center gap-1
+            <div className={`flex flex-col items-center gap-1 transition-all duration-300 ${isCurrent ? 'opacity-100 scale-105 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'opacity-70 scale-100'}`}>
+                <div className={`text-[10px] sm:text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1
                   ${isCurrent ? 'bg-yellow-400 text-yellow-900 animate-pulse ring-4 ring-yellow-400/80' : 'bg-black/60 text-yellow-200 border border-yellow-900/50'}
                   ${isOffline ? 'grayscale opacity-70' : ''}`}>
                     {isOffline && <i className="ph ph-wifi-slash text-red-400"></i>}
-                    {seatNames[idx] || `座位${idx + 1}`} {isCurrent && ' ▶'}
+                    {seatNames[idx] || `座位${idx + 1}`}{isCurrent && ' ▶'}
                 </div>
-
-                {compact ? (
-                    <div className="text-yellow-300 text-xs font-bold bg-black/40 px-3 py-1.5 rounded-lg border border-black/50">{tileCount}張</div>
-                ) : (
-                    <div className={`flex ${vertical ? 'flex-col -space-y-4 sm:-space-y-6 md:-space-y-8' : '-space-x-1 sm:-space-x-2 md:-space-x-3'} z-10`}>
-                        {hand.map((_, i) => (
-                            <div key={i} style={{ zIndex: i }}>
-                                <Tile isHidden isHostHidden={hostView} small={vertical} />
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {myMelds.length > 0 && (
-                    <div className={`flex gap-1 flex-wrap justify-center ${vertical ? 'flex-col mt-2' : ''}`}>
-                        {myMelds.map((meld, mi) => (
-                            <div key={mi} className={`flex ${vertical ? 'flex-col gap-0.5' : 'gap-px'} bg-black/30 p-1 rounded-md border border-black/50`}>
-                                {meld.tiles.map((t, ti) => (
-                                    <div key={t.uid} className={vertical ? 'rotate-90 origin-center my-1' : ''}>
-                                        <Tile tile={t} isOpenMeld isHostMeld={hostView} small={vertical}
-                                            isAngangHidden={meld.type === 'angang' && (ti === 1 || ti === 2)} />
-                                    </div>
-                                ))}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                {tilesDisplay}
+                {meldsDisplay}
             </div>
         );
     }
@@ -367,18 +470,19 @@
         }, [gs.discards?.length]);
         return (
             <div ref={areaRef}
-                className="bg-black/20 rounded-2xl p-3 sm:p-5 overflow-y-auto flex flex-wrap content-start gap-1 sm:gap-2 shadow-[inset_0_4px_15px_rgba(0,0,0,0.3)] border border-green-800/50 h-full scroll-smooth">
+                className="bg-black/20 rounded-2xl p-2 sm:p-3 overflow-y-auto shadow-[inset_0_4px_15px_rgba(0,0,0,0.3)] border border-green-800/50 h-full scroll-smooth"
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(32px, 1fr))', gap: '2px', alignContent: 'start' }}>
                 {(gs.discards || []).map((t, i) => (
                     <div key={`d${i}`} className="relative">
                         <Tile tile={t} isDiscard isHostDiscard isClaimed={t.claimed} />
                         {/* 最新打出的牌加上提示點 */}
                         {i === (gs.discards || []).length - 1 && !t.claimed && !gs.actionPrompt && (
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping z-10 shadow-md"></div>
+                            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-ping z-10 shadow-md"></div>
                         )}
                     </div>
                 ))}
                 {(gs.discards || []).length === 0 && (
-                    <div className="text-green-600/50 text-sm font-bold tracking-widest w-full h-full flex items-center justify-center">棄牌區將顯示於此</div>
+                    <div className="text-green-600/50 text-sm font-bold tracking-widest col-span-full flex items-center justify-center py-8">棄牌區將顯示於此</div>
                 )}
             </div>
         );
@@ -423,7 +527,7 @@
             if (tile) { hand = [...hand, tile].sort((a, b) => a.id - b.id); }
             if (discards.length > 0) discards[discards.length - 1] = { ...discards[discards.length - 1], claimed: true };
             const score = calculateScore(hand, melds[seatKey] || [], tile ? '放槍' : '自摸');
-            await backend.setGameState({ hands: { ...hands, [seatKey]: hand }, discards, status: 'gameover', winResult: { winnerSeat: seat, winType: tile ? '放槍' : '自摸', ...score }, pendingAction: null, actionPrompt: null, gameLog: [...log, `[${names[seat]}] 胡牌！(${tile ? `放槍: ${names[ap.from]}打${tile.label}` : '自摸'})`] });
+            await backend.setGameState({ hands: { ...hands, [seatKey]: hand }, discards, status: 'gameover', winResult: { winnerSeat: seat, winType: tile ? '放槍' : '自摸', loserSeat: tile ? ap.from : -1, ...score }, pendingAction: null, actionPrompt: null, gameLog: [...log, `[${names[seat]}] 胡牌！(${tile ? `放槍: ${names[ap.from]}打${tile.label}` : '自摸'})`] });
             return;
         }
         if (type === 'pong') {
@@ -457,7 +561,7 @@
             hand = [...hand, lingshang];
             if (checkWin(hand)) {
                 const score = calculateScore(hand, melds[seatKey], '嶺上自摸');
-                await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, discards, status: 'gameover', winResult: { winnerSeat: seat, winType: '嶺上自摸', ...score }, pendingAction: null, actionPrompt: null, drawnTileUid: lingshang.uid });
+                await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, discards, status: 'gameover', winResult: { winnerSeat: seat, winType: '嶺上自摸', loserSeat: -1, ...score }, pendingAction: null, actionPrompt: null, drawnTileUid: lingshang.uid });
                 return;
             }
             await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, discards, actionPrompt: null, currentSeat: seat, pendingAction: null, drawnTileUid: lingshang.uid, gameLog: [...log, `[${names[seat]}] 大明槓後摸嶺上: ${lingshang.label}`] });
@@ -482,7 +586,7 @@
             hand = [...hand, lingshang];
             if (checkWin(hand)) {
                 const score = calculateScore(hand, melds[seatKey], '嶺上自摸');
-                await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, status: 'gameover', winResult: { winnerSeat: seat, winType: '嶺上自摸', ...score }, pendingAction: null, drawnTileUid: lingshang.uid, gameLog: [...log, `[${names[seat]}] ${gangLabel}槓後嶺上自摸！`] });
+                await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, status: 'gameover', winResult: { winnerSeat: seat, winType: '嶺上自摸', loserSeat: -1, ...score }, pendingAction: null, drawnTileUid: lingshang.uid, gameLog: [...log, `[${names[seat]}] ${gangLabel}槓後嶺上自摸！`] });
                 return;
             }
             const moreGangs = findGangOptions(hand, melds[seatKey] || []);
@@ -530,7 +634,7 @@
             log.push(`[${names[seat]}] 摸牌`);
             if (checkWin(hand)) {
                 const score = calculateScore(hand, melds[seatKey] || [], '自摸');
-                await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, status: 'gameover', winResult: { winnerSeat: seat, winType: '自摸', ...score }, gameLog: [...log, `[${names[seat]}] 自摸！`] });
+                await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, status: 'gameover', winResult: { winnerSeat: seat, winType: '自摸', loserSeat: -1, ...score }, gameLog: [...log, `[${names[seat]}] 自摸！`] });
                 return;
             }
             const aiGangs = findGangOptions(hand, melds[seatKey] || []);
@@ -545,7 +649,7 @@
                     hand = [...hand, lingshang];
                     if (checkWin(hand)) {
                         const score = calculateScore(hand, melds[seatKey], '嶺上自摸');
-                        await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, status: 'gameover', winResult: { winnerSeat: seat, winType: '嶺上自摸', ...score }, gameLog: [...log, `[${names[seat]}] 嶺上自摸！`] });
+                        await backend.setGameState({ deck, hands: { ...hands, [seatKey]: hand }, melds, status: 'gameover', winResult: { winnerSeat: seat, winType: '嶺上自摸', loserSeat: -1, ...score }, gameLog: [...log, `[${names[seat]}] 嶺上自摸！`] });
                         return;
                     }
                 }
@@ -648,50 +752,50 @@
                     <span className="text-emerald-300 font-bold shrink-0 bg-black/40 px-3 py-1 md:py-1.5 rounded-full text-xs sm:text-sm md:text-base">牌庫: <span className="text-yellow-400">{gs.deck?.length ?? 0}</span></span>
                 </div>
 
-                {/* 遊戲桌面區域 (十字佈局優化) */}
-                <div className="flex-1 flex flex-col min-h-0 relative p-2 sm:p-4 justify-between">
+                {/* 遊戲桌面區域：CSS Grid 固定比例佈局 */}
+                <div className="flex-1 flex flex-col min-h-0 relative p-1 sm:p-2">
 
-                    {/* 上方 座位2 (對家) */}
-                    <div className="flex justify-center items-start flex-shrink-0 h-20 sm:h-28 md:h-36">
+                    {/* 上方 座位2 (對家) - 固定高度 */}
+                    <div className="flex justify-center items-center flex-shrink-0" style={{height: 'min(18vh, 130px)'}}>
                         <SeatDisplay idx={2} gs={gs} seatNames={seatNames} compact={false} hostView={true} />
                     </div>
 
-                    {/* 中間行：左 座位3 + 棄牌區 + 右 座位1 */}
-                    <div className="flex flex-1 items-stretch justify-between px-1 sm:px-6 min-h-0 w-full overflow-hidden gap-2 my-2">
+                    {/* 中間行：使用 CSS Grid，棄牌區佔最大比例 */}
+                    <div className="flex-1 min-h-0 grid gap-1" style={{gridTemplateColumns: 'minmax(0, 15%) 1fr minmax(0, 15%)'}}>
                         {/* 左方 座位3 */}
-                        <div className="flex flex-col items-center justify-center flex-shrink-0 w-16 sm:w-24 md:w-32">
-                            <SeatDisplay idx={3} gs={gs} seatNames={seatNames} vertical={true} compact={false} hostView={true} />
+                        <div className="flex items-center justify-center min-w-0 overflow-hidden">
+                            <SeatDisplay idx={3} gs={gs} seatNames={seatNames} vertical={true} compact={false} hostView={true} side="left" />
                         </div>
 
                         {/* 中央棄牌區 */}
-                        <div className="flex-1 min-w-0 max-w-3xl mx-auto h-full flex flex-col justify-center py-2 sm:py-6 relative z-0">
+                        <div className="min-w-0 h-full relative z-0">
                             <HostDiscardArea gs={gs} />
                         </div>
 
                         {/* 右方 座位1 */}
-                        <div className="flex flex-col items-center justify-center flex-shrink-0 w-16 sm:w-24 md:w-32">
-                            <SeatDisplay idx={1} gs={gs} seatNames={seatNames} vertical={true} compact={false} hostView={true} />
+                        <div className="flex items-center justify-center min-w-0 overflow-hidden">
+                            <SeatDisplay idx={1} gs={gs} seatNames={seatNames} vertical={true} compact={false} hostView={true} side="right" />
                         </div>
                     </div>
 
-                    {/* 下方 座位0 (莊家/自己) */}
-                    <div className="flex justify-center items-end flex-shrink-0 h-20 sm:h-28 md:h-36 mb-2">
+                    {/* 下方 座位0 (莊家) - 固定高度 */}
+                    <div className="flex justify-center items-center flex-shrink-0" style={{height: 'min(18vh, 130px)'}}>
                         <SeatDisplay idx={0} gs={gs} seatNames={seatNames} compact={false} hostView={true} />
                     </div>
                 </div>
 
-                {/* 動作提示字幕（誰在做什麼） */}
+                {/* 動作提示字幕（只顯示「考慮中」，不洩露選項） */}
                 {gs.actionPrompt && (
-                    <div className="absolute bottom-32 left-0 right-0 flex justify-center z-30 pointer-events-none animate-[slideUp_0.3s_ease-out]">
+                    <div className="absolute bottom-6 left-0 right-0 flex justify-center z-30 pointer-events-none animate-[slideUp_0.3s_ease-out]">
                         <div className="bg-black/80 text-yellow-300 text-sm sm:text-base font-bold px-6 py-3 rounded-full border-2 border-yellow-600 shadow-[0_5px_15px_rgba(0,0,0,0.5)] backdrop-blur-sm">
-                            等待 {seatNames[gs.actionPrompt.forSeat]} 回應 ({gs.actionPrompt.options.map(o => ({ win: '胡', pong: '碰', chow: '吃', dagang: '槓' }[o] || o)).join('/')})
+                            {seatNames[gs.actionPrompt.forSeat]} 考慮中...
                         </div>
                     </div>
                 )}
 
                 {/* 結算 */}
                 {gs.status === 'gameover' && gs.winResult && (
-                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={true} onReturn={handleReturnToLobby} />
+                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={true} onReturn={handleReturnToLobby} hands={gs.hands} melds={gs.melds} />
                 )}
             </div>
         );
@@ -927,7 +1031,7 @@
 
                 {/* 結算 */}
                 {gs.status === 'gameover' && gs.winResult && (
-                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={false} />
+                    <WinOverlay winResult={gs.winResult} seatNames={seatNames} isHost={false} hands={gs.hands} melds={gs.melds} />
                 )}
             </div>
         );
