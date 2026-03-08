@@ -311,16 +311,16 @@
                 {settlement && (
                     <div className="bg-black/50 border border-white/20 rounded-2xl px-4 py-2 mb-2 z-10 shadow-xl backdrop-blur-sm max-w-2xl w-full">
                         <div className="text-white/70 text-xs font-bold tracking-widest mb-1.5 text-center">結算</div>
-                        <div className="flex flex-col gap-1">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
                             {[0, 1, 2, 3].map(s => (
-                                <div key={s} className={`flex items-center justify-between rounded-lg py-1 px-3 ${s === winnerSeat ? 'bg-yellow-900/60 border border-yellow-500/50' : settlement[s] < 0 ? 'bg-red-900/40 border border-red-500/30' : 'bg-black/30'}`}>
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="text-white/60 text-xs font-bold">{seatWinds[s]}</span>
-                                        <span className="text-white text-xs font-medium">{seatNames[s] || `座${s + 1}`}</span>
+                                <div key={s} className={`flex items-center justify-between rounded-lg py-1 px-2 gap-1 ${s === winnerSeat ? 'bg-yellow-900/60 border border-yellow-500/50' : settlement[s] < 0 ? 'bg-red-900/40 border border-red-500/30' : 'bg-black/30'}`}>
+                                    <div className="flex items-center gap-1 min-w-0">
+                                        <span className="text-white/60 text-xs font-bold shrink-0">{seatWinds[s]}</span>
+                                        <span className="text-white text-xs font-medium truncate">{seatNames[s] || `座${s + 1}`}</span>
                                     </div>
-                                    <div className={`text-sm font-black ${settlement[s] > 0 ? 'text-yellow-400' : settlement[s] < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                    <span className={`text-xs font-black shrink-0 ${settlement[s] > 0 ? 'text-yellow-400' : settlement[s] < 0 ? 'text-red-400' : 'text-gray-400'}`}>
                                         {settlement[s] > 0 ? `+${settlement[s]}` : settlement[s] === 0 ? '—' : settlement[s]}台
-                                    </div>
+                                    </span>
                                 </div>
                             ))}
                         </div>
