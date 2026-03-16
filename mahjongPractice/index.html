@@ -366,7 +366,7 @@
                     winScore: null,
                     gameLog: [
                         `=== 對局開始 ===`,
-                        `[起始手牌 16張] ${hands[0].map(t => t.label).join(' ')}`,
+                        `[起始手牌 16張] ${hands[0].slice(0, 16).map(t => t.label).join(' ')}`,
                         `[莊家] 玩家摸牌(首張): ${firstDraw.label}`,
                     ],
                 });
@@ -412,7 +412,11 @@
                         // 檢查玩家是否自摸
                         if (checkWin(newHands[0])) {
                             const score = calculateScore(newHands[0], melds[0], '自摸');
-                            setGameState(prev => addLog({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: 0, winType: '自摸', drawnTileUid: drawnTile.uid, winScore: score }, `[玩家] 摸牌: ${drawnTile.label} → 自摸胡牌！`));
+                            const winHandLog = `[胡牌手型] ${[...melds[0].map(m => m.tiles.map(t => t.label).join('')), ...newHands[0].map(t => t.label)].join(' ')}`;
+                            setGameState(prev => {
+                                const s = addLog({ ...prev, deck: newDeck, hands: newHands, status: 'gameover', winner: 0, winType: '自摸', drawnTileUid: drawnTile.uid, winScore: score }, `[玩家] 摸牌: ${drawnTile.label} → 自摸胡牌！`);
+                                return addLog(s, winHandLog);
+                            });
                             return;
                         }
                         // 檢查槓選項
@@ -574,8 +578,10 @@
                     if (action === 'win') {
                         newHands[0] = [...newHands[0], tile].sort((a, b) => a.id - b.id);
                         const score = calculateScore(newHands[0], newMelds[0], '放槍');
-                        return addLog({ ...prev, hands: newHands, melds: newMelds, discards: newDiscards, status: 'gameover', winner: 0, winType: '放槍', winScore: score },
+                        const winHandLog = `[胡牌手型] ${[...newMelds[0].map(m => m.tiles.map(t => t.label).join('')), ...newHands[0].map(t => t.label)].join(' ')}`;
+                        const s = addLog({ ...prev, hands: newHands, melds: newMelds, discards: newDiscards, status: 'gameover', winner: 0, winType: '放槍', winScore: score },
                             `[玩家] 胡牌！(放槍: ${playerNames[actionPrompt.from]} 打 ${tile.label})`);
+                        return addLog(s, winHandLog);
                     }
                     if (action === 'pong') {
                         const pHand = newHands[0];
@@ -597,8 +603,10 @@
                         newHands[0] = [...newHands[0], lingshang];
                         if (checkWin(newHands[0])) {
                             const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
-                            return addLog({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid },
+                            const winHandLog = `[胡牌手型] ${[...newMelds[0].map(m => m.tiles.map(t => t.label).join('')), ...newHands[0].map(t => t.label)].join(' ')}`;
+                            const s = addLog({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score, drawnTileUid: lingshang.uid },
                                 `[玩家] 大明槓 ${tile.label} → 摸嶺上 ${lingshang.label} → 嶺上自摸！`);
+                            return addLog(s, winHandLog);
                         }
                         const moreGangs = findGangOptions(newHands[0], newMelds[0]);
                         return addLog({ ...prev, deck: newDeck, hands: newHands, melds: newMelds, discards: newDiscards, actionPrompt: null, turn: 0, drawnTileUid: lingshang.uid, gangPrompt: moreGangs.length > 0 ? moreGangs : null },
@@ -650,11 +658,13 @@
                     // 嶺上自摸判定
                     if (checkWin(newHands[0])) {
                         const score = calculateScore(newHands[0], newMelds[0], '嶺上自摸');
-                        return addLog({
+                        const winHandLog = `[胡牌手型] ${[...newMelds[0].map(m => m.tiles.map(t => t.label).join('')), ...newHands[0].map(t => t.label)].join(' ')}`;
+                        const s = addLog({
                             ...prev, hands: newHands, melds: newMelds, deck: newDeck,
                             drawnTileUid: lingshang.uid, gangPrompt: null,
                             status: 'gameover', winner: 0, winType: '嶺上自摸', winScore: score
                         }, `[玩家] ${gangOpt.type === 'angang' ? '暗' : '明'}槓 ${gangLabel} → 摸嶺上 ${lingshang.label} → 嶺上自摸！`);
+                        return addLog(s, winHandLog);
                     }
                     // 檢查是否還可以再槓
                     const moreGangs = findGangOptions(newHands[0], newMelds[0]);
