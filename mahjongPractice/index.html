@@ -716,16 +716,23 @@
             };
 
             // 依排序模式計算顯示用手牌順序（不修改 gameState，純顯示）
+            // 剛摸進來的牌固定排在最右方，其餘牌依模式排序
             const displayHand = useMemo(() => {
                 const hand = gameState.hands[0] || [];
+                const drawnUid = gameState.drawnTileUid;
+                const drawnTile = drawnUid ? hand.find(t => t.uid === drawnUid) : null;
+                const rest = drawnTile ? hand.filter(t => t.uid !== drawnUid) : hand;
+                let sorted;
                 if (sortMode === 'id') {
-                    return [...hand].sort((a, b) => a.id - b.id);
+                    sorted = [...rest].sort((a, b) => a.id - b.id);
+                } else {
+                    // 'split'：鎖定牌在左（按牌序），未鎖定牌在右（按牌序）
+                    const locked = rest.filter(t => lockedUids.has(t.uid)).sort((a, b) => a.id - b.id);
+                    const unlocked = rest.filter(t => !lockedUids.has(t.uid)).sort((a, b) => a.id - b.id);
+                    sorted = [...locked, ...unlocked];
                 }
-                // 'split'：鎖定牌在左（按牌序），未鎖定牌在右（按牌序）
-                const locked = hand.filter(t => lockedUids.has(t.uid)).sort((a, b) => a.id - b.id);
-                const unlocked = hand.filter(t => !lockedUids.has(t.uid)).sort((a, b) => a.id - b.id);
-                return [...locked, ...unlocked];
-            }, [gameState.hands[0], sortMode, lockedUids]);
+                return drawnTile ? [...sorted, drawnTile] : sorted;
+            }, [gameState.hands[0], gameState.drawnTileUid, sortMode, lockedUids]);
 
             // --- 畫面渲染 ---
             if (gameState.status === 'menu') {
