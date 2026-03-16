@@ -252,13 +252,6 @@
                         </>
                     )}
                     {isAngangHidden && <div className="absolute inset-0 bg-green-900/80 rounded"></div>}
-                    {onLockToggle && (
-                        <button
-                            className={`absolute bottom-0 right-0 w-[15px] h-[15px] sm:w-[17px] sm:h-[17px] flex items-center justify-center rounded-tl text-[8px] sm:text-[9px] leading-none font-bold z-10 transition-colors ${isLocked ? 'bg-orange-500 text-white' : 'bg-black/10 text-gray-400 hover:bg-black/20'}`}
-                            onClick={(e) => { e.stopPropagation(); onLockToggle(); }}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                        >{isLocked ? '🔒' : '🔓'}</button>
-                    )}
                 </div>
             );
         };
@@ -914,16 +907,23 @@
 
                             {/* 玩家手牌（依 displayHand 排序顯示） */}
                             <div className="flex flex-wrap justify-center gap-1 sm:gap-2">
-                                {displayHand.map((tile) => (
-                                    <Tile
-                                        key={tile.uid}
-                                        tile={tile}
-                                        onClick={() => handlePlayerDiscard(tile)}
-                                        isDrawn={gameState.drawnTileUid === tile.uid}
-                                        isLocked={lockedUids.has(tile.uid)}
-                                        onLockToggle={() => handleToggleLock(tile.uid)}
-                                    />
-                                ))}
+                                {displayHand.map((tile) => {
+                                    const isLocked = lockedUids.has(tile.uid);
+                                    return (
+                                        <div key={tile.uid} className="flex flex-col items-center">
+                                            <button
+                                                className={`w-full text-[9px] sm:text-[10px] leading-none px-0.5 py-0.5 rounded mb-0.5 font-bold transition-colors ${isLocked ? 'bg-orange-500 text-white' : 'bg-black/20 text-gray-300 hover:bg-black/35'}`}
+                                                onClick={() => handleToggleLock(tile.uid)}
+                                            >{isLocked ? '🔒' : '🔓'}</button>
+                                            <Tile
+                                                tile={tile}
+                                                onClick={() => handlePlayerDiscard(tile)}
+                                                isDrawn={gameState.drawnTileUid === tile.uid}
+                                                isLocked={isLocked}
+                                            />
+                                        </div>
+                                    );
+                                })}
                             </div>
 
                             {/* 提示狀態時強調玩家手牌區域 (微亮的背景) */}
