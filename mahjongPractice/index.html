@@ -1033,7 +1033,7 @@
                         return (
                             <>
                                 {/* 指令區：固定在畫面正上方，拖曳往上即可觸及 */}
-                                <div className="fixed inset-x-0 top-3 flex justify-center gap-5 z-40 pointer-events-none">
+                                <div className="fixed inset-x-0 bottom-32 sm:bottom-36 flex justify-center gap-5 z-40 pointer-events-none">
                                     <div ref={lockZoneRef}
                                         className={`pointer-events-auto w-28 sm:w-36 py-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all duration-150 shadow-2xl select-none
                                             ${dragInfo.overZone === 'lock'
