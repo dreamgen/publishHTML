@@ -339,6 +339,7 @@
             useEffect(() => { lockedUidsRef.current = lockedUids; }, [lockedUids]);
             const handleToggleLockRef = useRef(null);
             const handlePlayerDiscardRef = useRef(null);
+            const lastTapRef = useRef({ uid: null, time: 0 }); // 雙擊偵測
             // 指標事件全域監聽：移動 + 放開
             useEffect(() => {
                 const onMove = (e) => {
@@ -367,12 +368,23 @@
                     dragStartRef.current = null;
                     setDragInfo(null);
                     if (!moved) {
-                        // 點選：將牌加入/移出多選集合
-                        setSelectedUids(prev => {
-                            const next = new Set(prev);
-                            if (next.has(uid)) next.delete(uid); else next.add(uid);
-                            return next;
-                        });
+                        const now = Date.now();
+                        const last = lastTapRef.current;
+                        if (last.uid === uid && now - last.time < 350) {
+                            // 雙擊：直接送出（僅限單張，多選時不送出）
+                            lastTapRef.current = { uid: null, time: 0 };
+                            if (selectedUidsRef.current.size <= 1) {
+                                handlePlayerDiscardRef.current?.(tile);
+                            }
+                        } else {
+                            // 單擊：將牌加入/移出多選集合
+                            lastTapRef.current = { uid, time: now };
+                            setSelectedUids(prev => {
+                                const next = new Set(prev);
+                                if (next.has(uid)) next.delete(uid); else next.add(uid);
+                                return next;
+                            });
+                        }
                     } else if (overZone === 'lock') {
                         // 若拖曳的牌在多選集合中，對全部選取的牌切換鎖定
                         const targets = selectedUidsRef.current.has(uid)
@@ -1044,7 +1056,7 @@
                                             {multiCount > 1 ? `鎖定 ${multiCount} 張` : '鎖定'}
                                         </span>
                                     </div>
-                                    {canDiscard && (
+                                    {canDiscard && multiCount <= 1 && (
                                         <div ref={discardZoneRef}
                                             className={`pointer-events-auto w-28 sm:w-36 py-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all duration-150 shadow-2xl select-none
                                                 ${dragInfo.overZone === 'discard'
