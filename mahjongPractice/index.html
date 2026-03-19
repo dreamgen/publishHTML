@@ -203,7 +203,7 @@
         }
 
         // --- React 元件 ---
-        const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn, isLocked, onLockToggle }) => {
+        const Tile = ({ tile, isHidden, onClick, isDiscard, isMeld, isOpenMeld, isAngangHidden, large, isClaimed, isDrawn, isLocked, isSelected }) => {
             if (isHidden) {
                 return <div className="w-8 h-12 sm:w-10 sm:h-14 bg-green-600 rounded shadow-[inset_0_0_8px_rgba(0,0,0,0.3)] border-b-4 border-green-800 m-px"></div>;
             }
@@ -235,9 +235,11 @@
                 ? "bg-amber-50 shadow-sm"
                 : isDrawn
                     ? "ml-4 sm:ml-6 -translate-y-2 ring-4 ring-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.8)] z-10 bg-yellow-100"
-                    : isLocked
-                        ? "bg-orange-100 ring-2 ring-orange-400"
-                        : "bg-yellow-50";
+                    : isSelected
+                        ? "-translate-y-5 bg-sky-50 ring-2 ring-sky-400 shadow-[0_6px_18px_rgba(56,189,248,0.5)] z-10"
+                        : isLocked
+                            ? "bg-orange-100 ring-2 ring-orange-400"
+                            : "bg-yellow-50";
             return (
                 <div
                     onClick={onClick}
@@ -335,8 +337,82 @@
             const [lockedUids, setLockedUids] = useState(new Set()); // 鎖定牌的 UID 集合
             const lockedUidsRef = useRef(new Set()); // 供 setTimeout closure 安全讀取
             useEffect(() => { lockedUidsRef.current = lockedUids; }, [lockedUids]);
+            const handleToggleLockRef = useRef(null);
+            const handlePlayerDiscardRef = useRef(null);
+            const lastTapRef = useRef({ uid: null, time: 0 }); // 雙擊偵測
+            // 指標事件全域監聽：移動 + 放開
+            useEffect(() => {
+                const onMove = (e) => {
+                    if (!dragStartRef.current) return;
+                    const cx = e.clientX;
+                    const cy = e.clientY;
+                    const { x: sx, y: sy } = dragStartRef.current;
+                    if (!dragStartRef.current.moved && (cx-sx)*(cx-sx)+(cy-sy)*(cy-sy) < 64) return;
+                    dragStartRef.current.moved = true;
+                    let overZone = null;
+                    if (lockZoneRef.current) {
+                        const r = lockZoneRef.current.getBoundingClientRect();
+                        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) overZone = 'lock';
+                    }
+                    if (discardZoneRef.current) {
+                        const r = discardZoneRef.current.getBoundingClientRect();
+                        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) overZone = 'discard';
+                    }
+                    dragStartRef.current.overZone = overZone;
+                    const { uid, tile } = dragStartRef.current;
+                    setDragInfo({ uid, tile, x: cx, y: cy, overZone });
+                };
+                const onUp = () => {
+                    if (!dragStartRef.current) return;
+                    const { moved, uid, tile, overZone } = dragStartRef.current;
+                    dragStartRef.current = null;
+                    setDragInfo(null);
+                    if (!moved) {
+                        const now = Date.now();
+                        const last = lastTapRef.current;
+                        if (last.uid === uid && now - last.time < 350) {
+                            // 雙擊：直接送出（僅限單張，多選時不送出）
+                            lastTapRef.current = { uid: null, time: 0 };
+                            if (selectedUidsRef.current.size <= 1) {
+                                handlePlayerDiscardRef.current?.(tile);
+                            }
+                        } else {
+                            // 單擊：將牌加入/移出多選集合
+                            lastTapRef.current = { uid, time: now };
+                            setSelectedUids(prev => {
+                                const next = new Set(prev);
+                                if (next.has(uid)) next.delete(uid); else next.add(uid);
+                                return next;
+                            });
+                        }
+                    } else if (overZone === 'lock') {
+                        // 若拖曳的牌在多選集合中，對全部選取的牌切換鎖定
+                        const targets = selectedUidsRef.current.has(uid)
+                            ? [...selectedUidsRef.current]
+                            : [uid];
+                        targets.forEach(u => handleToggleLockRef.current?.(u));
+                    } else if (overZone === 'discard') {
+                        handlePlayerDiscardRef.current?.(tile);
+                    }
+                };
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+                window.addEventListener('pointercancel', onUp);
+                return () => {
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                    window.removeEventListener('pointercancel', onUp);
+                };
+            }, []);
             const [sortMode, setSortMode] = useState('id'); // 'id' = 全部排序, 'split' = 鎖定分區
             const [discardConfirm, setDiscardConfirm] = useState(null); // 等待確認出牌的鎖定牌
+            const [selectedUids, setSelectedUids] = useState(new Set()); // 手牌多選（上提顯示）
+            const selectedUidsRef = useRef(new Set());
+            useEffect(() => { selectedUidsRef.current = selectedUids; }, [selectedUids]);
+            const [dragInfo, setDragInfo] = useState(null);              // { tile, x, y, overZone }
+            const lockZoneRef = useRef(null);
+            const discardZoneRef = useRef(null);
+            const dragStartRef = useRef(null); // { uid, tile, x, y, moved, overZone }
             const playerNames = ['玩家', 'AI右', 'AI上', 'AI左'];
 
             // --- 記錄 helper ---
@@ -707,6 +783,11 @@
                     return next;
                 });
             };
+            // 保持 ref 指向最新版本（避免 useEffect 閉包過期）
+            useEffect(() => { handleToggleLockRef.current = handleToggleLock; });
+            useEffect(() => { handlePlayerDiscardRef.current = handlePlayerDiscard; });
+            // 手牌變動時清除選取
+            useEffect(() => { setSelectedUids(new Set()); }, [gameState.hands[0]]);
 
             // 依排序模式計算顯示用手牌順序（不修改 gameState，純顯示）
             // 剛摸進來的牌固定排在最右方，其餘牌依模式排序
@@ -906,20 +987,24 @@
                             )}
 
                             {/* 玩家手牌（依 displayHand 排序顯示） */}
-                            <div className="flex flex-wrap justify-center gap-1 sm:gap-2">
+                            <div className="flex flex-wrap justify-center gap-1 sm:gap-2" style={{touchAction:'none'}}>
                                 {displayHand.map((tile) => {
                                     const isLocked = lockedUids.has(tile.uid);
+                                    const isSelected = selectedUids.has(tile.uid);
                                     return (
-                                        <div key={tile.uid} className="flex flex-col items-center">
-                                            <button
-                                                className={`w-full text-[9px] sm:text-[10px] leading-none px-0.5 py-0.5 rounded mb-0.5 font-bold transition-colors ${isLocked ? 'bg-orange-500 text-white' : 'bg-black/20 text-gray-300 hover:bg-black/35'}`}
-                                                onClick={() => handleToggleLock(tile.uid)}
-                                            >{isLocked ? '🔒' : '🔓'}</button>
+                                        <div
+                                            key={tile.uid}
+                                            className="flex items-end pt-5"
+                                            onPointerDown={(e) => {
+                                                e.preventDefault();
+                                                dragStartRef.current = { uid: tile.uid, tile, x: e.clientX, y: e.clientY, moved: false, overZone: null };
+                                            }}
+                                        >
                                             <Tile
                                                 tile={tile}
-                                                onClick={() => handlePlayerDiscard(tile)}
                                                 isDrawn={gameState.drawnTileUid === tile.uid}
                                                 isLocked={isLocked}
+                                                isSelected={isSelected}
                                             />
                                         </div>
                                     );
@@ -951,6 +1036,50 @@
                             </div>
                         </div>
                     )}
+
+                    {/* 拖曳時：指令覆蓋區（顯示在畫面頂部，避免路徑交叉）＋幽靈牌 */}
+                    {dragInfo && (() => {
+                        const myTurn = gameState.turn === 0 && !gameState.actionPrompt && !gameState.gangPrompt;
+                        const canDiscard = myTurn && gameState.hands[0].length % 3 === 2;
+                        const multiCount = selectedUidsRef.current.has(dragInfo.uid) ? selectedUidsRef.current.size : 0;
+                        return (
+                            <>
+                                {/* 指令區：固定在畫面正上方，拖曳往上即可觸及 */}
+                                <div className="fixed inset-x-0 bottom-32 sm:bottom-36 flex justify-center gap-5 z-40 pointer-events-none">
+                                    <div ref={lockZoneRef}
+                                        className={`pointer-events-auto w-28 sm:w-36 py-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all duration-150 shadow-2xl select-none
+                                            ${dragInfo.overZone === 'lock'
+                                                ? 'bg-orange-500 border-orange-300 scale-110 shadow-orange-500/60'
+                                                : 'bg-orange-950/95 border-orange-600'}`}>
+                                        <span className="text-3xl leading-none">🔒</span>
+                                        <span className={`text-xs font-bold ${dragInfo.overZone === 'lock' ? 'text-white' : 'text-orange-200'}`}>
+                                            {multiCount > 1 ? `鎖定 ${multiCount} 張` : '鎖定'}
+                                        </span>
+                                    </div>
+                                    {canDiscard && multiCount <= 1 && (
+                                        <div ref={discardZoneRef}
+                                            className={`pointer-events-auto w-28 sm:w-36 py-4 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all duration-150 shadow-2xl select-none
+                                                ${dragInfo.overZone === 'discard'
+                                                    ? 'bg-red-500 border-red-300 scale-110 shadow-red-500/60'
+                                                    : 'bg-red-950/95 border-red-600'}`}>
+                                            <span className="text-3xl leading-none">🀄</span>
+                                            <span className={`text-xs font-bold ${dragInfo.overZone === 'discard' ? 'text-white' : 'text-red-200'}`}>打出</span>
+                                        </div>
+                                    )}
+                                </div>
+                                {/* 幽靈牌跟隨手指 */}
+                                <div style={{ position:'fixed', left: dragInfo.x - 20, top: dragInfo.y - 32, zIndex: 9999, pointerEvents:'none' }}
+                                     className="opacity-75 rotate-6 drop-shadow-2xl">
+                                    <Tile tile={dragInfo.tile} isLocked={lockedUids.has(dragInfo.uid)} />
+                                    {multiCount > 1 && (
+                                        <span className="absolute -top-1 -right-1 bg-sky-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                                            {multiCount}
+                                        </span>
+                                    )}
+                                </div>
+                            </>
+                        );
+                    })()}
 
                     {/* 遊戲結束結算畫面 */}
                     {gameState.status === 'gameover' && (
