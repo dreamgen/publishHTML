@@ -702,7 +702,7 @@
                     tricksTaken: newTricksTaken,
                     currentLeader: winnerSeat,
                     openingLeadMade, dummyRevealed,
-                    phase: 'scoring',
+                    phase: 'handFinished', // 【修改】從 scoring 改為 handFinished，先暫留牌桌畫面
                     lastHandResult: handResult,
                     rubberScore: finalRubberScore,
                     gamesWon,
@@ -747,22 +747,24 @@
         // 元件
         // ══════════════════════════════════════════════════════════════
 
-        // 單張牌 (Responsive Scaling)
+        // 單張牌 (Responsive Scaling, 手機版大幅度加大版面)
         const Card = ({ card, onClick, isHidden, size = 'hand', selected, disabled, noHoverAnim }) => {
             const sizeMap = {
-                hand: "w-14 h-20 sm:w-20 sm:h-28 md:w-24 md:h-36 lg:w-32 lg:h-48",
-                trick: "w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40",
-                sm: "w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 lg:w-20 lg:h-32"
+                // 手機版 (sm以下) 大幅增加基礎寬高，讓點擊面積與字體極大化
+                hand: "w-20 h-32 sm:w-24 sm:h-36 md:w-28 md:h-40 lg:w-32 lg:h-48",
+                trick: "w-14 h-20 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40",
+                sm: "w-16 h-24 sm:w-20 sm:h-28 md:w-24 md:h-32 lg:w-28 lg:h-40"
             };
             const textMap = {
-                hand: "text-xl sm:text-2xl md:text-3xl lg:text-5xl",
-                trick: "text-lg sm:text-xl md:text-2xl lg:text-4xl",
-                sm: "text-sm sm:text-lg md:text-xl lg:text-3xl"
+                hand: "text-3xl sm:text-4xl md:text-5xl lg:text-6xl",
+                trick: "text-xl sm:text-2xl md:text-3xl lg:text-4xl",
+                sm: "text-2xl sm:text-3xl md:text-4xl lg:text-5xl"
             };
             const cornerTextMap = {
-                hand: "text-[10px] sm:text-sm md:text-lg lg:text-xl",
-                trick: "text-[9px] sm:text-xs md:text-base lg:text-lg",
-                sm: "text-[8px] sm:text-[10px] md:text-sm lg:text-base"
+                // 手機版加大角標字體，確保收合時能清晰辨識
+                hand: "text-base sm:text-lg md:text-xl lg:text-2xl",
+                trick: "text-xs sm:text-sm md:text-base lg:text-xl",
+                sm: "text-sm sm:text-base md:text-lg lg:text-xl"
             };
 
             const szCls = sizeMap[size] || sizeMap['hand'];
@@ -803,84 +805,133 @@
             );
         };
 
-        // 手牌展示（支援展開與收合，皆採用單行手風琴模式）
+        // 手牌展示（手機版雙排重疊放大配置，電腦版單排）
         const HandDisplay = ({ cards, isExpanded, onCardClick, legalIds = [], selectedId, clickable, disabledOverall, size = "sm" }) => {
             const [hoverIdx, setHoverIdx] = useState(null);
             
-            // 判斷是否為叫牌階段的「縮小版」手牌
+            // 偵測裝置螢幕寬度（用以決定是否啟用手機版特殊雙排版面）
+            const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
+            useEffect(() => {
+                const handleResize = () => setIsMobile(window.innerWidth < 640);
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
             const isSmall = size === 'sm';
+            
+            // 手機版直式排版，牌數較多（>6）時自動切成兩排
+            const useTwoRows = isMobile && cards.length > 6;
 
-            // 依據 size 與 expanded 狀態動態設定容器高度
-            const containerHeightCollapsed = isSmall ? "h-5 sm:h-7 md:h-8 lg:h-10" : "h-6 sm:h-7 md:h-8 lg:h-11";
-            const containerHeightExpanded = isSmall 
-                ? "h-14 sm:h-20 md:h-24 lg:h-32"  // sm 大小的完整高度
-                : "h-20 sm:h-28 md:h-36 lg:h-48"; // hand 大小的完整高度
-            const containerHeight = isExpanded ? containerHeightExpanded : containerHeightCollapsed;
+            // 分割陣列為上下兩排
+            const rows = useTwoRows
+                ? [cards.slice(0, Math.ceil(cards.length / 2)), cards.slice(Math.ceil(cards.length / 2))]
+                : [cards];
 
-            // 收合時裁切底部，展開時顯示全牌
+            // 依據 size、expanded 狀態與是否雙排來動態設定容器高度
+            let containerHeight = "";
+            if (useTwoRows) {
+                // 精確計算雙排高度：
+                // sm 大小 (高度24/96px): 展開 144px(h-36), 收合 64px(h-16)
+                // hand 大小 (高度32/128px): 展開 192px(h-48), 收合 80px(h-20)
+                containerHeight = isExpanded 
+                    ? (isSmall ? "h-36" : "h-48") 
+                    : (isSmall ? "h-16" : "h-20");
+            } else {
+                const containerHeightCollapsed = isSmall ? "h-6 sm:h-8 md:h-10 lg:h-12" : "h-8 sm:h-10 md:h-12 lg:h-14";
+                const containerHeightExpanded = isSmall 
+                    ? "h-24 sm:h-28 md:h-32 lg:h-40"
+                    : "h-32 sm:h-36 md:h-40 lg:h-48";
+                containerHeight = isExpanded ? containerHeightExpanded : containerHeightCollapsed;
+            }
+
+            // 展開時不裁切（允許懸浮卡片突破容器），收合時底部裁切掉以達成「只看到半張牌」
             const clipStyle = isExpanded ? 'none' : 'inset(-150px -150px 0 -150px)';
+
+            // 用於追蹤全域的卡片 index (Hover 動畫需要)
+            let globalCardIndex = 0;
 
             return (
                 <div
-                    className={`flex justify-center items-start pt-1 w-full transition-all duration-300 ${containerHeight}`}
+                    className={`flex flex-col items-center justify-start pt-1 w-full transition-all duration-300 ${containerHeight}`}
                     style={{ clipPath: clipStyle }}
                     onMouseLeave={() => setHoverIdx(null)}
                 >
-                    {cards.map((c, i) => {
-                        const isLegal = legalIds.length === 0 || legalIds.includes(c.id);
-                        const isSel = selectedId && selectedId === c.id;
+                    {rows.map((rowCards, rowIdx) => {
+                        // 紀錄目前這一排的起始與結束 index
+                        const rowStartIndex = globalCardIndex;
+                        const rowEndIndex = globalCardIndex + rowCards.length - 1;
 
-                        // 手風琴推移距離（依據卡片大小做等比例適應）
-                        let translateX = 0;
-                        let translateY = 0;
-                        if (hoverIdx !== null) {
-                            if (i < hoverIdx) translateX = isSmall ? -4 : -8;  // 左邊牌微退
-                            // 當牌比較密集時，需更大的推擠空間露出花色 (針對大牌與小牌分別設置)
-                            if (i > hoverIdx) translateX = isExpanded ? (isSmall ? 28 : 48) : (isSmall ? 18 : 32);  
-                            if (i === hoverIdx) {
-                                translateX = isSmall ? 2 : 4;   // hover 的牌微置中
-                                translateY = isSmall ? -8 : -12; // 向上浮動
-                            }
+                        // 雙排時的垂直重疊
+                        let rowMarginTop = "";
+                        if (rowIdx > 0) {
+                            rowMarginTop = isExpanded
+                                // 展開：露出大約半張牌的資訊
+                                ? (isSmall ? "-mt-12" : "-mt-16") 
+                                // 收合：極度緊密壓縮，精準只顯示頂部角標 (約露出 2~2.5rem 左右)
+                                : (isSmall ? "-mt-16" : "-mt-[5.5rem]"); 
                         }
-                        if (isSel) translateY = isSmall ? -10 : -16;
-
-                        // 基礎疊合距 - 讓叫牌區(sm)與打牌區(hand)的重疊比例一致
-                        // 展開：約 9 張牌寬度，確保畫面塞得下
-                        // 收合：約 6-7 張牌寬度，節省空間
-                        const marginCollapsed = i === 0 ? 'ml-0' : (
-                            isSmall 
-                                ? '-ml-7 sm:-ml-10 md:-ml-12 lg:-ml-14'
-                                : '-ml-10 sm:-ml-12 md:-ml-16 lg:-ml-20'
-                        );
-                        const marginExpanded  = i === 0 ? 'ml-0' : (
-                            isSmall 
-                                ? '-ml-5 sm:-ml-7 md:-ml-8 lg:-ml-10'
-                                : '-ml-9 sm:-ml-10 md:-ml-12 lg:-ml-16'
-                        );
-                        const baseMargin = isExpanded ? marginExpanded : marginCollapsed;
 
                         return (
-                            <div
-                                key={c.id}
-                                onMouseEnter={() => setHoverIdx(i)}
-                                onClick={() => {
-                                    if (clickable && isLegal && onCardClick) onCardClick(c);
-                                    // 觸控裝置單點亦可展開手風琴
-                                    if (hoverIdx !== i) setHoverIdx(i);
-                                }}
-                                className={`relative transition-all duration-200 ease-out cursor-pointer ${baseMargin}`}
-                                style={{
-                                    zIndex: isSel ? 100 : (hoverIdx === i ? 50 : i),
-                                    transform: `translate(${translateX}px, ${translateY}px)`
-                                }}
-                            >
-                                <Card
-                                    card={c}
-                                    size={size}
-                                    selected={isSel}
-                                    disabled={disabledOverall || (!clickable && legalIds.length === 0) || (clickable && !isLegal)}
-                                    noHoverAnim={true} // 避免 card 本身的 hover 衝突，由外層控制
-                                />
+                            <div key={rowIdx} className={`flex justify-center w-full ${rowMarginTop} relative`} style={{ zIndex: (rowIdx + 1) * 10 }}>
+                                {rowCards.map((c, idxInRow) => {
+                                    const i = globalCardIndex++;
+                                    const isLegal = legalIds.length === 0 || legalIds.includes(c.id);
+                                    const isSel = selectedId && selectedId === c.id;
+                                    
+                                    const isHoverInThisRow = hoverIdx !== null && hoverIdx >= rowStartIndex && hoverIdx <= rowEndIndex;
+
+                                    // 手風琴推移距離 (因卡片變大，推開距離隨之增長)
+                                    let translateX = 0;
+                                    let translateY = 0;
+                                    if (isHoverInThisRow) {
+                                        if (i < hoverIdx) translateX = isSmall ? -6 : -10;
+                                        if (i > hoverIdx) translateX = isExpanded ? (isSmall ? 40 : 64) : (isSmall ? 28 : 44);
+                                        if (i === hoverIdx) {
+                                            translateX = isSmall ? 4 : 6;
+                                            translateY = isSmall ? -10 : -16;
+                                        }
+                                    }
+                                    if (isSel) translateY = isSmall ? -12 : -20;
+
+                                    // 基礎橫向疊合距
+                                    // 雙排時每排張數少，可用較小的重疊；單排張數多，重疊需加大
+                                    const marginCollapsed = idxInRow === 0 ? 'ml-0' : (
+                                        isSmall 
+                                            ? (useTwoRows ? '-ml-8' : '-ml-10 sm:-ml-12 md:-ml-14 lg:-ml-16')
+                                            : (useTwoRows ? '-ml-11' : '-ml-14 sm:-ml-16 md:-ml-20 lg:-ml-24')
+                                    );
+                                    const marginExpanded  = idxInRow === 0 ? 'ml-0' : (
+                                        isSmall 
+                                            ? (useTwoRows ? '-ml-6' : '-ml-7 sm:-ml-8 md:-ml-10 lg:-ml-12')
+                                            : (useTwoRows ? '-ml-8' : '-ml-10 sm:-ml-12 md:-ml-14 lg:-ml-16')
+                                    );
+                                    const baseMargin = isExpanded ? marginExpanded : marginCollapsed;
+
+                                    return (
+                                        <div
+                                            key={c.id}
+                                            onMouseEnter={() => setHoverIdx(i)}
+                                            onClick={() => {
+                                                if (clickable && isLegal && onCardClick) onCardClick(c);
+                                                // 觸控裝置單點亦可展開手風琴
+                                                if (hoverIdx !== i) setHoverIdx(i);
+                                            }}
+                                            className={`relative transition-all duration-200 ease-out cursor-pointer ${baseMargin}`}
+                                            style={{
+                                                zIndex: isSel ? 100 : (hoverIdx === i ? 50 : idxInRow),
+                                                transform: `translate(${translateX}px, ${translateY}px)`
+                                            }}
+                                        >
+                                            <Card
+                                                card={c}
+                                                size={size}
+                                                selected={isSel}
+                                                disabled={disabledOverall || (!clickable && legalIds.length === 0) || (clickable && !isLegal)}
+                                                noHoverAnim={true} // 避免 card 本身的 hover 衝突，由外層控制
+                                            />
+                                        </div>
+                                    );
+                                })}
                             </div>
                         );
                     })}
@@ -1173,11 +1224,12 @@
             // ── 清除上一墩殘留 ───────────────────────
             useEffect(() => {
                 if (!lastCompletedTrick) return;
+                if (phase === 'handFinished') return; // 【新增】如果是結束等待畫面，不要把最後一墩清掉
                 const t = setTimeout(() => {
                     setGameState(prev => ({ ...prev, lastCompletedTrick: null }));
                 }, 2500);
                 return () => clearTimeout(t);
-            }, [lastCompletedTrick]);
+            }, [lastCompletedTrick, phase]);
 
             // ── 自動控制手牌展開狀態 ────────────────────────
             useEffect(() => {
@@ -1193,6 +1245,10 @@
                     } else {
                         setNorthExpanded(false);
                     }
+                } else if (phase === 'handFinished' || phase === 'scoring') {
+                    // 【新增】結束時自動收合所有手牌，聚焦於中間的最後一墩
+                    setSouthExpanded(false);
+                    setNorthExpanded(false);
                 }
             }, [phase, currentBidder, currentLeader, currentTrick.length, autoPlayDummy, dummySeat, openingLeadMade]);
 
@@ -1398,7 +1454,8 @@
                 );
             }
 
-            if (phase === 'playing') {
+            // 【修改】將 handFinished 狀態與 playing 合併顯示在同一個打牌介面中
+            if (phase === 'playing' || phase === 'handFinished') {
                 const contractStr = contractDisplay(contract);
                 const declarerName = contract ? SEAT_NAME[contract.declarer] : '';
 
@@ -1515,8 +1572,15 @@
                                     )}
                                 </div>
                                 {/* Message text */}
-                                <div className="text-center text-xs sm:text-sm md:text-base lg:text-xl mt-2 min-h-[1.5rem]">
-                                    {isMyTurn ? (
+                                <div className="text-center text-xs sm:text-sm md:text-base lg:text-xl mt-4 min-h-[1.5rem] relative z-40">
+                                    {phase === 'handFinished' ? (
+                                        <button
+                                            onClick={() => setGameState(prev => ({ ...prev, phase: 'scoring' }))}
+                                            className="bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold px-6 sm:px-8 py-2 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-lg md:text-2xl active:scale-95 transition-all shadow-[0_0_20px_rgba(250,204,21,0.5)] animate-bounce"
+                                        >
+                                            進入結算畫面 →
+                                        </button>
+                                    ) : isMyTurn ? (
                                         <span className="text-yellow-300 font-bold animate-pulse drop-shadow-md tracking-wider bg-black/40 px-4 py-1.5 rounded-full border border-yellow-500/30">
                                             {isSouthTurn ? '請出牌（南家）' : '請出牌（北明手）'}
                                             {selectedCard ? ' → 再點擊出牌確認' : ''}
