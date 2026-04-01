@@ -29,6 +29,8 @@
             height: 100dvh;
             margin: 0;
             overflow: hidden;
+            /* 防止雙擊放大，提升操控手感 */
+            touch-action: manipulation;
         }
         #root {
             height: 100%;
@@ -38,17 +40,16 @@
             overflow: hidden;
             background: radial-gradient(ellipse at center, #065f46 0%, #022c22 100%);
         }
-        .min-h-screen { min-height: 100dvh; }
 
         /* Glass morphism */
         .glass-panel {
-            background: rgba(0, 0, 0, 0.35);
+            background: rgba(0, 0, 0, 0.4);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.12);
         }
         .glass-light {
-            background: rgba(255, 255, 255, 0.07);
+            background: rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             border: 1px solid rgba(255, 255, 255, 0.15);
@@ -59,34 +60,28 @@
         @media (hover: hover) {
             .card-hover:hover { transform: translateY(-16px); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 50; }
         }
-        .card-selected { transform: translateY(-24px) scale(1.05) !important; box-shadow: 0 15px 35px rgba(250,204,21,0.6) !important; z-index: 100 !important; }
+        .card-selected { transform: translateY(-20px) scale(1.05) !important; box-shadow: 0 15px 35px rgba(250,204,21,0.6) !important; z-index: 100 !important; }
 
-        /* Slide-up animation */
         @keyframes slideUp {
             from { transform: translateY(100%); opacity: 0; }
             to   { transform: translateY(0);    opacity: 1; }
         }
         .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
-        /* Pulse ring for active turn */
         @keyframes pulseRing {
             0%, 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.6); }
-            70%       { box-shadow: 0 0 0 10px rgba(250, 204, 21, 0); }
+            70%       { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0); }
         }
         .pulse-ring { animation: pulseRing 1.2s ease-in-out infinite; }
 
-        /* Fade-in */
         @keyframes fadeIn {
             from { opacity: 0; transform: scale(0.95); }
             to   { opacity: 1; transform: scale(1); }
         }
         .animate-fade-in { animation: fadeIn 0.25s ease-out; }
 
-        /* Scrollbar hide */
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Safe area padding for notched phones */
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 16px); }
     </style>
 </head>
@@ -108,10 +103,7 @@
         const RANKS = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
         const SUIT_SYMBOL = { S: '♠', H: '♥', D: '♦', C: '♣' };
         
-        // 牌面上的花色顏色 (優化梅花為較亮的翠綠色，提升在白色牌面上的辨識度)
         const SUIT_COLOR_CSS  = { S: '#020617', H: '#dc2626', D: '#ea580c', C: '#15803d' };
-        
-        // 暗色背景上的花色顏色 (用於叫牌與 HCP 面板，確保梅花與黑桃清晰可見)
         const SUIT_COLOR_DARK_BG = { S: '#f8fafc', H: '#ef4444', D: '#f97316', C: '#4ade80' };
 
         const RANK_LABEL  = { 14:'A', 13:'K', 12:'Q', 11:'J', 10:'10', 9:'9', 8:'8', 7:'7', 6:'6', 5:'5', 4:'4', 3:'3', 2:'2' };
@@ -170,10 +162,8 @@
 
         function isBalanced(lengths) {
             const vals = Object.values(lengths).sort((a, b) => b - a);
-            // 4333, 4432, 5332
             if (vals[0] > 5) return false;
             if (vals[0] === 5 && vals[1] > 3) return false;
-            const hasDoubleton = vals.some(v => v === 2);
             const hasSingleton = vals.some(v => v <= 1);
             if (hasSingleton) return false;
             return true;
@@ -249,7 +239,6 @@
             return realBids.length ? realBids[realBids.length - 1].call : null;
         }
 
-        // ── AI 叫牌邏輯 ────────────────────────────────────────────────
         function getLongestSuit(lengths) {
             return SUITS.reduce((best, s) => lengths[s] > lengths[best] ? s : best, 'S');
         }
@@ -399,10 +388,7 @@
         function aiSelectCard(seat, hand, trick, trumpSuit, contract) {
             const legal = legalCards(hand, trick, trumpSuit);
             if (legal.length === 1) return legal[0];
-
-            if (trick.length === 0) {
-                return aiLead(legal, trumpSuit);
-            }
+            if (trick.length === 0) return aiLead(legal, trumpSuit);
 
             const winnerSeat = currentTrickWinner(trick, trumpSuit);
             const partnerSeat = (seat + 2) % 4;
@@ -419,9 +405,7 @@
                 return false;
             });
 
-            if (canBeat.length > 0) {
-                return canBeat.sort((a, b) => a.rank - b.rank)[0];
-            }
+            if (canBeat.length > 0) return canBeat.sort((a, b) => a.rank - b.rank)[0];
             return legal.sort((a, b) => a.rank - b.rank)[0];
         }
 
@@ -434,9 +418,7 @@
                 if (!bySuit[c.suit]) bySuit[c.suit] = [];
                 bySuit[c.suit].push(c);
             }
-            for (const s of Object.keys(bySuit)) {
-                bySuit[s].sort((a, b) => b.rank - a.rank);
-            }
+            for (const s of Object.keys(bySuit)) bySuit[s].sort((a, b) => b.rank - a.rank);
 
             for (const s of SUITS) {
                 const cards = bySuit[s];
@@ -457,14 +439,9 @@
         // ══════════════════════════════════════════════════════════════
         function contractPoints(level, strain, doubled) {
             let base;
-            if (strain === 'N') {
-                base = 40 + 30 * (level - 1);
-            } else {
-                const tv = { C: 20, D: 20, H: 30, S: 30 }[strain];
-                base = tv * level;
-            }
-            const mult = doubled === 0 ? 1 : doubled === 1 ? 2 : 4;
-            return base * mult;
+            if (strain === 'N') base = 40 + 30 * (level - 1);
+            else { const tv = { C: 20, D: 20, H: 30, S: 30 }[strain]; base = tv * level; }
+            return base * (doubled === 0 ? 1 : doubled === 1 ? 2 : 4);
         }
 
         function isGameContract(level, strain, doubled) {
@@ -505,11 +482,8 @@
                     penalty = isVul ? down * 100 : down * 50;
                 } else {
                     const mult = doubled === 2 ? 2 : 1;
-                    if (!isVul) {
-                        penalty = mult * (100 + Math.max(0, down - 1) * 200 + Math.max(0, down - 3) * 100);
-                    } else {
-                        penalty = mult * (200 + Math.max(0, down - 1) * 300);
-                    }
+                    if (!isVul) penalty = mult * (100 + Math.max(0, down - 1) * 200 + Math.max(0, down - 3) * 100);
+                    else penalty = mult * (200 + Math.max(0, down - 1) * 300);
                 }
                 return { made: false, side: oppSide, penalty, down };
             }
@@ -552,9 +526,6 @@
             return below + above;
         }
 
-        // ══════════════════════════════════════════════════════════════
-        // 初始狀態
-        // ══════════════════════════════════════════════════════════════
         const INITIAL_STATE = {
             phase: 'menu',
             dealer: 0,
@@ -581,9 +552,6 @@
             autoPlayDummy: false,
         };
 
-        // ══════════════════════════════════════════════════════════════
-        // 遊戲操作
-        // ══════════════════════════════════════════════════════════════
         function startHand(state) {
             const deck = shuffle(buildDeck());
             const hands = [[], [], [], []];
@@ -617,36 +585,19 @@
             const newSeq = [...state.biddingSequence, { seat: state.currentBidder, call }];
             const auctionStatus = isAuctionOver(newSeq);
             if (auctionStatus === 'passedOut') {
-                return {
-                    ...state,
-                    biddingSequence: newSeq,
-                    auctionOver: true,
-                    phase: 'passedOut',
-                };
+                return { ...state, biddingSequence: newSeq, auctionOver: true, phase: 'passedOut' };
             }
             if (auctionStatus === 'contract') {
                 const contract = extractContract(newSeq);
                 const dummySeat = (contract.declarer + 2) % 4;
                 const openingLeader = (contract.declarer + 1) % 4;
                 return {
-                    ...state,
-                    biddingSequence: newSeq,
-                    auctionOver: true,
-                    contract,
-                    dummySeat,
-                    phase: 'playing',
-                    currentLeader: openingLeader,
-                    currentTrick: [],
-                    lastCompletedTrick: null,
-                    openingLeadMade: false,
-                    dummyRevealed: false,
+                    ...state, biddingSequence: newSeq, auctionOver: true, contract, dummySeat,
+                    phase: 'playing', currentLeader: openingLeader, currentTrick: [], lastCompletedTrick: null,
+                    openingLeadMade: false, dummyRevealed: false,
                 };
             }
-            return {
-                ...state,
-                biddingSequence: newSeq,
-                currentBidder: (state.currentBidder + 1) % 4,
-            };
+            return { ...state, biddingSequence: newSeq, currentBidder: (state.currentBidder + 1) % 4 };
         }
 
         function playCard(state, seat, card) {
@@ -663,10 +614,7 @@
             const trumpSuit = state.contract.strain === 'N' ? null : state.contract.strain;
             const winnerSeat = trickWinner(newTrick, trumpSuit);
             const winnerSide = winnerSeat % 2 === 0 ? 'NS' : 'EW';
-            const newTricksTaken = {
-                ...state.tricksTaken,
-                [winnerSide]: state.tricksTaken[winnerSide] + 1,
-            };
+            const newTricksTaken = { ...state.tricksTaken, [winnerSide]: state.tricksTaken[winnerSide] + 1 };
             const completedTricks = [...state.completedTricks, newTrick];
             const totalTricks = newTricksTaken.NS + newTricksTaken.EW;
 
@@ -694,39 +642,21 @@
                 }
 
                 return {
-                    ...state,
-                    hands: newHands,
-                    currentTrick: [],
-                    lastCompletedTrick: newTrick,
-                    completedTricks,
-                    tricksTaken: newTricksTaken,
-                    currentLeader: winnerSeat,
-                    openingLeadMade, dummyRevealed,
-                    phase: 'handFinished', // 【修改】從 scoring 改為 handFinished，先暫留牌桌畫面
-                    lastHandResult: handResult,
-                    rubberScore: finalRubberScore,
-                    gamesWon,
-                    vulnerable,
-                    rubberOver,
-                    rubberWinner,
+                    ...state, hands: newHands, currentTrick: [], lastCompletedTrick: newTrick,
+                    completedTricks, tricksTaken: newTricksTaken, currentLeader: winnerSeat,
+                    openingLeadMade, dummyRevealed, phase: 'handFinished',
+                    lastHandResult: handResult, rubberScore: finalRubberScore, gamesWon,
+                    vulnerable, rubberOver, rubberWinner,
                 };
             }
 
             return {
-                ...state,
-                hands: newHands,
-                currentTrick: [],
-                lastCompletedTrick: newTrick,
-                completedTricks,
-                tricksTaken: newTricksTaken,
-                currentLeader: winnerSeat,
+                ...state, hands: newHands, currentTrick: [], lastCompletedTrick: newTrick,
+                completedTricks, tricksTaken: newTricksTaken, currentLeader: winnerSeat,
                 openingLeadMade, dummyRevealed,
             };
         }
 
-        // ══════════════════════════════════════════════════════════════
-        // 介面輔助
-        // ══════════════════════════════════════════════════════════════
         function contractDisplay(contract) {
             if (!contract) return '';
             const dbl = contract.doubled === 1 ? ' ✕' : contract.doubled === 2 ? ' ✕✕' : '';
@@ -734,8 +664,7 @@
         }
 
         function isHumanTurn(turnSeat, state) {
-            const HUMAN_SEAT = 2; // South
-            if (turnSeat === HUMAN_SEAT) return true;
+            if (turnSeat === 2) return true;
             if (!state.autoPlayDummy && turnSeat === 0) {
                 if (state.dummySeat === 0) return state.openingLeadMade;
                 return true;
@@ -744,27 +673,24 @@
         }
 
         // ══════════════════════════════════════════════════════════════
-        // 元件
+        // UI 元件
         // ══════════════════════════════════════════════════════════════
 
-        // 單張牌 (Responsive Scaling, 手機版大幅度加大版面)
         const Card = ({ card, onClick, isHidden, size = 'hand', selected, disabled, noHoverAnim }) => {
             const sizeMap = {
-                // 手機版 (sm以下) 大幅增加基礎寬高，讓點擊面積與字體極大化
-                hand: "w-20 h-32 sm:w-24 sm:h-36 md:w-28 md:h-40 lg:w-32 lg:h-48",
-                trick: "w-14 h-20 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40",
-                sm: "w-16 h-24 sm:w-20 sm:h-28 md:w-24 md:h-32 lg:w-28 lg:h-40"
+                hand: "w-16 h-24 sm:w-20 sm:h-[7.5rem] md:w-24 md:h-36 lg:w-28 lg:h-40",
+                trick: "w-14 h-20 sm:w-16 sm:h-24 md:w-20 md:h-28",
+                sm: "w-10 h-14 sm:w-14 sm:h-20"
             };
             const textMap = {
-                hand: "text-3xl sm:text-4xl md:text-5xl lg:text-6xl",
-                trick: "text-xl sm:text-2xl md:text-3xl lg:text-4xl",
-                sm: "text-2xl sm:text-3xl md:text-4xl lg:text-5xl"
+                hand: "text-3xl sm:text-4xl md:text-5xl",
+                trick: "text-2xl sm:text-3xl",
+                sm: "text-xl sm:text-2xl"
             };
             const cornerTextMap = {
-                // 手機版加大角標字體，確保收合時能清晰辨識
-                hand: "text-base sm:text-lg md:text-xl lg:text-2xl",
-                trick: "text-xs sm:text-sm md:text-base lg:text-xl",
-                sm: "text-sm sm:text-base md:text-lg lg:text-xl"
+                hand: "text-[1.15rem] leading-[1.1] sm:text-2xl md:text-3xl", 
+                trick: "text-sm sm:text-base md:text-xl",
+                sm: "text-xs sm:text-sm"
             };
 
             const szCls = sizeMap[size] || sizeMap['hand'];
@@ -773,9 +699,9 @@
 
             if (isHidden) {
                 return (
-                    <div className={`${szCls} flex-shrink-0 bg-blue-900 rounded-lg sm:rounded-xl border-2 border-blue-600 shadow-md sm:shadow-lg relative overflow-hidden`}>
-                        <div className="absolute inset-1 sm:inset-1.5 md:inset-2 rounded bg-gradient-to-br from-blue-700 to-blue-950 flex items-center justify-center">
-                            <span className="text-blue-500/30 text-xs sm:text-sm md:text-xl lg:text-3xl select-none">🂠</span>
+                    <div className={`${szCls} flex-shrink-0 bg-blue-900 rounded-lg sm:rounded-xl border border-blue-600 shadow-md relative overflow-hidden`}>
+                        <div className="absolute inset-1 rounded bg-gradient-to-br from-blue-700 to-blue-950 flex items-center justify-center">
+                            <span className="text-blue-500/30 text-xs sm:text-lg select-none">🂠</span>
                         </div>
                     </div>
                 );
@@ -788,175 +714,106 @@
             return (
                 <div
                     onClick={disabled ? undefined : onClick}
-                    className={`${szCls} flex-shrink-0 bg-white rounded-lg sm:rounded-xl border border-gray-300 shadow-md sm:shadow-lg
-                        flex flex-col justify-between p-1 sm:p-1.5 md:p-2 select-none relative
+                    className={`${szCls} flex-shrink-0 bg-white rounded-lg sm:rounded-xl border border-gray-300 shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+                        flex flex-col justify-between p-1 sm:p-1.5 select-none relative
                         ${!disabled && !noHoverAnim ? 'cursor-pointer card-hover' : ''}
                         ${!disabled && noHoverAnim ? 'cursor-pointer' : ''}
                         ${selected ? 'card-selected ring-2 sm:ring-4 ring-yellow-400' : ''}
                         transition-all duration-200
                     `}
                 >
-                    <div className={`font-bold leading-none ${cornCls}`} style={{ color }}>{rank}{sym}</div>
+                    <div className={`font-black flex items-baseline gap-0.5 ${cornCls}`} style={{ color }}>
+                        <span>{rank}</span><span className="text-[0.8em]">{sym}</span>
+                    </div>
                     <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none`}>
                         <span className={`font-black ${txtCls} opacity-80`} style={{ color }}>{sym}</span>
                     </div>
-                    <div className={`font-bold leading-none self-end ${cornCls}`} style={{ color, transform: 'rotate(180deg)' }}>{rank}{sym}</div>
+                    <div className={`font-black flex items-baseline gap-0.5 self-end ${cornCls}`} style={{ color, transform: 'rotate(180deg)' }}>
+                        <span>{rank}</span><span className="text-[0.8em]">{sym}</span>
+                    </div>
                 </div>
             );
         };
 
-        // 手牌展示（手機版雙排重疊放大配置，電腦版單排）
         const HandDisplay = ({ cards, isExpanded, onCardClick, legalIds = [], selectedId, clickable, disabledOverall, size = "sm" }) => {
             const [hoverIdx, setHoverIdx] = useState(null);
-            
-            // 偵測裝置螢幕寬度（用以決定是否啟用手機版特殊雙排版面）
-            const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
-            useEffect(() => {
-                const handleResize = () => setIsMobile(window.innerWidth < 640);
-                window.addEventListener('resize', handleResize);
-                return () => window.removeEventListener('resize', handleResize);
-            }, []);
-
             const isSmall = size === 'sm';
             
-            // 手機版直式排版，牌數較多（>6）時自動切成兩排
-            const useTwoRows = isMobile && cards.length > 6;
+            const containerHeight = isExpanded 
+                ? (isSmall ? "h-[6.5rem] sm:h-36" : "h-[6.5rem] sm:h-[7.5rem] md:h-36") 
+                : (isSmall ? "h-8 sm:h-10" : "h-10 sm:h-12");
 
-            // 分割陣列為上下兩排
-            const rows = useTwoRows
-                ? [cards.slice(0, Math.ceil(cards.length / 2)), cards.slice(Math.ceil(cards.length / 2))]
-                : [cards];
-
-            // 依據 size、expanded 狀態與是否雙排來動態設定容器高度
-            let containerHeight = "";
-            if (useTwoRows) {
-                // 精確計算雙排高度：
-                // sm 大小 (高度24/96px): 展開 144px(h-36), 收合 64px(h-16)
-                // hand 大小 (高度32/128px): 展開 192px(h-48), 收合 80px(h-20)
-                containerHeight = isExpanded 
-                    ? (isSmall ? "h-36" : "h-48") 
-                    : (isSmall ? "h-16" : "h-20");
-            } else {
-                const containerHeightCollapsed = isSmall ? "h-6 sm:h-8 md:h-10 lg:h-12" : "h-8 sm:h-10 md:h-12 lg:h-14";
-                const containerHeightExpanded = isSmall 
-                    ? "h-24 sm:h-28 md:h-32 lg:h-40"
-                    : "h-32 sm:h-36 md:h-40 lg:h-48";
-                containerHeight = isExpanded ? containerHeightExpanded : containerHeightCollapsed;
-            }
-
-            // 展開時不裁切（允許懸浮卡片突破容器），收合時底部裁切掉以達成「只看到半張牌」
             const clipStyle = isExpanded ? 'none' : 'inset(-150px -150px 0 -150px)';
-
-            // 用於追蹤全域的卡片 index (Hover 動畫需要)
-            let globalCardIndex = 0;
 
             return (
                 <div
-                    className={`flex flex-col items-center justify-start pt-1 w-full transition-all duration-300 ${containerHeight}`}
+                    className={`flex flex-col items-center justify-start w-full transition-all duration-300 ${containerHeight}`}
                     style={{ clipPath: clipStyle }}
                     onMouseLeave={() => setHoverIdx(null)}
                 >
-                    {rows.map((rowCards, rowIdx) => {
-                        // 紀錄目前這一排的起始與結束 index
-                        const rowStartIndex = globalCardIndex;
-                        const rowEndIndex = globalCardIndex + rowCards.length - 1;
+                    <div className="flex justify-center w-full relative">
+                        {cards.map((c, i) => {
+                            const isLegal = legalIds.length === 0 || legalIds.includes(c.id);
+                            const isSel = selectedId && selectedId === c.id;
+                            
+                            let translateX = 0;
+                            let translateY = 0;
+                            if (hoverIdx !== null) {
+                                if (i < hoverIdx) translateX = isSmall ? -8 : -12;
+                                if (i > hoverIdx) translateX = isExpanded ? (isSmall ? 20 : 32) : (isSmall ? 16 : 24);
+                                if (i === hoverIdx) {
+                                    translateY = isSmall ? -12 : -16;
+                                }
+                            }
+                            if (isSel) translateY = isSmall ? -16 : -24;
 
-                        // 雙排時的垂直重疊
-                        let rowMarginTop = "";
-                        if (rowIdx > 0) {
-                            rowMarginTop = isExpanded
-                                // 展開：露出大約半張牌的資訊
-                                ? (isSmall ? "-mt-12" : "-mt-16") 
-                                // 收合：極度緊密壓縮，精準只顯示頂部角標 (約露出 2~2.5rem 左右)
-                                : (isSmall ? "-mt-16" : "-mt-[5.5rem]"); 
-                        }
+                            const marginCollapsed = i === 0 ? 'ml-0' : (isSmall ? '-ml-[3.2rem] sm:-ml-10' : '-ml-[3.2rem] sm:-ml-12 md:-ml-16');
+                            const marginExpanded  = i === 0 ? 'ml-0' : (isSmall ? '-ml-[2.2rem] sm:-ml-8' : '-ml-[2.4rem] sm:-ml-10 md:-ml-12');
+                            const baseMargin = isExpanded ? marginExpanded : marginCollapsed;
 
-                        return (
-                            <div key={rowIdx} className={`flex justify-center w-full ${rowMarginTop} relative`} style={{ zIndex: (rowIdx + 1) * 10 }}>
-                                {rowCards.map((c, idxInRow) => {
-                                    const i = globalCardIndex++;
-                                    const isLegal = legalIds.length === 0 || legalIds.includes(c.id);
-                                    const isSel = selectedId && selectedId === c.id;
-                                    
-                                    const isHoverInThisRow = hoverIdx !== null && hoverIdx >= rowStartIndex && hoverIdx <= rowEndIndex;
-
-                                    // 手風琴推移距離 (因卡片變大，推開距離隨之增長)
-                                    let translateX = 0;
-                                    let translateY = 0;
-                                    if (isHoverInThisRow) {
-                                        if (i < hoverIdx) translateX = isSmall ? -6 : -10;
-                                        if (i > hoverIdx) translateX = isExpanded ? (isSmall ? 40 : 64) : (isSmall ? 28 : 44);
-                                        if (i === hoverIdx) {
-                                            translateX = isSmall ? 4 : 6;
-                                            translateY = isSmall ? -10 : -16;
-                                        }
-                                    }
-                                    if (isSel) translateY = isSmall ? -12 : -20;
-
-                                    // 基礎橫向疊合距
-                                    // 雙排時每排張數少，可用較小的重疊；單排張數多，重疊需加大
-                                    const marginCollapsed = idxInRow === 0 ? 'ml-0' : (
-                                        isSmall 
-                                            ? (useTwoRows ? '-ml-8' : '-ml-10 sm:-ml-12 md:-ml-14 lg:-ml-16')
-                                            : (useTwoRows ? '-ml-11' : '-ml-14 sm:-ml-16 md:-ml-20 lg:-ml-24')
-                                    );
-                                    const marginExpanded  = idxInRow === 0 ? 'ml-0' : (
-                                        isSmall 
-                                            ? (useTwoRows ? '-ml-6' : '-ml-7 sm:-ml-8 md:-ml-10 lg:-ml-12')
-                                            : (useTwoRows ? '-ml-8' : '-ml-10 sm:-ml-12 md:-ml-14 lg:-ml-16')
-                                    );
-                                    const baseMargin = isExpanded ? marginExpanded : marginCollapsed;
-
-                                    return (
-                                        <div
-                                            key={c.id}
-                                            onMouseEnter={() => setHoverIdx(i)}
-                                            onClick={() => {
-                                                if (clickable && isLegal && onCardClick) onCardClick(c);
-                                                // 觸控裝置單點亦可展開手風琴
-                                                if (hoverIdx !== i) setHoverIdx(i);
-                                            }}
-                                            className={`relative transition-all duration-200 ease-out cursor-pointer ${baseMargin}`}
-                                            style={{
-                                                zIndex: isSel ? 100 : (hoverIdx === i ? 50 : idxInRow),
-                                                transform: `translate(${translateX}px, ${translateY}px)`
-                                            }}
-                                        >
-                                            <Card
-                                                card={c}
-                                                size={size}
-                                                selected={isSel}
-                                                disabled={disabledOverall || (!clickable && legalIds.length === 0) || (clickable && !isLegal)}
-                                                noHoverAnim={true} // 避免 card 本身的 hover 衝突，由外層控制
-                                            />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        );
-                    })}
+                            return (
+                                <div
+                                    key={c.id}
+                                    onMouseEnter={() => setHoverIdx(i)}
+                                    onClick={() => {
+                                        if (clickable && isLegal && onCardClick) onCardClick(c);
+                                        if (hoverIdx !== i) setHoverIdx(i);
+                                    }}
+                                    className={`relative transition-all duration-200 ease-out cursor-pointer ${baseMargin}`}
+                                    style={{
+                                        zIndex: isSel ? 100 : (hoverIdx === i ? 50 : i),
+                                        transform: `translate(${translateX}px, ${translateY}px)`
+                                    }}
+                                >
+                                    <Card
+                                        card={c}
+                                        size={size}
+                                        selected={isSel}
+                                        disabled={disabledOverall || (!clickable && legalIds.length === 0) || (clickable && !isLegal)}
+                                        noHoverAnim={true}
+                                    />
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             );
         };
 
-        // 玩家徽章
         const PlayerBadge = ({ name, isActive, isHuman }) => (
-            <div className={`glass-panel rounded-full px-3 sm:px-4 md:px-5 py-1 sm:py-1.5 md:py-2 text-[10px] sm:text-xs md:text-sm font-bold flex items-center gap-1.5 transition-all
-                ${isActive ? 'text-yellow-300 pulse-ring' : 'text-gray-400'}`}>
+            <div className={`glass-panel rounded-full px-3 py-1 text-xs sm:text-sm md:text-base font-bold flex items-center gap-1.5 transition-all
+                ${isActive ? 'text-yellow-300 ring-1 ring-yellow-400/50 shadow-[0_0_10px_rgba(250,204,21,0.3)]' : 'text-gray-300'}`}>
                 <span>{isHuman ? '👤' : '🤖'}</span>
                 <span>{name}</span>
-                {isActive && <span className="animate-pulse text-yellow-400">●</span>}
+                {isActive && <span className="animate-pulse text-yellow-400 text-[10px]">●</span>}
             </div>
         );
 
-        // 叫牌紀錄
         const AuctionBox = ({ sequence, dealer }) => {
             const firstBidder = (dealer + 1) % 4;
             const padded = [...Array(firstBidder).fill(null), ...sequence];
             const rows = [];
-            for (let i = 0; i < padded.length; i += 4) {
-                rows.push(padded.slice(i, i + 4));
-            }
+            for (let i = 0; i < padded.length; i += 4) rows.push(padded.slice(i, i + 4));
             const headers = ['北', '東', '南', '西'];
 
             const callDisplay = (call) => {
@@ -973,44 +830,40 @@
                 if (call === 'dbl') return 'text-orange-400 font-bold';
                 if (call === 'rdbl') return 'text-purple-400 font-bold';
                 if (call.endsWith('H') || call.endsWith('D')) return 'text-red-400 font-bold';
-                if (call.endsWith('C')) return 'text-green-400 font-bold'; // 增加梅花的紀錄辨識度
+                if (call.endsWith('C')) return 'text-green-400 font-bold';
                 return 'text-white font-bold';
             };
 
             return (
-                <div className="glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 md:p-6 w-[260px] sm:w-[380px] md:w-[480px] lg:w-[600px] shadow-lg">
-                    <div className="grid grid-cols-4 gap-1 text-center mb-2 sm:mb-4">
+                <div className="glass-panel rounded-2xl p-3 sm:p-5 w-full max-w-[280px] sm:max-w-md shadow-lg border border-white/10">
+                    <div className="grid grid-cols-4 gap-1 text-center mb-2">
                         {headers.map((h, i) => (
-                            <span key={i} className="text-yellow-400 font-bold text-xs sm:text-base md:text-xl lg:text-2xl">{h}</span>
+                            <span key={i} className="text-yellow-400 font-bold text-sm sm:text-lg">{h}</span>
                         ))}
                     </div>
-                    <div className="border-b border-white/20 mb-2 sm:mb-4" />
-                    <div className="overflow-y-auto hide-scrollbar" style={{ maxHeight: '40vh' }}>
+                    <div className="border-b border-white/20 mb-2" />
+                    <div className="overflow-y-auto hide-scrollbar" style={{ maxHeight: '35vh' }}>
                         {rows.map((row, ri) => (
-                            <div key={ri} className="grid grid-cols-4 gap-1 text-center py-1 sm:py-2">
+                            <div key={ri} className="grid grid-cols-4 gap-1 text-center py-1">
                                 {row.map((entry, ci) => (
-                                    <span key={ci} className={`text-xs sm:text-lg md:text-xl lg:text-2xl ${callColor(entry ? entry.call : null)}`}>
+                                    <span key={ci} className={`text-base sm:text-xl font-bold ${callColor(entry ? entry.call : null)}`}>
                                         {callDisplay(entry ? entry.call : null)}
                                     </span>
                                 ))}
                             </div>
                         ))}
                         {rows.length === 0 && (
-                            <div className="text-gray-500 text-xs sm:text-base md:text-xl text-center py-4">等待叫牌...</div>
+                            <div className="text-gray-500 text-sm sm:text-lg text-center py-4">等待叫牌...</div>
                         )}
                     </div>
                 </div>
             );
         };
 
-        // 底抽屜叫牌面板
         const BiddingSheet = ({ onBid, sequence, visible }) => {
             const [isExpanded, setIsExpanded] = useState(true);
 
-            useEffect(() => {
-                if (visible) setIsExpanded(true);
-            }, [visible]);
-
+            useEffect(() => { if (visible) setIsExpanded(true); }, [visible]);
             if (!visible) return null;
 
             const highest = getCurrentHighestBid(sequence);
@@ -1020,100 +873,101 @@
             if (!isExpanded) {
                 return (
                     <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
-                        <div
-                            className="glass-panel rounded-t-2xl px-4 py-3 md:py-4 flex items-center justify-center gap-2 cursor-pointer"
-                            onClick={() => setIsExpanded(true)}
-                        >
-                            <div className="w-12 h-1.5 md:h-2 bg-gray-400 rounded-full" />
-                            <span className="text-yellow-300 text-sm md:text-lg font-bold">展開叫牌</span>
-                            <span className="text-yellow-400 text-sm md:text-lg">▲</span>
+                        <div className="glass-panel rounded-t-2xl px-4 py-3 flex items-center justify-center gap-2 cursor-pointer border-t border-white/20"
+                             onClick={() => setIsExpanded(true)}>
+                            <div className="w-10 h-1.5 bg-gray-400 rounded-full" />
+                            <span className="text-yellow-300 text-base font-bold">展開叫牌面板</span>
                         </div>
                     </div>
                 );
             }
 
             return (
-                <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up max-w-4xl mx-auto">
-                    <div className="glass-panel rounded-t-3xl sm:rounded-t-[3rem] p-4 sm:p-6 md:p-8 pb-safe max-h-[75vh] overflow-y-auto hide-scrollbar shadow-2xl border-t border-white/20">
-                        <div
-                            className="flex items-center justify-center gap-2 cursor-pointer mb-4 sm:mb-6"
-                            onClick={() => setIsExpanded(false)}
-                        >
-                            <div className="w-12 h-1.5 md:h-2 bg-gray-500 rounded-full" />
-                            <span className="text-gray-400 text-[10px] sm:text-xs md:text-sm">收合 ▼</span>
+                <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up mx-auto max-w-2xl">
+                    <div className="glass-panel rounded-t-3xl p-3 sm:p-5 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-white/20 bg-[#022c22]/95 flex flex-col max-h-[85vh]">
+                        <div className="flex items-center justify-center gap-2 cursor-pointer mb-2 shrink-0" onClick={() => setIsExpanded(false)}>
+                            <div className="w-12 h-1.5 bg-gray-500 rounded-full" />
                         </div>
-                        <p className="text-yellow-300 text-center text-sm sm:text-lg md:text-xl font-bold mb-4 sm:mb-6">您的叫牌</p>
-                        <div className="grid grid-cols-5 gap-1.5 sm:gap-3 lg:gap-4 mb-4 sm:mb-6">
-                            {[1,2,3,4,5,6,7].flatMap(level =>
-                                ['C','D','H','S','N'].map(strain => {
-                                    const bid = `${level}${strain}`;
-                                    const legal = !highest || bidValue(bid) > bidValue(highest);
-                                    const isRed = strain === 'H' || strain === 'D';
-                                    const isGrn = strain === 'C';
-                                    return (
-                                        <button key={bid}
-                                            onClick={() => legal && onBid(bid)}
-                                            disabled={!legal}
-                                            className={`py-3 sm:py-4 md:py-5 rounded-xl sm:rounded-2xl text-sm sm:text-lg md:text-xl lg:text-2xl font-bold transition-all shadow-sm
-                                                ${legal
-                                                    ? isRed ? 'bg-red-800/80 hover:bg-red-700 text-white active:scale-95'
-                                                    : isGrn ? 'bg-green-600/90 hover:bg-green-500 text-white shadow-inner active:scale-95' // 梅花改為較亮綠色與純白字
-                                                    : 'bg-gray-700/80 hover:bg-gray-600 text-white active:scale-95'
-                                                    : 'bg-gray-800/40 text-gray-600 cursor-not-allowed opacity-40'
-                                                }`}
-                                        >
-                                            {level}{STRAIN_SYMBOL[strain]}
-                                        </button>
-                                    );
-                                })
-                            )}
-                        </div>
-                        <div className="flex gap-2 sm:gap-4">
+                        <p className="text-yellow-300 text-center text-lg sm:text-xl font-bold mb-3 shrink-0 tracking-widest">請選擇叫牌</p>
+                        
+                        {/* 動作按鈕移至上方固定 */}
+                        <div className="flex gap-2 sm:gap-3 mb-3 shrink-0">
                             <button onClick={() => onBid('pass')}
-                                className="flex-1 bg-gray-700/80 hover:bg-gray-600 text-white py-3 sm:py-5 md:py-6 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl md:text-2xl active:scale-95 transition-all shadow-md">
-                                過叫
+                                className="flex-[2] bg-slate-600 hover:bg-slate-500 text-white py-3.5 sm:py-4 rounded-xl font-bold text-xl active:scale-95 transition-all shadow-md">
+                                過 叫
                             </button>
-                            <button onClick={() => canDbl && onBid('dbl')}
-                                disabled={!canDbl}
-                                className={`flex-1 py-3 sm:py-5 md:py-6 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl md:text-2xl transition-all shadow-md
-                                    ${canDbl ? 'bg-orange-800/80 hover:bg-orange-700 text-white active:scale-95' : 'bg-gray-800/40 text-gray-600 opacity-40 cursor-not-allowed'}`}>
+                            <button onClick={() => canDbl && onBid('dbl')} disabled={!canDbl}
+                                className={`flex-1 py-3.5 sm:py-4 rounded-xl font-bold text-lg active:scale-95 transition-all shadow-md
+                                    ${canDbl ? 'bg-orange-700 text-white' : 'bg-gray-800/40 text-gray-600 opacity-40'}`}>
                                 加倍
                             </button>
-                            <button onClick={() => canRdbl && onBid('rdbl')}
-                                disabled={!canRdbl}
-                                className={`flex-1 py-3 sm:py-5 md:py-6 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl md:text-2xl transition-all shadow-md
-                                    ${canRdbl ? 'bg-purple-800/80 hover:bg-purple-700 text-white active:scale-95' : 'bg-gray-800/40 text-gray-600 opacity-40 cursor-not-allowed'}`}>
-                                再加倍
+                            <button onClick={() => canRdbl && onBid('rdbl')} disabled={!canRdbl}
+                                className={`flex-1 py-3.5 sm:py-4 rounded-xl font-bold text-lg active:scale-95 transition-all shadow-md
+                                    ${canRdbl ? 'bg-purple-700 text-white' : 'bg-gray-800/40 text-gray-600 opacity-40'}`}>
+                                再加
                             </button>
+                        </div>
+
+                        {/* 叫牌數字花色區，限制高度並可上下滑動 (約3行高) */}
+                        <div className="overflow-y-auto hide-scrollbar shrink-0 max-h-[14rem] sm:max-h-[18rem] rounded-xl relative border-t border-white/10 pt-2">
+                            <div className="grid grid-cols-5 gap-1.5 sm:gap-2 pb-2">
+                                {[1,2,3,4,5,6,7].flatMap(level =>
+                                    ['C','D','H','S','N'].map(strain => {
+                                        const bid = `${level}${strain}`;
+                                        const legal = !highest || bidValue(bid) > bidValue(highest);
+                                        const isRed = strain === 'H' || strain === 'D';
+                                        const isGrn = strain === 'C';
+                                        
+                                        // 尋找是否已被叫過，若是則取得叫牌者座位
+                                        const madeBid = sequence.find(b => b.call === bid);
+                                        const bidderName = madeBid ? SEAT_NAME[madeBid.seat] : null;
+
+                                        return (
+                                            <button key={bid}
+                                                onClick={() => legal && onBid(bid)}
+                                                disabled={!legal}
+                                                className={`relative py-3.5 sm:py-5 rounded-xl text-lg sm:text-2xl font-black transition-all shadow-md active:scale-95 overflow-hidden
+                                                    ${legal
+                                                        ? isRed ? 'bg-red-700/90 hover:bg-red-600 text-white'
+                                                        : isGrn ? 'bg-green-600/90 hover:bg-green-500 text-white'
+                                                        : 'bg-slate-700/90 hover:bg-slate-600 text-white'
+                                                        : 'bg-gray-800/40 text-gray-600 cursor-not-allowed opacity-30 shadow-none'
+                                                    }`}
+                                            >
+                                                {bidderName && (
+                                                    <div className="absolute top-0 right-0 bg-yellow-400 text-gray-900 text-[10px] sm:text-xs px-1.5 py-0.5 rounded-bl-lg font-bold shadow-sm z-10 opacity-100 border-b border-l border-yellow-600/50">
+                                                        {bidderName}
+                                                    </div>
+                                                )}
+                                                {level}{STRAIN_SYMBOL[strain]}
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
             );
         };
 
-        // HCP 顯示
         const HandHCP = ({ hand }) => {
             const hcp = calcHCP(hand);
             const lens = suitLengths(hand);
             return (
-                <div className="text-[10px] sm:text-xs md:text-sm lg:text-base text-gray-300 text-center flex flex-wrap justify-center items-center gap-1.5 sm:gap-2.5 mt-1 sm:mt-2">
-                    <span className="text-yellow-300 font-bold bg-black/50 px-2 sm:px-2.5 py-0.5 rounded border border-white/20 shadow-md">
-                        {hcp} HCP
+                <div className="text-xs sm:text-sm text-gray-300 flex justify-center items-center gap-1.5 mt-1">
+                    <span className="text-yellow-300 font-bold bg-black/50 px-2 py-0.5 rounded border border-white/20">
+                        {hcp} 點
                     </span>
                     {SUITS.map(s => (
-                        <span key={s} 
-                            style={{ color: SUIT_COLOR_DARK_BG[s] }} 
-                            className="bg-black/50 px-1.5 sm:px-2 py-0.5 rounded border border-white/20 shadow-md font-bold flex items-center gap-0.5"
-                        >
-                            <span className="opacity-90">{SUIT_SYMBOL[s]}</span>
-                            <span>{lens[s]}</span>
+                        <span key={s} style={{ color: SUIT_COLOR_DARK_BG[s] }} className="bg-black/50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                            <span className="opacity-90">{SUIT_SYMBOL[s]}</span><span>{lens[s]}</span>
                         </span>
                     ))}
                 </div>
             );
         };
 
-        // 計分卡
         const ScoreCard = ({ rubberScore, gamesWon, vulnerable }) => {
             const nsBelow = rubberScore.NS.below;
             const ewBelow = rubberScore.EW.below;
@@ -1121,52 +975,114 @@
             const ewAbove = rubberScore.EW.above;
 
             return (
-                <div className="glass-panel rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 w-full max-w-xs sm:max-w-md md:max-w-lg shadow-lg">
-                    <div className="grid grid-cols-3 gap-1 sm:gap-2 text-xs sm:text-sm md:text-base text-center mb-3 sm:mb-5">
+                <div className="glass-panel rounded-2xl p-4 sm:p-6 w-full max-w-sm shadow-lg border border-white/10 mx-auto">
+                    <div className="grid grid-cols-3 gap-2 text-sm sm:text-base text-center mb-3">
                         <div></div>
-                        <div className="text-yellow-300 font-bold">NS{vulnerable.NS ? ' ●' : ''}</div>
-                        <div className="text-yellow-300 font-bold">EW{vulnerable.EW ? ' ●' : ''}</div>
+                        <div className="text-yellow-300 font-bold text-lg">NS{vulnerable.NS ? ' ●' : ''}</div>
+                        <div className="text-yellow-300 font-bold text-lg">EW{vulnerable.EW ? ' ●' : ''}</div>
                     </div>
-                    {/* 高線 */}
-                    <div className="text-[10px] sm:text-xs md:text-sm text-gray-400 text-center mb-1 sm:mb-2 tracking-widest">── 高線 ──</div>
+                    <div className="text-xs text-gray-400 text-center mb-1 tracking-widest">── 高線 ──</div>
                     {[...Array(Math.max(nsAbove.length, ewAbove.length, 1))].map((_, i) => (
-                        <div key={i} className="grid grid-cols-3 gap-1 sm:gap-2 text-xs sm:text-sm md:text-base text-center py-0.5">
+                        <div key={i} className="grid grid-cols-3 gap-2 text-base text-center py-0.5">
                             <div></div>
-                            <div className="text-green-300 font-semibold">{nsAbove[i] != null ? nsAbove[i] : ''}</div>
-                            <div className="text-green-300 font-semibold">{ewAbove[i] != null ? ewAbove[i] : ''}</div>
+                            <div className="text-green-300 font-bold">{nsAbove[i] != null ? nsAbove[i] : ''}</div>
+                            <div className="text-green-300 font-bold">{ewAbove[i] != null ? ewAbove[i] : ''}</div>
                         </div>
                     ))}
-                    <div className="border-b border-yellow-500/60 my-2 sm:my-4" />
-                    {/* 低線 */}
-                    <div className="text-[10px] sm:text-xs md:text-sm text-gray-400 text-center mb-1 sm:mb-2 tracking-widest">── 低線 ──</div>
+                    <div className="border-b border-white/20 my-2" />
+                    <div className="text-xs text-gray-400 text-center mb-1 tracking-widest">── 低線 ──</div>
                     {[...Array(Math.max(nsBelow.length, ewBelow.length, 1))].map((_, i) => (
-                        <div key={i} className="grid grid-cols-3 gap-1 sm:gap-2 text-xs sm:text-sm md:text-base text-center py-0.5">
+                        <div key={i} className="grid grid-cols-3 gap-2 text-base text-center py-0.5">
                             <div></div>
-                            <div className="text-white font-semibold">{nsBelow[i] != null ? nsBelow[i] : ''}</div>
-                            <div className="text-white font-semibold">{ewBelow[i] != null ? ewBelow[i] : ''}</div>
+                            <div className="text-white font-bold">{nsBelow[i] != null ? nsBelow[i] : ''}</div>
+                            <div className="text-white font-bold">{ewBelow[i] != null ? ewBelow[i] : ''}</div>
                         </div>
                     ))}
-                    <div className="border-b border-yellow-500/60 my-2 sm:my-4" />
-                    <div className="grid grid-cols-3 gap-1 sm:gap-2 text-xs sm:text-sm md:text-base text-center font-bold">
+                    <div className="border-b border-white/20 my-3" />
+                    <div className="grid grid-cols-3 gap-2 text-base text-center font-bold items-center">
                         <div className="text-gray-400">局數</div>
-                        <div className="text-yellow-300">{gamesWon.NS}</div>
-                        <div className="text-yellow-300">{gamesWon.EW}</div>
+                        <div className="text-yellow-300 text-xl bg-black/30 rounded py-1">{gamesWon.NS}</div>
+                        <div className="text-yellow-300 text-xl bg-black/30 rounded py-1">{gamesWon.EW}</div>
                     </div>
-                    {vulnerable.NS && <div className="text-[9px] sm:text-[10px] md:text-xs text-center text-orange-300 mt-2 sm:mt-3">● = 有局方，罰分加倍</div>}
                 </div>
             );
         };
 
         // ══════════════════════════════════════════════════════════════
-        // 主畫面
+        // 全局資訊面板元件
+        // ══════════════════════════════════════════════════════════════
+        const GameInfoModal = ({ visible, onClose, gameState }) => {
+            if (!visible) return null;
+            const { rubberCount, dealer, vulnerable, rubberScore, gamesWon } = gameState;
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+                    <div className="glass-panel rounded-3xl p-6 w-full max-w-sm shadow-2xl relative border border-white/20 bg-[#022c22]/95" onClick={e => e.stopPropagation()}>
+                        <button onClick={onClose} className="absolute top-3 right-4 text-gray-400 hover:text-white text-3xl font-black active:scale-90 transition-all">&times;</button>
+                        <h2 className="text-yellow-300 text-xl font-black mb-4 text-center tracking-widest">遊戲資訊</h2>
+                        
+                        <div className="bg-black/40 rounded-xl p-3 mb-4 text-gray-200 text-sm font-bold flex justify-between border border-white/10">
+                            <span>第 {rubberCount} 橡皮牌</span>
+                            <span>發牌：{SEAT_NAME[dealer]}家</span>
+                        </div>
+
+                        <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />
+                        
+                        <button onClick={onClose} className="w-full mt-5 bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-xl active:scale-95 transition-all shadow-md tracking-widest">
+                            關 閉
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // ══════════════════════════════════════════════════════════════
+        // 牌情覆蓋層元件 (HUD Overlay)
+        // ══════════════════════════════════════════════════════════════
+        const BoardStatsOverlay = ({ visible, hands }) => {
+            if (!visible) return null;
+            
+            const StatBox = ({ seat, label }) => {
+                const hand = hands[seat];
+                const hcp = calcHCP(hand);
+                const lens = suitLengths(hand);
+                return (
+                    <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-white/20 flex flex-col items-center shadow-[0_0_15px_rgba(0,0,0,0.8)] bg-black/80 backdrop-blur-md pointer-events-none">
+                        <div className="text-yellow-300 font-bold mb-1.5 text-sm sm:text-base tracking-widest">
+                            {label} · {hand.length}張 · {hcp}點
+                        </div>
+                        <div className="flex gap-2 sm:gap-3">
+                            {SUITS.map(s => (
+                                <span key={s} style={{ color: SUIT_COLOR_DARK_BG[s] }} className="font-bold flex items-center text-sm sm:text-base">
+                                    {SUIT_SYMBOL[s]}{lens[s]}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="absolute inset-0 z-[60] pointer-events-none transition-opacity duration-300 animate-fade-in">
+                    <div className="absolute top-12 left-1/2 -translate-x-1/2"><StatBox seat={0} label="北家" /></div>
+                    <div className="absolute top-1/2 -translate-y-1/2 left-2"><StatBox seat={3} label="西家" /></div>
+                    <div className="absolute top-1/2 -translate-y-1/2 right-2"><StatBox seat={1} label="東家" /></div>
+                    <div className="absolute bottom-36 sm:bottom-40 left-1/2 -translate-x-1/2"><StatBox seat={2} label="南家" /></div>
+                </div>
+            );
+        };
+
+        // ══════════════════════════════════════════════════════════════
+        // 主應用
         // ══════════════════════════════════════════════════════════════
         function App() {
             const [gameState, setGameState] = useState(INITIAL_STATE);
             const [selectedCard, setSelectedCard] = useState(null);
-            
-            // 手牌展開/收合狀態
             const [southExpanded, setSouthExpanded] = useState(true);
             const [northExpanded, setNorthExpanded] = useState(false);
+            
+            // UI 狀態
+            const [showInfoModal, setShowInfoModal] = useState(false);
+            const [showBoardStats, setShowBoardStats] = useState(false); // 控制牌情覆蓋層
 
             const { phase, hands, biddingSequence, currentBidder, contract,
                     dealer, vulnerable, rubberScore, gamesWon, dummySeat,
@@ -1177,7 +1093,6 @@
             const HUMAN_SEAT = 2;
             const trumpSuit = contract && contract.strain !== 'N' ? contract.strain : null;
 
-            // ── AI 叫牌 ──────────────────────────────────
             useEffect(() => {
                 if (phase !== 'bidding') return;
                 if (currentBidder === HUMAN_SEAT) return;
@@ -1191,19 +1106,12 @@
                 return () => clearTimeout(t);
             }, [phase, biddingSequence.length, currentBidder]);
 
-            // ── 流局後自動重發 ──────────────────────────
             useEffect(() => {
                 if (phase !== 'passedOut') return;
-                const t = setTimeout(() => {
-                    setGameState(prev => {
-                        if (prev.phase !== 'passedOut') return prev;
-                        return startHand({ ...prev, dealer: (prev.dealer + 1) % 4 });
-                    });
-                }, 1500);
+                const t = setTimeout(() => setGameState(prev => prev.phase === 'passedOut' ? startHand({ ...prev, dealer: (prev.dealer + 1) % 4 }) : prev), 1500);
                 return () => clearTimeout(t);
             }, [phase]);
 
-            // ── AI 出牌 ──────────────────────────────────
             useEffect(() => {
                 if (phase !== 'playing') return;
                 const turnSeat = (currentLeader + currentTrick.length) % 4;
@@ -1221,17 +1129,13 @@
                 return () => clearTimeout(t);
             }, [phase, currentTrick.length, currentLeader, openingLeadMade]);
 
-            // ── 清除上一墩殘留 ───────────────────────
             useEffect(() => {
                 if (!lastCompletedTrick) return;
-                if (phase === 'handFinished') return; // 【新增】如果是結束等待畫面，不要把最後一墩清掉
-                const t = setTimeout(() => {
-                    setGameState(prev => ({ ...prev, lastCompletedTrick: null }));
-                }, 2500);
+                if (phase === 'handFinished') return; 
+                const t = setTimeout(() => setGameState(prev => ({ ...prev, lastCompletedTrick: null })), 2000);
                 return () => clearTimeout(t);
             }, [lastCompletedTrick, phase]);
 
-            // ── 自動控制手牌展開狀態 ────────────────────────
             useEffect(() => {
                 if (phase === 'bidding') {
                     setSouthExpanded(currentBidder === 2);
@@ -1239,20 +1143,17 @@
                 } else if (phase === 'playing') {
                     const turnSeat = (currentLeader + currentTrick.length) % 4;
                     setSouthExpanded(turnSeat === 2);
-                    // 北家若為人類操控，則輪到時自動展開
                     if (turnSeat === 0 && (!autoPlayDummy && (dummySeat === 0 ? openingLeadMade : true))) {
                         setNorthExpanded(true);
                     } else {
                         setNorthExpanded(false);
                     }
                 } else if (phase === 'handFinished' || phase === 'scoring') {
-                    // 【新增】結束時自動收合所有手牌，聚焦於中間的最後一墩
                     setSouthExpanded(false);
                     setNorthExpanded(false);
                 }
             }, [phase, currentBidder, currentLeader, currentTrick.length, autoPlayDummy, dummySeat, openingLeadMade]);
 
-            // ── 人類出牌 ──────────────────────────────────────────
             const handleCardClick = (seat, card) => {
                 if (phase !== 'playing') return;
                 const turnSeat = (currentLeader + currentTrick.length) % 4;
@@ -1284,84 +1185,61 @@
 
             const turnSeat = phase === 'playing' ? (currentLeader + currentTrick.length) % 4 : -1;
             const isMyTurn = phase === 'playing' && isHumanTurn(turnSeat, gameState);
-
             const displayTrick = currentTrick.length > 0 ? currentTrick : lastCompletedTrick;
             const isLastTrick  = currentTrick.length === 0 && lastCompletedTrick !== null;
-            const lastTrickWinner = isLastTrick
-                ? trickWinner(lastCompletedTrick, contract && contract.strain !== 'N' ? contract.strain : null)
-                : -1;
+            const lastTrickWinner = isLastTrick ? trickWinner(lastCompletedTrick, contract && contract.strain !== 'N' ? contract.strain : null) : -1;
 
             const humanControlsDummy = !autoPlayDummy;
-            const southLegal = phase === 'playing' && turnSeat === HUMAN_SEAT
-                ? legalCards(hands[HUMAN_SEAT], currentTrick, trumpSuit).map(c => c.id)
-                : [];
+            const southLegal = phase === 'playing' && turnSeat === HUMAN_SEAT ? legalCards(hands[HUMAN_SEAT], currentTrick, trumpSuit).map(c => c.id) : [];
             const northIsHumanControlled = humanControlsDummy && (dummySeat !== 0 || openingLeadMade);
-            const northLegal = phase === 'playing' && turnSeat === 0 && northIsHumanControlled
-                ? legalCards(hands[0], currentTrick, trumpSuit).map(c => c.id)
-                : [];
+            const northLegal = phase === 'playing' && turnSeat === 0 && northIsHumanControlled ? legalCards(hands[0], currentTrick, trumpSuit).map(c => c.id) : [];
             const isNorthTurn = turnSeat === 0;
             const isSouthTurn = turnSeat === HUMAN_SEAT;
             const northClickable = isNorthTurn && northIsHumanControlled;
             const southClickable = isSouthTurn;
 
-            // ── 渲染 ──────────────────────────────────────────────
+            // ── 渲染階段 ──────────────────────────────────────────────
 
             if (phase === 'menu') {
-                const hasGame = gamesWon.NS > 0 || gamesWon.EW > 0 ||
-                                rubberScore.NS.below.length > 0 || rubberScore.EW.below.length > 0 ||
-                                rubberScore.NS.above.length > 0 || rubberScore.EW.above.length > 0;
+                const hasGame = gamesWon.NS > 0 || gamesWon.EW > 0 || rubberScore.NS.below.length > 0 || rubberScore.EW.below.length > 0 || rubberScore.NS.above.length > 0 || rubberScore.EW.above.length > 0;
                 return (
-                    <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 gap-5 sm:gap-8 overflow-y-auto hide-scrollbar relative">
-                        <div className="glass-panel rounded-3xl sm:rounded-[2.5rem] p-6 sm:p-10 text-center w-full max-w-md animate-fade-in shadow-2xl">
-                            <div className="text-4xl sm:text-6xl mb-4 tracking-wider flex justify-center gap-2">
-                                <span style={{color:'#0f172a'}}>♠</span>
-                                <span style={{color:'#dc2626'}}>♥</span>
-                                <span style={{color:'#ea580c'}}>♦</span>
-                                <span style={{color:'#166534'}}>♣</span>
+                    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-6 overflow-y-auto hide-scrollbar">
+                        <div className="glass-panel rounded-3xl p-6 text-center w-full max-w-sm animate-fade-in shadow-2xl">
+                            <div className="text-5xl mb-2 flex justify-center gap-2">
+                                <span style={{color:'#f8fafc'}}>♠</span><span style={{color:'#ef4444'}}>♥</span><span style={{color:'#f97316'}}>♦</span><span style={{color:'#4ade80'}}>♣</span>
                             </div>
-                            <h1 className="text-white text-3xl sm:text-4xl font-bold mb-2">橋牌單機遊戲</h1>
-                            <p className="text-green-300 text-sm sm:text-lg">橡皮橋制 · 南家視角</p>
-                            <p className="text-gray-400 text-xs sm:text-sm mt-2">第 {gameState.rubberCount} 橡皮牌</p>
+                            <h1 className="text-white text-3xl font-black mb-1">橋牌單機版</h1>
+                            <p className="text-green-300 text-base font-bold">橡皮橋制 · 南家視角</p>
                         </div>
 
                         {hasGame && <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />}
 
-                        <div className="flex flex-col gap-3 sm:gap-5 w-full max-w-md z-10">
-                            <button
-                                onClick={() => setGameState(prev => startHand(prev))}
-                                className="w-full bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold py-4 sm:py-5 md:py-6 rounded-2xl sm:rounded-3xl text-lg sm:text-2xl shadow-xl transition-all active:scale-95">
+                        <div className="flex flex-col gap-3 w-full max-w-sm px-2">
+                            <button onClick={() => setGameState(prev => startHand(prev))}
+                                className="w-full bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 rounded-2xl text-xl shadow-[0_0_20px_rgba(250,204,21,0.4)] active:scale-95 transition-all">
                                 {hasGame ? '繼續下一局 →' : '開始遊戲 →'}
                             </button>
-                            <button
-                                onClick={() => setGameState(prev => ({ ...prev, autoPlayDummy: !prev.autoPlayDummy }))}
-                                className={`w-full font-bold py-3 sm:py-4 md:py-5 rounded-2xl sm:rounded-3xl text-sm sm:text-lg shadow transition-all active:scale-95 border
-                                    ${autoPlayDummy
-                                        ? 'glass-panel border-gray-500/50 text-gray-300'
-                                        : 'glass-panel border-blue-400/50 text-blue-200'
-                                    }`}>
-                                北家全權由我出牌：{autoPlayDummy ? '❌ 關閉（AI代出）' : '✅ 開啟（我自己出）'}
+                            <button onClick={() => setGameState(prev => ({ ...prev, autoPlayDummy: !prev.autoPlayDummy }))}
+                                className={`w-full font-bold py-3 rounded-2xl text-sm shadow active:scale-95 transition-all border
+                                    ${autoPlayDummy ? 'glass-panel border-gray-500/50 text-gray-300' : 'bg-blue-900/40 border-blue-400/50 text-blue-200'}`}>
+                                北家(明手)：{autoPlayDummy ? 'AI 代出' : '自己出牌'} (點擊切換)
                             </button>
-                            <button
-                                onClick={() => setGameState({
-                                    ...INITIAL_STATE,
-                                    rubberCount: gameState.rubberCount + (hasGame ? 1 : 0)
-                                })}
-                                className="w-full glass-panel border border-white/10 text-gray-300 font-bold py-3 sm:py-4 md:py-5 rounded-2xl sm:rounded-3xl text-sm sm:text-lg shadow transition-all active:scale-95">
-                                新橡皮牌
+                            <button onClick={() => setGameState({ ...INITIAL_STATE, rubberCount: gameState.rubberCount + (hasGame ? 1 : 0) })}
+                                className="w-full glass-panel border border-white/10 text-gray-400 font-bold py-3 rounded-2xl text-sm active:scale-95 transition-all">
+                                清除分數 (新橡皮牌)
                             </button>
                         </div>
-                        <p className="text-gray-500 text-xs sm:text-sm text-center z-10">南家與北家(明手)對抗東西家 AI</p>
                     </div>
                 );
             }
 
             if (phase === 'passedOut') {
                 return (
-                    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
-                        <div className="glass-panel rounded-3xl sm:rounded-[3rem] p-10 sm:p-16 md:p-20 text-center animate-fade-in shadow-2xl">
-                            <div className="text-6xl sm:text-8xl mb-4 sm:mb-6">🃏</div>
-                            <h2 className="text-white text-3xl sm:text-5xl font-bold mb-3 sm:mb-5">四家皆過叫</h2>
-                            <p className="text-green-300 text-lg sm:text-2xl">流局，換莊重新發牌...</p>
+                    <div className="flex-1 flex flex-col items-center justify-center p-4">
+                        <div className="glass-panel rounded-3xl p-10 text-center animate-fade-in shadow-2xl">
+                            <div className="text-6xl mb-4">🃏</div>
+                            <h2 className="text-white text-3xl font-bold mb-2">四家皆過叫</h2>
+                            <p className="text-green-300 text-lg">重新發牌...</p>
                         </div>
                     </div>
                 );
@@ -1373,344 +1251,244 @@
                 return (
                     <div className="flex-1 flex flex-col overflow-hidden relative">
                         {/* Top bar */}
-                        <div className="glass-panel flex items-center justify-between px-4 sm:px-8 py-2 sm:py-3 shrink-0 shadow-sm z-10">
-                            <div className="flex items-center gap-2">
-                                <PlayerBadge name="北家" isActive={currentBidder === 0} isHuman={false} />
+                        <div className="glass-panel flex items-center px-2 py-2 shrink-0 border-b border-white/10 relative z-20">
+                            <div className="flex-1 flex justify-start">
+                                <PlayerBadge name="北" isActive={currentBidder === 0} isHuman={false} />
                             </div>
-                            <span className="text-gray-300 text-xs sm:text-sm md:text-base font-bold">{vulStr} · 第{gamesWon.NS + gamesWon.EW + 1}局</span>
-                            <div className="flex items-center gap-2">
-                                <PlayerBadge name="東家" isActive={currentBidder === 1} isHuman={false} />
+                            <div className="shrink-0 flex justify-center px-1">
+                                <span className="text-gray-200 text-xs sm:text-sm font-bold bg-black/30 px-2 sm:px-3 py-1 rounded-full whitespace-nowrap">{vulStr}</span>
+                            </div>
+                            <div className="flex-1 flex justify-end items-center gap-1 sm:gap-2">
+                                <PlayerBadge name="東" isActive={currentBidder === 1} isHuman={false} />
+                                <button onClick={() => setShowBoardStats(!showBoardStats)} className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full border active:scale-95 transition-all text-xs sm:text-sm shadow-sm ${showBoardStats ? 'bg-yellow-500/20 border-yellow-400 text-yellow-300' : 'bg-white/10 hover:bg-white/20 border-white/20 text-gray-300'}`}>
+                                    👁️
+                                </button>
+                                <button onClick={() => setShowInfoModal(true)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full border border-white/20 active:scale-95 transition-all text-xs sm:text-sm text-yellow-300 shadow-sm">
+                                    ℹ️
+                                </button>
                             </div>
                         </div>
 
                         {/* North preview */}
-                        <div className="glass-light mx-3 sm:mx-8 md:mx-12 lg:mx-20 mt-2 sm:mt-4 rounded-2xl sm:rounded-3xl p-2 sm:p-4 shrink-0 shadow-lg z-10 relative">
-                            <button
-                                onClick={() => setNorthExpanded(!northExpanded)}
-                                className="absolute top-2 right-2 text-[10px] sm:text-xs text-yellow-300 bg-black/40 hover:bg-black/60 px-2 py-1 rounded-lg font-bold border border-yellow-600/50 z-20"
-                            >
-                                {northExpanded ? '收合 ▲' : '展開 ▼'}
-                            </button>
-                            <div className="flex flex-col items-center gap-1 sm:gap-2">
+                        <div className="glass-light mx-2 mt-2 rounded-2xl p-2 shrink-0 shadow-lg relative">
+                            <div className="flex flex-col items-center gap-1">
                                 <HandHCP hand={hands[0]} />
-                                <HandDisplay
-                                    cards={hands[0]}
-                                    isExpanded={northExpanded}
-                                    disabledOverall={true}
-                                    size="sm"
-                                />
+                                <HandDisplay cards={hands[0]} isExpanded={northExpanded} disabledOverall={true} size="sm" />
                             </div>
                         </div>
 
                         {/* Center auction */}
-                        <div className="flex-1 flex items-center justify-center gap-2 sm:gap-4 md:gap-8 py-2 sm:py-4 px-2 sm:px-4 overflow-hidden relative">
-                            {/* West */}
-                            <div className="flex flex-col items-center gap-1 sm:gap-2">
-                                <PlayerBadge name="西家" isActive={currentBidder === 3} isHuman={false} />
-                                <HandHCP hand={hands[3]} />
-                            </div>
-
-                            {/* Auction */}
+                        <div className="flex-1 flex items-center justify-center py-2 px-1">
                             <AuctionBox sequence={biddingSequence} dealer={dealer} />
-
-                            {/* East (HCP only, badge is top right) */}
-                            <div className="flex flex-col items-center gap-1 sm:gap-2">
-                                <PlayerBadge name="東家" isActive={currentBidder === 1} isHuman={false} />
-                                <HandHCP hand={hands[1]} />
-                            </div>
                         </div>
 
                         {/* South preview */}
-                        <div className="glass-light mx-3 sm:mx-8 md:mx-12 lg:mx-20 mb-2 sm:mb-4 rounded-2xl sm:rounded-3xl p-2 sm:p-4 shrink-0 shadow-lg z-10 relative">
-                            <button
-                                onClick={() => setSouthExpanded(!southExpanded)}
-                                className="absolute top-2 right-2 text-[10px] sm:text-xs text-yellow-300 bg-black/40 hover:bg-black/60 px-2 py-1 rounded-lg font-bold border border-yellow-600/50 z-20"
-                            >
-                                {southExpanded ? '收合 ▲' : '展開 ▼'}
-                            </button>
-                            <div className="flex flex-col items-center gap-1.5 sm:gap-3">
-                                <div className="flex items-center gap-2">
-                                    <PlayerBadge name="南家（您）" isActive={isHumanBidTurn} isHuman={true} />
+                        <div className="glass-light mx-2 mb-2 rounded-2xl p-2 shrink-0 shadow-lg relative">
+                            <div className="flex flex-col items-center gap-1.5">
+                                <div className="flex justify-between w-full px-2 items-center">
+                                    <PlayerBadge name="南家(您)" isActive={isHumanBidTurn} isHuman={true} />
+                                    <button onClick={() => setSouthExpanded(!southExpanded)}
+                                        className="text-xs text-yellow-300 bg-black/40 px-2 py-1 rounded font-bold border border-yellow-600/50">
+                                        {southExpanded ? '收合 ▲' : '展開 ▼'}
+                                    </button>
                                 </div>
                                 <HandHCP hand={hands[HUMAN_SEAT]} />
-                                <HandDisplay
-                                    cards={hands[HUMAN_SEAT]}
-                                    isExpanded={southExpanded}
-                                    disabledOverall={true}
-                                    size="sm"
-                                />
+                                <HandDisplay cards={hands[HUMAN_SEAT]} isExpanded={southExpanded} disabledOverall={true} size="sm" />
                             </div>
                         </div>
 
-                        {/* Waiting prompt */}
-                        {!isHumanBidTurn && (
-                            <div className="text-center text-gray-300 text-sm sm:text-base md:text-xl lg:text-2xl animate-pulse pb-4 sm:pb-8">
-                                {SEAT_NAME[currentBidder]}家思考中...
-                            </div>
-                        )}
-
                         <BiddingSheet onBid={handleBid} sequence={biddingSequence} visible={isHumanBidTurn} />
+                        
+                        <BoardStatsOverlay visible={showBoardStats} hands={hands} />
+                        <GameInfoModal visible={showInfoModal} onClose={() => setShowInfoModal(false)} gameState={gameState} />
                     </div>
                 );
             }
 
-            // 【修改】將 handFinished 狀態與 playing 合併顯示在同一個打牌介面中
             if (phase === 'playing' || phase === 'handFinished') {
                 const contractStr = contractDisplay(contract);
                 const declarerName = contract ? SEAT_NAME[contract.declarer] : '';
 
                 return (
-                    <div className="flex-1 flex flex-col overflow-hidden w-full h-full">
+                    <div className="flex-1 flex flex-col overflow-hidden w-full h-full justify-between relative">
                         {/* Top bar */}
-                        <div className="glass-panel flex items-center justify-between px-4 sm:px-8 py-2 sm:py-4 shrink-0 z-10 shadow-sm">
-                            <div className="flex items-center gap-2 sm:gap-4">
-                                <span className="text-white font-bold text-sm sm:text-lg md:text-2xl tracking-wider">{contractStr}</span>
-                                {contract && (
-                                    <span className="text-gray-300 text-xs sm:text-sm md:text-lg lg:text-xl">
-                                        {declarerName}家{autoPlayDummy ? ' · 北家AI' : ' · 北家自控'}
-                                    </span>
-                                )}
+                        <div className="glass-panel flex items-center justify-between px-3 py-2 shrink-0 z-20 border-b border-white/10">
+                            <div className="flex flex-col">
+                                <span className="text-yellow-400 font-black text-lg sm:text-xl leading-tight">{contractStr}</span>
+                                <span className="text-gray-300 text-[10px] sm:text-xs">{declarerName}家莊</span>
                             </div>
-                            <div className="text-xs sm:text-sm md:text-lg lg:text-xl text-gray-300 flex items-center gap-2 sm:gap-4 bg-black/40 px-3 sm:px-5 py-1 sm:py-2 rounded-full border border-white/10">
-                                <span>NS <span className="text-yellow-300 font-bold ml-1">{tricksTaken.NS}</span></span>
-                                <span className="text-gray-500">|</span>
-                                <span>EW <span className="text-yellow-300 font-bold ml-1">{tricksTaken.EW}</span></span>
+                            <div className="flex items-center gap-1.5 sm:gap-3">
+                                <div className="text-xs sm:text-sm text-gray-200 flex items-center gap-1.5 bg-black/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-white/10">
+                                    <span className="font-bold">NS <span className="text-yellow-300 ml-0.5 text-sm sm:text-lg">{tricksTaken.NS}</span></span>
+                                    <span className="text-gray-500">|</span>
+                                    <span className="font-bold">EW <span className="text-yellow-300 ml-0.5 text-sm sm:text-lg">{tricksTaken.EW}</span></span>
+                                </div>
+                                <button onClick={() => setShowBoardStats(!showBoardStats)} className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full border active:scale-95 transition-all text-xs sm:text-sm shadow-sm ${showBoardStats ? 'bg-yellow-500/20 border-yellow-400 text-yellow-300' : 'bg-white/10 hover:bg-white/20 border-white/20 text-gray-300'}`}>
+                                    👁️
+                                </button>
+                                <button onClick={() => setShowInfoModal(true)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full border border-white/20 active:scale-95 transition-all text-xs sm:text-sm text-yellow-300 shadow-sm">
+                                    ℹ️
+                                </button>
                             </div>
                         </div>
 
                         {/* North hand */}
                         {(() => {
                             const northFaceUp = dummyRevealed || (humanControlsDummy && dummySeat !== 0);
-                            const northLabel = dummyRevealed ? '（明手）' : (humanControlsDummy && dummySeat !== 0 ? '（防守）' : '');
                             return (
-                                <div className="glass-light mx-2 sm:mx-6 md:mx-10 mt-2 sm:mt-4 rounded-2xl sm:rounded-3xl p-2 sm:p-4 shrink-0 shadow-lg z-10 relative">
-                                    {northFaceUp && (
-                                        <button
-                                            onClick={() => setNorthExpanded(!northExpanded)}
-                                            className="absolute top-2 right-2 text-[10px] sm:text-xs text-yellow-300 bg-black/40 hover:bg-black/60 px-2 py-1 rounded-lg font-bold border border-yellow-600/50 z-20"
-                                        >
-                                            {northExpanded ? '收合 ▲' : '展開 ▼'}
-                                        </button>
-                                    )}
-                                    <div className="flex flex-col items-center gap-2 sm:gap-3">
-                                        <PlayerBadge name={`北家${northLabel}`} isActive={isNorthTurn} isHuman={false} />
-                                        {northFaceUp ? (
-                                            <HandDisplay
-                                                cards={hands[0]}
-                                                isExpanded={northExpanded}
-                                                onCardClick={(c) => handleCardClick(0, c)}
-                                                legalIds={northLegal}
-                                                selectedId={selectedCard && northClickable ? selectedCard.id : null}
-                                                clickable={northClickable}
-                                                size="hand"
-                                            />
-                                        ) : (
-                                            <div className="flex justify-center -space-x-4 sm:-space-x-8 md:-space-x-12 lg:-space-x-16 px-4 py-2">
-                                                {Array.from({ length: Math.min(hands[0].length, 13) }).map((_, i) => (
-                                                    <div key={i} style={{ zIndex: i }} className="relative hover:z-50 transition-all duration-200">
-                                                        <Card isHidden size="hand" />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                <div className="glass-light mx-1 sm:mx-4 mt-2 rounded-xl p-2 shrink-0 shadow-lg relative">
+                                    <div className="flex justify-between items-center mb-1 px-2">
+                                        <PlayerBadge name={northFaceUp ? "北(明手)" : "北家"} isActive={isNorthTurn} isHuman={false} />
                                     </div>
+                                    {northFaceUp ? (
+                                        <HandDisplay cards={hands[0]} isExpanded={northExpanded} onCardClick={(c) => handleCardClick(0, c)}
+                                            legalIds={northLegal} selectedId={selectedCard && northClickable ? selectedCard.id : null}
+                                            clickable={northClickable} size="hand" />
+                                    ) : (
+                                        <div className="flex justify-center -space-x-5 py-1">
+                                            {Array.from({ length: Math.min(hands[0].length, 13) }).map((_, i) => (
+                                                <div key={i} style={{ zIndex: i }}><Card isHidden size="hand" /></div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })()}
 
                         {/* Center Table */}
-                        <div className="flex-1 flex items-center justify-between px-1 sm:px-4 md:px-8 lg:px-12 min-h-0 w-full max-w-7xl mx-auto">
+                        <div className="flex-1 flex items-center justify-between px-1 w-full relative min-h-[220px]">
                             {/* West */}
-                            <div className="flex flex-col items-center gap-1 sm:gap-2 shrink-0">
-                                <PlayerBadge name="西家" isActive={turnSeat === 3} isHuman={false} />
-                                <div className="flex flex-col -space-y-6 sm:-space-y-10 md:-space-y-14 lg:-space-y-20 pt-4">
+                            <div className="flex flex-col items-center gap-1 shrink-0 w-12 sm:w-16">
+                                <PlayerBadge name="西" isActive={turnSeat === 3} isHuman={false} />
+                                <div className="flex flex-col -space-y-10 pt-2">
                                     {Array.from({ length: Math.min(hands[3].length, 13) }).map((_, i) => (
-                                        <div key={i} style={{ zIndex: i }} className="relative">
-                                            <Card isHidden size="sm" />
-                                        </div>
+                                        <div key={i} style={{ zIndex: i }}><Card isHidden size="sm" /></div>
                                     ))}
                                 </div>
-                                <span className="text-gray-500 text-[10px] sm:text-xs md:text-sm font-bold mt-2">{hands[3].length}張</span>
                             </div>
 
-                            {/* Center Trick Cross */}
-                            <div className="flex-1 flex flex-col items-center justify-center gap-2 sm:gap-4 px-2">
-                                <div className="glass-panel rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 lg:p-10 w-full max-w-[220px] sm:max-w-[340px] md:max-w-[480px] lg:max-w-[600px] flex flex-col items-center justify-center min-h-[220px] sm:min-h-[340px] md:min-h-[480px] lg:min-h-[600px] shadow-2xl relative">
+                            {/* Center Trick Box */}
+                            <div className="flex-1 flex flex-col items-center justify-center relative h-full max-h-[280px]">
+                                <div className="glass-panel rounded-2xl p-2 w-full max-w-[240px] aspect-square flex flex-col items-center justify-center shadow-xl relative border border-white/20">
                                     {!displayTrick ? (
-                                        <div className="text-gray-400 text-sm sm:text-base md:text-xl lg:text-2xl font-bold text-center py-4">
-                                            {openingLeadMade ? '新的一墩' : '等待首攻...'}
-                                        </div>
+                                        <div className="text-gray-300 text-sm font-bold opacity-70">等待首攻...</div>
                                     ) : (
                                         <div className="flex flex-col items-center justify-center w-full relative">
                                             {isLastTrick && (
-                                                <div className="absolute top-4 left-1/2 -translate-x-1/2 text-yellow-400 text-xs sm:text-sm md:text-base lg:text-lg font-bold text-center bg-black/60 px-3 sm:px-5 py-1 sm:py-2 rounded-full whitespace-nowrap shadow-md z-40 border border-yellow-600/50 backdrop-blur-md">
+                                                <div className="absolute -top-4 left-1/2 -translate-x-1/2 text-yellow-300 text-sm font-bold bg-black/80 px-3 py-1 rounded-full shadow-md z-40 border border-yellow-600/50 whitespace-nowrap">
                                                     {SEAT_NAME[lastTrickWinner]}家贏墩
                                                 </div>
                                             )}
-                                            {/* North */}
-                                            <div className="flex justify-center -mb-6 sm:-mb-10 md:-mb-14 lg:-mb-16 relative z-10 transition-all">
-                                                {displayTrick.find(t => t.seat === 0)
-                                                    ? <Card card={displayTrick.find(t => t.seat === 0).card} size="trick" disabled />
-                                                    : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40 opacity-0" />}
+                                            {/* Overlapping trick cards for compactness */}
+                                            <div className="flex justify-center -mb-6 relative z-10">
+                                                {displayTrick.find(t => t.seat === 0) ? <Card card={displayTrick.find(t => t.seat === 0).card} size="trick" disabled /> : <div className="w-14 h-20 opacity-0" />}
                                             </div>
-                                            {/* West / East */}
-                                            <div className="flex justify-between items-center w-full px-2 sm:px-6 md:px-10 lg:px-16 relative z-20 transition-all">
-                                                {displayTrick.find(t => t.seat === 3)
-                                                    ? <Card card={displayTrick.find(t => t.seat === 3).card} size="trick" disabled />
-                                                    : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40 opacity-0" />}
-                                                {displayTrick.find(t => t.seat === 1)
-                                                    ? <Card card={displayTrick.find(t => t.seat === 1).card} size="trick" disabled />
-                                                    : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40 opacity-0" />}
+                                            <div className="flex justify-between items-center w-full px-4 relative z-20">
+                                                {displayTrick.find(t => t.seat === 3) ? <Card card={displayTrick.find(t => t.seat === 3).card} size="trick" disabled /> : <div className="w-14 h-20 opacity-0" />}
+                                                {displayTrick.find(t => t.seat === 1) ? <Card card={displayTrick.find(t => t.seat === 1).card} size="trick" disabled /> : <div className="w-14 h-20 opacity-0" />}
                                             </div>
-                                            {/* South */}
-                                            <div className="flex justify-center -mt-6 sm:-mt-10 md:-mt-14 lg:-mt-16 relative z-30 transition-all">
-                                                {displayTrick.find(t => t.seat === 2)
-                                                    ? <Card card={displayTrick.find(t => t.seat === 2).card} size="trick" disabled />
-                                                    : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-28 lg:h-40 opacity-0" />}
+                                            <div className="flex justify-center -mt-6 relative z-30">
+                                                {displayTrick.find(t => t.seat === 2) ? <Card card={displayTrick.find(t => t.seat === 2).card} size="trick" disabled /> : <div className="w-14 h-20 opacity-0" />}
                                             </div>
                                         </div>
                                     )}
                                 </div>
-                                {/* Message text */}
-                                <div className="text-center text-xs sm:text-sm md:text-base lg:text-xl mt-4 min-h-[1.5rem] relative z-40">
+                                
+                                {/* Status Text below trick box */}
+                                <div className="h-8 mt-2 flex items-center justify-center">
                                     {phase === 'handFinished' ? (
-                                        <button
-                                            onClick={() => setGameState(prev => ({ ...prev, phase: 'scoring' }))}
-                                            className="bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold px-6 sm:px-8 py-2 sm:py-3 rounded-xl sm:rounded-2xl text-sm sm:text-lg md:text-2xl active:scale-95 transition-all shadow-[0_0_20px_rgba(250,204,21,0.5)] animate-bounce"
-                                        >
-                                            進入結算畫面 →
+                                        <button onClick={() => setGameState(prev => ({ ...prev, phase: 'scoring' }))}
+                                            className="bg-yellow-500 text-gray-900 font-bold px-5 py-2 rounded-full text-sm shadow-[0_0_15px_rgba(250,204,21,0.6)] animate-pulse">
+                                            結算成績 →
                                         </button>
                                     ) : isMyTurn ? (
-                                        <span className="text-yellow-300 font-bold animate-pulse drop-shadow-md tracking-wider bg-black/40 px-4 py-1.5 rounded-full border border-yellow-500/30">
-                                            {isSouthTurn ? '請出牌（南家）' : '請出牌（北明手）'}
-                                            {selectedCard ? ' → 再點擊出牌確認' : ''}
+                                        <span className="text-yellow-300 text-sm font-bold bg-black/50 px-3 py-1 rounded-full border border-yellow-500/30">
+                                            {selectedCard ? '點擊按鈕確認出牌' : (isSouthTurn ? '請出牌 (南家)' : '請出牌 (明手)')}
                                         </span>
                                     ) : turnSeat >= 0 ? (
-                                        <span className="text-gray-400 font-medium tracking-widest">{SEAT_NAME[turnSeat]}家出牌中...</span>
+                                        <span className="text-gray-400 text-xs font-bold">{SEAT_NAME[turnSeat]}家出牌中...</span>
                                     ) : null}
                                 </div>
                             </div>
 
                             {/* East */}
-                            <div className="flex flex-col items-center gap-1 sm:gap-2 shrink-0">
-                                <PlayerBadge name="東家" isActive={turnSeat === 1} isHuman={false} />
-                                <div className="flex flex-col -space-y-6 sm:-space-y-10 md:-space-y-14 lg:-space-y-20 pt-4">
+                            <div className="flex flex-col items-center gap-1 shrink-0 w-12 sm:w-16">
+                                <PlayerBadge name="東" isActive={turnSeat === 1} isHuman={false} />
+                                <div className="flex flex-col -space-y-10 pt-2">
                                     {Array.from({ length: Math.min(hands[1].length, 13) }).map((_, i) => (
-                                        <div key={i} style={{ zIndex: i }} className="relative">
-                                            <Card isHidden size="sm" />
-                                        </div>
+                                        <div key={i} style={{ zIndex: i }}><Card isHidden size="sm" /></div>
                                     ))}
                                 </div>
-                                <span className="text-gray-500 text-[10px] sm:text-xs md:text-sm font-bold mt-2">{hands[1].length}張</span>
                             </div>
                         </div>
 
                         {/* South hand */}
-                        <div className="glass-light mx-2 sm:mx-6 md:mx-10 mb-2 sm:mb-4 rounded-2xl sm:rounded-3xl p-2 sm:p-4 shrink-0 shadow-lg z-10 relative">
-                            <button
-                                onClick={() => setSouthExpanded(!southExpanded)}
-                                className="absolute top-2 right-2 text-[10px] sm:text-xs text-yellow-300 bg-black/40 hover:bg-black/60 px-2 py-1 rounded-lg font-bold border border-yellow-600/50 z-20"
-                            >
-                                {southExpanded ? '收合 ▲' : '展開 ▼'}
-                            </button>
-                            <div className="flex flex-col items-center gap-2 sm:gap-3 relative">
-                                <div className="flex items-center gap-2 mb-1 sm:mb-2">
-                                     <PlayerBadge name="南家（您）" isActive={isSouthTurn} isHuman={true} />
-                                </div>
-                                <HandDisplay
-                                    cards={hands[HUMAN_SEAT]}
-                                    isExpanded={southExpanded}
-                                    onCardClick={(c) => handleCardClick(HUMAN_SEAT, c)}
-                                    legalIds={southLegal}
-                                    selectedId={selectedCard && isSouthTurn ? selectedCard.id : null}
-                                    clickable={southClickable}
-                                    size="hand"
-                                />
+                        <div className="glass-light mx-1 sm:mx-4 mb-2 rounded-xl p-2 shrink-0 shadow-[0_-5px_20px_rgba(0,0,0,0.3)] relative">
+                            <div className="flex justify-between items-center mb-1 px-2">
+                                <PlayerBadge name="南(您)" isActive={isSouthTurn} isHuman={true} />
+                            </div>
+                            <div className="relative">
+                                <HandDisplay cards={hands[HUMAN_SEAT]} isExpanded={southExpanded}
+                                    onCardClick={(c) => handleCardClick(HUMAN_SEAT, c)} legalIds={southLegal}
+                                    selectedId={selectedCard && isSouthTurn ? selectedCard.id : null} clickable={southClickable} size="hand" />
                                 
-                                <div className="absolute -top-12 sm:-top-16 z-50">
-                                    {selectedCard && isSouthTurn && (
-                                        <button
-                                            onClick={() => handleConfirmPlay(HUMAN_SEAT)}
-                                            className="bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold px-6 sm:px-10 py-2 sm:py-3 md:py-4 rounded-xl sm:rounded-2xl text-sm sm:text-lg md:text-xl lg:text-2xl active:scale-95 transition-all shadow-xl border-2 border-yellow-300 animate-slide-up">
-                                            確認出牌：{RANK_LABEL[selectedCard.rank]}{SUIT_SYMBOL[selectedCard.suit]}
-                                        </button>
-                                    )}
-                                    {selectedCard && northClickable && turnSeat === 0 && (
-                                        <button
-                                            onClick={() => handleConfirmPlay(0)}
-                                            className="bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold px-6 sm:px-10 py-2 sm:py-3 md:py-4 rounded-xl sm:rounded-2xl text-sm sm:text-lg md:text-xl lg:text-2xl active:scale-95 transition-all shadow-xl border-2 border-yellow-300 animate-slide-up">
-                                            明手出牌：{RANK_LABEL[selectedCard.rank]}{SUIT_SYMBOL[selectedCard.suit]}
+                                {/* Confirm Play Button */}
+                                <div className="absolute -top-14 left-0 right-0 flex justify-center z-50 pointer-events-none">
+                                    {selectedCard && (isSouthTurn || (northClickable && turnSeat === 0)) && (
+                                        <button onClick={() => handleConfirmPlay(turnSeat === 0 ? 0 : HUMAN_SEAT)}
+                                            className="pointer-events-auto bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black px-8 py-3 rounded-full text-lg shadow-[0_5px_20px_rgba(0,0,0,0.5)] border-2 border-yellow-200 animate-slide-up">
+                                            確認打出 {RANK_LABEL[selectedCard.rank]}{SUIT_SYMBOL[selectedCard.suit]}
                                         </button>
                                     )}
                                 </div>
                             </div>
                         </div>
+
+                        <BoardStatsOverlay visible={showBoardStats} hands={hands} />
+                        <GameInfoModal visible={showInfoModal} onClose={() => setShowInfoModal(false)} gameState={gameState} />
                     </div>
                 );
             }
 
             if (phase === 'scoring') {
                 const result = lastHandResult;
-                const contractStr = contractDisplay(contract);
                 const isNSResult = result && result.side === 'NS';
 
                 return (
-                    <div className="flex-1 flex flex-col items-center overflow-y-auto hide-scrollbar p-4 sm:p-8 gap-4 sm:gap-6 animate-slide-up">
-                        <h2 className="text-white text-2xl sm:text-3xl md:text-4xl font-bold text-center mt-4 sm:mt-8">本局結果</h2>
+                    <div className="flex-1 flex flex-col items-center overflow-y-auto hide-scrollbar p-4 gap-4 animate-slide-up pb-10">
+                        <h2 className="text-white text-2xl font-bold mt-2">本局結算</h2>
 
-                        <div className={`glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-sm sm:max-w-lg md:max-w-xl text-center border-l-4 sm:border-l-8 shadow-2xl
-                            ${result.made
-                                ? isNSResult ? 'border-l-green-400' : 'border-l-blue-400'
-                                : 'border-l-red-400'}`}>
-                            <div className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-2 sm:mb-4">{contractStr}</div>
-                            <div className="text-gray-300 text-sm sm:text-base md:text-xl mb-4 sm:mb-6">
-                                {contract ? SEAT_NAME[contract.declarer] : ''}家叫牌
-                                {contract && vulnerable[contract.declarer % 2 === 0 ? 'NS' : 'EW'] ? ' · 有局' : ' · 無局'}
+                        <div className={`glass-panel rounded-2xl p-6 w-full max-w-sm text-center border-l-8 shadow-xl
+                            ${result.made ? (isNSResult ? 'border-l-green-400' : 'border-l-blue-400') : 'border-l-red-400'}`}>
+                            <div className="text-4xl font-black text-white mb-2">{contractDisplay(contract)}</div>
+                            <div className="text-gray-300 text-sm mb-4">
+                                {SEAT_NAME[contract.declarer]}家 · {vulnerable[contract.declarer % 2 === 0 ? 'NS' : 'EW'] ? '有局' : '無局'}
                             </div>
                             {result.made ? (
                                 <>
-                                    <div className="text-green-300 text-2xl sm:text-3xl md:text-4xl font-bold mb-2">
-                                        ✓ 完成合約{result.tricksWon > result.contractTricks ? ` +${result.tricksWon - result.contractTricks}` : ''}
-                                    </div>
-                                    <div className="text-gray-400 text-sm sm:text-lg md:text-xl">贏得 {result.tricksWon} 墩</div>
+                                    <div className="text-green-300 text-2xl font-bold mb-1">✓ 完成{result.tricksWon > result.contractTricks ? ` +${result.tricksWon - result.contractTricks}` : ''}</div>
+                                    <div className="text-gray-400 text-sm">贏得 {result.tricksWon} 墩</div>
                                 </>
                             ) : (
                                 <>
-                                    <div className="text-red-300 text-2xl sm:text-3xl md:text-4xl font-bold mb-2">✗ 差 {result.down} 墩</div>
-                                    <div className="text-gray-400 text-sm sm:text-lg md:text-xl">僅贏 {result.tricksWon || (contract.level + 6 - result.down)} 墩</div>
+                                    <div className="text-red-400 text-2xl font-bold mb-1">✗ 倒 {result.down} 墩</div>
+                                    <div className="text-gray-400 text-sm">僅贏 {result.tricksWon || (contract.level + 6 - result.down)} 墩</div>
                                 </>
                             )}
                         </div>
 
-                        <div className="glass-panel rounded-2xl sm:rounded-3xl p-5 sm:p-8 w-full max-w-sm sm:max-w-lg md:max-w-xl shadow-lg">
-                            <h3 className="text-yellow-300 font-bold text-base sm:text-xl md:text-2xl mb-4 sm:mb-6 text-center">計分明細</h3>
+                        <div className="glass-panel rounded-2xl p-5 w-full max-w-sm shadow-md">
+                            <h3 className="text-yellow-300 font-bold text-lg mb-3 text-center border-b border-white/10 pb-2">計分明細</h3>
                             {result.made ? (
-                                <div className="space-y-3 sm:space-y-4 text-sm sm:text-lg md:text-xl">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-gray-300">低線（合約分）</span>
-                                        <span className="text-white font-bold">{result.below}</span>
-                                    </div>
-                                    {result.above > 0 && (
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-gray-300">高線（獎勵分）</span>
-                                            <span className="text-green-300 font-bold">{result.above}</span>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between items-center pt-3 sm:pt-4 border-t border-white/20">
-                                        <span className="text-yellow-300">得分方</span>
-                                        <span className="text-yellow-300 font-bold">{result.side}</span>
-                                    </div>
+                                <div className="space-y-2 text-base">
+                                    <div className="flex justify-between"><span className="text-gray-300">低線 (合約分)</span><span className="text-white font-bold">{result.below}</span></div>
+                                    {result.above > 0 && <div className="flex justify-between"><span className="text-gray-300">高線 (獎勵分)</span><span className="text-green-300 font-bold">{result.above}</span></div>}
+                                    <div className="flex justify-between pt-2 border-t border-white/10 mt-2"><span className="text-yellow-300 text-sm">得分方</span><span className="text-yellow-300 font-bold">{result.side}</span></div>
                                 </div>
                             ) : (
-                                <div className="space-y-3 sm:space-y-4 text-sm sm:text-lg md:text-xl">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-gray-300">罰分</span>
-                                        <span className="text-red-300 font-bold">{result.penalty}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center pt-3 sm:pt-4 border-t border-white/20">
-                                        <span className="text-yellow-300">得分方（防守）</span>
-                                        <span className="text-yellow-300 font-bold">{result.side}</span>
-                                    </div>
+                                <div className="space-y-2 text-base">
+                                    <div className="flex justify-between"><span className="text-gray-300">罰分</span><span className="text-red-300 font-bold">{result.penalty}</span></div>
+                                    <div className="flex justify-between pt-2 border-t border-white/10 mt-2"><span className="text-yellow-300 text-sm">得分方 (防守)</span><span className="text-yellow-300 font-bold">{result.side}</span></div>
                                 </div>
                             )}
                         </div>
@@ -1718,26 +1496,19 @@
                         <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />
 
                         {rubberOver ? (
-                            <div className="glass-panel border-2 border-yellow-500/80 rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-sm sm:max-w-lg md:max-w-xl text-center shadow-2xl bg-yellow-900/20">
-                                <div className="text-5xl sm:text-7xl mb-4 sm:mb-6">🏆</div>
-                                <div className="text-yellow-300 text-2xl sm:text-4xl md:text-5xl font-bold mb-2 sm:mb-4">橡皮牌結束！</div>
-                                <div className="text-white font-bold text-xl sm:text-3xl md:text-4xl mb-2 sm:mb-4">{rubberWinner} 獲勝</div>
-                                <div className="text-gray-300 text-sm sm:text-xl md:text-2xl mb-6 sm:mb-8 font-mono">
-                                    NS: {totalScore(rubberScore, 'NS')} | EW: {totalScore(rubberScore, 'EW')}
-                                </div>
-                                <button
-                                    onClick={() => setGameState({
-                                        ...INITIAL_STATE,
-                                        rubberCount: gameState.rubberCount + 1,
-                                    })}
-                                    className="w-full bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold py-4 sm:py-5 md:py-6 rounded-2xl sm:rounded-3xl text-lg sm:text-2xl active:scale-95 transition-all shadow-xl">
+                            <div className="glass-panel border-2 border-yellow-500 rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl bg-yellow-900/30 mt-2">
+                                <div className="text-5xl mb-3">🏆</div>
+                                <div className="text-yellow-300 text-2xl font-black mb-2">橡皮牌結束！</div>
+                                <div className="text-white font-bold text-xl mb-3">{rubberWinner} 獲勝</div>
+                                <div className="text-gray-300 text-sm mb-5 font-mono">NS: {totalScore(rubberScore, 'NS')} | EW: {totalScore(rubberScore, 'EW')}</div>
+                                <button onClick={() => setGameState({ ...INITIAL_STATE, rubberCount: gameState.rubberCount + 1 })}
+                                    className="w-full bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 rounded-xl text-lg active:scale-95 transition-all shadow-lg">
                                     開始新橡皮牌 →
                                 </button>
                             </div>
                         ) : (
-                            <button
-                                onClick={() => setGameState(prev => startHand({ ...prev, dealer: (prev.dealer + 1) % 4 }))}
-                                className="w-full max-w-sm sm:max-w-lg md:max-w-xl bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-gray-900 font-bold py-4 sm:py-5 md:py-6 rounded-2xl sm:rounded-3xl text-lg sm:text-2xl shadow-xl active:scale-95 transition-all mb-8">
+                            <button onClick={() => setGameState(prev => startHand({ ...prev, dealer: (prev.dealer + 1) % 4 }))}
+                                className="w-full max-w-sm bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-all mt-2">
                                 下一局 →
                             </button>
                         )}
@@ -1750,16 +1521,6 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-    </script>
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('[PWA] SW registered:', reg.scope))
-                    .catch(err => console.warn('[PWA] SW failed:', err));
-            });
-        }
     </script>
 </body>
 </html>
