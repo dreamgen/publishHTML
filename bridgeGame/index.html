@@ -30,6 +30,7 @@
             margin: 0;
             overflow: hidden;
             touch-action: manipulation;
+            transition: font-size 0.3s ease; /* 讓切換字體大小時有平滑動畫 */
         }
         #root {
             height: 100%;
@@ -664,7 +665,6 @@
         // ══════════════════════════════════════════════════════════════
 
         const Card = ({ card, onClick, isHidden, size = 'preview', selected, disabled, noHoverAnim }) => {
-            // 定義不同情境下的卡牌尺寸 (預覽模式、打牌模式、桌面出牌模式、隱藏卡牌模式)
             const sizeMap = {
                 preview: "w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28",
                 play: "w-16 h-24 sm:w-20 sm:h-32 md:w-24 md:h-36 lg:w-28 lg:h-40",
@@ -713,14 +713,15 @@
                         transition-all duration-200
                     `}
                 >
-                    <div className={`absolute top-0.5 left-[2px] sm:top-1 sm:left-1 font-bold flex flex-col items-center leading-none ${cornCls}`} style={{ color }}>
+                    {/* 使用 Tailwind REM 尺度的 0.5 (即 0.125rem) 代替硬刻的 px，確保縮放比例正確 */}
+                    <div className={`absolute top-0.5 left-0.5 sm:top-1 sm:left-1 font-bold flex flex-col items-center leading-none ${cornCls}`} style={{ color }}>
                         <span className={rank === '10' ? 'tracking-tighter' : ''}>{rank}</span>
                         <span className="-mt-0.5 sm:-mt-1 text-[0.85em]">{sym}</span>
                     </div>
                     <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none`}>
                         <span className={`font-black ${txtCls} opacity-80`} style={{ color }}>{sym}</span>
                     </div>
-                    <div className={`absolute bottom-0.5 right-[2px] sm:bottom-1 sm:right-1 font-bold flex flex-col items-center leading-none ${cornCls}`} style={{ color, transform: 'rotate(180deg)' }}>
+                    <div className={`absolute bottom-0.5 right-0.5 sm:bottom-1 sm:right-1 font-bold flex flex-col items-center leading-none ${cornCls}`} style={{ color, transform: 'rotate(180deg)' }}>
                         <span className={rank === '10' ? 'tracking-tighter' : ''}>{rank}</span>
                         <span className="-mt-0.5 sm:-mt-1 text-[0.85em]">{sym}</span>
                     </div>
@@ -728,7 +729,6 @@
             );
         };
 
-        // 【百分比展開法】重寫的手牌展示元件
         const HandDisplay = ({ cards, isExpanded, onCardClick, legalIds = [], selectedId, clickable, disabledOverall, size = "preview" }) => {
             const [hoverIdx, setHoverIdx] = useState(null);
             const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
@@ -739,18 +739,16 @@
                 return () => window.removeEventListener('resize', handleResize);
             }, []);
 
-            // 判斷是否需要強制切成兩排 (打牌階段 size='play' 時強制執行)
             const useTwoRows = isMobile && cards.length > 5 && size === 'play';
 
             const rows = useTwoRows
                 ? [cards.slice(0, Math.ceil(cards.length / 2)), cards.slice(Math.ceil(cards.length / 2))]
                 : [cards];
 
-            // 動態容器高度
             let containerHeight = "";
             if (size === 'preview') {
                 containerHeight = isExpanded ? (useTwoRows ? "h-24 sm:h-32" : "h-16 sm:h-24") : "h-8 sm:h-10";
-            } else { // play
+            } else { 
                 containerHeight = isExpanded ? (useTwoRows ? "h-40 sm:h-52" : "h-24 sm:h-36") : "h-12 sm:h-16";
             }
 
@@ -764,7 +762,6 @@
                     onMouseLeave={() => setHoverIdx(null)}
                 >
                     {rows.map((rowCards, rowIdx) => {
-                        // 第 2 排的垂直位移計算
                         let topOffset = '0';
                         if (rowIdx > 0) {
                             if (isExpanded) {
@@ -781,7 +778,6 @@
                                     const isLegal = legalIds.length === 0 || legalIds.includes(c.id);
                                     const isSel = selectedId && selectedId === c.id;
                                     
-                                    // 核心邏輯：使用百分比定位，再向左回推本身的百分比，達成完美橫向等距排列！
                                     const ratio = rowCards.length > 1 ? (idxInRow / (rowCards.length - 1)) : 0.5;
                                     const leftPercent = ratio * 100;
 
@@ -789,7 +785,6 @@
                                     let translateX = 0;
                                     let scale = 1;
                                     
-                                    // Hover 互動特效：稍微上浮並推開旁邊的牌
                                     if (hoverIdx !== null) {
                                         if (i < hoverIdx) translateX = -10;
                                         if (i > hoverIdx) translateX = 10;
@@ -799,7 +794,6 @@
                                         }
                                     }
                                     
-                                    // 選中狀態
                                     if (isSel) {
                                         translateY = -20;
                                         scale = 1.05;
@@ -817,7 +811,6 @@
                                             style={{
                                                 left: `${leftPercent}%`,
                                                 zIndex: isSel ? 100 : (hoverIdx === i ? 50 : idxInRow),
-                                                // 完美解決破版：translate(-左側百分比)，讓卡片絕對不出界
                                                 transform: `translate(calc(-${leftPercent}% + ${translateX}px), ${translateY}px) scale(${scale})`
                                             }}
                                         >
@@ -875,7 +868,7 @@
             };
 
             return (
-                <div className="glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 md:p-6 w-full max-w-[280px] sm:max-w-[380px] md:w-[480px] lg:w-[600px] shadow-lg">
+                <div className="glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 md:p-6 w-full max-w-[17.5rem] sm:max-w-[23.75rem] md:max-w-[30rem] lg:max-w-[37.5rem] shadow-lg">
                     <div className="grid grid-cols-4 gap-1 text-center mb-2 sm:mb-4">
                         {headers.map((h, i) => (
                             <span key={i} className="text-yellow-400 font-bold text-sm sm:text-base md:text-xl lg:text-2xl">{h}</span>
@@ -923,7 +916,7 @@
             }
 
             return (
-                <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up mx-auto max-w-2xl">
+                <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up max-w-2xl mx-auto">
                     <div className="glass-panel rounded-t-3xl p-3 sm:p-5 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-white/20 bg-[#022c22]/95 flex flex-col max-h-[85vh]">
                         <div className="flex items-center justify-center gap-2 cursor-pointer mb-2 shrink-0" onClick={() => setIsExpanded(false)}>
                             <div className="w-12 h-1.5 bg-gray-500 rounded-full" />
@@ -963,7 +956,7 @@
                                             <button key={bid}
                                                 onClick={() => legal && onBid(bid)}
                                                 disabled={!legal}
-                                                className={`relative py-3.5 sm:py-5 rounded-xl text-lg sm:text-2xl font-black transition-all shadow-md active:scale-95 overflow-hidden
+                                                className={`relative py-3.5 sm:py-5 rounded-xl text-sm sm:text-lg md:text-xl lg:text-2xl font-black transition-all shadow-md active:scale-95 overflow-hidden
                                                     ${legal
                                                         ? isRed ? 'bg-red-700/90 hover:bg-red-600 text-white'
                                                         : isGrn ? 'bg-green-600/90 hover:bg-green-500 text-white'
@@ -1106,6 +1099,20 @@
         // 主應用
         // ══════════════════════════════════════════════════════════════
         function App() {
+            // ── UI 版面縮放 (REM 核心引擎) ──
+            const [uiScale, setUiScale] = useState(() => {
+                return localStorage.getItem('bridgeUiScale') || 'sm';
+            });
+
+            useEffect(() => {
+                localStorage.setItem('bridgeUiScale', uiScale);
+                // 調整根目錄字體大小，達成全局等比例縮放
+                if (uiScale === 'sm') document.documentElement.style.fontSize = '16px';
+                if (uiScale === 'md') document.documentElement.style.fontSize = '19px'; // 放大約 19%
+                if (uiScale === 'lg') document.documentElement.style.fontSize = '22px'; // 放大約 38%
+            }, [uiScale]);
+
+            // ── 遊戲核心狀態 ──
             const [gameState, setGameState] = useState(INITIAL_STATE);
             const [selectedCard, setSelectedCard] = useState(null);
             const [southExpanded, setSouthExpanded] = useState(true);
@@ -1233,8 +1240,8 @@
             if (phase === 'menu') {
                 const hasGame = gamesWon.NS > 0 || gamesWon.EW > 0 || rubberScore.NS.below.length > 0 || rubberScore.EW.below.length > 0 || rubberScore.NS.above.length > 0 || rubberScore.EW.above.length > 0;
                 return (
-                    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-6 overflow-y-auto hide-scrollbar">
-                        <div className="glass-panel rounded-3xl p-6 text-center w-full max-w-sm animate-fade-in shadow-2xl">
+                    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4 sm:gap-6 overflow-y-auto hide-scrollbar">
+                        <div className="glass-panel rounded-3xl p-6 text-center w-full max-w-[24rem] animate-fade-in shadow-2xl">
                             <div className="text-5xl mb-2 flex justify-center gap-2">
                                 <span style={{color:'#f8fafc'}}>♠</span><span style={{color:'#ef4444'}}>♥</span><span style={{color:'#f97316'}}>♦</span><span style={{color:'#4ade80'}}>♣</span>
                             </div>
@@ -1242,9 +1249,35 @@
                             <p className="text-green-300 text-base font-bold">橡皮橋制 · 南家視角</p>
                         </div>
 
+                        {/* UI 縮放與字體設定 */}
+                        <div className="glass-panel rounded-3xl p-4 sm:p-5 w-full max-w-[24rem] flex flex-col gap-3">
+                            <div className="text-yellow-300 font-bold text-sm sm:text-base text-center tracking-widest">
+                                介面字體與卡牌縮放
+                            </div>
+                            <div className="flex gap-2">
+                                {[
+                                    { id: 'sm', label: '小' },
+                                    { id: 'md', label: '中' },
+                                    { id: 'lg', label: '大' }
+                                ].map(sz => (
+                                    <button
+                                        key={sz.id}
+                                        onClick={() => setUiScale(sz.id)}
+                                        className={`flex-1 py-2.5 rounded-xl font-bold text-sm sm:text-base transition-all active:scale-95 ${
+                                            uiScale === sz.id
+                                                ? 'bg-yellow-500 text-gray-900 shadow-md border-2 border-yellow-300'
+                                                : 'bg-black/40 text-gray-300 border border-gray-600 hover:bg-black/60'
+                                        }`}
+                                    >
+                                        {sz.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         {hasGame && <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />}
 
-                        <div className="flex flex-col gap-3 w-full max-w-sm px-2">
+                        <div className="flex flex-col gap-3 w-full max-w-[24rem] px-2">
                             <button onClick={() => setGameState(prev => startHand(prev))}
                                 className="w-full bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 rounded-2xl text-xl shadow-[0_0_20px_rgba(250,204,21,0.4)] active:scale-95 transition-all">
                                 {hasGame ? '繼續下一局 →' : '開始遊戲 →'}
@@ -1394,7 +1427,7 @@
                         })()}
 
                         {/* Center Table */}
-                        <div className="flex-1 flex items-center justify-between px-1 w-full relative min-h-[220px]">
+                        <div className="flex-1 flex items-center justify-between px-1 w-full relative min-h-[13.75rem]">
                             <div className="flex flex-col items-center gap-1 shrink-0 w-10 sm:w-16">
                                 <PlayerBadge name="西" isActive={turnSeat === 3} isHuman={false} />
                                 <div className="flex flex-col -space-y-8 sm:-space-y-12 pt-2">
@@ -1404,8 +1437,8 @@
                                 </div>
                             </div>
 
-                            <div className="flex-1 flex flex-col items-center justify-center relative h-full max-h-[280px]">
-                                <div className="glass-panel rounded-2xl p-2 w-full max-w-[200px] sm:max-w-[240px] aspect-square flex flex-col items-center justify-center shadow-xl relative border border-white/20">
+                            <div className="flex-1 flex flex-col items-center justify-center relative h-full max-h-[17.5rem]">
+                                <div className="glass-panel rounded-2xl p-2 w-full max-w-[12.5rem] sm:max-w-[15rem] aspect-square flex flex-col items-center justify-center shadow-xl relative border border-white/20">
                                     {!displayTrick ? (
                                         <div className="text-gray-300 text-sm font-bold opacity-70">等待首攻...</div>
                                     ) : (
@@ -1494,7 +1527,7 @@
                     <div className="flex-1 flex flex-col items-center overflow-y-auto hide-scrollbar p-4 sm:p-8 gap-4 sm:gap-6 animate-slide-up pb-10">
                         <h2 className="text-white text-2xl sm:text-3xl md:text-4xl font-bold mt-2">本局結算</h2>
 
-                        <div className={`glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-sm sm:max-w-lg md:max-w-xl text-center border-l-8 shadow-2xl
+                        <div className={`glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-[24rem] sm:max-w-lg md:max-w-xl text-center border-l-8 shadow-2xl
                             ${result.made ? (isNSResult ? 'border-l-green-400' : 'border-l-blue-400') : 'border-l-red-400'}`}>
                             <div className="text-4xl sm:text-5xl md:text-6xl font-black text-white mb-2">{contractStr}</div>
                             <div className="text-gray-300 text-sm sm:text-base md:text-xl mb-4">
@@ -1513,7 +1546,7 @@
                             )}
                         </div>
 
-                        <div className="glass-panel rounded-2xl p-5 w-full max-w-sm sm:max-w-lg shadow-md">
+                        <div className="glass-panel rounded-2xl p-5 w-full max-w-[24rem] sm:max-w-lg shadow-md">
                             <h3 className="text-yellow-300 font-bold text-lg mb-3 text-center border-b border-white/10 pb-2">計分明細</h3>
                             {result.made ? (
                                 <div className="space-y-2 text-base sm:text-lg">
@@ -1532,7 +1565,7 @@
                         <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />
 
                         {rubberOver ? (
-                            <div className="glass-panel border-2 border-yellow-500 rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-sm sm:max-w-lg text-center shadow-2xl bg-yellow-900/30 mt-2">
+                            <div className="glass-panel border-2 border-yellow-500 rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-[24rem] sm:max-w-lg text-center shadow-2xl bg-yellow-900/30 mt-2">
                                 <div className="text-5xl sm:text-6xl mb-3">🏆</div>
                                 <div className="text-yellow-300 text-2xl sm:text-3xl font-black mb-2">橡皮牌結束！</div>
                                 <div className="text-white font-bold text-xl sm:text-2xl mb-3">{rubberWinner} 獲勝</div>
@@ -1544,7 +1577,7 @@
                             </div>
                         ) : (
                             <button onClick={() => setGameState(prev => startHand({ ...prev, dealer: (prev.dealer + 1) % 4 }))}
-                                className="w-full max-w-sm sm:max-w-lg bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 sm:py-5 rounded-xl sm:rounded-2xl text-lg sm:text-xl shadow-lg active:scale-95 transition-all mt-2">
+                                className="w-full max-w-[24rem] sm:max-w-lg bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 sm:py-5 rounded-xl sm:rounded-2xl text-lg sm:text-xl shadow-lg active:scale-95 transition-all mt-2">
                                 下一局 →
                             </button>
                         )}
@@ -1557,16 +1590,6 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-    </script>
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('[PWA] SW registered:', reg.scope))
-                    .catch(err => console.warn('[PWA] SW failed:', err));
-            });
-        }
     </script>
 </body>
 </html>
