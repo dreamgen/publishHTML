@@ -169,6 +169,17 @@
                         </svg>
                         <span id="copy-text">複製全文</span>
                     </button>
+
+                    <!-- 分享 / 在瀏覽器開啟按鈕 -->
+                    <button onclick="shareArticle()" id="share-btn" title="分享原始網址 / 在其他瀏覽器開啟"
+                        class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                            <polyline points="16 6 12 2 8 6"></polyline>
+                            <line x1="12" y1="2" x2="12" y2="15"></line>
+                        </svg>
+                        <span id="share-text">分享網址</span>
+                    </button>
                 </div>
             </div>
 
@@ -424,6 +435,36 @@
                 }
                 document.body.removeChild(ta);
             });
+        }
+
+        // ─── Share Original URL ───────────────────────────────────────────────
+        // Uses Web Share API (system share sheet) so the user can pick any
+        // browser or app. Falls back to window.open when unsupported.
+        async function shareArticle() {
+            const title     = document.getElementById('article-title').innerText;
+            const sourceUrl = document.getElementById('article-source-link').href;
+            const shareText = document.getElementById('share-text');
+
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: title,
+                        text:  '在淨讀器中看到這篇文章，分享給你：',
+                        url:   sourceUrl
+                    });
+                    // Brief visual feedback after share sheet closes
+                    shareText.innerText = '已分享！';
+                    setTimeout(() => { shareText.innerText = '分享網址'; }, 2000);
+                } catch (err) {
+                    // User cancelled — no feedback needed
+                    if (err.name !== 'AbortError') console.warn('[pureReader] share failed:', err);
+                }
+            } else {
+                // Fallback: open original URL in a new (full) browser tab
+                window.open(sourceUrl, '_blank', 'noopener,noreferrer');
+                shareText.innerText = '已開啟！';
+                setTimeout(() => { shareText.innerText = '分享網址'; }, 2000);
+            }
         }
 
         // ─── URL Form ─────────────────────────────────────────────────────────
