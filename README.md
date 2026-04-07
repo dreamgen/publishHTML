@@ -72,6 +72,24 @@
 
 ---
 
+### 📖 淨讀器 PureReader (`pureReader/`)
+
+> 過濾廣告，還原乾淨的網頁閱讀體驗
+
+**功能：**
+- 貼上任意網址，自動提取乾淨正文與圖片（Mozilla Readability）
+- DOMPurify 二次消毒，移除殘餘廣告與惡意指令碼
+- 支援 **Web Share Target**：安裝後可從瀏覽器分享選單直接傳送網址閱讀
+- 深色 / 淺色模式切換（跟隨系統偏好，可手動覆蓋）
+- **字體大小調整**（5 級，閱讀時顯示）
+- 一鍵**複製全文**為純文字（含標題與來源網址）
+- 雙代理伺服器備援機制（AllOrigins → CodeTabs）
+- 完整離線支援（Service Worker 快取 CDN 函式庫）
+
+**安裝：** 開啟 `/pureReader/` 後，點選「加入主畫面」即可安裝為獨立 App。
+
+---
+
 ## 技術架構
 
 | 項目 | 說明 |
@@ -114,6 +132,13 @@ publishHTML/
 │   └── icons/
 │       ├── mahjongPractice-192.svg
 │       └── mahjongPractice-512.svg
+├── pureReader/                  # 淨讀器 PureReader PWA（scope: ./，解析為 …/pureReader/）
+│   ├── index.html
+│   ├── manifest.webmanifest
+│   ├── sw.js
+│   └── icons/
+│       ├── pureReader-192.svg
+│       └── pureReader-512.svg
 └── README.md
 ```
 
