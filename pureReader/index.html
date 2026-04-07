@@ -330,11 +330,38 @@
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(htmlContent, 'text/html');
 
-                // Pre-clean
-                doc.querySelectorAll([
-                    'script', 'noscript', 'style', 'iframe', 'nav', 'footer', 'aside',
-                    '[class*="ad"]', '[id*="ad"]', '[class*="popup"]', '[class*="modal"]'
-                ].join(',')).forEach(el => el.remove());
+                // ── 主文章鎖定：移除第一篇之後的所有 <article>，防止廣編稿 / 無限捲動污染 ──
+                const articleTags = Array.from(doc.querySelectorAll('article'));
+                if (articleTags.length > 1) {
+                    articleTags.slice(1).forEach(a => a.remove());
+                }
+
+                // ── 修正懶加載圖片：將 data-src / data-original / data-lazy-src 提升為 src ──
+                doc.querySelectorAll('img').forEach(img => {
+                    const realSrc = img.getAttribute('data-src')
+                                 || img.getAttribute('data-original')
+                                 || img.getAttribute('data-lazy-src');
+                    if (realSrc) img.setAttribute('src', realSrc);
+                });
+
+                // ── Pre-clean：使用具名選擇器替代過寬的 [class*="ad"]，避免誤殺正文 ──
+                const unwantedSelectors = [
+                    'script', 'noscript', 'style', 'iframe', 'nav', 'footer', 'aside', 'header',
+                    // 廣告 — 具名 class / id 前綴（精確，不誤殺 "graduate" 等含 "ad" 的字）
+                    '.ad', '.ads', '.advertisement', '.ad-container', '.ad-wrapper', '.ad-banner',
+                    '[id^="ad-"]', '[class^="ad-"]', '[class*="-ad-"]',
+                    // 彈窗 / 遮罩
+                    '[class*="popup"]', '[class*="modal"]',
+                    // 第三方推薦內容 widget
+                    '.dable-widget', '#dablewidget', '.popin', '.outbrain', '.teads', '.taboola',
+                    // 相關推薦 / 延伸閱讀區塊
+                    '[class*="related"]', '[class*="recommend"]', '[id*="recommend"]',
+                    // 廣編稿 / 贊助商內容
+                    '[class*="sponsor"]', '[class*="promo"]', '[class*="advertorial"]', '[class*="commercial"]',
+                    // 常見文末延伸閱讀容器
+                    '.ext-reading', '.extend-reading', '[class*="bottom-article"]', '.next-article'
+                ];
+                doc.querySelectorAll(unwantedSelectors.join(',')).forEach(el => el.remove());
 
                 const reader = new Readability(doc);
                 const article = reader.parse();
