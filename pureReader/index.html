@@ -215,6 +215,13 @@
             <div id="article-content" class="prose dark:prose-invert max-w-none prose-lg md:prose-xl prose-img:rounded-xl"></div>
         </article>
 
+        <!-- Background Sync / Fetch status bar -->
+        <div id="sync-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-sm font-medium px-5 py-3 rounded-2xl shadow-xl z-50 flex items-center gap-3 w-max max-w-[90vw]">
+            <span id="sync-bar-text" class="flex-1 leading-snug"></span>
+            <button id="sync-bar-btn" class="hidden shrink-0 bg-white/20 dark:bg-gray-900/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors"></button>
+            <button onclick="document.getElementById('sync-bar').classList.add('hidden')" class="shrink-0 opacity-60 hover:opacity-100 transition-opacity">✕</button>
+        </div>
+
     </main>
 
     <script>
@@ -222,6 +229,28 @@
         const STORAGE_KEY_HISTORY     = 'pureReader_history';
         const STORAGE_KEY_CACHE_PFX   = 'pureReader_cache_';
         const MAX_HISTORY_ITEMS       = 20;
+
+        // ─── IndexedDB (shared schema with Service Worker) ────────────────────
+        const IDB_NAME = 'pureReader-db';
+        function openIdb() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(IDB_NAME, 1);
+                req.onupgradeneeded = ({ target: { result: db } }) => {
+                    if (!db.objectStoreNames.contains('sync-queue')) db.createObjectStore('sync-queue', { keyPath: 'url' });
+                    if (!db.objectStoreNames.contains('raw-html'))   db.createObjectStore('raw-html',   { keyPath: 'url' });
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror   = () => reject(req.error);
+            });
+        }
+        async function idbGet(store, key) {
+            const db = await openIdb();
+            return new Promise((res, rej) => { const r = db.transaction(store,'readonly').objectStore(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+        }
+        async function idbDelete(store, key) {
+            const db = await openIdb();
+            return new Promise((res, rej) => { const r = db.transaction(store,'readwrite').objectStore(store).delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
+        }
 
         // ─── PWA Install Prompt ────────────────────────────────────────────────
         let deferredPrompt = null;
@@ -418,6 +447,67 @@
             document.getElementById('error-message').innerText = msg;
         }
 
+        // ─── Background Processing ────────────────────────────────────────────
+        function showSyncBar(text, btnText, btnCb, autoDismissMs) {
+            const bar = document.getElementById('sync-bar');
+            document.getElementById('sync-bar-text').textContent = text;
+            const btn = document.getElementById('sync-bar-btn');
+            if (btnText && btnCb) { btn.textContent = btnText; btn.onclick = btnCb; btn.classList.remove('hidden'); }
+            else                  { btn.classList.add('hidden'); }
+            bar.classList.remove('hidden');
+            if (autoDismissMs) setTimeout(() => bar.classList.add('hidden'), autoDismissMs);
+        }
+
+        async function queueForBackground(url) {
+            if (!('serviceWorker' in navigator)) return false;
+            const reg = await navigator.serviceWorker.ready.catch(() => null);
+            if (!reg) return false;
+            // 1. Background Fetch API (continues even after app is closed)
+            if ('BackgroundFetch' in reg) {
+                try {
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                    await reg.backgroundFetch.fetch(encodeURIComponent(url).substring(0, 100), [proxyUrl], {
+                        title: `淨讀器：${new URL(url).hostname}`, downloadTotal: 3 * 1024 * 1024
+                    });
+                    showSyncBar('⬇ 已加入背景下載，完成後自動通知');
+                    return 'bgfetch';
+                } catch (e) { console.warn('[pureReader] BackgroundFetch:', e); }
+            }
+            // 2. Background Sync API (retries when network returns)
+            if (reg.sync && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'REGISTER_SYNC', url });
+                showSyncBar('⏳ 已排程，網路恢復後自動擷取');
+                return 'sync';
+            }
+            return false;
+        }
+
+        async function processRawHtml(url, html) {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const arts = Array.from(doc.querySelectorAll('article'));
+            if (arts.length > 1) arts.slice(1).forEach(a => a.remove());
+            doc.querySelectorAll('img').forEach(img => {
+                const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
+                if (s) img.setAttribute('src', s);
+            });
+            const sel = ['script','noscript','style','iframe','nav','footer','aside','header',
+                '.ad','.ads','.advertisement','.ad-container','.ad-wrapper','.ad-banner',
+                '[id^="ad-"]','[class^="ad-"]','[class*="-ad-"]','[class*="popup"]','[class*="modal"]',
+                '.dable-widget','#dablewidget','.popin','.outbrain','.teads','.taboola',
+                '[class*="related"]','[class*="recommend"]','[id*="recommend"]',
+                '[class*="sponsor"]','[class*="promo"]','[class*="advertorial"]','[class*="commercial"]',
+                '.ext-reading','.extend-reading','[class*="bottom-article"]','.next-article'];
+            doc.querySelectorAll(sel.join(',')).forEach(el => el.remove());
+            const article = new Readability(doc).parse();
+            if (!article?.content) throw new Error('無法從背景擷取的頁面提取正文');
+            let domain = ''; try { domain = new URL(url).hostname; } catch (e) {}
+            const data = { title: article.title || '無標題', byline: article.byline || '', content: article.content, domain };
+            await idbDelete('raw-html', url);
+            cacheArticle(url, data);
+            saveToHistory(url, data.title, domain);
+            return data;
+        }
+
         // ─── Core: Extract + Render ───────────────────────────────────────────
         async function extractArticle(url) {
             showLoading();
@@ -461,6 +551,8 @@
                 }
 
                 if (!htmlContent) {
+                    const bgResult = await queueForBackground(url);
+                    if (bgResult) { showSection('input-section'); return; }
                     throw new Error('無法獲取網頁內容，該網站可能啟用了高強度的防爬蟲機制（例如 Cloudflare），或代理伺服器目前無法連線。');
                 }
 
@@ -664,6 +756,31 @@
         window.addEventListener('DOMContentLoaded', () => {
             initTheme();
             renderHistoryList();
+
+            // ── SW message listener (Background Sync / Fetch 結果回傳) ──────────
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.addEventListener('message', async ({ data }) => {
+                    const { type, url } = data || {};
+                    if (type === 'SYNC_COMPLETE' && url) {
+                        try {
+                            const record = await idbGet('raw-html', url);
+                            if (!record) return;
+                            const articleData = await processRawHtml(url, record.html);
+                            renderHistoryList();
+                            const host = (() => { try { return new URL(url).hostname; } catch(e){ return url; } })();
+                            showSyncBar(
+                                `✓ ${host} 擷取完成`,
+                                '立即閱讀',
+                                () => { document.getElementById('sync-bar').classList.add('hidden'); renderArticle(articleData, url, false); },
+                                0
+                            );
+                        } catch (e) { showSyncBar('⚠ 背景擷取完成，但無法解析正文', null, null, 5000); }
+                    }
+                    if (type === 'SYNC_FAILED') {
+                        showSyncBar('⚠ 背景擷取失敗，請稍後重試', null, null, 5000);
+                    }
+                });
+            }
 
             // Handle Web Share Target (GET params)
             const params = new URLSearchParams(window.location.search);
