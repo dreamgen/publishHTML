@@ -54,6 +54,15 @@
             max-height: 60vh;
             object-fit: contain;
         }
+
+        /* Line clamp for history list items */
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 min-h-screen flex flex-col font-sans">
@@ -112,17 +121,13 @@
             </button>
         </div>
 
-        <!-- Input Section -->
-        <div id="input-section" class="flex flex-col items-center justify-center py-10 flex-1">
-            <div class="w-full max-w-lg bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 sm:p-8 border border-gray-100 dark:border-gray-700 text-center">
-                <div class="w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-blue-500">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-                    </svg>
-                </div>
-                <h2 class="text-2xl font-bold mb-2">貼上網址開始閱讀</h2>
-                <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">或將網頁分享至此應用程式，自動為您提取乾淨的正文與圖片。</p>
+        <!-- Input & History Section -->
+        <div id="input-section" class="flex flex-col flex-1 gap-8">
+
+            <!-- URL Input Card -->
+            <div class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-md p-6 sm:p-8 border border-gray-100 dark:border-gray-700 text-center">
+                <h2 class="text-2xl font-bold mb-2">開始淨化閱讀</h2>
+                <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">貼上文章網址，自動提取無廣告正文。或安裝後從瀏覽器分享鍵直接傳送。</p>
 
                 <form id="url-form" class="flex flex-col gap-3" onsubmit="handleUrlSubmit(event)">
                     <input type="url" id="url-input" placeholder="https://example.com/article" required
@@ -133,12 +138,36 @@
                     </button>
                 </form>
             </div>
+
+            <!-- History Section -->
+            <div class="w-full">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        閱讀歷史
+                    </h3>
+                    <button id="clear-history-btn" onclick="clearHistory()" class="hidden text-sm text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors">清空全部</button>
+                </div>
+
+                <div id="empty-history-msg" class="text-center py-10 bg-white/50 dark:bg-gray-800/50 rounded-xl border border-dashed border-gray-300 dark:border-gray-600">
+                    <p class="text-gray-500 dark:text-gray-400">尚無閱讀紀錄</p>
+                </div>
+
+                <ul id="history-list" class="hidden flex flex-col gap-3">
+                    <!-- Injected by renderHistoryList() -->
+                </ul>
+            </div>
         </div>
 
         <!-- Loading State -->
         <div id="loading-section" class="hidden flex-1 flex flex-col items-center justify-center py-20">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
-            <p class="text-gray-500 dark:text-gray-400 animate-pulse">正在提取正文，過濾廣告中…</p>
+            <div class="relative w-16 h-16 mb-4">
+                <div class="absolute inset-0 border-4 border-gray-200 dark:border-gray-700 rounded-full"></div>
+                <div class="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+            </div>
+            <h3 class="text-lg font-bold mb-2">正在處理中…</h3>
+            <p class="text-gray-500 dark:text-gray-400 text-sm text-center max-w-xs">這可能需要幾秒鐘。擷取後會自動快取，下次開啟瞬間載入。</p>
+            <button onclick="resetView()" class="mt-6 text-sm text-blue-500 hover:underline">取消返回</button>
         </div>
 
         <!-- Error State -->
@@ -151,35 +180,34 @@
         <article id="article-section" class="hidden w-full pb-20">
             <div class="mb-8 border-b border-gray-200 dark:border-gray-800 pb-6">
                 <h1 id="article-title" class="text-3xl sm:text-4xl font-extrabold leading-tight mb-4"></h1>
-                <div class="flex flex-wrap items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
-                    <div id="article-author" class="hidden flex items-center gap-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                        <span></span>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <!-- 左側：作者、來源、快取標籤 -->
+                    <div class="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                        <div id="article-author" class="hidden flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                            <span></span>
+                        </div>
+                        <div id="article-domain" class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                            <a id="article-source-link" href="#" target="_blank" rel="noopener noreferrer" class="hover:text-blue-500 transition-colors"></a>
+                        </div>
+                        <!-- 快取載入指示器 -->
+                        <span id="cache-badge" class="hidden text-xs font-medium px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            快取載入
+                        </span>
                     </div>
-                    <div id="article-domain" class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-                        <a id="article-source-link" href="#" target="_blank" rel="noopener noreferrer" class="hover:text-blue-500 transition-colors"></a>
+                    <!-- 右側：操作按鈕 -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button onclick="copyArticleText()" id="copy-btn" class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                            <span id="copy-text">複製全文</span>
+                        </button>
+                        <button onclick="shareArticle()" id="share-btn" title="分享原始網址 / 在其他瀏覽器開啟" class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
+                            <span id="share-text">分享網址</span>
+                        </button>
                     </div>
-
-                    <!-- 複製全文按鈕 -->
-                    <button onclick="copyArticleText()" id="copy-btn" class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer ml-auto sm:ml-0">
-                        <svg id="copy-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
-                            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
-                        </svg>
-                        <span id="copy-text">複製全文</span>
-                    </button>
-
-                    <!-- 分享 / 在瀏覽器開啟按鈕 -->
-                    <button onclick="shareArticle()" id="share-btn" title="分享原始網址 / 在其他瀏覽器開啟"
-                        class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-                            <polyline points="16 6 12 2 8 6"></polyline>
-                            <line x1="12" y1="2" x2="12" y2="15"></line>
-                        </svg>
-                        <span id="share-text">分享網址</span>
-                    </button>
                 </div>
             </div>
 
@@ -190,6 +218,11 @@
     </main>
 
     <script>
+        // ─── Constants ────────────────────────────────────────────────────────
+        const STORAGE_KEY_HISTORY     = 'pureReader_history';
+        const STORAGE_KEY_CACHE_PFX   = 'pureReader_cache_';
+        const MAX_HISTORY_ITEMS       = 20;
+
         // ─── PWA Install Prompt ────────────────────────────────────────────────
         let deferredPrompt = null;
 
@@ -261,6 +294,98 @@
             }
         }
 
+        // ─── History & Cache ──────────────────────────────────────────────────
+        function _cacheKey(url) {
+            return btoa(unescape(encodeURIComponent(url))).substring(0, 24);
+        }
+
+        function getHistory() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY) || '[]'); }
+            catch (e) { return []; }
+        }
+
+        function saveToHistory(url, title, domain) {
+            let hist = getHistory().filter(i => i.url !== url);
+            hist.unshift({ url, title, domain, timestamp: Date.now() });
+            if (hist.length > MAX_HISTORY_ITEMS) {
+                const evicted = hist.pop();
+                localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(evicted.url));
+            }
+            localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(hist));
+            renderHistoryList();
+        }
+
+        function cacheArticle(url, data) {
+            try {
+                localStorage.setItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url),
+                    JSON.stringify({ ...data, savedAt: Date.now() }));
+            } catch (e) { console.warn('[pureReader] Storage full, skip cache:', e); }
+        }
+
+        function getCachedArticle(url) {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) { return null; }
+        }
+
+        function deleteHistoryItem(url, event) {
+            if (event) event.stopPropagation();
+            const hist = getHistory().filter(i => i.url !== url);
+            localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(hist));
+            localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
+            renderHistoryList();
+        }
+
+        function clearHistory() {
+            if (!confirm('確定要清空所有閱讀紀錄與快取嗎？')) return;
+            getHistory().forEach(i => localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(i.url)));
+            localStorage.removeItem(STORAGE_KEY_HISTORY);
+            renderHistoryList();
+        }
+
+        function formatDate(ts) {
+            const d = new Date(ts);
+            return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+
+        function renderHistoryList() {
+            const hist    = getHistory();
+            const listEl  = document.getElementById('history-list');
+            const emptyEl = document.getElementById('empty-history-msg');
+            const clearBtn= document.getElementById('clear-history-btn');
+            if (hist.length === 0) {
+                listEl.classList.add('hidden'); clearBtn.classList.add('hidden');
+                emptyEl.classList.remove('hidden'); listEl.innerHTML = ''; return;
+            }
+            emptyEl.classList.add('hidden');
+            listEl.classList.remove('hidden'); clearBtn.classList.remove('hidden');
+            listEl.innerHTML = hist.map(item => {
+                const domain = item.domain || (() => { try { return new URL(item.url).hostname; } catch(e){ return ''; } })();
+                const safeUrl = item.url.replace(/'/g, '%27');
+                return `<li class="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer flex items-center justify-between gap-3"
+                    onclick="loadFromHistory('${safeUrl}')">
+                    <div class="flex-1 min-w-0">
+                        <h4 class="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 text-sm leading-snug mb-1">${item.title || '無標題'}</h4>
+                        <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                            <span>${formatDate(item.timestamp)}</span>
+                            <span class="truncate max-w-[120px]">${domain}</span>
+                        </div>
+                    </div>
+                    <button onclick="deleteHistoryItem('${safeUrl}', event)"
+                        class="shrink-0 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        title="刪除">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                    </button>
+                </li>`;
+            }).join('');
+        }
+
+        function loadFromHistory(url) {
+            document.getElementById('url-input').value = url;
+            extractArticle(url);
+        }
+
         // ─── UI State Helpers ─────────────────────────────────────────────────
         function showSection(id) {
             ['input-section', 'loading-section', 'error-section', 'article-section'].forEach(s => {
@@ -285,6 +410,7 @@
             showSection('input-section');
             window.history.replaceState({}, document.title, window.location.pathname);
             document.getElementById('url-input').value = '';
+            renderHistoryList();
         }
 
         function showError(msg) {
@@ -295,6 +421,17 @@
         // ─── Core: Extract + Render ───────────────────────────────────────────
         async function extractArticle(url) {
             showLoading();
+            document.getElementById('cache-badge').classList.add('hidden');
+
+            // 1. Cache-first: instant load
+            const cached = getCachedArticle(url);
+            if (cached) {
+                console.info('[pureReader] Serving from cache');
+                setTimeout(() => renderArticle(cached, url, true), 250);
+                return;
+            }
+
+            // 2. Fetch via proxies
             try {
                 new URL(url); // Validate URL
 
@@ -370,7 +507,20 @@
                     throw new Error('自動提取正文失敗。該網頁可能不是標準文章格式，或內容被隱藏。');
                 }
 
-                renderArticle(article, url);
+                let domain = '';
+                try { domain = new URL(url).hostname; } catch (e) {}
+
+                const articleData = {
+                    title:   article.title  || '無標題',
+                    byline:  article.byline || '',
+                    content: article.content,
+                    domain
+                };
+
+                // 3. Save to cache & history, then render
+                cacheArticle(url, articleData);
+                saveToHistory(url, articleData.title, domain);
+                renderArticle(articleData, url, false);
 
             } catch (error) {
                 console.error('[pureReader] Extraction error:', error);
@@ -378,17 +528,18 @@
             }
         }
 
-        function renderArticle(article, originalUrl) {
+        function renderArticle(articleData, originalUrl, isFromCache) {
             const titleEl      = document.getElementById('article-title');
             const authorEl     = document.getElementById('article-author');
             const sourceLinkEl = document.getElementById('article-source-link');
             const contentEl    = document.getElementById('article-content');
+            const cacheBadge   = document.getElementById('cache-badge');
 
-            titleEl.textContent = article.title || '無標題';
+            titleEl.textContent = articleData.title || '無標題';
 
-            if (article.byline) {
+            if (articleData.byline) {
                 authorEl.classList.remove('hidden');
-                authorEl.querySelector('span').textContent = article.byline.trim();
+                authorEl.querySelector('span').textContent = articleData.byline.trim();
             } else {
                 authorEl.classList.add('hidden');
             }
@@ -402,7 +553,15 @@
                 sourceLinkEl.href = originalUrl;
             }
 
-            const cleanHTML = DOMPurify.sanitize(article.content, {
+            // Show cache badge & bump history timestamp when loaded from cache
+            if (isFromCache) {
+                cacheBadge.classList.remove('hidden');
+                saveToHistory(originalUrl, articleData.title, articleData.domain || '');
+            } else {
+                cacheBadge.classList.add('hidden');
+            }
+
+            const cleanHTML = DOMPurify.sanitize(articleData.content, {
                 USE_PROFILES: { html: true },
                 ADD_TAGS: ['img', 'figure', 'figcaption'],
                 FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
@@ -504,6 +663,7 @@
         // ─── Init ─────────────────────────────────────────────────────────────
         window.addEventListener('DOMContentLoaded', () => {
             initTheme();
+            renderHistoryList();
 
             // Handle Web Share Target (GET params)
             const params = new URLSearchParams(window.location.search);
