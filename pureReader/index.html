@@ -168,6 +168,25 @@
                     <!-- Injected by renderHistoryList() -->
                 </ul>
             </div>
+
+            <!-- Failed Hosts Section -->
+            <div id="failed-section" class="hidden w-full">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold flex items-center gap-2 text-red-600 dark:text-red-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+                        載入失敗記錄
+                        <span id="failed-count" class="text-xs bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 px-2 py-0.5 rounded-full font-normal">0</span>
+                    </h3>
+                    <div class="flex gap-3">
+                        <button id="copy-failed-btn" onclick="copyFailedHosts()" class="text-sm text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors">複製全部</button>
+                        <button onclick="clearFailedHosts()" class="text-sm text-red-500 hover:text-red-700 transition-colors">清空</button>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 border border-red-100 dark:border-red-900/50 rounded-xl px-4 py-1">
+                    <ul id="failed-list" class="divide-y divide-gray-100 dark:divide-gray-700"></ul>
+                </div>
+            </div>
+
         </div>
 
         <!-- Loading State -->
@@ -243,6 +262,8 @@
         const STORAGE_KEY_HISTORY     = 'pureReader_history';
         const STORAGE_KEY_CACHE_PFX   = 'pureReader_cache_';
         const STORAGE_KEY_PENDING     = 'pureReader_pending';
+        const STORAGE_KEY_STRAT_PREF  = 'pureReader_strat_pref';  // { hostname: { winner: 0|1|2, savedAt } }
+        const STORAGE_KEY_FAILED      = 'pureReader_failed_hosts'; // { hostname: { url, reason, count, lastAt } }
         const MAX_HISTORY_ITEMS       = 20;
 
         // ─── IndexedDB (shared schema with Service Worker) ────────────────────
@@ -438,6 +459,79 @@
             extractArticle(url);
         }
 
+        // ─── Strategy Preference (per hostname) ──────────────────────────────────
+        function getStratPref() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STRAT_PREF) || '{}'); }
+            catch (e) { return {}; }
+        }
+        function saveStratPref(hostname, idx) {
+            const p = getStratPref();
+            p[hostname] = { winner: idx, savedAt: Date.now() };
+            localStorage.setItem(STORAGE_KEY_STRAT_PREF, JSON.stringify(p));
+        }
+
+        // ─── Failed Host Recording ────────────────────────────────────────────
+        function getFailedHosts() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY_FAILED) || '{}'); }
+            catch (e) { return {}; }
+        }
+        function recordFailedHost(url, reason) {
+            let host = ''; try { host = new URL(url).hostname; } catch (e) { host = url; }
+            const map = getFailedHosts();
+            map[host] = { url, reason, count: (map[host]?.count || 0) + 1, lastAt: Date.now() };
+            localStorage.setItem(STORAGE_KEY_FAILED, JSON.stringify(map));
+            renderFailedHosts();
+        }
+        function deleteFailedHost(host) {
+            const map = getFailedHosts(); delete map[host];
+            localStorage.setItem(STORAGE_KEY_FAILED, JSON.stringify(map));
+            renderFailedHosts();
+        }
+        function clearFailedHosts() {
+            localStorage.removeItem(STORAGE_KEY_FAILED); renderFailedHosts();
+        }
+        function copyFailedHosts() {
+            const map = getFailedHosts();
+            const lines = Object.entries(map)
+                .sort((a, b) => b[1].lastAt - a[1].lastAt)
+                .map(([h, d]) => `${h}\t${d.reason}\t${d.count}次\t${d.url}`).join('\n');
+            const btn = document.getElementById('copy-failed-btn');
+            navigator.clipboard.writeText(lines).then(() => {
+                if (btn) { const t = btn.textContent; btn.textContent = '已複製！'; setTimeout(() => btn.textContent = t, 2000); }
+            }).catch(() => {
+                const ta = document.createElement('textarea'); ta.value = lines;
+                ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta);
+                ta.select(); try { document.execCommand('copy'); } catch(e) {}
+                document.body.removeChild(ta);
+            });
+        }
+        function renderFailedHosts() {
+            const map     = getFailedHosts();
+            const entries = Object.entries(map).sort((a, b) => b[1].lastAt - a[1].lastAt);
+            const section = document.getElementById('failed-section');
+            const list    = document.getElementById('failed-list');
+            const badge   = document.getElementById('failed-count');
+            if (!section || !list) return;
+            if (badge) badge.textContent = entries.length;
+            if (entries.length === 0) { section.classList.add('hidden'); return; }
+            section.classList.remove('hidden');
+            list.innerHTML = entries.map(([host, d]) => {
+                const safeHost = host.replace(/'/g, '%27');
+                const stratPref = getStratPref()[host];
+                const stratLabel = stratPref ? `▸ 慣用策略${stratPref.winner + 1}` : '';
+                return `<li class="flex items-center gap-3 py-2.5">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium truncate text-gray-900 dark:text-gray-100">${host} <span class="text-xs text-blue-500">${stratLabel}</span></p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">${d.reason} &middot; ${d.count}次 &middot; ${formatDate(d.lastAt)}</p>
+                    </div>
+                    <button onclick="deleteFailedHost('${safeHost}')"
+                        class="shrink-0 p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="移除">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </li>`;
+            }).join('');
+        }
+
         // ─── Pending Jobs ──────────────────────────────────────────────────
         function getPendingJobs() {
             try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PENDING) || '[]'); }
@@ -512,6 +606,7 @@
             document.getElementById('url-input').value = '';
             renderHistoryList();
             renderPendingJobs();
+            renderFailedHosts();
         }
 
         function showError(msg) {
@@ -620,62 +715,79 @@
                 let lastError   = '';
                 const setStatus = t => { const el = document.getElementById('loading-status-text'); if (el) el.textContent = t; };
 
-                // ─── 三重代理策略（依序嘗試，強到弱） ─────────────────────────
-                const strategies = [
-                    // 策略 1: CodeTabs（繞過防火牆能力較強）
-                    async () => {
-                        setStatus('嘗試策略一 (高強代理)…');
+                // ─── 策略偏好：從上次成功的策略開始（降低等待時間）─────────────
+                let hostname = ''; try { hostname = new URL(url).hostname; } catch (e) {}
+                const stratPref    = getStratPref();
+                const preferredIdx = stratPref[hostname]?.winner ?? -1;
+
+                // 三重代理策略（保留 idx 對應關係，以便儲存偏好）
+                const allStrategies = [
+                    { idx: 0, label: 'CodeTabs', fn: async () => {
+                        setStatus(`嘗試策略一${preferredIdx === 0 ? ' ★慣用' : ''}…`);
                         const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return await res.text();
-                    },
-                    // 策略 2: AllOrigins JSON API（含 HTTP 狀態碼檢查）
-                    async () => {
-                        setStatus('嘗試策略二 (備用代理 A)…');
+                    }},
+                    { idx: 1, label: 'AllOrigins JSON', fn: async () => {
+                        setStatus(`嘗試策略二${preferredIdx === 1 ? ' ★慣用' : ''}…`);
                         const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
                         if (!res.ok) throw new Error('Proxy API Failed');
                         const data = await res.json();
                         if (data.status && data.status.http_code >= 400) throw new Error(`HTTP ${data.status.http_code}`);
                         return data.contents;
-                    },
-                    // 策略 3: AllOrigins Raw
-                    async () => {
-                        setStatus('嘗試策略三 (備用代理 B)…');
+                    }},
+                    { idx: 2, label: 'AllOrigins Raw', fn: async () => {
+                        setStatus(`嘗試策略三${preferredIdx === 2 ? ' ★慣用' : ''}…`);
                         const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return await res.text();
-                    }
+                    }}
                 ];
 
+                // 偏好策略排到第一位，跳過已知失敗的等待時間
+                const strategies = preferredIdx >= 0
+                    ? [allStrategies[preferredIdx], ...allStrategies.filter(s => s.idx !== preferredIdx)]
+                    : allStrategies;
+
+                let winnerIdx = -1;
                 for (const strategy of strategies) {
                     try {
-                        const content = await strategy();
-                        // 內容長度 < 500 視為空白頁或錯誤頁
-                        if (content && content.length > 500) { htmlContent = content; break; }
+                        const content = await strategy.fn();
+                        if (content && content.length > 500) {
+                            htmlContent = content;
+                            winnerIdx   = strategy.idx;
+                            break;
+                        }
                     } catch (e) {
-                        if (e.name === 'AbortError') throw e; // 用戶主動取消
+                        if (e.name === 'AbortError') throw e;
                         lastError = e.message;
-                        console.warn('[pureReader] Strategy failed:', e.message);
+                        console.warn('[pureReader] Strategy failed:', strategy.label, e.message);
                     }
                 }
 
+                // 成功：儲存此 hostname 的偏好策略
+                if (winnerIdx >= 0) saveStratPref(hostname, winnerIdx);
+
                 if (!htmlContent) {
+                    recordFailedHost(url, lastError || '所有代理均失敗');
                     const bgResult = await queueForBackground(url);
                     if (bgResult) { showSection('input-section'); return; }
                     throw new Error(`無法讀取此網頁 (${lastError})。\n\n常見原因：\n1. 此為需登入或付費的文章\n2. 網站設定了嚴格的防抓取機制\n3. 網址無效`);
                 }
 
-                // ─── 偵測 Cloudflare / Bot 保護頁面 ────────────────────────
+                // ─── 偵測 Cloudflare / Bot 保護頁面 ────────────────────────────
                 const isBotProtected =
                     htmlContent.includes('cf-browser-verification') ||
                     htmlContent.includes('Just a moment...') ||
                     htmlContent.includes('Checking if the site connection is secure') ||
                     (htmlContent.includes('Cloudflare') && htmlContent.includes('Ray ID'));
                 if (isBotProtected) {
+                    recordFailedHost(url, 'Cloudflare 真人驗證');
                     throw new Error('網站防火牆阻擋。目標網站啟用了「真人驗證機制」（Cloudflare），淨讀器為自動擷取，無法通過驗證。請利用「分享網址」按鈕在完整瀏覽器中開啟。');
                 }
 
                 setStatus('網頁已獲取，正在萃取正文…');
+
 
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(htmlContent, 'text/html');
@@ -882,6 +994,7 @@
             initTheme();
             renderHistoryList();
             renderPendingJobs();
+            renderFailedHosts();
 
             // ── SW message listener (Background Sync / Fetch 結果回傳) ──────────
             if ('serviceWorker' in navigator) {
