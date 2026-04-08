@@ -25,6 +25,26 @@
                 extend: {
                     colors: {
                         primary: '#3b82f6',
+                    },
+                    typography: {
+                        '3xl': {
+                            css: {
+                                fontSize: '1.875rem', /* 30px */
+                                lineHeight: '1.6',
+                                h1: { fontSize: '2.5rem' },
+                                h2: { fontSize: '2rem' },
+                                h3: { fontSize: '1.75rem' },
+                            },
+                        },
+                        '4xl': {
+                            css: {
+                                fontSize: '2.25rem', /* 36px */
+                                lineHeight: '1.5',
+                                h1: { fontSize: '3rem' },
+                                h2: { fontSize: '2.5rem' },
+                                h3: { fontSize: '2rem' },
+                            },
+                        }
                     }
                 }
             }
@@ -262,8 +282,9 @@
         const STORAGE_KEY_HISTORY     = 'pureReader_history';
         const STORAGE_KEY_CACHE_PFX   = 'pureReader_cache_';
         const STORAGE_KEY_PENDING     = 'pureReader_pending';
-        const STORAGE_KEY_STRAT_PREF  = 'pureReader_strat_pref';  // { hostname: { winner: 0|1|2, savedAt } }
+        const STORAGE_KEY_STRAT_PREF  = 'pureReader_strat_pref';  // { hostname: { winner: 0|1|2|3, savedAt } }
         const STORAGE_KEY_FAILED      = 'pureReader_failed_hosts'; // { hostname: { url, reason, count, lastAt } }
+        const STORAGE_KEY_FONT_SIZE   = 'pureReader_font_size';   // int (0-6)
         const MAX_HISTORY_ITEMS       = 20;
 
         // ─── IndexedDB (shared schema with Service Worker) ────────────────────
@@ -338,19 +359,22 @@
         // ─── Font Size ────────────────────────────────────────────────────────
         function changeFontSize(step) {
             const content = document.getElementById('article-content');
-            const title   = document.getElementById('article-title');
+            const title = document.getElementById('article-title');
+            if (!content || !title) return;
 
-            const proseClasses = ['prose-sm', 'prose-base', 'prose-lg', 'prose-xl', 'prose-2xl'];
-            const titleClasses = ['text-xl', 'text-2xl', 'text-3xl', 'text-4xl', 'text-5xl'];
-            const titleSmClasses = ['sm:text-2xl', 'sm:text-3xl', 'sm:text-4xl', 'sm:text-5xl', 'sm:text-6xl'];
+            const proseClasses = ['prose-sm', 'prose-base', 'prose-lg', 'prose-xl', 'prose-2xl', 'prose-3xl', 'prose-4xl'];
+            const titleClasses = ['text-xl', 'text-2xl', 'text-3xl', 'text-4xl', 'text-5xl', 'text-6xl', 'text-7xl'];
+            const titleSmClasses = ['sm:text-2xl', 'sm:text-3xl', 'sm:text-4xl', 'sm:text-5xl', 'sm:text-6xl', 'sm:text-7xl', 'sm:text-8xl'];
 
             // Remove responsive override so manual sizing takes full effect
             content.classList.remove('md:prose-xl');
 
             let idx = proseClasses.findIndex(c => content.classList.contains(c));
-            if (idx === -1) idx = 2; // default: prose-lg
+            if (idx === -1) {
+                idx = parseInt(localStorage.getItem(STORAGE_KEY_FONT_SIZE) || '2', 10);
+            }
 
-            const newIdx = idx + step;
+            const newIdx = step === 0 ? idx : idx + step;
             if (newIdx >= 0 && newIdx < proseClasses.length) {
                 proseClasses.forEach(c => content.classList.remove(c));
                 content.classList.add(proseClasses[newIdx]);
@@ -358,6 +382,8 @@
                 titleClasses.forEach(c => title.classList.remove(c));
                 titleSmClasses.forEach(c => title.classList.remove(c));
                 title.classList.add(titleClasses[newIdx], titleSmClasses[newIdx]);
+
+                localStorage.setItem(STORAGE_KEY_FONT_SIZE, newIdx);
             }
         }
 
@@ -999,6 +1025,7 @@
         // ─── Init ─────────────────────────────────────────────────────────────
         window.addEventListener('DOMContentLoaded', () => {
             initTheme();
+            changeFontSize(0); // Load saved font size on init
             renderHistoryList();
             renderPendingJobs();
             renderFailedHosts();
