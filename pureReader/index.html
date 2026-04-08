@@ -178,6 +178,7 @@
             </div>
             <h3 class="text-lg font-bold mb-2">正在處理中…</h3>
             <p id="loading-url-hint" class="text-gray-500 dark:text-gray-400 text-xs text-center max-w-xs truncate px-4 mb-1"></p>
+            <p id="loading-status-text" class="text-blue-500 dark:text-blue-400 text-xs text-center max-w-xs font-medium mb-1"></p>
             <p class="text-gray-500 dark:text-gray-400 text-sm text-center max-w-xs">擷取後會自動快取，下次開啟瞬間載入。</p>
             <button onclick="cancelAndQueue()" class="mt-6 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors">中止 → 改用背景擷取</button>
             <button onclick="resetView()" class="mt-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">直接放棄</button>
@@ -616,36 +617,65 @@
                 new URL(url); // Validate URL
 
                 let htmlContent = null;
+                let lastError   = '';
+                const setStatus = t => { const el = document.getElementById('loading-status-text'); if (el) el.textContent = t; };
 
-                const proxies = [
-                    {
-                        url: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-                        parse: async (res) => (await res.json()).contents
+                // ─── 三重代理策略（依序嘗試，強到弱） ─────────────────────────
+                const strategies = [
+                    // 策略 1: CodeTabs（繞過防火牆能力較強）
+                    async () => {
+                        setStatus('嘗試策略一 (高強代理)…');
+                        const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return await res.text();
                     },
-                    {
-                        url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-                        parse: async (res) => await res.text()
+                    // 策略 2: AllOrigins JSON API（含 HTTP 狀態碼檢查）
+                    async () => {
+                        setStatus('嘗試策略二 (備用代理 A)…');
+                        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
+                        if (!res.ok) throw new Error('Proxy API Failed');
+                        const data = await res.json();
+                        if (data.status && data.status.http_code >= 400) throw new Error(`HTTP ${data.status.http_code}`);
+                        return data.contents;
+                    },
+                    // 策略 3: AllOrigins Raw
+                    async () => {
+                        setStatus('嘗試策略三 (備用代理 B)…');
+                        const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return await res.text();
                     }
                 ];
 
-                for (const proxy of proxies) {
+                for (const strategy of strategies) {
                     try {
-                        const response = await fetch(proxy.url, { signal: currentFetchAbort?.signal });
-                        if (response.ok) {
-                            htmlContent = await proxy.parse(response);
-                            if (htmlContent) break;
-                        }
+                        const content = await strategy();
+                        // 內容長度 < 500 視為空白頁或錯誤頁
+                        if (content && content.length > 500) { htmlContent = content; break; }
                     } catch (e) {
-                        if (e.name === 'AbortError') throw e; // propagate cancel
-                        console.warn('[pureReader] Proxy failed:', proxy.url, e);
+                        if (e.name === 'AbortError') throw e; // 用戶主動取消
+                        lastError = e.message;
+                        console.warn('[pureReader] Strategy failed:', e.message);
                     }
                 }
 
                 if (!htmlContent) {
                     const bgResult = await queueForBackground(url);
                     if (bgResult) { showSection('input-section'); return; }
-                    throw new Error('無法獲取網頁內容，該網站可能啟用了高強度的防爬蟲機制（例如 Cloudflare），或代理伺服器目前無法連線。');
+                    throw new Error(`無法讀取此網頁 (${lastError})。\n\n常見原因：\n1. 此為需登入或付費的文章\n2. 網站設定了嚴格的防抓取機制\n3. 網址無效`);
                 }
+
+                // ─── 偵測 Cloudflare / Bot 保護頁面 ────────────────────────
+                const isBotProtected =
+                    htmlContent.includes('cf-browser-verification') ||
+                    htmlContent.includes('Just a moment...') ||
+                    htmlContent.includes('Checking if the site connection is secure') ||
+                    (htmlContent.includes('Cloudflare') && htmlContent.includes('Ray ID'));
+                if (isBotProtected) {
+                    throw new Error('網站防火牆阻擋。目標網站啟用了「真人驗證機制」（Cloudflare），淨讀器為自動擷取，無法通過驗證。請利用「分享網址」按鈕在完整瀏覽器中開啟。');
+                }
+
+                setStatus('網頁已獲取，正在萃取正文…');
 
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(htmlContent, 'text/html');
