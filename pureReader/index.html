@@ -177,8 +177,10 @@
                 <div class="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
             </div>
             <h3 class="text-lg font-bold mb-2">正在處理中…</h3>
-            <p class="text-gray-500 dark:text-gray-400 text-sm text-center max-w-xs">這可能需要幾秒鐘。擷取後會自動快取，下次開啟瞬間載入。</p>
-            <button onclick="resetView()" class="mt-6 text-sm text-blue-500 hover:underline">取消返回</button>
+            <p id="loading-url-hint" class="text-gray-500 dark:text-gray-400 text-xs text-center max-w-xs truncate px-4 mb-1"></p>
+            <p class="text-gray-500 dark:text-gray-400 text-sm text-center max-w-xs">擷取後會自動快取，下次開啟瞬間載入。</p>
+            <button onclick="cancelAndQueue()" class="mt-6 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors">中止 → 改用背景擷取</button>
+            <button onclick="resetView()" class="mt-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">直接放棄</button>
         </div>
 
         <!-- Error State -->
@@ -265,7 +267,9 @@
         }
 
         // ─── PWA Install Prompt ────────────────────────────────────────────────
-        let deferredPrompt = null;
+        let deferredPrompt    = null;
+        let currentFetchUrl   = null;   // URL currently being fetched (for cancel)
+        let currentFetchAbort = null;   // AbortController for the active fetch
 
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
@@ -514,6 +518,21 @@
             document.getElementById('error-message').innerText = msg;
         }
 
+        // Abort the active foreground fetch and hand the URL to background processing
+        async function cancelAndQueue() {
+            const url = currentFetchUrl;
+            if (currentFetchAbort) { currentFetchAbort.abort(); }
+            // Reset immediately so the user sees the home screen
+            resetView();
+            if (url) {
+                const result = await queueForBackground(url);
+                if (!result) {
+                    // Background APIs not available; just show error hint
+                    showSyncBar('⚠ 此瀏覽器不支援背景擷取，請稍後手動重試', null, null, 5000);
+                }
+            }
+        }
+
         // ─── Background Processing ────────────────────────────────────────────
         function showSyncBar(text, btnText, btnCb, autoDismissMs) {
             const bar = document.getElementById('sync-bar');
@@ -577,8 +596,12 @@
 
         // ─── Core: Extract + Render ───────────────────────────────────────────
         async function extractArticle(url) {
+            currentFetchUrl   = url;
+            currentFetchAbort = new AbortController();
             showLoading();
-            document.getElementById('cache-badge').classList.add('hidden');
+            // Show URL hint in loading screen
+            const hint = document.getElementById('loading-url-hint');
+            if (hint) { try { hint.textContent = new URL(url).hostname; } catch(e) { hint.textContent = url; } }
 
             // 1. Cache-first: instant load
             const cached = getCachedArticle(url);
@@ -607,12 +630,13 @@
 
                 for (const proxy of proxies) {
                     try {
-                        const response = await fetch(proxy.url);
+                        const response = await fetch(proxy.url, { signal: currentFetchAbort?.signal });
                         if (response.ok) {
                             htmlContent = await proxy.parse(response);
                             if (htmlContent) break;
                         }
                     } catch (e) {
+                        if (e.name === 'AbortError') throw e; // propagate cancel
                         console.warn('[pureReader] Proxy failed:', proxy.url, e);
                     }
                 }
@@ -682,8 +706,12 @@
                 renderArticle(articleData, url, false);
 
             } catch (error) {
+                if (error.name === 'AbortError') return; // cancelled by user via cancelAndQueue()
                 console.error('[pureReader] Extraction error:', error);
                 showError(error.message || '發生未知錯誤，請確認網址是否正確且公開可存取。');
+            } finally {
+                currentFetchUrl   = null;
+                currentFetchAbort = null;
             }
         }
 
