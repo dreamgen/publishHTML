@@ -721,7 +721,7 @@
         }
 
         // ─── Core: Extract + Render ───────────────────────────────────────────
-        async function extractArticle(url, forceDeep = false) {
+        async function extractArticle(url) {
             currentFetchUrl   = url;
             currentFetchAbort = new AbortController();
             showLoading();
@@ -730,13 +730,11 @@
             if (hint) { try { hint.textContent = new URL(url).hostname; } catch(e) { hint.textContent = url; } }
 
             // 1. Cache-first: instant load
-            if (!forceDeep) {
-                const cached = getCachedArticle(url);
-                if (cached) {
-                    console.info('[pureReader] Serving from cache');
-                    setTimeout(() => renderArticle(cached, url, true), 250);
-                    return;
-                }
+            const cached = getCachedArticle(url);
+            if (cached) {
+                console.info('[pureReader] Serving from cache');
+                setTimeout(() => renderArticle(cached, url, true), 250);
+                return;
             }
 
             // 2. Fetch via proxies
@@ -783,20 +781,10 @@
                 ];
 
 
-                // 若為 forceDeep 模式，強制單一使用深層渲染代理
-                const deepStrategy = [{
-                    idx: -1, label: 'Deep Proxy (JS Render)', fn: async () => {
-                        setStatus('嘗試深度解析 (無頭瀏覽器渲染)…');
-                        const res = await fetch(`https://purereader-proxy.vercel.app/api/deep?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
-                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                        return await res.text();
-                    }
-                }];
-
                 // 偏好策略排到第一位，跳過已知失敗的等待時間
-                const strategies = forceDeep ? deepStrategy : (preferredIdx >= 0
+                const strategies = preferredIdx >= 0
                     ? [allStrategies[preferredIdx], ...allStrategies.filter(s => s.idx !== preferredIdx)]
-                    : allStrategies);
+                    : allStrategies;
 
                 let winnerIdx = -1;
                 for (const strategy of strategies) {
@@ -946,18 +934,20 @@
                 img.removeAttribute('height');
             });
 
-            // 深度解析按鈕
+            // 深度解析按鈕（改為直接開新分頁，避免 Vercel Timeout 沒有 CORS 標頭的問題）
             let deepContainer = document.getElementById('deep-fetch-container');
             if (deepContainer) deepContainer.remove();
+
+            const deepUrl = `https://purereader-proxy.vercel.app/api/deep?url=${encodeURIComponent(originalUrl)}`;
 
             contentEl.insertAdjacentHTML('afterend', `
                 <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
                     <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺？此網頁可能需要 JS 渲染</p>
-                    <button onclick="extractArticle('${originalUrl.replace(/'/g, "\\'")}', true)" class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 flex items-center justify-center gap-2 mx-auto">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 1 0 10-10"></path><path d="M12 8v4l3 3"></path></svg>
-                        深度解析 (重新讀取更完整的內容)
-                    </button>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">使用無頭瀏覽器完整渲染，需等待較長時間。</p>
+                    <a href="${deepUrl}" target="_blank" rel="noopener noreferrer" class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 mx-auto">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        深度解析 (開新分頁讀取完整內容)
+                    </a>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">將透過無頭瀏覽器伺服器完整渲染 JS。</p>
                 </div>
             `);
 
