@@ -44,15 +44,21 @@ async function notifyClients(msg) {
 }
 
 // ─── Fetch raw HTML via CORS proxies ──────────────────────────────────────────
+const PROXY_HOSTNAMES = ['purereader-proxy.vercel.app', 'api.allorigins.win', 'api.codetabs.com'];
+
 async function fetchRawHtml(url) {
   const proxies = [
     {
-      src: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-      parse: async r => { const d = await r.json(); return d.contents || null; }
+      src: `https://purereader-proxy.vercel.app/api/proxy?url=${encodeURIComponent(url)}`,
+      parse: async r => await r.text()
     },
     {
       src: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
       parse: async r => await r.text()
+    },
+    {
+      src: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+      parse: async r => { const d = await r.json(); return d.contents || null; }
     }
   ];
   for (const { src, parse } of proxies) {
@@ -149,8 +155,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (request.method !== 'GET')                                          return;
   if (!url.protocol.startsWith('http'))                                  return;
-  if (url.hostname === 'api.allorigins.win' ||
-      url.hostname === 'api.codetabs.com')                               return;
+  if (PROXY_HOSTNAMES.includes(url.hostname))                            return;
 
   const cacheName = url.origin === self.location.origin ? CACHE_NAME : SHARED_CACHE;
   event.respondWith(

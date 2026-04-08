@@ -722,27 +722,34 @@
 
                 // 三重代理策略（保留 idx 對應關係，以便儲存偏好）
                 const allStrategies = [
-                    { idx: 0, label: 'CodeTabs', fn: async () => {
-                        setStatus(`嘗試策略一${preferredIdx === 0 ? ' ★慣用' : ''}…`);
+                    { idx: 0, label: 'PureReader Proxy', fn: async () => {
+                        setStatus(`嘗試策略一${preferredIdx === 0 ? ' ★慣用' : ''} (自有代理)…`);
+                        const res = await fetch(`https://purereader-proxy.vercel.app/api/proxy?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return await res.text();
+                    }},
+                    { idx: 1, label: 'CodeTabs', fn: async () => {
+                        setStatus(`嘗試策略二${preferredIdx === 1 ? ' ★慣用' : ''} (CodeTabs)…`);
                         const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return await res.text();
                     }},
-                    { idx: 1, label: 'AllOrigins JSON', fn: async () => {
-                        setStatus(`嘗試策略二${preferredIdx === 1 ? ' ★慣用' : ''}…`);
+                    { idx: 2, label: 'AllOrigins JSON', fn: async () => {
+                        setStatus(`嘗試策略三${preferredIdx === 2 ? ' ★慣用' : ''} (AllOrigins JSON)…`);
                         const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
                         if (!res.ok) throw new Error('Proxy API Failed');
                         const data = await res.json();
                         if (data.status && data.status.http_code >= 400) throw new Error(`HTTP ${data.status.http_code}`);
                         return data.contents;
                     }},
-                    { idx: 2, label: 'AllOrigins Raw', fn: async () => {
-                        setStatus(`嘗試策略三${preferredIdx === 2 ? ' ★慣用' : ''}…`);
+                    { idx: 3, label: 'AllOrigins Raw', fn: async () => {
+                        setStatus(`嘗試策略四${preferredIdx === 3 ? ' ★慣用' : ''} (AllOrigins Raw)…`);
                         const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: currentFetchAbort?.signal });
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return await res.text();
                     }}
                 ];
+
 
                 // 偏好策略排到第一位，跳過已知失敗的等待時間
                 const strategies = preferredIdx >= 0
