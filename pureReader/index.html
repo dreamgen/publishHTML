@@ -139,6 +139,17 @@
                 </form>
             </div>
 
+            <!-- Background Jobs Section -->
+            <div id="pending-section" class="hidden w-full">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-4 h-4 relative shrink-0">
+                        <div class="absolute inset-0 border-2 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+                    </div>
+                    <h3 class="text-lg font-bold">背景擷取中</h3>
+                </div>
+                <ul id="pending-list" class="flex flex-col gap-3"></ul>
+            </div>
+
             <!-- History Section -->
             <div class="w-full">
                 <div class="flex items-center justify-between mb-4">
@@ -228,6 +239,7 @@
         // ─── Constants ────────────────────────────────────────────────────────
         const STORAGE_KEY_HISTORY     = 'pureReader_history';
         const STORAGE_KEY_CACHE_PFX   = 'pureReader_cache_';
+        const STORAGE_KEY_PENDING     = 'pureReader_pending';
         const MAX_HISTORY_ITEMS       = 20;
 
         // ─── IndexedDB (shared schema with Service Worker) ────────────────────
@@ -324,8 +336,14 @@
         }
 
         // ─── History & Cache ──────────────────────────────────────────────────
+        // FNV-1a 32-bit hash — avoids prefix-collision for URLs sharing the same domain/path prefix
         function _cacheKey(url) {
-            return btoa(unescape(encodeURIComponent(url))).substring(0, 24);
+            let h = 0x811c9dc5;
+            for (let i = 0; i < url.length; i++) {
+                h ^= url.charCodeAt(i);
+                h = Math.imul(h, 0x01000193) >>> 0;
+            }
+            return h.toString(16).padStart(8, '0');
         }
 
         function getHistory() {
@@ -415,6 +433,54 @@
             extractArticle(url);
         }
 
+        // ─── Pending Jobs ──────────────────────────────────────────────────
+        function getPendingJobs() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PENDING) || '[]'); }
+            catch (e) { return []; }
+        }
+        function addPendingJob(url, method) {
+            const jobs = getPendingJobs().filter(j => j.url !== url);
+            let domain = ''; try { domain = new URL(url).hostname; } catch(e) {}
+            jobs.unshift({ url, domain, method, startedAt: Date.now() });
+            localStorage.setItem(STORAGE_KEY_PENDING, JSON.stringify(jobs));
+            renderPendingJobs();
+        }
+        function removePendingJob(url) {
+            const jobs = getPendingJobs().filter(j => j.url !== url);
+            localStorage.setItem(STORAGE_KEY_PENDING, JSON.stringify(jobs));
+            renderPendingJobs();
+        }
+        function renderPendingJobs() {
+            const jobs    = getPendingJobs();
+            const section = document.getElementById('pending-section');
+            const list    = document.getElementById('pending-list');
+            if (!section || !list) return;
+            if (jobs.length === 0) { section.classList.add('hidden'); list.innerHTML = ''; return; }
+            section.classList.remove('hidden');
+            list.innerHTML = jobs.map(job => {
+                const safeUrl = job.url.replace(/'/g, '%27');
+                const label   = job.method === 'bgfetch' ? '背景下載 (可關閉 App)' : '背景同步 (請保持連線)';
+                return `<li class="bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-800 rounded-xl p-3 flex items-center gap-3">
+                    <div class="shrink-0 w-7 h-7 relative">
+                        <div class="absolute inset-0 border-2 border-gray-200 dark:border-gray-700 rounded-full"></div>
+                        <div class="absolute inset-0 border-2 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-sm truncate text-gray-900 dark:text-gray-100">${job.domain || job.url}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">${label}</p>
+                    </div>
+                    <button onclick="cancelPendingJob('${safeUrl}')"
+                        class="shrink-0 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="取消">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </li>`;
+            }).join('');
+        }
+        function cancelPendingJob(url) {
+            removePendingJob(url);
+            idbDelete('sync-queue', url).catch(() => {});
+        }
+
         // ─── UI State Helpers ─────────────────────────────────────────────────
         function showSection(id) {
             ['input-section', 'loading-section', 'error-section', 'article-section'].forEach(s => {
@@ -440,6 +506,7 @@
             window.history.replaceState({}, document.title, window.location.pathname);
             document.getElementById('url-input').value = '';
             renderHistoryList();
+            renderPendingJobs();
         }
 
         function showError(msg) {
@@ -469,14 +536,14 @@
                     await reg.backgroundFetch.fetch(encodeURIComponent(url).substring(0, 100), [proxyUrl], {
                         title: `淨讀器：${new URL(url).hostname}`, downloadTotal: 3 * 1024 * 1024
                     });
-                    showSyncBar('⬇ 已加入背景下載，完成後自動通知');
+                    addPendingJob(url, 'bgfetch');
                     return 'bgfetch';
                 } catch (e) { console.warn('[pureReader] BackgroundFetch:', e); }
             }
             // 2. Background Sync API (retries when network returns)
             if (reg.sync && navigator.serviceWorker.controller) {
                 navigator.serviceWorker.controller.postMessage({ type: 'REGISTER_SYNC', url });
-                showSyncBar('⏳ 已排程，網路恢復後自動擷取');
+                addPendingJob(url, 'sync');
                 return 'sync';
             }
             return false;
@@ -756,12 +823,14 @@
         window.addEventListener('DOMContentLoaded', () => {
             initTheme();
             renderHistoryList();
+            renderPendingJobs();
 
             // ── SW message listener (Background Sync / Fetch 結果回傳) ──────────
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.addEventListener('message', async ({ data }) => {
                     const { type, url } = data || {};
                     if (type === 'SYNC_COMPLETE' && url) {
+                        removePendingJob(url);
                         try {
                             const record = await idbGet('raw-html', url);
                             if (!record) return;
@@ -777,6 +846,7 @@
                         } catch (e) { showSyncBar('⚠ 背景擷取完成，但無法解析正文', null, null, 5000); }
                     }
                     if (type === 'SYNC_FAILED') {
+                        if (url) removePendingJob(url);
                         showSyncBar('⚠ 背景擷取失敗，請稍後重試', null, null, 5000);
                     }
                 });
