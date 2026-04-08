@@ -260,6 +260,10 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
                             <span id="share-text">分享網址</span>
                         </button>
+                        <button onclick="reportParseFailure()" id="report-btn" title="手動回報讀取異常 (例如格式錯誤或被阻擋)" class="flex items-center gap-1 bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 px-2 py-1 rounded-md transition-colors cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                            <span class="text-xs">失敗</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -831,30 +835,17 @@
                     articleTags.slice(1).forEach(a => a.remove());
                 }
 
-                // ── 修正懶加載圖片：將 data-src / data-original / data-lazy-src 提升為 src ──
+                // ── 修復圖片懶加載 (Lazy Loading)：將隱藏的真實網址還原給 src ──
                 doc.querySelectorAll('img').forEach(img => {
-                    const realSrc = img.getAttribute('data-src')
-                                 || img.getAttribute('data-original')
-                                 || img.getAttribute('data-lazy-src');
-                    if (realSrc) img.setAttribute('src', realSrc);
+                    const realSrc = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || img.getAttribute('data-srcset');
+                    if (realSrc) img.setAttribute('src', realSrc.split(' ')[0]);
                 });
 
-                // ── Pre-clean：使用具名選擇器替代過寬的 [class*="ad"]，避免誤殺正文 ──
+                // ── 精準清除無用標籤，避免誤殺正常內容 (移除粗暴的 [class*="ad"]) ──
                 const unwantedSelectors = [
-                    'script', 'noscript', 'style', 'iframe', 'nav', 'footer', 'aside', 'header',
-                    // 廣告 — 具名 class / id 前綴（精確，不誤殺 "graduate" 等含 "ad" 的字）
-                    '.ad', '.ads', '.advertisement', '.ad-container', '.ad-wrapper', '.ad-banner',
-                    '[id^="ad-"]', '[class^="ad-"]', '[class*="-ad-"]',
-                    // 彈窗 / 遮罩
-                    '[class*="popup"]', '[class*="modal"]',
-                    // 第三方推薦內容 widget
-                    '.dable-widget', '#dablewidget', '.popin', '.outbrain', '.teads', '.taboola',
-                    // 相關推薦 / 延伸閱讀區塊
-                    '[class*="related"]', '[class*="recommend"]', '[id*="recommend"]',
-                    // 廣編稿 / 贊助商內容
-                    '[class*="sponsor"]', '[class*="promo"]', '[class*="advertorial"]', '[class*="commercial"]',
-                    // 常見文末延伸閱讀容器
-                    '.ext-reading', '.extend-reading', '[class*="bottom-article"]', '.next-article'
+                    'script', 'noscript', 'style', 'iframe', 'nav', 'footer', 'aside', 
+                    '.ad', '.ads', '.advertisement', '[class*="ad-container"]', '[class*="ad-slot"]', '[id^="ad-"]', '[class^="ad-"]',
+                    '[class*="popup"]', '[class*="modal"]', '.related-posts', '.recommendations'
                 ];
                 doc.querySelectorAll(unwantedSelectors.join(',')).forEach(el => el.remove());
 
@@ -1012,6 +1003,17 @@
                 window.open(sourceUrl, '_blank', 'noopener,noreferrer');
                 shareText.innerText = '已開啟！';
                 setTimeout(() => { shareText.innerText = '分享網址'; }, 2000);
+            }
+        }
+        
+        function reportParseFailure() {
+            const el = document.getElementById('article-source-link');
+            if (el && el.href) {
+                recordFailedHost(el.href, '手動標註讀取失敗 / 內容排版異常');
+                const btn = document.getElementById('report-btn');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-xs">已記錄</span>`;
+                setTimeout(() => { btn.innerHTML = originalText; }, 2000);
             }
         }
 
