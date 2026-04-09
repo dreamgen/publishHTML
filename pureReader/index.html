@@ -317,6 +317,7 @@
         let deferredPrompt    = null;
         let currentFetchUrl   = null;   // URL currently being fetched (for cancel)
         let currentFetchAbort = null;   // AbortController for the active fetch
+        let _deepChannel      = null;   // BroadcastChannel instance held by the ORIGINAL tab
 
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
@@ -881,6 +882,118 @@
             }
         }
 
+        // ─── Deep Parse (BroadcastChannel) ───────────────────────────────────
+        function startDeepParse(btn, originalUrl) {
+            if (btn.disabled) return;
+
+            // 關閉上一次的 channel（防止重複訂閱）
+            if (_deepChannel) { _deepChannel.close(); _deepChannel = null; }
+
+            // 按鈕進入等待狀態
+            btn.disabled = true;
+            document.getElementById('deep-parse-label').textContent = '深度解析中…';
+            const statusEl = document.getElementById('deep-parse-status');
+            statusEl.textContent = '正在開啟深度解析視窗，請稍候…';
+            statusEl.classList.remove('hidden');
+
+            // 不支援 BroadcastChannel 時的 fallback（舊行為）
+            if (!window.BroadcastChannel) {
+                window.open(`https://purereader-proxy.vercel.app/api/deep?url=${encodeURIComponent(originalUrl)}`, '_blank', 'noopener,noreferrer');
+                btn.disabled = false;
+                document.getElementById('deep-parse-label').textContent = '深度解析 (開新分頁讀取完整內容)';
+                statusEl.textContent = '已開啟新分頁（此瀏覽器不支援自動回傳）';
+                return;
+            }
+
+            // 開啟同源的 pureReader 新分頁（帶 deep=1 參數）
+            window.open(`${window.location.pathname}?url=${encodeURIComponent(originalUrl)}&deep=1`, '_blank');
+
+            // 訂閱 BroadcastChannel 等待新分頁回傳結果
+            _deepChannel = new BroadcastChannel('pureReader-deep');
+
+            // 60 秒逾時
+            const timeoutId = setTimeout(() => {
+                if (!_deepChannel) return;
+                _deepChannel.close();
+                _deepChannel = null;
+                btn.disabled = false;
+                document.getElementById('deep-parse-label').textContent = '深度解析 (開新分頁讀取完整內容)';
+                statusEl.textContent = '深度解析逾時，請查看新開啟的分頁。';
+            }, 60_000);
+
+            _deepChannel.onmessage = ({ data }) => {
+                if (!data || data.type !== 'DEEP_RESULT' || data.url !== originalUrl) return;
+
+                clearTimeout(timeoutId);
+                _deepChannel.close();
+                _deepChannel = null;
+
+                if (data.error) {
+                    // 新分頁解析失敗，已自行導航至 Vercel URL
+                    btn.disabled = false;
+                    document.getElementById('deep-parse-label').textContent = '深度解析 (開新分頁讀取完整內容)';
+                    statusEl.textContent = '深度解析已在新分頁開啟（無法自動回傳）';
+                    return;
+                }
+
+                // 成功：更新 Reader 內容
+                cacheArticle(originalUrl, data.articleData);
+                saveToHistory(originalUrl, data.articleData.title, data.articleData.domain || '');
+                renderArticle(data.articleData, originalUrl, false);
+                showSyncBar('✓ 深度解析完成，內容已更新', null, null, 4000);
+                // renderArticle 會重建 deep-fetch-container，不需額外清理按鈕
+            };
+        }
+
+        async function extractArticleDeep(url) {
+            showLoading();
+            const hint = document.getElementById('loading-url-hint');
+            if (hint) { try { hint.textContent = new URL(url).hostname; } catch(e) { hint.textContent = url; } }
+            const statusEl = document.getElementById('loading-status-text');
+            if (statusEl) statusEl.textContent = '深度解析中 (透過無頭瀏覽器)…';
+
+            const vercelDeepUrl = `https://purereader-proxy.vercel.app/api/deep?url=${encodeURIComponent(url)}`;
+            const proxiedUrl    = `https://api.allorigins.win/get?url=${encodeURIComponent(vercelDeepUrl)}`;
+
+            const broadcast = (payload) => {
+                if (!window.BroadcastChannel) return;
+                const ch = new BroadcastChannel('pureReader-deep');
+                ch.postMessage({ type: 'DEEP_RESULT', url, ...payload });
+                ch.close();
+            };
+
+            let html = null;
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 45_000);
+                const res = await fetch(proxiedUrl, { signal: controller.signal });
+                clearTimeout(timer);
+                if (!res.ok) throw new Error(`allOrigins HTTP ${res.status}`);
+                const json = await res.json();
+                if (json.status?.http_code >= 400) throw new Error(`Vercel HTTP ${json.status.http_code}`);
+                html = json.contents;
+                if (!html || html.length < 500) throw new Error('內容太短');
+            } catch (err) {
+                console.warn('[pureReader deep] allOrigins failed:', err.message);
+                broadcast({ error: err.message });
+                window.location.href = vercelDeepUrl;  // fallback：直接導覽至 Vercel URL
+                return;
+            }
+
+            let articleData;
+            try {
+                articleData = await processRawHtml(url, html);  // 複用既有解析邏輯（含 cache + history 寫入）
+            } catch (err) {
+                console.warn('[pureReader deep] Readability failed:', err.message);
+                broadcast({ error: err.message });
+                window.location.href = vercelDeepUrl;
+                return;
+            }
+
+            broadcast({ articleData });               // 廣播回原始分頁
+            renderArticle(articleData, url, false);   // 新分頁也顯示內容
+        }
+
         function renderArticle(articleData, originalUrl, isFromCache) {
             const titleEl      = document.getElementById('article-title');
             const authorEl     = document.getElementById('article-author');
@@ -934,19 +1047,22 @@
                 img.removeAttribute('height');
             });
 
-            // 深度解析按鈕（改為直接開新分頁，避免 Vercel Timeout 沒有 CORS 標頭的問題）
+            // 深度解析按鈕（透過 BroadcastChannel 將結果回傳原始分頁）
             let deepContainer = document.getElementById('deep-fetch-container');
             if (deepContainer) deepContainer.remove();
 
-            const deepUrl = `https://purereader-proxy.vercel.app/api/deep?url=${encodeURIComponent(originalUrl)}`;
+            const _escapedDeepUrl = originalUrl.replace(/'/g, '%27');
 
             contentEl.insertAdjacentHTML('afterend', `
                 <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
                     <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺？此網頁可能需要 JS 渲染</p>
-                    <a href="${deepUrl}" target="_blank" rel="noopener noreferrer" class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 mx-auto">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                        深度解析 (開新分頁讀取完整內容)
-                    </a>
+                    <button id="deep-parse-btn"
+                        onclick="startDeepParse(this, '${_escapedDeepUrl}')"
+                        class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 mx-auto">
+                        <svg id="deep-parse-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        <span id="deep-parse-label">深度解析 (開新分頁讀取完整內容)</span>
+                    </button>
+                    <p id="deep-parse-status" class="hidden text-xs text-indigo-500 dark:text-indigo-400 mt-2"></p>
                     <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">將透過無頭瀏覽器伺服器完整渲染 JS。</p>
                 </div>
             `);
@@ -1077,8 +1193,9 @@
             }
 
             // Handle Web Share Target (GET params)
-            const params = new URLSearchParams(window.location.search);
-            let sharedUrl = params.get('url') || params.get('text') || '';
+            const params    = new URLSearchParams(window.location.search);
+            let sharedUrl   = params.get('url') || params.get('text') || '';
+            const isDeepTab = params.get('deep') === '1';
 
             // Some apps send a full URL inside the text param
             if (sharedUrl && !sharedUrl.startsWith('http')) {
@@ -1088,7 +1205,11 @@
 
             if (sharedUrl && sharedUrl.startsWith('http')) {
                 document.getElementById('url-input').value = sharedUrl;
-                extractArticle(sharedUrl);
+                if (isDeepTab) {
+                    extractArticleDeep(sharedUrl);   // 新分頁：只走深度解析路徑
+                } else {
+                    extractArticle(sharedUrl);
+                }
             }
         });
     </script>
