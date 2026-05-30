@@ -340,12 +340,30 @@
             const anyRealCall = sequence.some(b => !['pass','dbl','rdbl'].includes(b.call));
 
             if (!anyRealCall) return computeOpeningBid(hcp, lengths);
+
+            // 路徑 A：回應搭檔開叫
+            // 必須確認：搭檔的第一次叫牌是在對手叫牌「之前」，
+            // 否則搭檔只是在蓋叫（overcall），不應觸發正常回應邏輯。
             if (partnerBids.length > 0 && myBids.length === 0) {
-                const bid = computeResponse(hcp, lengths, partnerBids[0].call, highestBid);
-                if (legalBid(bid)) return bid;
-                if (bid === '1N' && legalBid('2N')) return '2N';
-                return 'pass';
+                const partnerFirstBidIdx = sequence.findIndex(
+                    b => b.seat === partner && !['pass','dbl','rdbl'].includes(b.call)
+                );
+                // 檢查在搭檔叫牌之前，對手是否已有實叫
+                const oppBidBeforePartner = sequence
+                    .slice(0, partnerFirstBidIdx)
+                    .some(b => b.seat % 2 !== seat % 2 && !['pass','dbl','rdbl'].includes(b.call));
+
+                if (!oppBidBeforePartner) {
+                    // 搭檔是開叫方，正常回應
+                    const bid = computeResponse(hcp, lengths, partnerBids[0].call, highestBid);
+                    if (legalBid(bid)) return bid;
+                    if (bid === '1N' && legalBid('2N')) return '2N';
+                    return 'pass';
+                }
+                // 搭檔是蓋叫方，不做特別回應（落入下方競叫或 pass）
             }
+
+            // 路徑 B：對手開叫，且我方（自己與搭檔）尚未叫 → 蓋叫
             if (oppBids.length > 0 && myBids.length === 0 && partnerBids.length === 0) {
                 const bid = computeOvercall(hcp, lengths, highestBid);
                 if (legalBid(bid)) return bid;
