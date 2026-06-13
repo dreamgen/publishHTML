@@ -1573,9 +1573,6 @@
                         _showPrefetchProgress(pagesAhead + fetched, _session.prefetchCount);
                         await _saveSession();
 
-                        // Capacity control: trim old pages behind current position
-                        if (_session.maxKeep > 0) await _cleanupOldPages();
-
                     } catch (e) {
                         if (e.name === 'AbortError') break;
                         console.error('[NovelMode] Prefetch error:', e);
@@ -1693,9 +1690,14 @@
 
                 _updateIndicators();
 
-                // Sliding window: refill the prefetch buffer ahead of new position
-                if (navigator.onLine && !_prefetching) {
-                    prefetch(); // fire and forget — will calculate how many more are needed
+                // Sliding window: abort any running prefetch, then refill buffer
+                if (navigator.onLine) {
+                    if (_prefetching && _abortCtrl) {
+                        _abortCtrl.abort();
+                        _abortCtrl   = null;
+                        _prefetching = false;
+                    }
+                    prefetch(); // fire and forget — recalculates needed from new currentIdx
                 }
             }
 
