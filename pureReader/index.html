@@ -495,8 +495,10 @@
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
                     </button>
                 </div>
-                <!-- Exit novel mode -->
-                <div class="text-center mt-2">
+                <!-- Exit / Update novel mode -->
+                <div class="flex justify-center gap-4 mt-2">
+                    <button onclick="NovelMode.checkUpdates()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔄 檢查更新</button>
+                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出小說模式</button>
                 </div>
             </div>
@@ -2032,6 +2034,93 @@
                 return null;
             }
 
+            async function checkUpdates() {
+                if (!_session) return;
+                if (!navigator.onLine) {
+                    showSyncBar('📶 離線中，無法檢查更新', null, null, 3000);
+                    return;
+                }
+
+                showSyncBar('🔄 正在檢查更新中...', null, null, 2000);
+
+                // 1. If the current page is missing or has no content, try to reload it
+                const currentUrl = _session.currentUrl;
+                const currentPage = await idbGet('novel-pages', currentUrl).catch(() => null);
+                if (!currentPage || !currentPage.content) {
+                    try {
+                        showSyncBar('🔄 正在重新載入當前章節...', null, null, 2000);
+                        const html = await _fetchHtml(currentUrl);
+                        if (html) {
+                            const doc = new DOMParser().parseFromString(html, 'text/html');
+                            // Clean images
+                            doc.querySelectorAll('img').forEach(img => {
+                                const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
+                                if (s) img.setAttribute('src', s);
+                            });
+                            // Clean scripts/ads
+                            doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads').forEach(el => el.remove());
+                            const article = new Readability(doc).parse();
+                            if (article?.content) {
+                                const cleanContent = DOMPurify.sanitize(article.content, {
+                                    USE_PROFILES: { html: true },
+                                    ADD_TAGS: ['img', 'figure', 'figcaption'],
+                                    FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
+                                });
+                                await idbPut('novel-pages', {
+                                    url:       currentUrl,
+                                    title:     article.title || '',
+                                    content:   cleanContent,
+                                    rawHtml:   html,
+                                    fetchedAt: Date.now(),
+                                    sessionId: _session.id
+                                });
+                                // Re-render current page
+                                await _navigateToPage(_session.currentIdx);
+                                showSyncBar('✓ 當前章節重新載入成功', null, null, 3000);
+                            }
+                        }
+                    } catch (e) {
+                        showSyncBar('⚠ 重新載入當前章節失敗', null, null, 3000);
+                    }
+                }
+
+                // 2. Check for new chapters from the last page
+                const lastUrl = _session.pages[_session.pages.length - 1];
+                try {
+                    const html = await _fetchHtml(lastUrl);
+                    if (!html) {
+                        showSyncBar('⚠ 無法連線至原始網頁', null, null, 3000);
+                        return;
+                    }
+
+                    const foundNextUrl = _findNextUrl(html, lastUrl);
+                    if (foundNextUrl && !_session.pages.includes(foundNextUrl) && !_isEndOrIndexUrl(foundNextUrl, _session.startUrl)) {
+                        // Update the raw HTML of the last page to save the new next link
+                        const lastPageData = await idbGet('novel-pages', lastUrl).catch(() => null);
+                        if (lastPageData) {
+                            lastPageData.rawHtml = html;
+                            await idbPut('novel-pages', lastPageData);
+                        }
+
+                        // Trigger prefetch to download new chapters
+                        showSyncBar('🎉 發現新章節！開始背景預載...', null, null, 3000);
+                        if (_prefetching) {
+                            if (_abortCtrl) {
+                                _abortCtrl.abort();
+                                _abortCtrl = null;
+                            }
+                            _prefetching = false;
+                        }
+                        prefetch();
+                    } else {
+                        showSyncBar('目前已是最新章節，暫無更新。', null, null, 3000);
+                    }
+                } catch (e) {
+                    console.error('[NovelMode] Update check failed:', e);
+                    showSyncBar('⚠ 檢查更新失敗，請稍後再試', null, null, 3000);
+                }
+            }
+
             function _escHtml(str) {
                 const d = document.createElement('div');
                 d.textContent = str;
@@ -2045,6 +2134,7 @@
                 activate, deactivate,
                 loadNext, loadPrev,
                 prefetch,
+                checkUpdates,
                 resumeSession, deleteSession, clearAllSessions, clearCache,
                 renderBookmarks,
                 get active() { return _active; },
