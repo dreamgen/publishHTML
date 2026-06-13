@@ -1484,8 +1484,9 @@
                 const needed     = _session.prefetchCount - pagesAhead;
                 if (needed <= 0) return; // buffer is full
 
+                const activeCtrl = new AbortController();
+                _abortCtrl   = activeCtrl;
                 _prefetching = true;
-                _abortCtrl   = new AbortController();
 
                 let fetched = 0;
                 let nextUrl = _session.pages[_session.pages.length - 1];
@@ -1493,15 +1494,18 @@
                 _showPrefetchProgress(pagesAhead, _session.prefetchCount);
 
                 while (fetched < needed && _active) {
+                    if (activeCtrl.signal.aborted) break;
                     try {
                         // Get raw HTML of the last page to find its "next" link
                         const lastPageData = await idbGet('novel-pages', nextUrl).catch(() => null);
+                        if (activeCtrl.signal.aborted) break;
                         let html = null;
 
                         if (lastPageData?.rawHtml) {
                             html = lastPageData.rawHtml;
                         } else {
-                            html = await _fetchHtml(nextUrl, _abortCtrl.signal);
+                            html = await _fetchHtml(nextUrl, activeCtrl.signal);
+                            if (activeCtrl.signal.aborted) break;
                             if (html && lastPageData) {
                                 lastPageData.rawHtml = html;
                                 await idbPut('novel-pages', lastPageData);
@@ -1509,15 +1513,18 @@
                         }
 
                         if (!html) { console.warn('[NovelMode] Failed to fetch', nextUrl); break; }
+                        if (activeCtrl.signal.aborted) break;
 
                         // First page: also store its raw HTML for auto-detect
                         if (fetched === 0 && nextUrl === _session.pages[0]) {
                             const firstPage = await idbGet('novel-pages', nextUrl).catch(() => null);
+                            if (activeCtrl.signal.aborted) break;
                             if (firstPage && !firstPage.rawHtml) {
                                 firstPage.rawHtml = html;
                                 await idbPut('novel-pages', firstPage);
                             }
                         }
+                        if (activeCtrl.signal.aborted) break;
 
                         // Find next link from this page
                         const foundNextUrl = _findNextUrl(html, nextUrl);
@@ -1535,7 +1542,8 @@
                         }
 
                         // Fetch the next page
-                        const nextHtml = await _fetchHtml(foundNextUrl, _abortCtrl.signal);
+                        const nextHtml = await _fetchHtml(foundNextUrl, activeCtrl.signal);
+                        if (activeCtrl.signal.aborted) break;
                         if (!nextHtml) break;
 
                         // Parse with Readability
@@ -1551,6 +1559,7 @@
                             console.warn('[NovelMode] Could not parse next page:', foundNextUrl);
                             break;
                         }
+                        if (activeCtrl.signal.aborted) break;
 
                         const cleanContent = DOMPurify.sanitize(article.content, {
                             USE_PROFILES: { html: true },
@@ -1566,6 +1575,7 @@
                             fetchedAt: Date.now(),
                             sessionId: _session.id
                         });
+                        if (activeCtrl.signal.aborted) break;
 
                         _session.pages.push(foundNextUrl);
                         nextUrl = foundNextUrl;
@@ -1580,10 +1590,12 @@
                     }
                 }
 
-                _prefetching = false;
-                _abortCtrl   = null;
-                _updateIndicators();
-                _hidePrefetchProgress();
+                if (_abortCtrl === activeCtrl) {
+                    _prefetching = false;
+                    _abortCtrl   = null;
+                    _updateIndicators();
+                    _hidePrefetchProgress();
+                }
             }
 
             // ── Find next URL from HTML ──────────────────────────────────────
@@ -1628,7 +1640,13 @@
                         return;
                     }
                     // Force-fetch exactly 1 page so the user isn't stuck
-                    _prefetching = false; // allow re-entry
+                    if (_prefetching) {
+                        if (_abortCtrl) {
+                            _abortCtrl.abort();
+                            _abortCtrl = null;
+                        }
+                        _prefetching = false;
+                    }
                     const saved = _session.prefetchCount;
                     _session.prefetchCount = 1;
                     await prefetch();
@@ -1692,9 +1710,11 @@
 
                 // Sliding window: abort any running prefetch, then refill buffer
                 if (navigator.onLine) {
-                    if (_prefetching && _abortCtrl) {
-                        _abortCtrl.abort();
-                        _abortCtrl   = null;
+                    if (_prefetching) {
+                        if (_abortCtrl) {
+                            _abortCtrl.abort();
+                            _abortCtrl = null;
+                        }
                         _prefetching = false;
                     }
                     prefetch(); // fire and forget — recalculates needed from new currentIdx
