@@ -455,6 +455,12 @@
                         <span class="text-sm text-gray-500 dark:text-gray-400">頁（0 = 不限制）</span>
                     </div>
                 </div>
+                <!-- End Keywords -->
+                <div>
+                    <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">最末頁關鍵字</label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">當網頁內容或標題包含此字詞時，自動判定為最末頁並停止預載。多個關鍵字請用逗號隔開。</p>
+                    <input type="text" id="novel-end-keywords" placeholder="例如：待續, 全書完, 敬請期待" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                </div>
                 <!-- Storage Info -->
                 <div id="novel-storage-info" class="hidden bg-gray-50 dark:bg-gray-700/50 rounded-lg px-4 py-3">
                     <p class="text-xs text-gray-500 dark:text-gray-400">目前已儲存 <span id="novel-stored-count" class="font-bold text-indigo-600 dark:text-indigo-400">0</span> 頁，佔用約 <span id="novel-stored-size" class="font-bold">0 KB</span></p>
@@ -1319,6 +1325,7 @@
                     document.getElementById('novel-selector-input').value = _session.selector || '';
                     document.getElementById('novel-prefetch-count').value = _session.prefetchCount || 10;
                     document.getElementById('novel-max-keep').value       = _session.maxKeep || 0;
+                    document.getElementById('novel-end-keywords').value   = _session.endKeywords || '';
                 }
             }
             function closePanel() {
@@ -1424,6 +1431,7 @@
                 const selectorInput = document.getElementById('novel-selector-input').value.trim();
                 const prefetchCount = parseInt(document.getElementById('novel-prefetch-count').value) || 10;
                 const maxKeep       = parseInt(document.getElementById('novel-max-keep').value) || 0;
+                const endKeywords   = document.getElementById('novel-end-keywords').value.trim();
 
                 if (!selectorInput) {
                     alert('請輸入下一頁連結的選擇器或關鍵字');
@@ -1461,6 +1469,7 @@
                     _session.selectorType  = isCssSelector ? 'css' : 'keyword';
                     _session.prefetchCount = prefetchCount;
                     _session.maxKeep       = maxKeep;
+                    _session.endKeywords   = endKeywords;
                     _session.currentUrl    = currentUrl;
                     
                     const idx = _session.pages.indexOf(currentUrl);
@@ -1477,6 +1486,7 @@
                         selectorType:   isCssSelector ? 'css' : 'keyword',
                         prefetchCount:  prefetchCount,
                         maxKeep:        maxKeep,
+                        endKeywords:    endKeywords,
                         pages:          [currentUrl],
                         currentIdx:     0,
                         createdAt:      Date.now(),
@@ -1616,6 +1626,39 @@
                         }
                         if (activeCtrl.signal.aborted) break;
 
+                        // ── Smart check 1: Chapter number jump check ──────────────────
+                        const lastNum = _parseChapterNumber(lastPageData?.title || _session.title);
+                        const nextNum = _parseChapterNumber(article.title);
+                        if (lastNum !== null && nextNum !== null) {
+                            const diff = nextNum - lastNum;
+                            if (diff !== 0 && diff !== 1) {
+                                console.info(`[NovelMode] Chapter jump check: ${lastNum} -> ${nextNum} (diff ${diff}), stopping prefetch.`);
+                                break;
+                            }
+                        }
+
+                        // ── Smart check 2: Title and Content end keywords check ───────
+                        const plainText = article.textContent || '';
+                        const textTail = plainText.slice(-300); // check last 300 characters
+                        
+                        let endKeywords = ['讀完', '待續', '全書完', '已完結', '未完待續', '下回待續', '敬請期待', '全劇終', '完結'];
+                        if (_session.endKeywords) {
+                            const customKeywords = _session.endKeywords.split(/[,，]/).map(k => k.trim()).filter(Boolean);
+                            endKeywords = [...endKeywords, ...customKeywords];
+                        }
+
+                        const matchedTitleKeyword = endKeywords.find(kw => article.title.includes(kw));
+                        if (matchedTitleKeyword) {
+                            console.info(`[NovelMode] Found end keyword "${matchedTitleKeyword}" in next chapter title, stopping prefetch.`);
+                            break;
+                        }
+
+                        const matchedContentKeyword = endKeywords.find(kw => textTail.includes(kw));
+                        if (matchedContentKeyword) {
+                            console.info(`[NovelMode] Found end keyword "${matchedContentKeyword}" in next chapter content, stopping prefetch.`);
+                            break;
+                        }
+
                         const cleanContent = DOMPurify.sanitize(article.content, {
                             USE_PROFILES: { html: true },
                             ADD_TAGS: ['img', 'figure', 'figcaption'],
@@ -1719,6 +1762,64 @@
                 } catch (e) {
                     return true; // invalid URL is considered ended
                 }
+            }
+
+            // ── Chinese numeral to Arabic number conversion ───────────────────
+            function _cnToNum(str) {
+                const cnNums = { '零':0, '一':1, '二':2, '兩':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9 };
+                const cnUnits = { '十':10, '百':100, '千':1000, '萬':10000 };
+                
+                str = str.replace(/\s+/g, '');
+                let val = 0;
+                let temp = 0;
+                
+                for (let i = 0; i < str.length; i++) {
+                    const char = str[i];
+                    if (cnNums[char] !== undefined) {
+                        temp = cnNums[char];
+                    } else if (cnUnits[char] !== undefined) {
+                        const u = cnUnits[char];
+                        if (u === 10 && temp === 0 && val === 0) {
+                            temp = 1;
+                        }
+                        if (u >= 10000) {
+                            val = (val + temp) * u;
+                            temp = 0;
+                        } else {
+                            val += temp * u;
+                            temp = 0;
+                        }
+                    }
+                }
+                return val + temp;
+            }
+
+            // ── Extract chapter number from title ─────────────────────────────
+            function _parseChapterNumber(title) {
+                if (!title) return null;
+                title = title.trim();
+                
+                const m1 = title.match(/第\s*([0-9]+|[一二三四五六七八九十百千零兩]+)\s*[章節回折卷]/);
+                if (m1) {
+                    const raw = m1[1];
+                    if (/^[0-9]+$/.test(raw)) {
+                        return parseInt(raw, 10);
+                    } else {
+                        return _cnToNum(raw);
+                    }
+                }
+                
+                const m2 = title.match(/(?:chapter|ch|vol|volume|part)\.?\s*([0-9]+)/i);
+                if (m2) {
+                    return parseInt(m2[1], 10);
+                }
+                
+                const m3 = title.match(/([0-9]+)/);
+                if (m3) {
+                    return parseInt(m3[1], 10);
+                }
+                
+                return null;
             }
 
             // ── Navigation ───────────────────────────────────────────────────
