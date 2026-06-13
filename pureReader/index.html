@@ -1580,6 +1580,12 @@
                             break;
                         }
 
+                        // Check if it jumps out of the novel pages (e.g. end.html or parent index)
+                        if (_isEndOrIndexUrl(foundNextUrl, _session.startUrl)) {
+                            console.info('[NovelMode] Next URL matches end/index pattern, stopping prefetch:', foundNextUrl);
+                            break;
+                        }
+
                         // Already in our list? skip but count
                         if (_session.pages.includes(foundNextUrl)) {
                             nextUrl = foundNextUrl;
@@ -1674,6 +1680,43 @@
                     }
                 }
                 return null;
+            }
+
+            // ── Check if URL indicates the end of the novel or Table of Contents ──
+            function _isEndOrIndexUrl(url, startUrl) {
+                try {
+                    const u = new URL(url);
+                    const s = new URL(startUrl);
+
+                    // Domain check
+                    if (u.origin !== s.origin) return true;
+
+                    // Parse last segment
+                    const path = u.pathname;
+                    const segments = path.split('/').filter(Boolean);
+                    if (segments.length === 0) return true; // root index
+
+                    const lastSeg = segments[segments.length - 1].toLowerCase();
+
+                    // Keywords indicating end/index
+                    const endKeywords = ['end', 'index', 'list', 'catalog', 'outline', 'directory', 'menu', 'home', 'about', 'category', 'main'];
+
+                    // Check if last segment is exactly one of these (with or without common extensions)
+                    const baseName = lastSeg.replace(/\.(html?|s?html|php|asp[x]?|jsp)$/i, '');
+                    if (endKeywords.includes(baseName)) {
+                        return true;
+                    }
+
+                    // Check if path is parent of start URL (shorter path and is a prefix)
+                    const sPath = s.pathname;
+                    if (path.length < sPath.length && sPath.startsWith(path)) {
+                        return true;
+                    }
+
+                    return false;
+                } catch (e) {
+                    return true; // invalid URL is considered ended
+                }
             }
 
             // ── Navigation ───────────────────────────────────────────────────
