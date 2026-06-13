@@ -1221,6 +1221,9 @@
             showSection('article-section');
             document.getElementById('font-controls').classList.remove('hidden');
             document.getElementById('novel-mode-btn').classList.remove('hidden');
+            if (typeof NovelMode !== 'undefined') {
+                NovelMode.onPageLoaded(originalUrl);
+            }
             window.scrollTo(0, 0);
         }
 
@@ -1324,14 +1327,24 @@
                 const panel = document.getElementById('novel-settings-panel');
                 panel.classList.contains('active') ? closePanel() : openPanel();
             }
-            function openPanel() {
+            async function openPanel() {
                 const sourceLink = document.getElementById('article-source-link');
                 const currentUrl = sourceLink?.href || '';
 
                 // Validate if the current _session belongs to the currentUrl
-                if (_session && (!_session.pages || !_session.pages.includes(currentUrl))) {
+                if (_session && !_isSameNovel(_session.startUrl, currentUrl)) {
                     _session = null;
                     _active = false;
+                }
+
+                // If _session is null, check if there's a matching session in IndexedDB
+                if (!_session && currentUrl) {
+                    const sessions = await idbGetAll('novel-sessions').catch(() => []);
+                    const existing = sessions.find(s => _isSameNovel(s.startUrl, currentUrl));
+                    if (existing) {
+                        _session = existing;
+                        _active = true;
+                    }
                 }
 
                 document.getElementById('novel-overlay').classList.add('active');
@@ -1478,7 +1491,7 @@
                 const isCssSelector = /^[#.a-z\[]/i.test(selectorInput);
 
                 // Validate if the in-memory _session belongs to the currentUrl
-                if (_session && (!_session.pages || !_session.pages.includes(currentUrl))) {
+                if (_session && !_isSameNovel(_session.startUrl, currentUrl)) {
                     _session = null;
                 }
 
@@ -1488,7 +1501,7 @@
                     existing = _session;
                 } else {
                     const sessions = await idbGetAll('novel-sessions').catch(() => []);
-                    existing = sessions.find(s => s.pages && s.pages.includes(currentUrl));
+                    existing = sessions.find(s => _isSameNovel(s.startUrl, currentUrl));
                 }
 
                 if (existing) {
@@ -1503,6 +1516,10 @@
                     const idx = _session.pages.indexOf(currentUrl);
                     if (idx !== -1) {
                         _session.currentIdx = idx;
+                    } else {
+                        // Append if manually jumped
+                        _session.pages.push(currentUrl);
+                        _session.currentIdx = _session.pages.length - 1;
                     }
                 } else {
                     const sessionId = _cacheKey(currentUrl);
@@ -1561,6 +1578,8 @@
                 _prefetching = false;
                 _session = null;
                 document.getElementById('novel-controls').classList.add('hidden');
+                const articleEl = document.getElementById('article-section');
+                if (articleEl) articleEl.style.paddingBottom = '';
             }
 
             // ── Prefetch engine ──────────────────────────────────────────────
@@ -1803,6 +1822,41 @@
                 } catch (e) {
                     return true; // invalid URL is considered ended
                 }
+            }
+
+            // ── Extract unique book identifier from URL ───────────────────────
+            function _extractBookId(url) {
+                try {
+                    const u = new URL(url);
+                    let path = u.pathname.replace(/\.(html?|shtml|php|asp[x]?|jsp)$/i, '').replace(/\/$/, '');
+                    const segments = path.split('/').filter(Boolean);
+                    
+                    // Check query parameters for common book IDs
+                    const queryParams = ['id', 'bookid', 'bid', 'novelid', 'nid', 'book_id', 'novel_id'];
+                    for (const p of queryParams) {
+                        const val = u.searchParams.get(p);
+                        if (val) return u.hostname + '_query_' + p + '_' + val;
+                    }
+
+                    if (segments.length === 0) return u.hostname;
+
+                    // Strip trailing digits from the last segment (e.g. chapter number)
+                    let last = segments[segments.length - 1];
+                    last = last.replace(/[_-]?\d+$/, '');
+                    segments[segments.length - 1] = last;
+
+                    if (segments.length >= 2) {
+                        return u.hostname + '/' + segments.slice(0, -1).join('/');
+                    }
+                    return u.hostname + '/' + segments.join('/');
+                } catch (e) {
+                    return url;
+                }
+            }
+
+            function _isSameNovel(url1, url2) {
+                if (!url1 || !url2) return false;
+                return _extractBookId(url1) === _extractBookId(url2);
             }
 
             // ── Chinese numeral to Arabic number conversion ───────────────────
@@ -2529,6 +2583,53 @@
                 }
             }
 
+            async function onPageLoaded(url) {
+                if (!_active) return;
+
+                // Validate if the URL belongs to the current session
+                if (_session && _isSameNovel(_session.startUrl, url)) {
+                    // Update index and currentUrl
+                    const idx = _session.pages.indexOf(url);
+                    if (idx !== -1) {
+                        _session.currentIdx = idx;
+                    } else {
+                        // Append if manually jumped
+                        _session.pages.push(url);
+                        _session.currentIdx = _session.pages.length - 1;
+                    }
+                    _session.currentUrl = url;
+                    await _saveSession();
+                    _showControls();
+                    _updateIndicators();
+                    // Trigger prefetch to keep filling the sliding window
+                    prefetch();
+                    return;
+                }
+
+                // If not in current session, check if it belongs to another existing session
+                const sessions = await idbGetAll('novel-sessions').catch(() => []);
+                const existing = sessions.find(s => _isSameNovel(s.startUrl, url));
+                if (existing) {
+                    _session = existing;
+                    const idx = _session.pages.indexOf(url);
+                    if (idx !== -1) {
+                        _session.currentIdx = idx;
+                    } else {
+                        _session.pages.push(url);
+                        _session.currentIdx = _session.pages.length - 1;
+                    }
+                    _session.currentUrl = url;
+                    await _saveSession();
+                    _showControls();
+                    _updateIndicators();
+                    showSyncBar(`已自動切換至小說《${_session.title}》`, null, null, 2000);
+                    prefetch();
+                } else {
+                    // Doesn't belong to any session, deactivate novel mode
+                    deactivate();
+                }
+            }
+
             function _escHtml(str) {
                 const d = document.createElement('div');
                 d.textContent = str;
@@ -2545,7 +2646,7 @@
                 checkUpdates,
                 toggleAutoUpdate, checkSessionUpdates, triggerAutoUpdates,
                 resumeSession, deleteSession, clearAllSessions, clearCache,
-                renderBookmarks,
+                renderBookmarks, onPageLoaded,
                 get active() { return _active; },
                 get session() { return _session; }
             };
