@@ -83,6 +83,106 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+
+        /* ─── Novel Mode Styles ─────────────────────────────────────── */
+        /* Bottom Sheet Overlay */
+        #novel-overlay {
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            opacity: 0;
+        }
+        #novel-overlay.active {
+            pointer-events: auto;
+            opacity: 1;
+        }
+        /* Bottom Sheet Panel */
+        #novel-settings-panel {
+            transform: translateY(100%);
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        #novel-settings-panel.active {
+            transform: translateY(0);
+        }
+        /* Novel chapter separator */
+        .novel-chapter-sep {
+            position: relative;
+            text-align: center;
+            margin: 2.5rem 0 1.5rem;
+            padding: 1rem 0;
+        }
+        .novel-chapter-sep::before {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; top: 50%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #94a3b8, transparent);
+        }
+        .dark .novel-chapter-sep::before {
+            background: linear-gradient(90deg, transparent, #475569, transparent);
+        }
+        .novel-chapter-sep span {
+            position: relative;
+            background: #f9fafb;
+            padding: 0 1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #6366f1;
+            letter-spacing: 0.05em;
+        }
+        .dark .novel-chapter-sep span {
+            background: #111827;
+            color: #818cf8;
+        }
+        /* Prefetch progress bar */
+        .novel-prefetch-bar {
+            height: 3px;
+            background: #e2e8f0;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .dark .novel-prefetch-bar {
+            background: #374151;
+        }
+        .novel-prefetch-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            border-radius: 2px;
+            transition: width 0.4s ease;
+        }
+        /* Novel controls sticky bar */
+        #novel-controls {
+            animation: novelSlideUp 0.3s ease;
+        }
+        @keyframes novelSlideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        /* Offline indicator pulse */
+        .offline-pulse {
+            animation: offlinePulse 2s ease-in-out infinite;
+        }
+        @keyframes offlinePulse {
+            0%, 100% { opacity: 0.7; }
+            50%      { opacity: 1; }
+        }
+        /* Novel bookmark card hover */
+        .novel-bookmark-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .novel-bookmark-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px -5px rgba(0,0,0,0.1);
+        }
+        /* Candidate link highlight */
+        .novel-candidate {
+            transition: all 0.15s ease;
+        }
+        .novel-candidate:hover {
+            background: #eef2ff !important;
+        }
+        .dark .novel-candidate:hover {
+            background: #312e81 !important;
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 min-h-screen flex flex-col font-sans">
@@ -109,6 +209,14 @@
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
                     </button>
                 </div>
+
+                <!-- Novel Mode Toggle (Visible only when reading) -->
+                <button id="novel-mode-btn" onclick="NovelMode.togglePanel()" class="hidden p-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors" title="小說模式">
+                    <svg class="w-5 h-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path>
+                        <path d="m9 10 2 2 4-4"></path>
+                    </svg>
+                </button>
 
                 <!-- Dark Mode Toggle -->
                 <button id="theme-toggle" onclick="toggleTheme()" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="切換深淺模式">
@@ -142,6 +250,15 @@
         </div>
 
         <!-- Input & History Section -->
+        <!-- Offline Indicator -->
+        <div id="offline-indicator" class="hidden mb-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-center gap-3">
+            <span class="offline-pulse text-lg">📶</span>
+            <div>
+                <p class="text-sm font-bold text-amber-700 dark:text-amber-300">離線模式</p>
+                <p class="text-xs text-amber-600 dark:text-amber-400">可閱讀已預載的小說章節</p>
+            </div>
+        </div>
+
         <div id="input-section" class="flex flex-col flex-1 gap-8">
 
             <!-- URL Input Card -->
@@ -168,6 +285,18 @@
                     <h3 class="text-lg font-bold">背景擷取中</h3>
                 </div>
                 <ul id="pending-list" class="flex flex-col gap-3"></ul>
+            </div>
+
+            <!-- Novel Bookmarks Section -->
+            <div id="novel-bookmarks-section" class="hidden w-full">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+                        <span class="text-indigo-600 dark:text-indigo-400">小說書籤</span>
+                    </h3>
+                    <button onclick="NovelMode.clearAllSessions()" class="text-sm text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors">清空全部</button>
+                </div>
+                <ul id="novel-bookmarks-list" class="flex flex-col gap-3"></ul>
             </div>
 
             <!-- History Section -->
@@ -272,6 +401,107 @@
             <div id="article-content" class="prose dark:prose-invert max-w-none prose-lg md:prose-xl prose-img:rounded-xl"></div>
         </article>
 
+        <!-- Novel Mode Settings Panel (Bottom Sheet) -->
+        <div id="novel-overlay" class="fixed inset-0 bg-black/40 z-40" onclick="NovelMode.closePanel()"></div>
+        <div id="novel-settings-panel" class="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-800 rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div class="sticky top-0 bg-white dark:bg-gray-800 px-6 pt-4 pb-3 border-b border-gray-100 dark:border-gray-700 rounded-t-2xl">
+                <div class="w-10 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-3"></div>
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-bold flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+                        小說模式設定
+                    </h3>
+                    <button onclick="NovelMode.closePanel()" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="px-6 py-5 flex flex-col gap-6">
+                <!-- Next Page Selector -->
+                <div>
+                    <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">下一頁連結</label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">輸入 CSS 選擇器或關鍵字（如「下一章」「Next」），或使用自動偵測。</p>
+                    <div class="flex gap-2">
+                        <input type="text" id="novel-selector-input" placeholder="例如：a.next 或 下一章" class="flex-1 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                        <button onclick="NovelMode.autoDetect()" class="shrink-0 px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg text-sm font-medium transition-colors border border-indigo-100 dark:border-indigo-800/50">自動偵測</button>
+                    </div>
+                    <!-- Auto-detected candidates -->
+                    <div id="novel-candidates" class="hidden mt-3">
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">偵測到的候選連結：</p>
+                        <ul id="novel-candidates-list" class="flex flex-col gap-1.5 max-h-40 overflow-y-auto"></ul>
+                    </div>
+                </div>
+                <!-- Prefetch Count -->
+                <div>
+                    <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">預載頁數</label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">背景自動預先載入的章節數量。長途飛行建議設定較大數字（如 50-200）。</p>
+                    <div class="flex items-center gap-3">
+                        <input type="number" id="novel-prefetch-count" value="10" min="1" max="9999" class="w-24 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <span class="text-sm text-gray-500 dark:text-gray-400">頁</span>
+                        <div class="flex gap-1.5 ml-auto">
+                            <button onclick="document.getElementById('novel-prefetch-count').value=10" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">10</button>
+                            <button onclick="document.getElementById('novel-prefetch-count').value=50" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">50</button>
+                            <button onclick="document.getElementById('novel-prefetch-count').value=100" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">100</button>
+                            <button onclick="document.getElementById('novel-prefetch-count').value=200" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">200</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Max Keep Pages -->
+                <div>
+                    <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">最大保留頁數</label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">閱讀超過此頁數後，自動刪除最早的章節以節省空間。設 0 為不限制。</p>
+                    <div class="flex items-center gap-3">
+                        <input type="number" id="novel-max-keep" value="0" min="0" max="9999" class="w-24 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <span class="text-sm text-gray-500 dark:text-gray-400">頁（0 = 不限制）</span>
+                    </div>
+                </div>
+                <!-- Storage Info -->
+                <div id="novel-storage-info" class="hidden bg-gray-50 dark:bg-gray-700/50 rounded-lg px-4 py-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">目前已儲存 <span id="novel-stored-count" class="font-bold text-indigo-600 dark:text-indigo-400">0</span> 頁，佔用約 <span id="novel-stored-size" class="font-bold">0 KB</span></p>
+                </div>
+                <!-- Action Buttons -->
+                <div class="flex gap-3">
+                    <button onclick="NovelMode.activate()" class="flex-1 py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-medium rounded-xl shadow-md transition-all text-sm">啟用小說模式</button>
+                    <button onclick="NovelMode.clearCache()" class="px-4 py-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 font-medium rounded-xl transition-colors text-sm border border-red-100 dark:border-red-800/50">清除快取</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Novel Controls Bar (visible during novel reading) -->
+        <div id="novel-controls" class="hidden fixed bottom-0 left-0 right-0 z-30 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border-t border-gray-200 dark:border-gray-700 shadow-lg">
+            <div class="max-w-3xl mx-auto px-4 py-3">
+                <!-- Prefetch progress -->
+                <div id="novel-prefetch-progress" class="hidden mb-2">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs text-gray-500 dark:text-gray-400">預載進度</span>
+                        <span id="novel-prefetch-status" class="text-xs font-medium text-indigo-600 dark:text-indigo-400">0/0</span>
+                    </div>
+                    <div class="novel-prefetch-bar">
+                        <div id="novel-prefetch-fill" class="novel-prefetch-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+                <!-- Navigation -->
+                <div class="flex items-center justify-between gap-3">
+                    <button onclick="NovelMode.loadPrev()" id="novel-prev-btn" disabled class="flex items-center gap-1.5 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
+                        上一章
+                    </button>
+                    <div class="flex flex-col items-center">
+                        <span id="novel-page-indicator" class="text-xs font-bold text-indigo-600 dark:text-indigo-400">第 1 章</span>
+                        <span id="novel-cache-indicator" class="text-xs text-gray-400 dark:text-gray-500"></span>
+                    </div>
+                    <button onclick="NovelMode.loadNext()" id="novel-next-btn" class="flex items-center gap-1.5 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition-colors shadow-sm">
+                        下一章
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+                    </button>
+                </div>
+                <!-- Exit novel mode -->
+                <div class="text-center mt-2">
+                    <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出小說模式</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Background Sync / Fetch status bar -->
         <div id="sync-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-sm font-medium px-5 py-3 rounded-2xl shadow-xl z-50 flex items-center gap-3 w-max max-w-[90vw]">
             <span id="sync-bar-text" class="flex-1 leading-snug"></span>
@@ -292,13 +522,16 @@
         const MAX_HISTORY_ITEMS       = 20;
 
         // ─── IndexedDB (shared schema with Service Worker) ────────────────────
-        const IDB_NAME = 'pureReader-db';
+        const IDB_NAME    = 'pureReader-db';
+        const IDB_VERSION = 2;  // Upgraded for novel-pages & novel-sessions stores
         function openIdb() {
             return new Promise((resolve, reject) => {
-                const req = indexedDB.open(IDB_NAME, 1);
+                const req = indexedDB.open(IDB_NAME, IDB_VERSION);
                 req.onupgradeneeded = ({ target: { result: db } }) => {
-                    if (!db.objectStoreNames.contains('sync-queue')) db.createObjectStore('sync-queue', { keyPath: 'url' });
-                    if (!db.objectStoreNames.contains('raw-html'))   db.createObjectStore('raw-html',   { keyPath: 'url' });
+                    if (!db.objectStoreNames.contains('sync-queue'))     db.createObjectStore('sync-queue', { keyPath: 'url' });
+                    if (!db.objectStoreNames.contains('raw-html'))       db.createObjectStore('raw-html',   { keyPath: 'url' });
+                    if (!db.objectStoreNames.contains('novel-pages'))    db.createObjectStore('novel-pages', { keyPath: 'url' });
+                    if (!db.objectStoreNames.contains('novel-sessions')) db.createObjectStore('novel-sessions', { keyPath: 'id' });
                 };
                 req.onsuccess = () => resolve(req.result);
                 req.onerror   = () => reject(req.error);
@@ -308,9 +541,21 @@
             const db = await openIdb();
             return new Promise((res, rej) => { const r = db.transaction(store,'readonly').objectStore(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
         }
+        async function idbPut(store, value) {
+            const db = await openIdb();
+            return new Promise((res, rej) => { const r = db.transaction(store,'readwrite').objectStore(store).put(value); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+        }
         async function idbDelete(store, key) {
             const db = await openIdb();
             return new Promise((res, rej) => { const r = db.transaction(store,'readwrite').objectStore(store).delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
+        }
+        async function idbGetAll(store) {
+            const db = await openIdb();
+            return new Promise((res, rej) => { const r = db.transaction(store,'readonly').objectStore(store).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+        }
+        async function idbClearStore(store) {
+            const db = await openIdb();
+            return new Promise((res, rej) => { const r = db.transaction(store,'readwrite').objectStore(store).clear(); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
         }
 
         // ─── PWA Install Prompt ────────────────────────────────────────────────
@@ -631,12 +876,15 @@
 
         function resetView() {
             document.getElementById('font-controls').classList.add('hidden');
+            document.getElementById('novel-mode-btn').classList.add('hidden');
+            NovelMode.deactivate();
             showSection('input-section');
             window.history.replaceState({}, document.title, window.location.pathname);
             document.getElementById('url-input').value = '';
             renderHistoryList();
             renderPendingJobs();
             renderFailedHosts();
+            NovelMode.renderBookmarks();
         }
 
         function showError(msg) {
@@ -953,6 +1201,7 @@
 
             showSection('article-section');
             document.getElementById('font-controls').classList.remove('hidden');
+            document.getElementById('novel-mode-btn').classList.remove('hidden');
             window.scrollTo(0, 0);
         }
 
@@ -1041,6 +1290,653 @@
             if (url) extractArticle(url);
         }
 
+        // ─══════════════════════════════════════════════════════════════════
+        // ─── Novel Mode Module ────────────────────────────────────────────
+        // ─══════════════════════════════════════════════════════════════════
+        const NovelMode = (() => {
+            let _active      = false;
+            let _session     = null;   // { id, startUrl, currentUrl, selector, selectorType, prefetchCount, maxKeep, pages:[], currentIdx, createdAt }
+            let _prefetching = false;
+            let _abortCtrl   = null;
+            let _lastDetectedHtml = null; // Raw HTML from original page load, for auto-detect
+
+            // ── Panel open/close ──────────────────────────────────────────────
+            function togglePanel() { 
+                const panel = document.getElementById('novel-settings-panel');
+                panel.classList.contains('active') ? closePanel() : openPanel();
+            }
+            function openPanel() {
+                document.getElementById('novel-overlay').classList.add('active');
+                document.getElementById('novel-settings-panel').classList.add('active');
+                _updateStorageInfo();
+                // Pre-fill from existing session if any
+                if (_session) {
+                    document.getElementById('novel-selector-input').value = _session.selector || '';
+                    document.getElementById('novel-prefetch-count').value = _session.prefetchCount || 10;
+                    document.getElementById('novel-max-keep').value       = _session.maxKeep || 0;
+                }
+            }
+            function closePanel() {
+                document.getElementById('novel-overlay').classList.remove('active');
+                document.getElementById('novel-settings-panel').classList.remove('active');
+            }
+
+            // ── Auto-detect next-page links ───────────────────────────────────
+            function autoDetect() {
+                const contentEl = document.getElementById('article-content');
+                const sourceLink = document.getElementById('article-source-link');
+                if (!contentEl || !sourceLink) return;
+
+                // We scan the raw HTML stored from the last fetch, because Readability strips most nav links.
+                // Fallback: scan article-content DOM (limited).
+                const candidates = [];
+                const keywords   = ['下一頁','下一章','下一篇','下一回','下回','下章','next chapter','next page','next','後續','繼續閱讀','>>','→','»'];
+
+                // Attempt to re-fetch a lightweight scan of the original page from cache
+                const currentUrl = sourceLink.href;
+                _scanForCandidates(currentUrl, keywords).then(found => {
+                    const listEl   = document.getElementById('novel-candidates-list');
+                    const section  = document.getElementById('novel-candidates');
+                    if (found.length === 0) {
+                        section.classList.remove('hidden');
+                        listEl.innerHTML = '<li class="text-xs text-gray-400 py-2">未偵測到候選連結。請手動輸入 CSS 選擇器或連結文字關鍵字。</li>';
+                        return;
+                    }
+                    section.classList.remove('hidden');
+                    listEl.innerHTML = found.map((c, i) => `
+                        <li class="novel-candidate flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700/50 border border-transparent hover:border-indigo-300 dark:hover:border-indigo-600"
+                            onclick="NovelMode.selectCandidate(${i})">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+                            <div class="flex-1 min-w-0">
+                                <span class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate block">${_escHtml(c.text)}</span>
+                                <span class="text-xs text-gray-400 dark:text-gray-500 truncate block">${_escHtml(c.href)}</span>
+                            </div>
+                        </li>
+                    `).join('');
+                    // Store for selection
+                    _lastCandidates = found;
+                });
+            }
+            let _lastCandidates = [];
+
+            function selectCandidate(idx) {
+                if (!_lastCandidates[idx]) return;
+                const c = _lastCandidates[idx];
+                // Use the link text as keyword match
+                document.getElementById('novel-selector-input').value = c.text.trim();
+                document.getElementById('novel-candidates').classList.add('hidden');
+            }
+
+            async function _scanForCandidates(url, keywords) {
+                const results = [];
+                try {
+                    // Try to get the original raw HTML (before Readability stripped it)
+                    // First check IndexedDB raw-html store
+                    let html = null;
+                    const cached = await idbGet('raw-html', url).catch(() => null);
+                    if (cached?.html) {
+                        html = cached.html;
+                    } else {
+                        // Fetch fresh via proxy for scanning
+                        html = await _fetchHtml(url);
+                    }
+                    if (!html) return results;
+
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const links = doc.querySelectorAll('a[href]');
+                    const seen = new Set();
+                    links.forEach(a => {
+                        const text = (a.textContent || '').trim().toLowerCase();
+                        const href = a.getAttribute('href') || '';
+                        if (!href || href === '#' || href.startsWith('javascript:')) return;
+                        const matchesKeyword = keywords.some(kw => text.includes(kw.toLowerCase()));
+                        // Also check common CSS classes/IDs
+                        const classId = ((a.className || '') + ' ' + (a.id || '')).toLowerCase();
+                        const matchesClass = ['next', '下一'].some(kw => classId.includes(kw));
+                        if (matchesKeyword || matchesClass) {
+                            const resolvedHref = new URL(href, url).href;
+                            if (!seen.has(resolvedHref)) {
+                                seen.add(resolvedHref);
+                                results.push({ text: (a.textContent || '').trim().substring(0, 60), href: resolvedHref, selector: _buildSelector(a) });
+                            }
+                        }
+                    });
+                } catch (e) { console.warn('[NovelMode] autoDetect error:', e); }
+                return results;
+            }
+
+            function _buildSelector(el) {
+                if (el.id) return `#${el.id}`;
+                if (el.className) {
+                    const cls = el.className.split(/\s+/).filter(c => c && !c.includes(':'))[0];
+                    if (cls) return `a.${cls}`;
+                }
+                return null;
+            }
+
+            // ── Activate novel mode ───────────────────────────────────────────
+            async function activate() {
+                const selectorInput = document.getElementById('novel-selector-input').value.trim();
+                const prefetchCount = parseInt(document.getElementById('novel-prefetch-count').value) || 10;
+                const maxKeep       = parseInt(document.getElementById('novel-max-keep').value) || 0;
+
+                if (!selectorInput) {
+                    alert('請輸入下一頁連結的選擇器或關鍵字');
+                    return;
+                }
+
+                const sourceLink = document.getElementById('article-source-link');
+                const currentUrl = sourceLink?.href || '';
+                if (!currentUrl) return;
+
+                // Determine if it's a CSS selector or keyword
+                const isCssSelector = /^[#.a-z\[]/i.test(selectorInput);
+
+                // Create or update session
+                const sessionId = _cacheKey(currentUrl);
+                _session = {
+                    id:             sessionId,
+                    startUrl:       currentUrl,
+                    currentUrl:     currentUrl,
+                    selector:       selectorInput,
+                    selectorType:   isCssSelector ? 'css' : 'keyword',
+                    prefetchCount:  prefetchCount,
+                    maxKeep:        maxKeep,
+                    pages:          [currentUrl],
+                    currentIdx:     0,
+                    createdAt:      Date.now(),
+                    title:          document.getElementById('article-title')?.textContent || '未命名小說'
+                };
+
+                // Save current page content to novel-pages
+                const contentEl = document.getElementById('article-content');
+                await idbPut('novel-pages', {
+                    url:       currentUrl,
+                    title:     document.getElementById('article-title')?.textContent || '',
+                    content:   contentEl?.innerHTML || '',
+                    fetchedAt: Date.now(),
+                    sessionId: sessionId
+                });
+
+                _active = true;
+                await _saveSession();
+                closePanel();
+                _showControls();
+                _updateIndicators();
+
+                // Start prefetching
+                prefetch();
+            }
+
+            function deactivate() {
+                _active = false;
+                if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
+                _prefetching = false;
+                document.getElementById('novel-controls').classList.add('hidden');
+            }
+
+            // ── Prefetch engine ──────────────────────────────────────────────
+            async function prefetch() {
+                if (_prefetching || !_active || !_session) return;
+                _prefetching = true;
+                _abortCtrl   = new AbortController();
+
+                const target  = _session.prefetchCount;
+                let fetched   = 0;
+                let nextUrl   = _session.pages[_session.pages.length - 1];
+
+                _showPrefetchProgress(0, target);
+
+                while (fetched < target && _active) {
+                    try {
+                        // Find the next URL from the last fetched page
+                        const lastPageData = await idbGet('novel-pages', nextUrl).catch(() => null);
+                        let html = null;
+
+                        if (lastPageData?.rawHtml) {
+                            html = lastPageData.rawHtml;
+                        } else {
+                            html = await _fetchHtml(nextUrl, _abortCtrl.signal);
+                            if (html && lastPageData) {
+                                // Store rawHtml for future scanning
+                                lastPageData.rawHtml = html;
+                                await idbPut('novel-pages', lastPageData);
+                            }
+                        }
+
+                        if (!html) { console.warn('[NovelMode] Failed to fetch', nextUrl); break; }
+
+                        // If this is the first page, store its raw HTML too
+                        if (fetched === 0 && nextUrl === _session.pages[0]) {
+                            const firstPage = await idbGet('novel-pages', nextUrl).catch(() => null);
+                            if (firstPage && !firstPage.rawHtml) {
+                                firstPage.rawHtml = html;
+                                await idbPut('novel-pages', firstPage);
+                            }
+                        }
+
+                        // Find next link from this page
+                        const foundNextUrl = _findNextUrl(html, nextUrl);
+                        if (!foundNextUrl) {
+                            console.info('[NovelMode] No next link found, stopping prefetch');
+                            break;
+                        }
+
+                        // Check if already fetched
+                        if (_session.pages.includes(foundNextUrl)) {
+                            nextUrl = foundNextUrl;
+                            fetched++;
+                            _showPrefetchProgress(fetched, target);
+                            continue;
+                        }
+
+                        // Fetch the next page
+                        const nextHtml = await _fetchHtml(foundNextUrl, _abortCtrl.signal);
+                        if (!nextHtml) break;
+
+                        // Parse with Readability
+                        const doc = new DOMParser().parseFromString(nextHtml, 'text/html');
+                        // Fix lazy images
+                        doc.querySelectorAll('img').forEach(img => {
+                            const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
+                            if (s) img.setAttribute('src', s);
+                        });
+                        // Remove junk
+                        doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
+                        const article = new Readability(doc).parse();
+
+                        if (!article?.content) {
+                            console.warn('[NovelMode] Could not parse next page:', foundNextUrl);
+                            break;
+                        }
+
+                        // Sanitize content
+                        const cleanContent = DOMPurify.sanitize(article.content, {
+                            USE_PROFILES: { html: true },
+                            ADD_TAGS: ['img', 'figure', 'figcaption'],
+                            FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
+                        });
+
+                        // Store in IndexedDB
+                        await idbPut('novel-pages', {
+                            url:       foundNextUrl,
+                            title:     article.title || '',
+                            content:   cleanContent,
+                            rawHtml:   nextHtml,
+                            fetchedAt: Date.now(),
+                            sessionId: _session.id
+                        });
+
+                        _session.pages.push(foundNextUrl);
+                        nextUrl = foundNextUrl;
+                        fetched++;
+                        _showPrefetchProgress(fetched, target);
+                        await _saveSession();
+
+                        // Capacity control
+                        if (_session.maxKeep > 0) await _cleanupOldPages();
+
+                    } catch (e) {
+                        if (e.name === 'AbortError') break;
+                        console.error('[NovelMode] Prefetch error:', e);
+                        break;
+                    }
+                }
+
+                _prefetching = false;
+                _abortCtrl   = null;
+                _updateIndicators();
+                _hidePrefetchProgress();
+            }
+
+            // ── Find next URL from HTML ──────────────────────────────────────
+            function _findNextUrl(html, baseUrl) {
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                const sel = _session.selector;
+
+                // Try CSS selector first
+                if (_session.selectorType === 'css') {
+                    try {
+                        const el = doc.querySelector(sel);
+                        if (el?.href || el?.getAttribute('href')) {
+                            return new URL(el.getAttribute('href'), baseUrl).href;
+                        }
+                    } catch (e) { /* fallthrough to keyword */ }
+                }
+
+                // Keyword matching
+                const keyword = sel.toLowerCase();
+                const links = doc.querySelectorAll('a[href]');
+                for (const a of links) {
+                    const text = (a.textContent || '').trim().toLowerCase();
+                    const classId = ((a.className || '') + ' ' + (a.id || '')).toLowerCase();
+                    if (text.includes(keyword) || classId.includes(keyword)) {
+                        const href = a.getAttribute('href');
+                        if (href && href !== '#' && !href.startsWith('javascript:')) {
+                            return new URL(href, baseUrl).href;
+                        }
+                    }
+                }
+                return null;
+            }
+
+            // ── Navigation ───────────────────────────────────────────────────
+            async function loadNext() {
+                if (!_session) return;
+                const nextIdx = _session.currentIdx + 1;
+                if (nextIdx >= _session.pages.length) {
+                    // Try to fetch one more
+                    if (!navigator.onLine) {
+                        showSyncBar('📶 離線中，無法載入新章節', null, null, 3000);
+                        return;
+                    }
+                    // Temporarily prefetch 1 more
+                    const oldCount = _session.prefetchCount;
+                    _session.prefetchCount = 1;
+                    await prefetch();
+                    _session.prefetchCount = oldCount;
+                    if (nextIdx >= _session.pages.length) {
+                        showSyncBar('已到最後一章，未找到下一頁連結', null, null, 3000);
+                        return;
+                    }
+                }
+                await _navigateToPage(nextIdx);
+            }
+
+            async function loadPrev() {
+                if (!_session || _session.currentIdx <= 0) return;
+                await _navigateToPage(_session.currentIdx - 1);
+            }
+
+            async function _navigateToPage(idx) {
+                const url = _session.pages[idx];
+                const pageData = await idbGet('novel-pages', url).catch(() => null);
+                if (!pageData?.content) {
+                    showSyncBar('⚠ 此章節尚未載入', null, null, 3000);
+                    return;
+                }
+
+                _session.currentIdx  = idx;
+                _session.currentUrl  = url;
+                await _saveSession();
+
+                // Render in article area
+                const contentEl = document.getElementById('article-content');
+                const titleEl   = document.getElementById('article-title');
+                const sourceLink = document.getElementById('article-source-link');
+
+                if (pageData.title && titleEl) titleEl.textContent = pageData.title;
+                if (contentEl) {
+                    contentEl.innerHTML = pageData.content;
+                    // Fix relative image URLs
+                    try {
+                        const baseUri = new URL(url).origin;
+                        contentEl.querySelectorAll('img').forEach(img => {
+                            const src = img.getAttribute('src');
+                            if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+                                try { img.src = new URL(src, baseUri).href; } catch (e) {}
+                            }
+                            img.setAttribute('loading', 'lazy');
+                        });
+                    } catch (e) {}
+                }
+                if (sourceLink) {
+                    sourceLink.href = url;
+                    try { sourceLink.textContent = new URL(url).hostname; } catch(e) {}
+                }
+
+                // Show cache badge
+                document.getElementById('cache-badge')?.classList.remove('hidden');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                _updateIndicators();
+
+                // Continue prefetching if we're near the end
+                const remaining = _session.pages.length - idx - 1;
+                if (remaining < 3 && navigator.onLine && !_prefetching) {
+                    const oldCount = _session.prefetchCount;
+                    _session.prefetchCount = Math.max(5, _session.prefetchCount);
+                    prefetch(); // fire and forget
+                    _session.prefetchCount = oldCount;
+                }
+
+                // Capacity control
+                if (_session.maxKeep > 0) await _cleanupOldPages();
+            }
+
+            // ── Capacity control ─────────────────────────────────────────────
+            async function _cleanupOldPages() {
+                if (!_session || _session.maxKeep <= 0) return;
+                while (_session.pages.length > _session.maxKeep) {
+                    const oldUrl = _session.pages.shift();
+                    await idbDelete('novel-pages', oldUrl).catch(() => {});
+                    // Adjust currentIdx
+                    if (_session.currentIdx > 0) _session.currentIdx--;
+                }
+                await _saveSession();
+            }
+
+            // ── Session / Bookmark management ────────────────────────────────
+            async function _saveSession() {
+                if (!_session) return;
+                await idbPut('novel-sessions', _session);
+            }
+
+            async function resumeSession(sessionId) {
+                const session = await idbGet('novel-sessions', sessionId).catch(() => null);
+                if (!session) { alert('找不到此書籤'); return; }
+                _session = session;
+                _active  = true;
+
+                // Navigate to the current page
+                const pageData = await idbGet('novel-pages', session.currentUrl).catch(() => null);
+                if (pageData?.content) {
+                    // Show article section
+                    const articleData = {
+                        title:   pageData.title || '小說章節',
+                        byline:  '',
+                        content: pageData.content,
+                        domain:  (() => { try { return new URL(session.currentUrl).hostname; } catch(e){ return ''; } })()
+                    };
+                    renderArticle(articleData, session.currentUrl, true);
+                    _showControls();
+                    _updateIndicators();
+                } else {
+                    // Need to re-fetch
+                    extractArticle(session.currentUrl);
+                }
+            }
+
+            async function deleteSession(sessionId) {
+                // Delete all pages for this session
+                const session = await idbGet('novel-sessions', sessionId).catch(() => null);
+                if (session?.pages) {
+                    for (const url of session.pages) {
+                        await idbDelete('novel-pages', url).catch(() => {});
+                    }
+                }
+                await idbDelete('novel-sessions', sessionId).catch(() => {});
+                renderBookmarks();
+            }
+
+            async function clearAllSessions() {
+                if (!confirm('確定要清空所有小說書籤與預載資料嗎？')) return;
+                await idbClearStore('novel-sessions').catch(() => {});
+                await idbClearStore('novel-pages').catch(() => {});
+                renderBookmarks();
+            }
+
+            async function clearCache() {
+                if (!confirm('確定要清除所有小說預載快取嗎？書籤設定將保留。')) return;
+                await idbClearStore('novel-pages').catch(() => {});
+                // Reset pages arrays in sessions
+                const sessions = await idbGetAll('novel-sessions').catch(() => []);
+                for (const s of sessions) {
+                    s.pages = [s.startUrl];
+                    s.currentIdx = 0;
+                    s.currentUrl = s.startUrl;
+                    await idbPut('novel-sessions', s);
+                }
+                _updateStorageInfo();
+                showSyncBar('✓ 小說快取已清除', null, null, 3000);
+            }
+
+            // ── Bookmarks rendering (home screen) ────────────────────────────
+            async function renderBookmarks() {
+                const section = document.getElementById('novel-bookmarks-section');
+                const listEl  = document.getElementById('novel-bookmarks-list');
+                if (!section || !listEl) return;
+
+                let sessions = [];
+                try { sessions = await idbGetAll('novel-sessions'); } catch(e) {}
+                if (sessions.length === 0) {
+                    section.classList.add('hidden');
+                    listEl.innerHTML = '';
+                    return;
+                }
+
+                section.classList.remove('hidden');
+                sessions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                listEl.innerHTML = sessions.map(s => {
+                    const domain = (() => { try { return new URL(s.startUrl).hostname; } catch(e){ return ''; } })();
+                    const progress = `第 ${(s.currentIdx || 0) + 1} 章 / 共 ${s.pages?.length || 1} 章`;
+                    return `<li class="novel-bookmark-card bg-white dark:bg-gray-800 border border-indigo-100 dark:border-indigo-900/50 rounded-xl p-4 cursor-pointer flex items-center gap-3"
+                        onclick="NovelMode.resumeSession('${s.id}')">
+                        <div class="shrink-0 w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h4 class="font-bold text-sm line-clamp-2 text-gray-900 dark:text-gray-100 mb-0.5">${_escHtml(s.title || '未命名小說')}</h4>
+                            <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                                <span class="text-indigo-500 dark:text-indigo-400 font-medium">${progress}</span>
+                                <span class="truncate max-w-[100px]">${domain}</span>
+                            </div>
+                        </div>
+                        <button onclick="event.stopPropagation(); NovelMode.deleteSession('${s.id}')" 
+                            class="shrink-0 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="刪除書籤">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                        </button>
+                    </li>`;
+                }).join('');
+            }
+
+            // ── UI helpers ───────────────────────────────────────────────────
+            function _showControls() {
+                document.getElementById('novel-controls').classList.remove('hidden');
+                // Add bottom padding to article so controls don't overlap content
+                const articleEl = document.getElementById('article-section');
+                if (articleEl) articleEl.style.paddingBottom = '120px';
+            }
+
+            function _updateIndicators() {
+                if (!_session) return;
+                const pageInd  = document.getElementById('novel-page-indicator');
+                const cacheInd = document.getElementById('novel-cache-indicator');
+                const prevBtn  = document.getElementById('novel-prev-btn');
+                const nextBtn  = document.getElementById('novel-next-btn');
+
+                if (pageInd)  pageInd.textContent  = `第 ${_session.currentIdx + 1} 章`;
+                if (cacheInd) cacheInd.textContent  = `已預載 ${_session.pages.length} 章`;
+                if (prevBtn)  prevBtn.disabled       = _session.currentIdx <= 0;
+            }
+
+            function _showPrefetchProgress(current, total) {
+                const el = document.getElementById('novel-prefetch-progress');
+                if (el) el.classList.remove('hidden');
+                const status = document.getElementById('novel-prefetch-status');
+                const fill   = document.getElementById('novel-prefetch-fill');
+                if (status) status.textContent = `${current}/${total}`;
+                if (fill)   fill.style.width   = `${Math.min(100, (current / total) * 100)}%`;
+                _updateIndicators();
+            }
+
+            function _hidePrefetchProgress() {
+                setTimeout(() => {
+                    const el = document.getElementById('novel-prefetch-progress');
+                    if (el) el.classList.add('hidden');
+                }, 2000);
+            }
+
+            async function _updateStorageInfo() {
+                const infoEl = document.getElementById('novel-storage-info');
+                if (!infoEl) return;
+                try {
+                    const pages = await idbGetAll('novel-pages');
+                    const count = pages.length;
+                    const totalSize = pages.reduce((sum, p) => sum + (p.content?.length || 0) + (p.rawHtml?.length || 0), 0);
+                    document.getElementById('novel-stored-count').textContent = count;
+                    document.getElementById('novel-stored-size').textContent  = totalSize > 1048576 
+                        ? `${(totalSize / 1048576).toFixed(1)} MB` 
+                        : `${Math.round(totalSize / 1024)} KB`;
+                    infoEl.classList.remove('hidden');
+                } catch (e) { infoEl.classList.add('hidden'); }
+            }
+
+            // ── Fetch helper (reuses proxy strategy from main app) ───────────
+            async function _fetchHtml(url, signal) {
+                const strategies = [
+                    async () => {
+                        const res = await fetch(`https://purereader-proxy.vercel.app/api/proxy?url=${encodeURIComponent(url)}`, { signal });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return await res.text();
+                    },
+                    async () => {
+                        const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return await res.text();
+                    },
+                    async () => {
+                        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal });
+                        if (!res.ok) throw new Error('Proxy failed');
+                        const data = await res.json();
+                        return data.contents;
+                    }
+                ];
+                for (const fn of strategies) {
+                    try {
+                        const html = await fn();
+                        if (html && html.length > 200) return html;
+                    } catch (e) {
+                        if (e.name === 'AbortError') throw e;
+                    }
+                }
+                return null;
+            }
+
+            function _escHtml(str) {
+                const d = document.createElement('div');
+                d.textContent = str;
+                return d.innerHTML;
+            }
+
+            // Public API
+            return {
+                togglePanel, openPanel, closePanel,
+                autoDetect, selectCandidate,
+                activate, deactivate,
+                loadNext, loadPrev,
+                prefetch,
+                resumeSession, deleteSession, clearAllSessions, clearCache,
+                renderBookmarks,
+                get active() { return _active; },
+                get session() { return _session; }
+            };
+        })();
+
+        // ─── Offline Detection ─────────────────────────────────────────────
+        function updateOfflineIndicator() {
+            const el = document.getElementById('offline-indicator');
+            if (!el) return;
+            if (!navigator.onLine) {
+                el.classList.remove('hidden');
+                el.classList.add('flex');
+            } else {
+                el.classList.add('hidden');
+                el.classList.remove('flex');
+            }
+        }
+        window.addEventListener('online',  updateOfflineIndicator);
+        window.addEventListener('offline', updateOfflineIndicator);
+
         // ─── Init ─────────────────────────────────────────────────────────────
         window.addEventListener('DOMContentLoaded', () => {
             initTheme();
@@ -1048,6 +1944,8 @@
             renderHistoryList();
             renderPendingJobs();
             renderFailedHosts();
+            NovelMode.renderBookmarks();
+            updateOfflineIndicator();
 
             // ── SW message listener (Background Sync / Fetch 結果回傳) ──────────
             if ('serviceWorker' in navigator) {

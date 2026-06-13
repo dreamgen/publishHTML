@@ -6,14 +6,14 @@
  * 3. Background Fetch : 關掉 App 後仍可繼續下載
  */
 
-const SW_VERSION   = 'v2';
+const SW_VERSION   = 'v3';
 const CACHE_NAME   = `pureReader-${SW_VERSION}`;
 const SHARED_CACHE = `pureReader-shared-${SW_VERSION}`;
 const ALL_CACHES   = [CACHE_NAME, SHARED_CACHE];
 
 // ─── IDB helpers ───────────────────────────────────────────────────────────────
 const IDB_NAME    = 'pureReader-db';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -23,6 +23,10 @@ function openDb() {
         db.createObjectStore('sync-queue', { keyPath: 'url' });
       if (!db.objectStoreNames.contains('raw-html'))
         db.createObjectStore('raw-html', { keyPath: 'url' });
+      if (!db.objectStoreNames.contains('novel-pages'))
+        db.createObjectStore('novel-pages', { keyPath: 'url' });
+      if (!db.objectStoreNames.contains('novel-sessions'))
+        db.createObjectStore('novel-sessions', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror   = () => reject(req.error);
