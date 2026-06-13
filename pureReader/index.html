@@ -189,7 +189,7 @@
 
     <!-- Navigation / Header -->
     <header class="sticky top-0 z-10 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-700 shadow-sm">
-        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
             <h1 class="text-xl font-bold tracking-tight text-blue-500 flex items-center gap-2 cursor-pointer" onclick="resetView()">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
@@ -236,7 +236,7 @@
     </header>
 
     <!-- Main Content Area -->
-    <main class="flex-1 max-w-3xl w-full mx-auto px-4 py-6 flex flex-col relative">
+    <main class="flex-1 max-w-3xl lg:max-w-4xl xl:max-w-5xl w-full mx-auto px-4 py-6 flex flex-col relative">
 
         <!-- Install PWA Banner -->
         <div id="install-banner" class="hidden mb-6 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -469,7 +469,7 @@
 
         <!-- Novel Controls Bar (visible during novel reading) -->
         <div id="novel-controls" class="hidden fixed bottom-0 left-0 right-0 z-30 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border-t border-gray-200 dark:border-gray-700 shadow-lg">
-            <div class="max-w-3xl mx-auto px-4 py-3">
+            <div class="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 py-3">
                 <!-- Prefetch progress -->
                 <div id="novel-prefetch-progress" class="hidden mb-2">
                     <div class="flex items-center justify-between mb-1">
@@ -2166,6 +2166,25 @@
             renderFailedHosts();
             NovelMode.renderBookmarks();
             updateOfflineIndicator();
+
+            // ── Keyboard Navigation for Novel Mode ────────────────────────────
+            window.addEventListener('keydown', (e) => {
+                if (!NovelMode.active) return;
+                
+                // Ignore key events if the user is currently typing in an input element
+                const activeTag = document.activeElement?.tagName;
+                if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+                    return;
+                }
+
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    NovelMode.loadPrev();
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    NovelMode.loadNext();
+                }
+            });
 
             // ── SW message listener (Background Sync / Fetch 結果回傳) ──────────
             if ('serviceWorker' in navigator) {
