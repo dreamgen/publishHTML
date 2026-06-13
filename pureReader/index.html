@@ -449,7 +449,7 @@
                 <!-- Max Keep Pages -->
                 <div>
                     <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">最大保留頁數</label>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">閱讀超過此頁數後，自動刪除最早的章節以節省空間。設 0 為不限制。</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">閱讀超過此頁數後，自動刪除更早的已讀頁面。例如設為 5，看到第 20 頁時會刪除第 1～15 頁。設 0 為不刪除。</p>
                     <div class="flex items-center gap-3">
                         <input type="number" id="novel-max-keep" value="0" min="0" max="9999" class="w-24 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
                         <span class="text-sm text-gray-500 dark:text-gray-400">頁（0 = 不限制）</span>
@@ -1478,18 +1478,23 @@
             // ── Prefetch engine ──────────────────────────────────────────────
             async function prefetch() {
                 if (_prefetching || !_active || !_session) return;
+
+                // Sliding window: always maintain prefetchCount pages AHEAD of currentIdx
+                const pagesAhead = _session.pages.length - _session.currentIdx - 1;
+                const needed     = _session.prefetchCount - pagesAhead;
+                if (needed <= 0) return; // buffer is full
+
                 _prefetching = true;
                 _abortCtrl   = new AbortController();
 
-                const target  = _session.prefetchCount;
-                let fetched   = 0;
-                let nextUrl   = _session.pages[_session.pages.length - 1];
+                let fetched = 0;
+                let nextUrl = _session.pages[_session.pages.length - 1];
 
-                _showPrefetchProgress(0, target);
+                _showPrefetchProgress(pagesAhead, _session.prefetchCount);
 
-                while (fetched < target && _active) {
+                while (fetched < needed && _active) {
                     try {
-                        // Find the next URL from the last fetched page
+                        // Get raw HTML of the last page to find its "next" link
                         const lastPageData = await idbGet('novel-pages', nextUrl).catch(() => null);
                         let html = null;
 
@@ -1498,7 +1503,6 @@
                         } else {
                             html = await _fetchHtml(nextUrl, _abortCtrl.signal);
                             if (html && lastPageData) {
-                                // Store rawHtml for future scanning
                                 lastPageData.rawHtml = html;
                                 await idbPut('novel-pages', lastPageData);
                             }
@@ -1506,7 +1510,7 @@
 
                         if (!html) { console.warn('[NovelMode] Failed to fetch', nextUrl); break; }
 
-                        // If this is the first page, store its raw HTML too
+                        // First page: also store its raw HTML for auto-detect
                         if (fetched === 0 && nextUrl === _session.pages[0]) {
                             const firstPage = await idbGet('novel-pages', nextUrl).catch(() => null);
                             if (firstPage && !firstPage.rawHtml) {
@@ -1522,11 +1526,11 @@
                             break;
                         }
 
-                        // Check if already fetched
+                        // Already in our list? skip but count
                         if (_session.pages.includes(foundNextUrl)) {
                             nextUrl = foundNextUrl;
                             fetched++;
-                            _showPrefetchProgress(fetched, target);
+                            _showPrefetchProgress(pagesAhead + fetched, _session.prefetchCount);
                             continue;
                         }
 
@@ -1536,12 +1540,10 @@
 
                         // Parse with Readability
                         const doc = new DOMParser().parseFromString(nextHtml, 'text/html');
-                        // Fix lazy images
                         doc.querySelectorAll('img').forEach(img => {
                             const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
                             if (s) img.setAttribute('src', s);
                         });
-                        // Remove junk
                         doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
                         const article = new Readability(doc).parse();
 
@@ -1550,14 +1552,12 @@
                             break;
                         }
 
-                        // Sanitize content
                         const cleanContent = DOMPurify.sanitize(article.content, {
                             USE_PROFILES: { html: true },
                             ADD_TAGS: ['img', 'figure', 'figcaption'],
                             FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
                         });
 
-                        // Store in IndexedDB
                         await idbPut('novel-pages', {
                             url:       foundNextUrl,
                             title:     article.title || '',
@@ -1570,10 +1570,10 @@
                         _session.pages.push(foundNextUrl);
                         nextUrl = foundNextUrl;
                         fetched++;
-                        _showPrefetchProgress(fetched, target);
+                        _showPrefetchProgress(pagesAhead + fetched, _session.prefetchCount);
                         await _saveSession();
 
-                        // Capacity control
+                        // Capacity control: trim old pages behind current position
                         if (_session.maxKeep > 0) await _cleanupOldPages();
 
                     } catch (e) {
@@ -1625,16 +1625,17 @@
                 if (!_session) return;
                 const nextIdx = _session.currentIdx + 1;
                 if (nextIdx >= _session.pages.length) {
-                    // Try to fetch one more
+                    // No prefetched pages left — try to fetch 1 on-demand
                     if (!navigator.onLine) {
                         showSyncBar('📶 離線中，無法載入新章節', null, null, 3000);
                         return;
                     }
-                    // Temporarily prefetch 1 more
-                    const oldCount = _session.prefetchCount;
+                    // Force-fetch exactly 1 page so the user isn't stuck
+                    _prefetching = false; // allow re-entry
+                    const saved = _session.prefetchCount;
                     _session.prefetchCount = 1;
                     await prefetch();
-                    _session.prefetchCount = oldCount;
+                    _session.prefetchCount = saved;
                     if (nextIdx >= _session.pages.length) {
                         showSyncBar('已到最後一章，未找到下一頁連結', null, null, 3000);
                         return;
@@ -1668,7 +1669,6 @@
                 if (pageData.title && titleEl) titleEl.textContent = pageData.title;
                 if (contentEl) {
                     contentEl.innerHTML = pageData.content;
-                    // Fix relative image URLs
                     try {
                         const baseUri = new URL(url).origin;
                         contentEl.querySelectorAll('img').forEach(img => {
@@ -1685,32 +1685,32 @@
                     try { sourceLink.textContent = new URL(url).hostname; } catch(e) {}
                 }
 
-                // Show cache badge
                 document.getElementById('cache-badge')?.classList.remove('hidden');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
+
+                // Capacity control: trim old pages behind current position
+                if (_session.maxKeep > 0) await _cleanupOldPages();
+
                 _updateIndicators();
 
-                // Continue prefetching if we're near the end
-                const remaining = _session.pages.length - idx - 1;
-                if (remaining < 3 && navigator.onLine && !_prefetching) {
-                    const oldCount = _session.prefetchCount;
-                    _session.prefetchCount = Math.max(5, _session.prefetchCount);
-                    prefetch(); // fire and forget
-                    _session.prefetchCount = oldCount;
+                // Sliding window: refill the prefetch buffer ahead of new position
+                if (navigator.onLine && !_prefetching) {
+                    prefetch(); // fire and forget — will calculate how many more are needed
                 }
-
-                // Capacity control
-                if (_session.maxKeep > 0) await _cleanupOldPages();
             }
 
             // ── Capacity control ─────────────────────────────────────────────
+            // Keeps maxKeep pages (including current). Only trims already-read
+            // pages behind currentIdx. Prefetched pages ahead are never touched.
+            // Example: maxKeep=5, at page 20 → delete pages 1-15, keep 16-20.
             async function _cleanupOldPages() {
                 if (!_session || _session.maxKeep <= 0) return;
-                while (_session.pages.length > _session.maxKeep) {
+                const toRemove = _session.currentIdx - (_session.maxKeep - 1);
+                if (toRemove <= 0) return;
+                for (let i = 0; i < toRemove; i++) {
                     const oldUrl = _session.pages.shift();
                     await idbDelete('novel-pages', oldUrl).catch(() => {});
-                    // Adjust currentIdx
-                    if (_session.currentIdx > 0) _session.currentIdx--;
+                    _session.currentIdx--;
                 }
                 await _saveSession();
             }
