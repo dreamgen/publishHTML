@@ -652,7 +652,10 @@
             catch (e) { return []; }
         }
 
-        function saveToHistory(url, title, domain) {
+        function saveToHistory(url, title, domain, force = false) {
+            if (!force && typeof NovelMode !== 'undefined' && NovelMode.active) {
+                return;
+            }
             let hist = getHistory().filter(i => i.url !== url);
             hist.unshift({ url, title, domain, timestamp: Date.now() });
             if (hist.length > MAX_HISTORY_ITEMS) {
@@ -1769,19 +1772,37 @@
             }
 
             async function deleteSession(sessionId) {
-                // Delete all pages for this session
                 const session = await idbGet('novel-sessions', sessionId).catch(() => null);
-                if (session?.pages) {
-                    for (const url of session.pages) {
-                        await idbDelete('novel-pages', url).catch(() => {});
+                if (session) {
+                    // Save the last read page to history as a rescue entry
+                    const pageData = await idbGet('novel-pages', session.currentUrl).catch(() => null);
+                    const title = pageData?.title || session.title || '未命名小說';
+                    let domain = '';
+                    try { domain = new URL(session.currentUrl).hostname; } catch (e) {}
+                    saveToHistory(session.currentUrl, title, domain, true);
+
+                    // Delete all pages for this session
+                    if (session.pages) {
+                        for (const url of session.pages) {
+                            await idbDelete('novel-pages', url).catch(() => {});
+                        }
                     }
+                    await idbDelete('novel-sessions', sessionId).catch(() => {});
                 }
-                await idbDelete('novel-sessions', sessionId).catch(() => {});
                 renderBookmarks();
             }
 
             async function clearAllSessions() {
                 if (!confirm('確定要清空所有小說書籤與預載資料嗎？')) return;
+                // Before clearing, save each session's last read page to history as a rescue entry
+                const sessions = await idbGetAll('novel-sessions').catch(() => []);
+                for (const session of sessions) {
+                    const pageData = await idbGet('novel-pages', session.currentUrl).catch(() => null);
+                    const title = pageData?.title || session.title || '未命名小說';
+                    let domain = '';
+                    try { domain = new URL(session.currentUrl).hostname; } catch (e) {}
+                    saveToHistory(session.currentUrl, title, domain, true);
+                }
                 await idbClearStore('novel-sessions').catch(() => {});
                 await idbClearStore('novel-pages').catch(() => {});
                 renderBookmarks();
