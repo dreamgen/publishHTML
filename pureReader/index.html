@@ -1432,24 +1432,55 @@
                 const currentUrl = sourceLink?.href || '';
                 if (!currentUrl) return;
 
+                // Abort any running prefetch before updating settings
+                if (_prefetching) {
+                    if (_abortCtrl) {
+                        _abortCtrl.abort();
+                        _abortCtrl = null;
+                    }
+                    _prefetching = false;
+                }
+
                 // Determine if it's a CSS selector or keyword
                 const isCssSelector = /^[#.a-z\[]/i.test(selectorInput);
 
-                // Create or update session
-                const sessionId = _cacheKey(currentUrl);
-                _session = {
-                    id:             sessionId,
-                    startUrl:       currentUrl,
-                    currentUrl:     currentUrl,
-                    selector:       selectorInput,
-                    selectorType:   isCssSelector ? 'css' : 'keyword',
-                    prefetchCount:  prefetchCount,
-                    maxKeep:        maxKeep,
-                    pages:          [currentUrl],
-                    currentIdx:     0,
-                    createdAt:      Date.now(),
-                    title:          document.getElementById('article-title')?.textContent || '未命名小說'
-                };
+                // Find existing session to preserve page list and index
+                let existing = null;
+                if (_session) {
+                    existing = _session;
+                } else {
+                    const sessions = await idbGetAll('novel-sessions').catch(() => []);
+                    existing = sessions.find(s => s.pages && s.pages.includes(currentUrl));
+                }
+
+                if (existing) {
+                    _session = existing;
+                    _session.selector      = selectorInput;
+                    _session.selectorType  = isCssSelector ? 'css' : 'keyword';
+                    _session.prefetchCount = prefetchCount;
+                    _session.maxKeep       = maxKeep;
+                    _session.currentUrl    = currentUrl;
+                    
+                    const idx = _session.pages.indexOf(currentUrl);
+                    if (idx !== -1) {
+                        _session.currentIdx = idx;
+                    }
+                } else {
+                    const sessionId = _cacheKey(currentUrl);
+                    _session = {
+                        id:             sessionId,
+                        startUrl:       currentUrl,
+                        currentUrl:     currentUrl,
+                        selector:       selectorInput,
+                        selectorType:   isCssSelector ? 'css' : 'keyword',
+                        prefetchCount:  prefetchCount,
+                        maxKeep:        maxKeep,
+                        pages:          [currentUrl],
+                        currentIdx:     0,
+                        createdAt:      Date.now(),
+                        title:          document.getElementById('article-title')?.textContent || '未命名小說'
+                    };
+                }
 
                 // Save current page content to novel-pages
                 const contentEl = document.getElementById('article-content');
@@ -1458,8 +1489,21 @@
                     title:     document.getElementById('article-title')?.textContent || '',
                     content:   contentEl?.innerHTML || '',
                     fetchedAt: Date.now(),
-                    sessionId: sessionId
+                    sessionId: _session.id
                 });
+
+                // Capacity control: trim old pages behind immediately if maxKeep was decreased
+                if (_session.maxKeep > 0) await _cleanupOldPages();
+
+                // Prefetch buffer size adjustment: decrement if prefetchCount was decreased
+                const pagesAhead = _session.pages.length - _session.currentIdx - 1;
+                const toRemoveAhead = pagesAhead - _session.prefetchCount;
+                if (toRemoveAhead > 0) {
+                    for (let i = 0; i < toRemoveAhead; i++) {
+                        const urlToDel = _session.pages.pop();
+                        await idbDelete('novel-pages', urlToDel).catch(() => {});
+                    }
+                }
 
                 _active = true;
                 await _saveSession();
