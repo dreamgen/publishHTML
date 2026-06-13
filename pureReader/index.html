@@ -1317,15 +1317,30 @@
                 panel.classList.contains('active') ? closePanel() : openPanel();
             }
             function openPanel() {
+                const sourceLink = document.getElementById('article-source-link');
+                const currentUrl = sourceLink?.href || '';
+
+                // Validate if the current _session belongs to the currentUrl
+                if (_session && (!_session.pages || !_session.pages.includes(currentUrl))) {
+                    _session = null;
+                    _active = false;
+                }
+
                 document.getElementById('novel-overlay').classList.add('active');
                 document.getElementById('novel-settings-panel').classList.add('active');
                 _updateStorageInfo();
+
                 // Pre-fill from existing session if any
                 if (_session) {
                     document.getElementById('novel-selector-input').value = _session.selector || '';
                     document.getElementById('novel-prefetch-count').value = _session.prefetchCount || 10;
                     document.getElementById('novel-max-keep').value       = _session.maxKeep || 0;
                     document.getElementById('novel-end-keywords').value   = _session.endKeywords || '';
+                } else {
+                    document.getElementById('novel-selector-input').value = '';
+                    document.getElementById('novel-prefetch-count').value = 10;
+                    document.getElementById('novel-max-keep').value       = 0;
+                    document.getElementById('novel-end-keywords').value   = '';
                 }
             }
             function closePanel() {
@@ -1454,6 +1469,11 @@
                 // Determine if it's a CSS selector or keyword
                 const isCssSelector = /^[#.a-z\[]/i.test(selectorInput);
 
+                // Validate if the in-memory _session belongs to the currentUrl
+                if (_session && (!_session.pages || !_session.pages.includes(currentUrl))) {
+                    _session = null;
+                }
+
                 // Find existing session to preserve page list and index
                 let existing = null;
                 if (_session) {
@@ -1531,6 +1551,7 @@
                 _active = false;
                 if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
                 _prefetching = false;
+                _session = null;
                 document.getElementById('novel-controls').classList.add('hidden');
             }
 
