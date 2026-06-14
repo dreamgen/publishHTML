@@ -152,10 +152,67 @@
         /* Novel controls sticky bar */
         #novel-controls {
             animation: novelSlideUp 0.3s ease;
+            transition: transform 0.35s cubic-bezier(0.32,0.72,0,1), opacity 0.3s ease;
         }
         @keyframes novelSlideUp {
             from { transform: translateY(20px); opacity: 0; }
             to   { transform: translateY(0);    opacity: 1; }
+        }
+
+        /* ── Novel auto-hide bars ──────────────────────────────────── */
+        /* When novel-bar-hidden class is active, slide the header up and
+           the controls bar down, out of view. */
+        body.novel-bar-hidden header {
+            transform: translateY(-110%);
+            pointer-events: none;
+        }
+        header {
+            transition: transform 0.4s cubic-bezier(0.32,0.72,0,1);
+        }
+        body.novel-bar-hidden #novel-controls {
+            transform: translateY(110%);
+            pointer-events: none;
+        }
+        /* Floating tab pills that replace the bars when hidden */
+        #novel-top-tab, #novel-bottom-tab {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 35;
+            cursor: pointer;
+            display: none;  /* shown only during novel mode */
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.875rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            user-select: none;
+            white-space: nowrap;
+        }
+        #novel-top-tab {
+            top: 6px;
+            background: rgba(99,102,241,0.92);
+            color: #fff;
+            backdrop-filter: blur(8px);
+        }
+        #novel-bottom-tab {
+            bottom: 6px;
+            background: rgba(99,102,241,0.92);
+            color: #fff;
+            backdrop-filter: blur(8px);
+        }
+        /* The tabs are only visible when bars are hidden */
+        body.novel-bar-hidden #novel-top-tab,
+        body.novel-bar-hidden #novel-bottom-tab {
+            display: flex;
+        }
+        body:not(.novel-bar-hidden) #novel-top-tab,
+        body:not(.novel-bar-hidden) #novel-bottom-tab {
+            display: none;
         }
         /* Offline indicator pulse */
         .offline-pulse {
@@ -471,6 +528,18 @@
                     <button onclick="NovelMode.clearCache()" class="px-4 py-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 font-medium rounded-xl transition-colors text-sm border border-red-100 dark:border-red-800/50">清除快取</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Novel auto-hide: floating tab pills (shown when bars are hidden) -->
+        <!-- Top tab: tap to reveal header -->
+        <div id="novel-top-tab" onclick="NovelMode.showBars()" title="顯示頂部選單">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            <span id="novel-top-tab-label">第 1 章</span>
+        </div>
+        <!-- Bottom tab: tap to reveal controls -->
+        <div id="novel-bottom-tab" onclick="NovelMode.showBars()" title="顯示底部工具列">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            <span>工具列</span>
         </div>
 
         <!-- Novel Controls Bar (visible during novel reading) -->
@@ -1602,6 +1671,9 @@
                 const articleEl = document.getElementById('article-section');
                 if (articleEl) articleEl.style.paddingBottom = '';
                 closeTOC();
+                // Restore bars visibility
+                _clearBarTimer();
+                document.body.classList.remove('novel-bar-hidden');
             }
 
             // ── Table of Contents (TOC) Drawer ────────────────────────────────
@@ -2359,6 +2431,8 @@
                 // Add bottom padding to article so controls don't overlap content
                 const articleEl = document.getElementById('article-section');
                 if (articleEl) articleEl.style.paddingBottom = '130px';
+                // Show bars immediately whenever controls appear
+                showBars();
             }
 
             function _updateIndicators() {
@@ -2373,6 +2447,10 @@
                 // Sync continuous-read checkbox state
                 const continuousCheckbox = document.getElementById('novel-continuous-read-checkbox');
                 if (continuousCheckbox) continuousCheckbox.checked = !!_session.continuousRead;
+
+                // Also update the floating top tab label
+                const topTabLabel = document.getElementById('novel-top-tab-label');
+                if (topTabLabel) topTabLabel.textContent = `第 ${_session.currentIdx + 1} 章`;
                 if (cacheInd) cacheInd.textContent  = `已預載 ${_session.pages.length} 章`;
                 if (prevBtn)  prevBtn.disabled       = _session.currentIdx <= 0;
 
@@ -2668,6 +2746,35 @@
                 await _saveSession();
             }
 
+            // ── Bar auto-hide (show/hide header + controls during reading) ─────
+            let _barTimer   = null;
+            const _BAR_AUTO_HIDE_MS = 5000; // hide after 5 s of inactivity
+            let _barHovered = false;        // true while mouse is inside a bar
+
+            function showBars() {
+                _clearBarTimer();
+                document.body.classList.remove('novel-bar-hidden');
+                // Start auto-hide countdown only when in novel mode
+                if (_active) _barTimer = setTimeout(hideBars, _BAR_AUTO_HIDE_MS);
+            }
+
+            function hideBars() {
+                _clearBarTimer();
+                // Don't hide if mouse is hovering over a bar, or TOC is open, or not in novel mode
+                if (!_active) return;
+                const toc = document.getElementById('novel-toc-drawer');
+                if (toc && !toc.classList.contains('translate-y-full')) return;
+                document.body.classList.add('novel-bar-hidden');
+            }
+
+            function _clearBarTimer() {
+                if (_barTimer) { clearTimeout(_barTimer); _barTimer = null; }
+            }
+
+            function isBarHidden() {
+                return document.body.classList.contains('novel-bar-hidden');
+            }
+
             async function toggleContinuousRead(checked) {
                 if (!_session) return;
                 _session.continuousRead = checked;
@@ -2861,6 +2968,7 @@
                 resumeSession, deleteSession, clearAllSessions, clearCache,
                 renderBookmarks, onPageLoaded,
                 toggleTOC, jumpToTOC,
+                showBars, hideBars, isBarHidden,
                 isAtPageBottom: _isAtPageBottom,
                 get active() { return _active; },
                 get session() { return _session; }
@@ -2910,15 +3018,37 @@
                     e.preventDefault();
                     NovelMode.loadNext();
                 } else if (e.key === ' ' || e.key === 'Spacebar') {
-                    // Continuous reading: advance to next chapter only when
-                    // (a) the toggle is enabled AND
-                    // (b) the user is already at (or very near) the bottom of the page.
+                    // If bars are currently visible → hide them immediately
+                    if (!NovelMode.isBarHidden()) {
+                        e.preventDefault();
+                        NovelMode.hideBars();
+                        return;
+                    }
+                    // Bars are already hidden:
+                    // If continuous reading is on AND we're at the page bottom → next chapter
                     if (NovelMode.session?.continuousRead && NovelMode.isAtPageBottom()) {
                         e.preventDefault();
                         NovelMode.loadNext();
                     }
                     // Otherwise let the default Space behaviour (scroll down) run normally.
                 }
+            });
+
+            // ── Novel bar hover guards ─────────────────────────────────────
+            // When the user hovers over the header or controls bar, pause the
+            // auto-hide timer so the bars don’t disappear mid-interaction.
+            ['header', '#novel-controls'].forEach(sel => {
+                const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+                if (!el) return;
+                el.addEventListener('mouseenter', () => {
+                    if (NovelMode.active) NovelMode.showBars(); // resets timer, removes hidden class
+                });
+                el.addEventListener('mouseleave', () => {
+                    // Restart the auto-hide countdown after leaving the bar
+                    if (NovelMode.active) {
+                        // showBars already started a timer; no extra action needed
+                    }
+                });
             });
 
             // ── SW message listener (Background Sync / Fetch 結果回傳) ──────────
