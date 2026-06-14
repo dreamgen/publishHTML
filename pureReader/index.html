@@ -240,6 +240,61 @@
         .dark .novel-candidate:hover {
             background: #312e81 !important;
         }
+
+        /* ── Pull-to-next-chapter overscroll hint ──────────────────────── */
+        #novel-pull-hint {
+            display: none;         /* visible only when continuousRead is on */
+            position: relative;
+            left: 0; right: 0;
+            height: 80px;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 16px;
+            border-radius: 16px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            color: #6366f1;
+            background: linear-gradient(to bottom, transparent, rgba(99,102,241,0.08));
+            transition: opacity 0.2s ease;
+            user-select: none;
+            overflow: hidden;
+        }
+        .dark #novel-pull-hint {
+            color: #818cf8;
+            background: linear-gradient(to bottom, transparent, rgba(99,102,241,0.12));
+        }
+        #novel-pull-hint.visible { display: flex; }
+        /* Circular progress ring around the arrow */
+        #novel-pull-ring {
+            width: 36px; height: 36px;
+            transform: rotate(-90deg);
+        }
+        #novel-pull-ring circle.bg {
+            fill: none;
+            stroke: rgba(99,102,241,0.15);
+            stroke-width: 3;
+        }
+        #novel-pull-ring circle.fg {
+            fill: none;
+            stroke: #6366f1;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-dasharray: 100;
+            stroke-dashoffset: 100;
+            transition: stroke-dashoffset 0.05s linear;
+        }
+        .dark #novel-pull-ring circle.fg { stroke: #818cf8; }
+        /* Ripple when chapter loads */
+        @keyframes pullSuccess {
+            0%   { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+        #novel-pull-hint.success #novel-pull-ring {
+            animation: pullSuccess 0.4s ease forwards;
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 min-h-screen flex flex-col font-sans">
@@ -456,6 +511,19 @@
 
             <!-- Dynamic content injected here by renderArticle() -->
             <div id="article-content" class="prose dark:prose-invert max-w-none prose-lg md:prose-xl prose-img:rounded-xl"></div>
+
+            <!-- Pull-to-next-chapter hint (touch overscroll) -->
+            <div id="novel-pull-hint" aria-hidden="true">
+                <svg id="novel-pull-ring" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                    <circle class="bg" cx="18" cy="18" r="15.9"/>
+                    <circle class="fg" cx="18" cy="18" r="15.9"/>
+                    <!-- Down arrow -->
+                    <g transform="rotate(90,18,18)" fill="currentColor" stroke="none">
+                        <path d="M11 15l7 7 7-7" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </g>
+                </svg>
+                <span id="novel-pull-label">繼續下滑載入下一章</span>
+            </div>
         </article>
 
         <!-- Novel Mode Settings Panel (Bottom Sheet) -->
@@ -1674,6 +1742,12 @@
                 // Restore bars visibility
                 _clearBarTimer();
                 document.body.classList.remove('novel-bar-hidden');
+                // Reset any body rubber-band offset from pull gesture
+                document.body.style.transform  = '';
+                document.body.style.transition = '';
+                // Hide pull-to-next hint
+                const hint = document.getElementById('novel-pull-hint');
+                if (hint) hint.classList.remove('visible');
             }
 
             // ── Table of Contents (TOC) Drawer ────────────────────────────────
@@ -2426,6 +2500,7 @@
             }
 
             // ── UI helpers ───────────────────────────────────────────────────
+            let _pullInitialized = false;
             function _showControls() {
                 document.getElementById('novel-controls').classList.remove('hidden');
                 // Add bottom padding to article so controls don't overlap content
@@ -2433,6 +2508,10 @@
                 if (articleEl) articleEl.style.paddingBottom = '130px';
                 // Show bars immediately whenever controls appear
                 showBars();
+                // Sync pull-to-next hint
+                _updatePullHintVisibility();
+                // Initialize pull gesture once (after DOM is ready)
+                if (!_pullInitialized) { _pullInitialized = true; _initPullToNext(); }
             }
 
             function _updateIndicators() {
@@ -2779,7 +2858,118 @@
                 if (!_session) return;
                 _session.continuousRead = checked;
                 await _saveSession();
+                _updatePullHintVisibility();
             }
+
+            // Show/hide the pull hint strip based on continuousRead state
+            function _updatePullHintVisibility() {
+                const hint = document.getElementById('novel-pull-hint');
+                if (!hint) return;
+                const on = _active && !!_session?.continuousRead;
+                if (on) hint.classList.add('visible');
+                else    hint.classList.remove('visible');
+            }
+
+            // ── Pull-to-next-chapter (touch overscroll) ───────────────────────
+            // Tracks the active touch pull gesture state.
+            const _pull = {
+                active:    false,  // true while a pull gesture is in progress
+                startY:    0,      // pageY of the initial touchstart
+                startScroll: 0,    // scrollY at touchstart
+                dist:      0,      // current pull distance in px (0 → threshold)
+                triggered: false,  // true after threshold crossed (prevent re-trigger)
+                animFrame: null,
+            };
+            const _PULL_THRESHOLD = 90;  // px of overscroll to trigger next chapter
+            const _PULL_RESIST    = 0.38; // rubber-band resistance factor
+
+            function _initPullToNext() {
+                const article = document.getElementById('article-section');
+                if (!article) return;
+
+                article.addEventListener('touchstart', (e) => {
+                    if (!_active || !_session?.continuousRead) return;
+                    _pull.startY      = e.touches[0].pageY;
+                    _pull.startScroll = window.scrollY;
+                    _pull.triggered   = false;
+                    _pull.dist        = 0;
+                }, { passive: true });
+
+                article.addEventListener('touchmove', (e) => {
+                    if (!_active || !_session?.continuousRead) return;
+                    const deltaY      = e.touches[0].pageY - _pull.startY; // negative = scroll down
+                    const atBottom    = _isAtPageBottom();
+                    const scrollingDown = deltaY < 0;
+
+                    if (!atBottom || !scrollingDown || _pull.triggered) return;
+
+                    // Calculate overscroll distance (additional pull past page bottom)
+                    const maxScroll  = document.documentElement.scrollHeight - window.innerHeight;
+                    const overscroll = Math.max(0, window.scrollY + (-deltaY) - maxScroll);
+                    _pull.dist = overscroll;
+
+                    // Apply rubber-band visual to the article body
+                    const rubberDist = overscroll * _PULL_RESIST;
+                    const hint = document.getElementById('novel-pull-hint');
+                    const label = document.getElementById('novel-pull-label');
+                    const ring  = document.querySelector('#novel-pull-ring circle.fg');
+
+                    // Update progress ring (stroke-dashoffset: 100 = empty, 0 = full)
+                    if (ring) {
+                        const pct = Math.min(1, _pull.dist / _PULL_THRESHOLD);
+                        ring.style.strokeDashoffset = 100 - pct * 100;
+                    }
+                    if (label) {
+                        label.textContent = _pull.dist >= _PULL_THRESHOLD
+                            ? '放開以載入下一章 ✓'
+                            : '繼續下滑載入下一章';
+                    }
+                    // Translate the page content upward to create the "peek" effect
+                    document.body.style.transform = `translateY(${-rubberDist}px)`;
+                    document.body.style.transition = 'none';
+
+                    if (_pull.dist >= _PULL_THRESHOLD && !_pull.triggered) {
+                        // Tactile feedback (vibration API, if available)
+                        if (navigator.vibrate) navigator.vibrate(20);
+                    }
+                }, { passive: true });
+
+                article.addEventListener('touchend', async (e) => {
+                    if (!_active || !_session?.continuousRead) return;
+                    if (_pull.triggered) return;
+
+                    // Snap back
+                    document.body.style.transition = 'transform 0.35s cubic-bezier(0.25,0.46,0.45,0.94)';
+                    document.body.style.transform  = '';
+
+                    const hint  = document.getElementById('novel-pull-hint');
+                    const ring  = document.querySelector('#novel-pull-ring circle.fg');
+                    const label = document.getElementById('novel-pull-label');
+
+                    if (_pull.dist >= _PULL_THRESHOLD) {
+                        _pull.triggered = true;
+                        // Success animation
+                        if (hint) {
+                            hint.classList.add('success');
+                            setTimeout(() => hint.classList.remove('success'), 500);
+                        }
+                        // Reset ring
+                        if (ring)  ring.style.strokeDashoffset = 0;
+                        if (label) label.textContent = '✓ 載入下一章中...';
+                        await loadNext();
+                        // After loading, reset hint
+                        if (ring)  ring.style.strokeDashoffset = 100;
+                        if (label) label.textContent = '繼續下滑載入下一章';
+                    } else {
+                        // Didn't reach threshold — reset ring
+                        if (ring)  ring.style.strokeDashoffset = 100;
+                        if (label) label.textContent = '繼續下滑載入下一章';
+                    }
+                    _pull.dist      = 0;
+                    _pull.triggered = false;
+                }, { passive: true });
+            }
+
 
             // Returns true if the page is scrolled to within 40px of the bottom,
             // accounting for the fixed controls bar.
