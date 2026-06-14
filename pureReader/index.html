@@ -504,15 +504,22 @@
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
                     </button>
                 </div>
-                <!-- Auto-update Checkbox (visible only on the last chapter) -->
-                <div id="novel-auto-update-container" class="hidden flex justify-center items-center gap-2 mt-2">
-                    <label class="inline-flex items-center cursor-pointer text-xs text-gray-600 dark:text-gray-400 gap-1.5 select-none">
-                        <input type="checkbox" id="novel-auto-update-checkbox" onchange="NovelMode.toggleAutoUpdate(this.checked)" class="rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 bg-gray-50 dark:bg-gray-700">
-                        自動檢查更新 (每日一次/進入首頁時)
+                <!-- Continuous Read + Auto-update row -->
+                <div class="flex justify-center items-center gap-4 mt-2">
+                    <label class="inline-flex items-center cursor-pointer text-xs text-gray-600 dark:text-gray-400 gap-1.5 select-none" title="頁面滾到底時，按下空白鍵自動跳到下一章">
+                        <input type="checkbox" id="novel-continuous-read-checkbox" onchange="NovelMode.toggleContinuousRead(this.checked)" class="rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 bg-gray-50 dark:bg-gray-700">
+                        連續閱讀
                     </label>
+                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
+                    <div id="novel-auto-update-container" class="hidden flex items-center">
+                        <label class="inline-flex items-center cursor-pointer text-xs text-gray-600 dark:text-gray-400 gap-1.5 select-none">
+                            <input type="checkbox" id="novel-auto-update-checkbox" onchange="NovelMode.toggleAutoUpdate(this.checked)" class="rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 bg-gray-50 dark:bg-gray-700">
+                            自動更新
+                        </label>
+                    </div>
                 </div>
                 <!-- Exit / Update novel mode -->
-                <div class="flex justify-center gap-4 mt-2">
+                <div class="flex justify-center gap-4 mt-1.5">
                     <button onclick="NovelMode.checkUpdates()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔄 檢查更新</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出小說模式</button>
@@ -2351,7 +2358,7 @@
                 document.getElementById('novel-controls').classList.remove('hidden');
                 // Add bottom padding to article so controls don't overlap content
                 const articleEl = document.getElementById('article-section');
-                if (articleEl) articleEl.style.paddingBottom = '120px';
+                if (articleEl) articleEl.style.paddingBottom = '130px';
             }
 
             function _updateIndicators() {
@@ -2362,6 +2369,10 @@
                 const nextBtn  = document.getElementById('novel-next-btn');
 
                 if (pageInd)  pageInd.textContent  = `第 ${_session.currentIdx + 1} 章`;
+
+                // Sync continuous-read checkbox state
+                const continuousCheckbox = document.getElementById('novel-continuous-read-checkbox');
+                if (continuousCheckbox) continuousCheckbox.checked = !!_session.continuousRead;
                 if (cacheInd) cacheInd.textContent  = `已預載 ${_session.pages.length} 章`;
                 if (prevBtn)  prevBtn.disabled       = _session.currentIdx <= 0;
 
@@ -2657,6 +2668,20 @@
                 await _saveSession();
             }
 
+            async function toggleContinuousRead(checked) {
+                if (!_session) return;
+                _session.continuousRead = checked;
+                await _saveSession();
+            }
+
+            // Returns true if the page is scrolled to within 40px of the bottom,
+            // accounting for the fixed controls bar.
+            function _isAtPageBottom() {
+                const scrolled  = window.scrollY + window.innerHeight;
+                const total     = document.documentElement.scrollHeight;
+                return (total - scrolled) <= 60;
+            }
+
             async function checkSessionUpdates(sessionId, event) {
                 if (event) event.stopPropagation();
                 if (!navigator.onLine) {
@@ -2832,10 +2857,11 @@
                 loadNext, loadPrev,
                 prefetch,
                 checkUpdates,
-                toggleAutoUpdate, checkSessionUpdates, triggerAutoUpdates,
+                toggleAutoUpdate, toggleContinuousRead, checkSessionUpdates, triggerAutoUpdates,
                 resumeSession, deleteSession, clearAllSessions, clearCache,
                 renderBookmarks, onPageLoaded,
                 toggleTOC, jumpToTOC,
+                isAtPageBottom: _isAtPageBottom,
                 get active() { return _active; },
                 get session() { return _session; }
             };
@@ -2883,6 +2909,15 @@
                 } else if (e.key === 'ArrowRight') {
                     e.preventDefault();
                     NovelMode.loadNext();
+                } else if (e.key === ' ' || e.key === 'Spacebar') {
+                    // Continuous reading: advance to next chapter only when
+                    // (a) the toggle is enabled AND
+                    // (b) the user is already at (or very near) the bottom of the page.
+                    if (NovelMode.session?.continuousRead && NovelMode.isAtPageBottom()) {
+                        e.preventDefault();
+                        NovelMode.loadNext();
+                    }
+                    // Otherwise let the default Space behaviour (scroll down) run normally.
                 }
             });
 
