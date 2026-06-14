@@ -1626,53 +1626,142 @@
                 if (arrow) arrow.classList.remove('rotate-180');
             }
 
+            // ── TOC lazy-load state ───────────────────────────────────────
+            // Tracks the index window currently rendered in the TOC list.
+            let _tocWindow = { startIdx: 0, endIdx: 0, observer: null };
+            const _TOC_WINDOW = 100; // half-window size on each side of currentIdx
+            const _TOC_PAGE   = 50;  // how many extra items to append per sentinel trigger
+
             async function renderTOC() {
                 const listEl = document.getElementById('novel-toc-list');
                 if (!listEl || !_session) return;
 
+                // Tear down old IntersectionObserver if any
+                if (_tocWindow.observer) {
+                    _tocWindow.observer.disconnect();
+                    _tocWindow.observer = null;
+                }
+
+                const pages = _session.pages || [];
+                if (pages.length === 0) {
+                    listEl.innerHTML = '<div class="text-center py-4 text-xs text-gray-400">無預載章節</div>';
+                    return;
+                }
+
                 listEl.innerHTML = '<div class="text-center py-4 text-xs text-gray-400">載入目錄中...</div>';
 
-                try {
-                    const pages = _session.pages || [];
-                    const fetchPromises = pages.map(url => idbGet('novel-pages', url).catch(() => null));
-                    const pagesData = await Promise.all(fetchPromises);
+                // Compute initial visible window: currentIdx ± _TOC_WINDOW
+                const cur   = _session.currentIdx;
+                const start = Math.max(0, cur - _TOC_WINDOW);
+                const end   = Math.min(pages.length - 1, cur + _TOC_WINDOW);
 
-                    const items = [];
-                    pagesData.forEach((p, idx) => {
-                        const title = p?.title || `第 ${idx + 1} 章 (載入中/無標題)`;
-                        const isActive = idx === _session.currentIdx;
-                        const activeClass = isActive 
-                            ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold border-l-4 border-indigo-500' 
-                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/30';
-                        const currentBadge = isActive 
-                            ? '<span class="ml-2 text-[10px] bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded shrink-0">閱讀中</span>' 
-                            : '';
+                _tocWindow.startIdx = start;
+                _tocWindow.endIdx   = end;
 
-                        items.push(`
-                            <div onclick="NovelMode.jumpToTOC(${idx})" class="novel-toc-item flex items-center justify-between px-4 py-3 cursor-pointer transition-all border-b border-gray-100 dark:border-gray-800 ${activeClass}" data-idx="${idx}">
-                                <span class="truncate pr-4">${_escHtml(title)}</span>
-                                ${currentBadge}
-                            </div>
-                        `);
-                    });
+                await _renderTOCWindow(listEl, start, end, true);
+            }
 
-                    if (items.length === 0) {
-                        listEl.innerHTML = '<div class="text-center py-4 text-xs text-gray-400">無預載章節</div>';
-                    } else {
-                        listEl.innerHTML = items.join('');
-                        
-                        // Scroll active item into view centered
-                        setTimeout(() => {
-                            const activeItem = listEl.querySelector(`.novel-toc-item[data-idx="${_session.currentIdx}"]`);
-                            if (activeItem) {
-                                activeItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                            }
-                        }, 100);
-                    }
-                } catch (e) {
-                    console.error('[NovelMode] renderTOC error:', e);
-                    listEl.innerHTML = '<div class="text-center py-4 text-xs text-red-500">載入目錄失敗</div>';
+            // Renders the slice [start..end] into listEl.
+            // If reset=true, replaces the list entirely; otherwise appends or prepends.
+            async function _renderTOCWindow(listEl, start, end, reset, direction) {
+                const pages = _session.pages || [];
+                const cur   = _session.currentIdx;
+
+                // Fetch only the slice we need from IndexedDB
+                const sliceUrls   = pages.slice(start, end + 1);
+                const fetchPromises = sliceUrls.map(url => idbGet('novel-pages', url).catch(() => null));
+                const pagesData   = await Promise.all(fetchPromises);
+
+                const html = pagesData.map((p, offset) => {
+                    const idx      = start + offset;
+                    const title    = p?.title || `第 ${idx + 1} 章`;
+                    const isActive = idx === cur;
+                    const activeClass = isActive
+                        ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold border-l-4 border-indigo-500'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/30';
+                    const badge = isActive
+                        ? '<span class="ml-2 text-[10px] bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded shrink-0">閱讀中</span>'
+                        : '';
+                    return `<div onclick="NovelMode.jumpToTOC(${idx})" class="novel-toc-item flex items-center justify-between px-4 py-3 cursor-pointer transition-all border-b border-gray-100 dark:border-gray-800 ${activeClass}" data-idx="${idx}"><span class="truncate pr-4">${_escHtml(title)}</span>${badge}</div>`;
+                }).join('');
+
+                if (reset) {
+                    listEl.innerHTML = html;
+                } else if (direction === 'prepend') {
+                    listEl.insertAdjacentHTML('afterbegin', html);
+                } else {
+                    listEl.insertAdjacentHTML('beforeend', html);
                 }
+
+                // Attach IntersectionObserver sentinels on top/bottom items
+                _attachTOCSentinels(listEl);
+
+                // On initial load, scroll the active chapter into center
+                if (reset) {
+                    setTimeout(() => {
+                        const activeItem = listEl.querySelector(`.novel-toc-item[data-idx="${_session.currentIdx}"]`);
+                        if (activeItem) activeItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                    }, 100);
+                }
+            }
+
+            // Attach IntersectionObserver sentinels to the first and last visible items.
+            // When either is scrolled into view, it loads the next batch of chapters.
+            function _attachTOCSentinels(listEl) {
+                if (_tocWindow.observer) _tocWindow.observer.disconnect();
+
+                const pages = _session?.pages || [];
+                const total = pages.length;
+
+                const observer = new IntersectionObserver(async (entries) => {
+                    for (const entry of entries) {
+                        if (!entry.isIntersecting) continue;
+                        observer.disconnect(); // Pause while loading
+
+                        const sentinel = entry.target;
+                        const isTop    = sentinel.dataset.sentinel === 'top';
+
+                        if (isTop && _tocWindow.startIdx > 0) {
+                            // Load more ABOVE
+                            const newStart = Math.max(0, _tocWindow.startIdx - _TOC_PAGE);
+                            const newEnd   = _tocWindow.startIdx - 1;
+                            _tocWindow.startIdx = newStart;
+
+                            // Capture scroll height before prepend to keep position stable
+                            const prevScrollTop = listEl.scrollTop;
+                            const prevHeight    = listEl.scrollHeight;
+                            await _renderTOCWindow(listEl, newStart, newEnd, false, 'prepend');
+                            // Restore scroll position so user doesn't jump to top
+                            listEl.scrollTop = prevScrollTop + (listEl.scrollHeight - prevHeight);
+
+                        } else if (!isTop && _tocWindow.endIdx < total - 1) {
+                            // Load more BELOW
+                            const newStart = _tocWindow.endIdx + 1;
+                            const newEnd   = Math.min(total - 1, _tocWindow.endIdx + _TOC_PAGE);
+                            _tocWindow.endIdx = newEnd;
+                            await _renderTOCWindow(listEl, newStart, newEnd, false, 'append');
+                        }
+
+                        // Re-attach sentinels after loading
+                        _attachTOCSentinels(listEl);
+                    }
+                }, { root: listEl, threshold: 0.1 });
+
+                // Top sentinel: the first item in the list
+                const topItem = listEl.querySelector('.novel-toc-item:first-of-type') || listEl.firstElementChild;
+                if (topItem && _tocWindow.startIdx > 0) {
+                    topItem.dataset.sentinel = 'top';
+                    observer.observe(topItem);
+                }
+
+                // Bottom sentinel: the last item in the list
+                const bottomItem = listEl.querySelector('.novel-toc-item:last-of-type') || listEl.lastElementChild;
+                if (bottomItem && _tocWindow.endIdx < (pages.length - 1)) {
+                    bottomItem.dataset.sentinel = 'bottom';
+                    observer.observe(bottomItem);
+                }
+
+                _tocWindow.observer = observer;
             }
 
             async function jumpToTOC(idx) {
