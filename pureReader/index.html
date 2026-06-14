@@ -563,6 +563,12 @@
                 </div>
             </div>
             <div class="px-6 py-5 flex flex-col gap-6">
+                <!-- Custom Novel Title -->
+                <div>
+                    <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">自訂小說書名</label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">設定方便在首頁或書籤列表中辨識的名稱。</p>
+                    <input type="text" id="novel-title-input" placeholder="例如：百歲修行從覺醒天靈根開始" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                </div>
                 <!-- Next Page Selector -->
                 <div>
                     <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">下一頁連結</label>
@@ -1532,11 +1538,13 @@
 
                 // Pre-fill from existing session if any
                 if (_session) {
+                    document.getElementById('novel-title-input').value    = _session.title || '';
                     document.getElementById('novel-selector-input').value = _session.selector || '';
                     document.getElementById('novel-prefetch-count').value = _session.prefetchCount || 10;
                     document.getElementById('novel-max-keep').value       = _session.maxKeep || 0;
                     document.getElementById('novel-end-keywords').value   = _session.endKeywords || '';
                 } else {
+                    document.getElementById('novel-title-input').value    = document.getElementById('article-title')?.textContent || '';
                     document.getElementById('novel-selector-input').value = '';
                     document.getElementById('novel-prefetch-count').value = 10;
                     document.getElementById('novel-max-keep').value       = 0;
@@ -1643,6 +1651,7 @@
 
             // ── Activate novel mode ───────────────────────────────────────────
             async function activate() {
+                const titleInput    = document.getElementById('novel-title-input').value.trim();
                 const selectorInput = document.getElementById('novel-selector-input').value.trim();
                 const prefetchCount = parseInt(document.getElementById('novel-prefetch-count').value) || 10;
                 const maxKeep       = parseInt(document.getElementById('novel-max-keep').value) || 0;
@@ -1685,6 +1694,7 @@
 
                 if (existing) {
                     _session = existing;
+                    if (titleInput) _session.title = titleInput;
                     _session.selector      = selectorInput;
                     _session.selectorType  = isCssSelector ? 'css' : 'keyword';
                     _session.prefetchCount = prefetchCount;
@@ -1714,7 +1724,7 @@
                         pages:          [currentUrl],
                         currentIdx:     0,
                         createdAt:      Date.now(),
-                        title:          document.getElementById('article-title')?.textContent || '未命名小說'
+                        title:          titleInput || document.getElementById('article-title')?.textContent || '未命名小說'
                     };
                 }
 
@@ -2441,6 +2451,24 @@
                 renderBookmarks();
             }
 
+            async function renameSession(sessionId) {
+                const session = await idbGet('novel-sessions', sessionId).catch(() => null);
+                if (!session) return;
+                const newTitle = prompt('請輸入自訂小說書名：', session.title || '');
+                if (newTitle === null) return; // user cancelled
+                const cleanedTitle = newTitle.trim();
+                if (!cleanedTitle) {
+                    alert('書名不能為空！');
+                    return;
+                }
+                session.title = cleanedTitle;
+                await idbPut('novel-sessions', session);
+                if (_session && _session.id === sessionId) {
+                    _session.title = cleanedTitle;
+                }
+                renderBookmarks();
+            }
+
             async function clearAllSessions() {
                 if (!confirm('確定要清空所有小說書籤與預載資料嗎？')) return;
                 // Before clearing, save each session's last read page to history as a rescue entry
@@ -2510,6 +2538,10 @@
                                 <span class="truncate max-w-[100px]">${domain}</span>
                             </div>
                         </div>
+                        <button onclick="event.stopPropagation(); NovelMode.renameSession('${s.id}')" 
+                            class="shrink-0 p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="重新命名">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+                        </button>
                         <button onclick="event.stopPropagation(); NovelMode.checkSessionUpdates('${s.id}', event)" 
                             class="shrink-0 p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="檢查更新">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
@@ -2923,7 +2955,7 @@
                 triggered: false,  // true after threshold crossed (prevent re-trigger)
                 animFrame: null,
             };
-            const _PULL_THRESHOLD = 50;  // px of overscroll to trigger next chapter
+            const _PULL_THRESHOLD = 90;  // px of overscroll to trigger next chapter
             const _PULL_RESIST    = 0.38; // rubber-band resistance factor
 
             function _initPullToNext() {
@@ -3212,7 +3244,7 @@
                 prefetch,
                 checkUpdates,
                 toggleAutoUpdate, toggleContinuousRead, checkSessionUpdates, triggerAutoUpdates,
-                resumeSession, deleteSession, clearAllSessions, clearCache,
+                resumeSession, deleteSession, renameSession, clearAllSessions, clearCache,
                 renderBookmarks, onPageLoaded,
                 toggleTOC, jumpToTOC,
                 showBars, hideBars, isBarHidden,
