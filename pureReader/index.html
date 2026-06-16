@@ -1585,6 +1585,7 @@
             let _ttsRate = 1.0;
             let _currentUtterance = null;
             let _wakeLock = null;
+            let _noSleepVideo = null;
             let _lastDetectedHtml = null; // Raw HTML from original page load, for auto-detect
             let _prefetchWarning = null; // { lastNum, nextNum, foundNextUrl, article }
             const _bypassedUrls   = new Set();
@@ -3450,15 +3451,20 @@
             }
 
             async function _requestWakeLock() {
+                _releaseWakeLock(); // Release any existing locks/videos first
+                
                 if ('wakeLock' in navigator) {
                     try {
-                        _releaseWakeLock(); // Release any existing reference first
                         _wakeLock = await navigator.wakeLock.request('screen');
                         console.log('[TTS] Screen Wake Lock acquired.');
+                        return; // Successfully got native lock
                     } catch (err) {
-                        console.warn('[TTS] Failed to acquire Screen Wake Lock:', err);
+                        console.warn('[TTS] Failed to acquire Screen Wake Lock, falling back to video loop:', err);
                     }
                 }
+                
+                // Fallback to dummy video playback for keeping the screen active
+                _startVideoWakeLock();
             }
 
             function _releaseWakeLock() {
@@ -3471,13 +3477,69 @@
                         _wakeLock = null;
                     });
                 }
+                _stopVideoWakeLock();
             }
 
             async function _syncWakeLock() {
                 if (_ttsActive && _ttsPlaying && document.visibilityState === 'visible') {
                     await _requestWakeLock();
                 } else if (document.visibilityState === 'hidden') {
-                    _wakeLock = null; // Browser automatically releases it, we just reset reference
+                    _wakeLock = null; // Browser automatically releases native wakeLock when hidden
+                    _stopVideoWakeLock();
+                }
+            }
+
+            function _startVideoWakeLock() {
+                if (_noSleepVideo) return;
+                
+                try {
+                    const video = document.createElement('video');
+                    video.setAttribute('loop', '');
+                    video.setAttribute('muted', '');
+                    video.setAttribute('playsinline', '');
+                    video.style.position = 'fixed';
+                    video.style.top = '0';
+                    video.style.left = '0';
+                    video.style.width = '1px';
+                    video.style.height = '1px';
+                    video.style.opacity = '0.01';
+                    video.style.pointerEvents = 'none';
+                    video.style.zIndex = '-9999';
+                    
+                    // WebM source
+                    const srcWebm = document.createElement('source');
+                    srcWebm.src = "data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyBACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBCLqBCB9DtnVAIueBAKNAHIEAAIAwAQCdASoIAAgAAUAmJaQAA3AA/vz0AAA=";
+                    srcWebm.type = "video/webm";
+                    video.appendChild(srcWebm);
+                    
+                    // MP4 source
+                    const srcMp4 = document.createElement('source');
+                    srcMp4.src = "data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29tYXZjMQAAAZBtb292AAAAbG12aGQAAAAA3ndVCN53VQgAAAPoAAAAZAAAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAIVdHJhawAAAHx0a2hkAAAAAd53VQjed1UIAAABAAAAAAAAAGQAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAG1bWRpYQAAACBtZGhkAAAAAN53VQjed1UIAABkAAAAZAAAAAEAAAAAAAAAIWhkbHIAAAAAAAAAAHZpZGVAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABQW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAPNzdGJsAAAAg3N0c2QAAAAAAAAAAQAAAFdzdHZjMQAAAAAAAwABAAAAAAAAAAAAAAAAAAAAAABkAGQAAAAAABM5YXZjMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABjC2IAyADIAAAAVY29scG5jbHMAAQACAAIAAAAAABhzdHRzAAAAAAAAAAEAAAABAAAAZAAAAHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAAHN0c3oAAAAAAAAADQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAHN0Y28AAAAAAAAAAQAAADQ=";
+                    srcMp4.type = "video/mp4";
+                    video.appendChild(srcMp4);
+                    
+                    document.body.appendChild(video);
+                    
+                    video.play().then(() => {
+                        console.log('[TTS] Video Wake Lock started successfully.');
+                        _noSleepVideo = video;
+                    }).catch(err => {
+                        console.warn('[TTS] Failed to play Video Wake Lock:', err);
+                        video.remove();
+                    });
+                } catch (e) {
+                    console.warn('[TTS] Error setting up Video Wake Lock:', e);
+                }
+            }
+
+            function _stopVideoWakeLock() {
+                if (_noSleepVideo) {
+                    try {
+                        _noSleepVideo.pause();
+                        _noSleepVideo.remove();
+                    } catch (e) {}
+                    _noSleepVideo = null;
+                    console.log('[TTS] Video Wake Lock stopped.');
                 }
             }
 
