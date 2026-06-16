@@ -2057,7 +2057,7 @@
                         const nextNum = _parseChapterNumber(article.title);
                         if (lastNum !== null && nextNum !== null) {
                             const diff = nextNum - lastNum;
-                            if (diff !== 0 && diff !== 1) {
+                            if (diff < 0 || diff > 5) {
                                 console.info(`[NovelMode] Chapter jump check: ${lastNum} -> ${nextNum} (diff ${diff}), stopping prefetch.`);
                                 _session.isEnded = true;
                                 await _saveSession();
