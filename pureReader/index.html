@@ -640,6 +640,21 @@
         <!-- Novel Controls Bar (visible during novel reading) -->
         <div id="novel-controls" class="hidden fixed bottom-0 left-0 right-0 z-30 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border-t border-gray-200 dark:border-gray-700 shadow-lg">
             <div class="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 py-3">
+                <!-- Prefetch warning banner -->
+                <div id="novel-prefetch-warning" class="hidden mb-3 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl flex flex-col gap-2">
+                    <div class="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-400">
+                        <svg class="w-4 h-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        <span id="novel-prefetch-warning-message">偵測到異常的章節跳號</span>
+                    </div>
+                    <div id="novel-prefetch-preview" class="hidden text-xs text-gray-600 dark:text-gray-400 bg-white/50 dark:bg-gray-900/50 p-2.5 rounded-lg border border-gray-200/50 dark:border-gray-800/50 max-h-24 overflow-y-auto leading-relaxed">
+                    </div>
+                    <div class="flex gap-2 justify-end">
+                        <button onclick="NovelMode.showPrefetchWarningPreview()" id="novel-prefetch-preview-btn" class="px-2.5 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-medium transition-colors">查看預覽</button>
+                        <button onclick="NovelMode.resumePrefetchAfterWarning()" class="px-2.5 py-1 text-[11px] bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors shadow-sm">繼續預載</button>
+                        <button onclick="NovelMode.stopPrefetchAfterWarning()" class="px-2.5 py-1 text-[11px] bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg font-medium transition-colors">結束預載</button>
+                    </div>
+                </div>
+
                 <!-- Prefetch progress -->
                 <div id="novel-prefetch-progress" class="hidden mb-2">
                     <div class="flex items-center justify-between mb-1">
@@ -1506,6 +1521,8 @@
             let _prefetching = false;
             let _abortCtrl   = null;
             let _lastDetectedHtml = null; // Raw HTML from original page load, for auto-detect
+            let _prefetchWarning = null; // { lastNum, nextNum, foundNextUrl, article }
+            const _bypassedUrls   = new Set();
 
             // ── Panel open/close ──────────────────────────────────────────────
             function togglePanel() { 
@@ -1767,6 +1784,13 @@
                 _prefetching = false;
                 _session = null;
                 document.getElementById('novel-controls').classList.add('hidden');
+                
+                // Hide prefetch warning and clear state
+                const warningEl = document.getElementById('novel-prefetch-warning');
+                if (warningEl) warningEl.classList.add('hidden');
+                _prefetchWarning = null;
+                _bypassedUrls.clear();
+
                 const articleEl = document.getElementById('article-section');
                 if (articleEl) articleEl.style.paddingBottom = '';
                 closeTOC();
@@ -2055,12 +2079,12 @@
                         // ── Smart check 1: Chapter number jump check ──────────────────
                         const lastNum = _parseChapterNumber(lastPageData?.title || _session.title);
                         const nextNum = _parseChapterNumber(article.title);
-                        if (lastNum !== null && nextNum !== null) {
+                        if (lastNum !== null && nextNum !== null && !_bypassedUrls.has(foundNextUrl)) {
                             const diff = nextNum - lastNum;
                             if (diff < 0 || diff > 5) {
-                                console.info(`[NovelMode] Chapter jump check: ${lastNum} -> ${nextNum} (diff ${diff}), stopping prefetch.`);
-                                _session.isEnded = true;
-                                await _saveSession();
+                                console.info(`[NovelMode] Chapter jump check: ${lastNum} -> ${nextNum} (diff ${diff}). Showing warning banner.`);
+                                _prefetchWarning = { lastNum, nextNum, foundNextUrl, article };
+                                _showPrefetchWarning(lastNum, nextNum, article);
                                 break;
                             }
                         }
@@ -2327,6 +2351,11 @@
             }
 
             async function _navigateToPage(idx) {
+                // Reset any prefetch warnings on manual page navigation
+                const warningEl = document.getElementById('novel-prefetch-warning');
+                if (warningEl) warningEl.classList.add('hidden');
+                _prefetchWarning = null;
+
                 const url = _session.pages[idx];
                 const pageData = await idbGet('novel-pages', url).catch(() => null);
                 if (!pageData?.content) {
@@ -2882,6 +2911,90 @@
                 await _saveSession();
             }
 
+            // ── Prefetch warning dialog handlers ─────────────────────────────
+            function _showPrefetchWarning(lastNum, nextNum, article) {
+                const banner = document.getElementById('novel-prefetch-warning');
+                const msg = document.getElementById('novel-prefetch-warning-message');
+                const previewBlock = document.getElementById('novel-prefetch-preview');
+                const previewBtn = document.getElementById('novel-prefetch-preview-btn');
+                if (!banner || !msg) return;
+
+                const diff = nextNum - lastNum;
+                let text = '';
+                if (diff < 0) {
+                    text = `偵測到章節編號倒退（第 ${lastNum} 章 → 第 ${nextNum} 章）`;
+                } else {
+                    text = `偵測到異常的章節跳號（第 ${lastNum} 章 → 第 ${nextNum} 章）`;
+                }
+                msg.textContent = text;
+                
+                // Reset preview state
+                if (previewBlock) {
+                    previewBlock.classList.add('hidden');
+                    previewBlock.innerHTML = '';
+                }
+                if (previewBtn) previewBtn.textContent = '查看預覽';
+
+                banner.classList.remove('hidden');
+                
+                // Make sure controls are shown
+                showBars();
+            }
+
+            function showPrefetchWarningPreview() {
+                if (!_prefetchWarning) return;
+                const previewBlock = document.getElementById('novel-prefetch-preview');
+                const previewBtn = document.getElementById('novel-prefetch-preview-btn');
+                if (!previewBlock || !previewBtn) return;
+
+                if (previewBlock.classList.contains('hidden')) {
+                    const article = _prefetchWarning.article;
+                    // Create a clean preview snippet
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = article.content || '';
+                    const textSnippet = tempDiv.textContent.trim().slice(0, 180) + '...';
+                    
+                    previewBlock.innerHTML = `<strong>標題：</strong>${_escHtml(article.title)}<br><p class="mt-1 text-gray-500">${_escHtml(textSnippet)}</p>`;
+                    previewBlock.classList.remove('hidden');
+                    previewBtn.textContent = '收起預覽';
+                } else {
+                    previewBlock.classList.add('hidden');
+                    previewBtn.textContent = '查看預覽';
+                }
+                showBars();
+            }
+
+            async function resumePrefetchAfterWarning() {
+                if (!_prefetchWarning) return;
+                const url = _prefetchWarning.foundNextUrl;
+                _bypassedUrls.add(url);
+
+                // Hide warning banner
+                const banner = document.getElementById('novel-prefetch-warning');
+                if (banner) banner.classList.add('hidden');
+
+                _prefetchWarning = null;
+
+                // Resume prefetching
+                prefetch();
+            }
+
+            async function stopPrefetchAfterWarning() {
+                if (!_prefetchWarning) return;
+                
+                // Hide warning banner
+                const banner = document.getElementById('novel-prefetch-warning');
+                if (banner) banner.classList.add('hidden');
+
+                _prefetchWarning = null;
+
+                if (_session) {
+                    _session.isEnded = true;
+                    await _saveSession();
+                }
+                _updateIndicators();
+            }
+
             // ── Bar auto-hide (show/hide header + controls during reading) ─────
             let _barTimer   = null;
             const _BAR_AUTO_HIDE_MS = 5000; // hide after 5 s of inactivity
@@ -2896,10 +3009,12 @@
 
             function hideBars() {
                 _clearBarTimer();
-                // Don't hide if mouse is hovering over a bar, or TOC is open, or not in novel mode
+                // Don't hide if mouse is hovering over a bar, or TOC is open, or warning banner is visible, or not in novel mode
                 if (!_active) return;
                 const toc = document.getElementById('novel-toc-drawer');
                 if (toc && !toc.classList.contains('translate-y-full')) return;
+                const warning = document.getElementById('novel-prefetch-warning');
+                if (warning && !warning.classList.contains('hidden')) return;
                 document.body.classList.add('novel-bar-hidden');
             }
 
@@ -3248,6 +3363,7 @@
                 renderBookmarks, onPageLoaded,
                 toggleTOC, jumpToTOC,
                 showBars, hideBars, isBarHidden,
+                showPrefetchWarningPreview, resumePrefetchAfterWarning, stopPrefetchAfterWarning,
                 isAtPageBottom: _isAtPageBottom,
                 get active() { return _active; },
                 get session() { return _session; }
