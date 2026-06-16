@@ -1584,6 +1584,7 @@
             let _ttsVoiceName = '';
             let _ttsRate = 1.0;
             let _currentUtterance = null;
+            let _wakeLock = null;
             let _lastDetectedHtml = null; // Raw HTML from original page load, for auto-detect
             let _prefetchWarning = null; // { lastNum, nextNum, foundNextUrl, article }
             const _bypassedUrls   = new Set();
@@ -3448,6 +3449,38 @@
                 }
             }
 
+            async function _requestWakeLock() {
+                if ('wakeLock' in navigator) {
+                    try {
+                        _releaseWakeLock(); // Release any existing reference first
+                        _wakeLock = await navigator.wakeLock.request('screen');
+                        console.log('[TTS] Screen Wake Lock acquired.');
+                    } catch (err) {
+                        console.warn('[TTS] Failed to acquire Screen Wake Lock:', err);
+                    }
+                }
+            }
+
+            function _releaseWakeLock() {
+                if (_wakeLock) {
+                    _wakeLock.release().then(() => {
+                        _wakeLock = null;
+                        console.log('[TTS] Screen Wake Lock released.');
+                    }).catch(err => {
+                        console.warn('[TTS] Failed to release Screen Wake Lock:', err);
+                        _wakeLock = null;
+                    });
+                }
+            }
+
+            async function _syncWakeLock() {
+                if (_ttsActive && _ttsPlaying && document.visibilityState === 'visible') {
+                    await _requestWakeLock();
+                } else if (document.visibilityState === 'hidden') {
+                    _wakeLock = null; // Browser automatically releases it, we just reset reference
+                }
+            }
+
             function startTTS() {
                 if (!window.speechSynthesis) {
                     showSyncBar('⚠ 您的瀏覽器不支援語音朗讀功能', null, null, 3000);
@@ -3477,6 +3510,7 @@
                     _speakCurrentParagraph();
                 }
                 
+                _requestWakeLock();
                 showBars();
             }
 
@@ -3488,6 +3522,7 @@
                 }
                 _clearUtterance();
                 _clearParagraphHighlights();
+                _releaseWakeLock();
                 
                 const panel = document.getElementById('novel-tts-panel');
                 if (panel) panel.classList.add('hidden');
@@ -3506,6 +3541,7 @@
                     }
                     _clearUtterance();
                     _updateTtsPlayBtn();
+                    _releaseWakeLock();
                 } else {
                     _ttsPlaying = true;
                     _updateTtsPlayBtn();
@@ -3513,6 +3549,7 @@
                         _ttsParagraphs = Array.from(document.querySelectorAll('#article-content p')).filter(p => p.textContent.trim().length > 0);
                     }
                     _speakCurrentParagraph();
+                    _requestWakeLock();
                 }
             }
 
@@ -3711,7 +3748,7 @@
                 showPrefetchWarningPreview, resumePrefetchAfterWarning, stopPrefetchAfterWarning,
                 isAtPageBottom: _isAtPageBottom,
                 startTTS, stopTTS, toggleTTSPlay, changeTTSVoice, changeTTSRate,
-                prevTTSParagraph, nextTTSParagraph, isTtsActive, jumpToTtsParagraph,
+                prevTTSParagraph, nextTTSParagraph, isTtsActive, jumpToTtsParagraph, syncWakeLock: _syncWakeLock,
                 get active() { return _active; },
                 get session() { return _session; }
             };
@@ -3783,6 +3820,15 @@
                         if (p) {
                             NovelMode.jumpToTtsParagraph(p);
                         }
+                    }
+                });
+            }
+
+            // Sync Screen Wake Lock if visibility status changes (re-acquires on visible)
+            if ('wakeLock' in navigator) {
+                document.addEventListener('visibilitychange', () => {
+                    if (NovelMode.active) {
+                        NovelMode.syncWakeLock();
                     }
                 });
             }
