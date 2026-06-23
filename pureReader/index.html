@@ -669,16 +669,17 @@
                         <select id="novel-tts-voice-select" onchange="NovelMode.changeTTSVoice(this.value)" class="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg px-2 py-1 max-w-[180px] focus:outline-none focus:border-indigo-500">
                             <!-- Voices dynamically populated -->
                         </select>
-                        <div class="flex items-center gap-1.5">
-                            <span class="text-xs text-gray-500 dark:text-gray-400">語速</span>
-                            <input type="range" id="novel-tts-rate-range" min="0.5" max="2.0" step="0.1" value="1.0" oninput="NovelMode.changeTTSRate(this.value)" class="w-16 h-1 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
-                            <span id="novel-tts-rate-val" class="text-[10px] font-mono text-gray-500 dark:text-gray-400">1.0x</span>
+                        <div class="flex items-center gap-1">
+                            <span class="text-xs text-gray-500 dark:text-gray-400 mr-1">語速</span>
+                            <button onclick="NovelMode.adjustTTSRate(-0.1)" class="w-6 h-6 flex items-center justify-center bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 font-bold text-sm select-none">-</button>
+                            <span id="novel-tts-rate-val" class="text-xs font-mono font-medium text-gray-700 dark:text-gray-300 min-w-[32px] text-center select-none">1.0x</span>
+                            <button onclick="NovelMode.adjustTTSRate(0.1)" class="w-6 h-6 flex items-center justify-center bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 font-bold text-sm select-none">+</button>
                         </div>
                     </div>
                     <!-- right/bottom: Buttons -->
                     <div class="flex gap-2 justify-end items-center">
                         <button onclick="NovelMode.prevTTSParagraph()" title="上一段" class="p-1.5 bg-white hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
                         </button>
                         <button id="novel-tts-play-btn" onclick="NovelMode.toggleTTSPlay()" class="px-3 py-1.5 text-xs bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors shadow-sm flex items-center gap-1">
                             <svg id="novel-tts-play-icon" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -686,6 +687,9 @@
                         </button>
                         <button onclick="NovelMode.nextTTSParagraph()" title="下一段" class="p-1.5 bg-white hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                        <button onclick="NovelMode.hideBars()" class="px-3 py-1.5 text-xs bg-white hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium transition-colors border border-gray-200 dark:border-gray-700">
+                            隱藏
                         </button>
                         <button onclick="NovelMode.stopTTS()" class="px-3 py-1.5 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg font-medium transition-colors border border-red-100 dark:border-red-800/30">
                             結束
@@ -755,6 +759,8 @@
                     <button onclick="NovelMode.startTTS()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔊 朗讀聽書</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.checkUpdates()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔄 檢查更新</button>
+                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
+                    <button onclick="NovelMode.hideBars()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🙈 隱藏工具列</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出小說模式</button>
                 </div>
@@ -3079,13 +3085,12 @@
 
             function hideBars() {
                 _clearBarTimer();
-                // Don't hide if mouse is hovering over a bar, or TOC is open, or warning banner is visible, or not in novel mode, or TTS is active
+                // Don't hide if mouse is hovering over a bar, or TOC is open, or warning banner is visible, or not in novel mode
                 if (!_active) return;
                 const toc = document.getElementById('novel-toc-drawer');
                 if (toc && !toc.classList.contains('translate-y-full')) return;
                 const warning = document.getElementById('novel-prefetch-warning');
                 if (warning && !warning.classList.contains('hidden')) return;
-                if (_ttsActive) return; // Keep controls visible while listening
                 document.body.classList.add('novel-bar-hidden');
             }
 
@@ -3558,9 +3563,7 @@
                 const savedRate = localStorage.getItem('novel-tts-rate');
                 if (savedRate) {
                     _ttsRate = parseFloat(savedRate);
-                    const rateRange = document.getElementById('novel-tts-rate-range');
                     const rateVal = document.getElementById('novel-tts-rate-val');
-                    if (rateRange) rateRange.value = _ttsRate;
                     if (rateVal) rateVal.textContent = _ttsRate.toFixed(1) + 'x';
                 }
                 
@@ -3753,6 +3756,13 @@
                 }
             }
 
+            function adjustTTSRate(delta) {
+                let newRate = _ttsRate + delta;
+                newRate = Math.round(newRate * 10) / 10;
+                newRate = Math.max(0.5, Math.min(2.5, newRate));
+                changeTTSRate(newRate);
+            }
+
             function prevTTSParagraph() {
                 if (!_ttsActive) return;
                 if (_currentTtsIndex > 0) {
@@ -3809,7 +3819,7 @@
                 showBars, hideBars, isBarHidden,
                 showPrefetchWarningPreview, resumePrefetchAfterWarning, stopPrefetchAfterWarning,
                 isAtPageBottom: _isAtPageBottom,
-                startTTS, stopTTS, toggleTTSPlay, changeTTSVoice, changeTTSRate,
+                startTTS, stopTTS, toggleTTSPlay, changeTTSVoice, changeTTSRate, adjustTTSRate,
                 prevTTSParagraph, nextTTSParagraph, isTtsActive, jumpToTtsParagraph, syncWakeLock: _syncWakeLock,
                 get active() { return _active; },
                 get session() { return _session; }
