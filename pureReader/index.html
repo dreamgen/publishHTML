@@ -355,6 +355,13 @@
                     </button>
                 </div>
 
+                <!-- Favorite Toggle (Visible only when reading) -->
+                <button id="favorite-toggle-btn" onclick="toggleFavoriteCurrent()" class="hidden p-2 rounded-full hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors transition-all duration-200 ease-in-out hover:scale-110 active:scale-95" title="加入最愛">
+                    <svg id="favorite-icon" class="w-5 h-5 text-gray-400 dark:text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                </button>
+
                 <!-- Novel Mode Toggle (Visible only when reading) -->
                 <button id="novel-mode-btn" onclick="NovelMode.togglePanel()" class="hidden p-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors" title="小說模式">
                     <svg class="w-5 h-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -442,6 +449,19 @@
                     <button onclick="NovelMode.clearAllSessions()" class="text-sm text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors">清空全部</button>
                 </div>
                 <ul id="novel-bookmarks-list" class="flex flex-col gap-3"></ul>
+            </div>
+
+            <!-- Favorites Section -->
+            <div id="favorites-section" class="w-full hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                        <span class="text-yellow-500 dark:text-yellow-400">我的最愛</span>
+                    </h3>
+                </div>
+                <ul id="favorites-list" class="flex flex-col gap-3">
+                    <!-- Injected by renderFavoritesList() -->
+                </ul>
             </div>
 
             <!-- History Section -->
@@ -790,6 +810,7 @@
     <script>
         // ─── Constants ────────────────────────────────────────────────────────
         const STORAGE_KEY_HISTORY     = 'pureReader_history';
+        const STORAGE_KEY_FAVORITES   = 'pureReader_favorites';
         const STORAGE_KEY_CACHE_PFX   = 'pureReader_cache_';
         const STORAGE_KEY_PENDING     = 'pureReader_pending';
         const STORAGE_KEY_STRAT_PREF  = 'pureReader_strat_pref';  // { hostname: { winner: 0|1|2|3, savedAt } }
@@ -838,6 +859,9 @@
         let deferredPrompt    = null;
         let currentFetchUrl   = null;   // URL currently being fetched (for cancel)
         let currentFetchAbort = null;   // AbortController for the active fetch
+        let currentArticleUrl   = null;
+        let currentArticleTitle = null;
+        let currentArticleDomain = null;
 
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
@@ -956,17 +980,128 @@
             } catch (e) { return null; }
         }
 
+        function getFavorites() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY_FAVORITES) || '[]'); }
+            catch (e) { return []; }
+        }
+
+        function toggleFavorite(url, event) {
+            if (event) event.stopPropagation();
+            let favs = getFavorites();
+            const idx = favs.findIndex(i => i.url === url);
+            if (idx > -1) {
+                favs.splice(idx, 1);
+                localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(favs));
+                const inHistory = getHistory().some(i => i.url === url);
+                if (!inHistory) {
+                    localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
+                }
+            } else {
+                let title = '無標題';
+                let domain = '';
+                if (url === currentArticleUrl) {
+                    title = currentArticleTitle || '無標題';
+                    domain = currentArticleDomain || '';
+                } else {
+                    const histItem = getHistory().find(i => i.url === url);
+                    if (histItem) {
+                        title = histItem.title || '無標題';
+                        domain = histItem.domain || '';
+                    } else {
+                        try { domain = new URL(url).hostname; } catch(e) {}
+                    }
+                }
+                favs.unshift({ url, title, domain, timestamp: Date.now() });
+                localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(favs));
+            }
+            renderHistoryList();
+            renderFavoritesList();
+            updateFavoriteButtonState();
+        }
+
+        function toggleFavoriteCurrent() {
+            if (!currentArticleUrl) return;
+            toggleFavorite(currentArticleUrl);
+        }
+
+        function updateFavoriteButtonState() {
+            const btn = document.getElementById('favorite-toggle-btn');
+            if (!btn) return;
+            if (!currentArticleUrl) {
+                btn.classList.add('hidden');
+                return;
+            }
+            const favs = getFavorites();
+            const isFav = favs.some(f => f.url === currentArticleUrl);
+            const icon = document.getElementById('favorite-icon');
+            if (icon) {
+                if (isFav) {
+                    icon.setAttribute('fill', 'currentColor');
+                    icon.classList.remove('text-gray-400', 'dark:text-gray-500');
+                    icon.classList.add('text-yellow-500');
+                    btn.title = '取消最愛';
+                } else {
+                    icon.setAttribute('fill', 'none');
+                    icon.classList.remove('text-yellow-500');
+                    icon.classList.add('text-gray-400', 'dark:text-gray-500');
+                    btn.title = '加入最愛';
+                }
+            }
+        }
+
+        function renderFavoritesList() {
+            const favs      = getFavorites();
+            const sectionEl = document.getElementById('favorites-section');
+            const listEl    = document.getElementById('favorites-list');
+            if (favs.length === 0) {
+                sectionEl.classList.add('hidden');
+                listEl.innerHTML = '';
+                return;
+            }
+            sectionEl.classList.remove('hidden');
+            listEl.innerHTML = favs.map(item => {
+                const domain = item.domain || (() => { try { return new URL(item.url).hostname; } catch(e){ return ''; } })();
+                const safeUrl = item.url.replace(/'/g, '%27');
+                return `<li class="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer flex items-center justify-between gap-3"
+                    onclick="loadFromHistory('${safeUrl}')">
+                    <div class="flex-1 min-w-0">
+                        <h4 class="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 text-sm leading-snug mb-1">${item.title || '無標題'}</h4>
+                        <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                            <span>${formatDate(item.timestamp)}</span>
+                            <span class="truncate max-w-[120px]">${domain}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
+                        <button onclick="toggleFavorite('${safeUrl}', event)"
+                            class="p-2 text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-950/30 rounded-lg transition-colors transition-all duration-200 ease-in-out hover:scale-110 active:scale-95"
+                            title="取消最愛">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                        </button>
+                    </div>
+                </li>`;
+            }).join('');
+        }
+
         function deleteHistoryItem(url, event) {
             if (event) event.stopPropagation();
             const hist = getHistory().filter(i => i.url !== url);
             localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(hist));
-            localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
+            const inFav = getFavorites().some(i => i.url === url);
+            if (!inFav) {
+                localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
+            }
             renderHistoryList();
         }
 
         function clearHistory() {
             if (!confirm('確定要清空所有閱讀紀錄與快取嗎？')) return;
-            getHistory().forEach(i => localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(i.url)));
+            const favs = getFavorites();
+            getHistory().forEach(i => {
+                const inFav = favs.some(f => f.url === i.url);
+                if (!inFav) {
+                    localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(i.url));
+                }
+            });
             localStorage.removeItem(STORAGE_KEY_HISTORY);
             renderHistoryList();
         }
@@ -978,6 +1113,7 @@
 
         function renderHistoryList() {
             const hist    = getHistory();
+            const favs    = getFavorites();
             const listEl  = document.getElementById('history-list');
             const emptyEl = document.getElementById('empty-history-msg');
             const clearBtn= document.getElementById('clear-history-btn');
@@ -990,6 +1126,7 @@
             listEl.innerHTML = hist.map(item => {
                 const domain = item.domain || (() => { try { return new URL(item.url).hostname; } catch(e){ return ''; } })();
                 const safeUrl = item.url.replace(/'/g, '%27');
+                const isFav = favs.some(f => f.url === item.url);
                 return `<li class="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer flex items-center justify-between gap-3"
                     onclick="loadFromHistory('${safeUrl}')">
                     <div class="flex-1 min-w-0">
@@ -999,11 +1136,18 @@
                             <span class="truncate max-w-[120px]">${domain}</span>
                         </div>
                     </div>
-                    <button onclick="deleteHistoryItem('${safeUrl}', event)"
-                        class="shrink-0 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                        title="刪除">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
-                    </button>
+                    <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
+                        <button onclick="toggleFavorite('${safeUrl}', event)"
+                            class="p-2 text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-950/30 rounded-lg transition-colors transition-all duration-200 ease-in-out hover:scale-110 active:scale-95 md:opacity-0 group-hover:opacity-100 focus:opacity-100 ${isFav ? 'text-yellow-500 md:opacity-100' : ''}"
+                            title="${isFav ? '取消最愛' : '加入最愛'}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                        </button>
+                        <button onclick="deleteHistoryItem('${safeUrl}', event)"
+                            class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors transition-all duration-200 ease-in-out hover:scale-110 active:scale-95 md:opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            title="刪除">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                        </button>
+                    </div>
                 </li>`;
             }).join('');
         }
@@ -1156,11 +1300,16 @@
         function resetView() {
             document.getElementById('font-controls').classList.add('hidden');
             document.getElementById('novel-mode-btn').classList.add('hidden');
+            document.getElementById('favorite-toggle-btn').classList.add('hidden');
+            currentArticleUrl = null;
+            currentArticleTitle = null;
+            currentArticleDomain = null;
             NovelMode.deactivate();
             showSection('input-section');
             window.history.replaceState({}, document.title, window.location.pathname);
             document.getElementById('url-input').value = '';
             renderHistoryList();
+            renderFavoritesList();
             renderPendingJobs();
             renderFailedHosts();
             NovelMode.renderBookmarks();
@@ -1479,9 +1628,14 @@
                 </div>
             `);
 
+            currentArticleUrl = originalUrl;
+            currentArticleTitle = articleData.title;
+            currentArticleDomain = articleData.domain || (() => { try { return new URL(originalUrl).hostname; } catch(e){ return ''; } })();
             showSection('article-section');
             document.getElementById('font-controls').classList.remove('hidden');
             document.getElementById('novel-mode-btn').classList.remove('hidden');
+            document.getElementById('favorite-toggle-btn').classList.remove('hidden');
+            updateFavoriteButtonState();
             if (typeof NovelMode !== 'undefined') {
                 NovelMode.onPageLoaded(originalUrl);
             }
@@ -3846,6 +4000,7 @@
             initTheme();
             changeFontSize(0); // Load saved font size on init
             renderHistoryList();
+            renderFavoritesList();
             renderPendingJobs();
             renderFailedHosts();
             NovelMode.renderBookmarks();
