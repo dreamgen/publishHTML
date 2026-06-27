@@ -546,6 +546,30 @@
                 </ul>
             </div>
 
+            <!-- Backup & Restore Section -->
+            <div class="w-full">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        資料備份與還原
+                    </h3>
+                </div>
+                <div class="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">您可以將所有的歷史紀錄、最愛清單及個人設定匯出成備份檔，或是從備份檔還原資料。</p>
+                    <div class="flex gap-3">
+                        <button onclick="exportData()" class="flex-1 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 font-medium rounded-xl transition-colors text-sm border border-indigo-100 dark:border-indigo-800/50 flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            匯出備份 (JSON)
+                        </button>
+                        <button onclick="document.getElementById('import-file-input').click()" class="flex-1 py-2 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-xl transition-colors text-sm border border-gray-200 dark:border-gray-600 shadow-sm flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                            匯入還原
+                        </button>
+                        <input type="file" id="import-file-input" class="hidden" accept=".json" onchange="importData(event)">
+                    </div>
+                </div>
+            </div>
+
             <!-- Failed Hosts Section -->
             <div id="failed-section" class="hidden w-full">
                 <div class="flex items-center justify-between mb-3">
@@ -926,7 +950,8 @@
                 <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-indigo-50 dark:bg-indigo-900/30 border-4 border-indigo-300 dark:border-indigo-700 mb-4">
                     <span class="text-3xl">⏸</span>
                 </div>
-                <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">閱讀已暫停</h3>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">閱讀已暫停</h3>
+                <p id="novel-tl-pause-usage" class="text-sm font-medium text-indigo-600 dark:text-indigo-400 mb-6">今日已累積：0 分鐘</p>
                 <div class="flex flex-col gap-3">
                     <button onclick="NovelTimeLimit.resume()" class="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-medium rounded-xl shadow-md transition-all text-sm">
                         ▶ 恢復閱讀
@@ -1393,8 +1418,57 @@
             renderFailedHosts();
         }
         function clearFailedHosts() {
+            if (!confirm('確定要清空失敗記錄嗎？')) return;
             localStorage.removeItem(STORAGE_KEY_FAILED); renderFailedHosts();
         }
+        
+        // ─── Data Backup & Restore ────────────────────────────────────────────
+        function exportData() {
+            const data = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('pureReader_') && !key.startsWith('pureReader_cache_') && !key.startsWith('pureReader_pending')) {
+                    data[key] = localStorage.getItem(key);
+                }
+            }
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const dateStr = new Date().toISOString().slice(0,10);
+            a.download = `pureReader_backup_${dateStr}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    let importedCount = 0;
+                    for (const key in data) {
+                        if (key.startsWith('pureReader_')) {
+                            localStorage.setItem(key, data[key]);
+                            importedCount++;
+                        }
+                    }
+                    if (importedCount > 0) {
+                        alert(`成功還原了 ${importedCount} 項資料！網頁將重新載入以套用設定。`);
+                        window.location.reload();
+                    } else {
+                        alert('備份檔中找不到有效的淨讀器資料。');
+                    }
+                } catch(err) {
+                    alert('匯入失敗：備份檔格式不正確。');
+                }
+                event.target.value = ''; // Reset input
+            };
+            reader.readAsText(file);
+        }
+
         function copyFailedHosts() {
             const map = getFailedHosts();
             const lines = Object.entries(map)
@@ -4297,6 +4371,13 @@
                 return state;
             }
 
+            function exitReading() {
+                if (_isPaused) resume();
+                const el = document.getElementById('novel-tl-pause-overlay');
+                if (el) el.classList.remove('active');
+                NovelMode.deactivate();
+            }
+
             function _isDisabledToday(state) {
                 return state.disabledUntil && Date.now() < state.disabledUntil;
             }
@@ -4413,6 +4494,12 @@
                     s.todayUsedMs += Math.min(elapsed, 5000);
                     s.lastTickAt = null;
                     _saveState(s);
+                }
+
+                const s = _checkAndResetDay(_getState());
+                const usageEl = document.getElementById('novel-tl-pause-usage');
+                if (usageEl) {
+                    usageEl.textContent = `今日已累積：${_formatMs(s.todayUsedMs)}`;
                 }
 
                 _removeIdleListeners();
