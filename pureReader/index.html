@@ -555,7 +555,7 @@
                     </h3>
                 </div>
                 <div class="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">您可以將所有的歷史紀錄、最愛清單及個人設定匯出成備份檔，或是從備份檔還原資料。</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">本備份僅儲存個人設定及小說最後閱讀位置 (不含預載快取內容，還原時若無快取需重新載入)。匯入時將與現有紀錄合併。</p>
                     <div class="flex gap-3">
                         <button onclick="exportData()" class="flex-1 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 font-medium rounded-xl transition-colors text-sm border border-indigo-100 dark:border-indigo-800/50 flex items-center justify-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -1439,7 +1439,16 @@
                 }
 
                 try {
-                    data.indexedDB['novel-sessions'] = await idbGetAll('novel-sessions');
+                    const sessions = await idbGetAll('novel-sessions');
+                    const strippedSessions = sessions.map(s => ({
+                        id: s.id,
+                        title: s.title,
+                        startUrl: s.startUrl,
+                        currentUrl: s.currentUrl,
+                        createdAt: s.createdAt,
+                        isEnded: s.isEnded
+                    }));
+                    data.indexedDB['novel-sessions'] = strippedSessions;
                 } catch(e) {
                     console.error('Failed to export novel-sessions', e);
                 }
@@ -1473,7 +1482,26 @@
                         }
                         if (data.indexedDB && data.indexedDB['novel-sessions']) {
                             for (const session of data.indexedDB['novel-sessions']) {
-                                await idbPut('novel-sessions', session);
+                                try {
+                                    const existing = await idbGet('novel-sessions', session.id).catch(() => null);
+                                    if (existing && existing.pages && existing.pages.includes(session.currentUrl)) {
+                                        // Merge into existing prefetch
+                                        existing.currentUrl = session.currentUrl;
+                                        existing.currentIdx = existing.pages.indexOf(session.currentUrl);
+                                        if (session.title) existing.title = session.title;
+                                        if (session.createdAt) existing.createdAt = session.createdAt;
+                                        await idbPut('novel-sessions', existing);
+                                    } else {
+                                        // Reset prefetch array to the restored bookmark
+                                        session.pages = [session.currentUrl];
+                                        session.currentIdx = 0;
+                                        await idbPut('novel-sessions', session);
+                                    }
+                                } catch (e) {
+                                    session.pages = [session.currentUrl];
+                                    session.currentIdx = 0;
+                                    await idbPut('novel-sessions', session);
+                                }
                                 importedCount++;
                             }
                         }
@@ -3072,9 +3100,8 @@
                 // Reset pages arrays in sessions
                 const sessions = await idbGetAll('novel-sessions').catch(() => []);
                 for (const s of sessions) {
-                    s.pages = [s.startUrl];
+                    s.pages = [s.currentUrl];
                     s.currentIdx = 0;
-                    s.currentUrl = s.startUrl;
                     await idbPut('novel-sessions', s);
                 }
                 _updateStorageInfo();
