@@ -241,7 +241,6 @@
             animation: offlinePulse 2s ease-in-out infinite;
         }
         @keyframes offlinePulse {
-            0%, 100% { opacity: 0.7; }
             50%      { opacity: 1; }
         }
         /* Novel bookmark card hover */
@@ -707,10 +706,21 @@
                     </div>
                 </div>
                 <!-- End Keywords -->
-                <div>
+                <div class="mb-5">
                     <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">最末頁關鍵字</label>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">當網頁內容或標題包含此字詞時，自動判定為最末頁並停止預載。多個關鍵字請用逗號隔開。</p>
                     <input type="text" id="novel-end-keywords" placeholder="例如：待續, 全書完, 敬請期待" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                </div>
+                <!-- Hide Labels Toggle -->
+                <div class="mb-5 flex items-center justify-between">
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 dark:text-gray-300">隱藏工具列文字</label>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">只顯示圖示，讓底部工具列更簡潔</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="novel-hide-labels-checkbox" onchange="NovelMode.toggleHideLabels(this.checked)" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                    </label>
                 </div>
                 <!-- Storage Info -->
                 <div id="novel-storage-info" class="hidden bg-gray-50 dark:bg-gray-700/50 rounded-lg px-4 py-3">
@@ -845,18 +855,31 @@
                     </div>
                 </div>
                 <!-- Exit / Update novel mode -->
-                <div class="flex justify-center gap-4 mt-1.5">
-                    <button onclick="NovelMode.startTTS()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔊 朗讀聽書</button>
-                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
-                    <button onclick="NovelMode.checkUpdates()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔄 檢查更新</button>
-                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
-                    <button onclick="NovelMode.hideBars()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🙈 隱藏</button>
-                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
-                    <button onclick="NovelTimeLimit.openSettings()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">⏱ 限時</button>
-                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
-                    <button id="novel-tl-pause-btn" onclick="NovelTimeLimit.pause()" class="text-xs text-amber-500 hover:text-amber-600 transition-colors font-semibold hidden">⏸ 暫停</button>
-                    <span id="novel-tl-pause-sep" class="text-xs text-gray-300 dark:text-gray-600 hidden">|</span>
-                    <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出</button>
+                <div class="flex justify-center gap-6 mt-3 mb-1">
+                    <button onclick="NovelMode.startTTS()" class="flex flex-col items-center gap-1 text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">
+                        <span class="text-[22px] leading-none">🔊</span>
+                        <span class="text-[10px] toolbar-label">聽書</span>
+                    </button>
+                    <button onclick="NovelMode.checkUpdates()" class="flex flex-col items-center gap-1 text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">
+                        <span class="text-[22px] leading-none">🔄</span>
+                        <span class="text-[10px] toolbar-label">更新</span>
+                    </button>
+                    <button onclick="NovelMode.hideBars()" class="flex flex-col items-center gap-1 text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">
+                        <span class="text-[22px] leading-none">🙈</span>
+                        <span class="text-[10px] toolbar-label">隱藏</span>
+                    </button>
+                    <button onclick="NovelTimeLimit.openSettings()" class="flex flex-col items-center gap-1 text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">
+                        <span class="text-[22px] leading-none">⏱</span>
+                        <span class="text-[10px] toolbar-label">限時</span>
+                    </button>
+                    <button id="novel-tl-pause-btn" onclick="NovelTimeLimit.pause()" class="flex flex-col items-center gap-1 text-amber-500 hover:text-amber-600 transition-colors font-semibold">
+                        <span class="text-[22px] leading-none">⏸</span>
+                        <span class="text-[10px] toolbar-label">暫停</span>
+                    </button>
+                    <button onclick="NovelMode.deactivate()" class="flex flex-col items-center gap-1 text-gray-400 hover:text-red-500 transition-colors font-semibold">
+                        <span class="text-[22px] leading-none">🚪</span>
+                        <span class="text-[10px] toolbar-label">退出</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -4176,6 +4199,7 @@
                 isAtPageBottom: _isAtPageBottom,
                 startTTS, stopTTS, toggleTTSPlay, changeTTSVoice, changeTTSRate, adjustTTSRate,
                 prevTTSParagraph, nextTTSParagraph, isTtsActive, jumpToTtsParagraph, syncWakeLock: _syncWakeLock,
+                toggleHideLabels,
                 get active() { return _active; },
                 get session() { return _session; }
             };
@@ -4701,7 +4725,7 @@
                 startTimer, stopTimer, checkLimit,
                 extend, exitReading, disableForToday,
                 openSettings, closeSettings, setLimit,
-                renderChart
+                renderChart, pause, resume, setAutoPause
             };
         })();
 
@@ -4731,6 +4755,12 @@
             NovelMode.renderBookmarks();
             updateOfflineIndicator();
             NovelMode.triggerAutoUpdates();
+
+            if (localStorage.getItem('pureReader_hide_labels') === 'true') {
+                document.body.classList.add('hide-toolbar-labels');
+                const cb = document.getElementById('novel-hide-labels-checkbox');
+                if (cb) cb.checked = true;
+            }
 
             // Initialize TTS voice change listener if SpeechSynthesis is supported
             if (window.speechSynthesis) {
