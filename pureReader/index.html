@@ -1423,40 +1423,72 @@
         }
         
         // ─── Data Backup & Restore ────────────────────────────────────────────
-        function exportData() {
-            const data = {};
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith('pureReader_') && !key.startsWith('pureReader_cache_') && !key.startsWith('pureReader_pending')) {
-                    data[key] = localStorage.getItem(key);
+        async function exportData() {
+            try {
+                const data = {
+                    _schemaVersion: 2,
+                    localStorage: {},
+                    indexedDB: {}
+                };
+
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('pureReader_') && !key.startsWith('pureReader_cache_') && !key.startsWith('pureReader_pending')) {
+                        data.localStorage[key] = localStorage.getItem(key);
+                    }
                 }
+
+                try {
+                    data.indexedDB['novel-sessions'] = await idbGetAll('novel-sessions');
+                } catch(e) {
+                    console.error('Failed to export novel-sessions', e);
+                }
+
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const dateStr = new Date().toISOString().slice(0,10);
+                a.download = `pureReader_backup_${dateStr}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch(err) {
+                alert('匯出失敗：' + err.message);
             }
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const dateStr = new Date().toISOString().slice(0,10);
-            a.download = `pureReader_backup_${dateStr}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
         }
 
-        function importData(event) {
+        async function importData(event) {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = (e) => {
+            reader.onload = async (e) => {
                 try {
                     const data = JSON.parse(e.target.result);
                     let importedCount = 0;
-                    for (const key in data) {
-                        if (key.startsWith('pureReader_')) {
-                            localStorage.setItem(key, data[key]);
+                    
+                    if (data._schemaVersion === 2) {
+                        for (const key in data.localStorage) {
+                            localStorage.setItem(key, data.localStorage[key]);
                             importedCount++;
                         }
+                        if (data.indexedDB && data.indexedDB['novel-sessions']) {
+                            for (const session of data.indexedDB['novel-sessions']) {
+                                await idbPut('novel-sessions', session);
+                                importedCount++;
+                            }
+                        }
+                    } else {
+                        // Legacy format
+                        for (const key in data) {
+                            if (key.startsWith('pureReader_')) {
+                                localStorage.setItem(key, data[key]);
+                                importedCount++;
+                            }
+                        }
                     }
+
                     if (importedCount > 0) {
-                        alert(`成功還原了 ${importedCount} 項資料！網頁將重新載入以套用設定。`);
+                        alert(`成功還原了資料！網頁將重新載入以套用設定。`);
                         window.location.reload();
                     } else {
                         alert('備份檔中找不到有效的淨讀器資料。');
