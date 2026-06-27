@@ -214,6 +214,28 @@
         body:not(.novel-bar-hidden) #novel-bottom-tab {
             display: none;
         }
+        #novel-floating-pause-btn {
+            position: fixed;
+            bottom: 6px;
+            right: 16px;
+            z-index: 35;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.875rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: rgba(245,158,11,0.92); /* amber-500 */
+            color: #fff;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+            user-select: none;
+        }
+        body.novel-bar-hidden.novel-tl-active #novel-floating-pause-btn {
+            display: flex;
+        }
         /* Offline indicator pulse */
         .offline-pulse {
             animation: offlinePulse 2s ease-in-out infinite;
@@ -360,6 +382,15 @@
         @keyframes novelTlPulse {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.05); }
+        }
+        #novel-tl-pause-overlay {
+            transition: opacity 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #novel-tl-pause-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
         }
     </style>
 </head>
@@ -704,6 +735,12 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             <span>工具列</span>
         </div>
+        
+        <!-- Floating pause button -->
+        <div id="novel-floating-pause-btn" onclick="NovelTimeLimit.pause()" title="暫停閱讀">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            <span>暫停</span>
+        </div>
 
         <!-- Novel Controls Bar (visible during novel reading) -->
         <div id="novel-controls" class="hidden fixed bottom-0 left-0 right-0 z-30 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border-t border-gray-200 dark:border-gray-700 shadow-lg">
@@ -813,11 +850,13 @@
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.checkUpdates()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🔄 檢查更新</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
-                    <button onclick="NovelMode.hideBars()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🙈 隱藏工具列</button>
+                    <button onclick="NovelMode.hideBars()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🙈 隱藏</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelTimeLimit.openSettings()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">⏱ 限時</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
-                    <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出小說模式</button>
+                    <button id="novel-tl-pause-btn" onclick="NovelTimeLimit.pause()" class="text-xs text-amber-500 hover:text-amber-600 transition-colors font-semibold hidden">⏸ 暫停</button>
+                    <span id="novel-tl-pause-sep" class="text-xs text-gray-300 dark:text-gray-600 hidden">|</span>
+                    <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出</button>
                 </div>
             </div>
         </div>
@@ -858,6 +897,24 @@
             </div>
         </div>
 
+        <!-- Novel Time Limit Pause Overlay -->
+        <div id="novel-tl-pause-overlay" class="fixed inset-0 z-50 bg-gray-900/80 dark:bg-black/85 backdrop-blur-sm flex items-center justify-center">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 sm:p-8 mx-4 max-w-sm w-full text-center border border-gray-200 dark:border-gray-700">
+                <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-indigo-50 dark:bg-indigo-900/30 border-4 border-indigo-300 dark:border-indigo-700 mb-4">
+                    <span class="text-3xl">⏸</span>
+                </div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">閱讀已暫停</h3>
+                <div class="flex flex-col gap-3">
+                    <button onclick="NovelTimeLimit.resume()" class="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-medium rounded-xl shadow-md transition-all text-sm">
+                        ▶ 恢復閱讀
+                    </button>
+                    <button onclick="NovelTimeLimit.exitReading()" class="w-full py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors text-sm border border-gray-200 dark:border-gray-600">
+                        🏠 回首頁
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Novel Time Limit Settings -->
         <div id="novel-tl-settings-overlay" class="fixed inset-0 bg-black/40 z-50" onclick="NovelTimeLimit.closeSettings()"></div>
         <div id="novel-tl-settings-panel" class="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-200 dark:border-gray-700 max-h-[85vh] overflow-y-auto">
@@ -893,6 +950,22 @@
                         <option value="6">6 小時</option>
                         <option value="7">7 小時</option>
                         <option value="8">8 小時</option>
+                    </select>
+                </div>
+                <div id="novel-tl-auto-pause-row" class="mb-5">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">閒置自動暫停</label>
+                    <select id="novel-tl-pause-select" onchange="NovelTimeLimit.setAutoPause(parseInt(this.value))" class="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm font-medium">
+                        <option value="0">不自動暫停</option>
+                        <option value="1">1 分鐘</option>
+                        <option value="2">2 分鐘</option>
+                        <option value="3">3 分鐘</option>
+                        <option value="4">4 分鐘</option>
+                        <option value="5">5 分鐘</option>
+                        <option value="6">6 分鐘</option>
+                        <option value="7">7 分鐘</option>
+                        <option value="8">8 分鐘</option>
+                        <option value="9">9 分鐘</option>
+                        <option value="10">10 分鐘</option>
                     </select>
                 </div>
                 <div id="novel-tl-disable-today-row" class="mb-5">
@@ -4118,6 +4191,8 @@
             let _tickInterval   = null;
             let _cooldownTimer  = null;
             let _cooldownLeft   = 0;
+            let _isPaused       = false;
+            let _idleTimer      = null;
 
             // ── Helpers ──────────────────────────────────────────────────────
             function _getTodayKey() {
@@ -4128,11 +4203,18 @@
             }
 
             function _defaultState() {
-                return { dailyLimitHours: 1, todayUsedMs: 0, todayDate: _getTodayKey(), extensionsUsed: 0, extensionMs: 0, disabledUntil: null, lastTickAt: null };
+                return { dailyLimitHours: 1, autoPauseMinutes: 5, todayUsedMs: 0, todayDate: _getTodayKey(), extensionsUsed: 0, extensionMs: 0, disabledUntil: null, lastTickAt: null };
             }
 
             function _getState() {
-                try { const s = JSON.parse(localStorage.getItem(STORAGE_TIMER)); return s || _defaultState(); }
+                try { 
+                    const s = JSON.parse(localStorage.getItem(STORAGE_TIMER)); 
+                    if (s) {
+                        if (s.autoPauseMinutes === undefined) s.autoPauseMinutes = 5;
+                        return s;
+                    }
+                    return _defaultState(); 
+                }
                 catch(e) { return _defaultState(); }
             }
 
@@ -4253,14 +4335,90 @@
                 }, 1000);
             }
 
+            // ── Idle Detection & Pause ───────────────────────────────────────
+            function _resetIdleTimer() {
+                if (_idleTimer) clearTimeout(_idleTimer);
+                const state = _getState();
+                if (state.autoPauseMinutes > 0 && !_isPaused && state.dailyLimitHours > 0 && !_isDisabledToday(state)) {
+                    _idleTimer = setTimeout(() => {
+                        pause();
+                    }, state.autoPauseMinutes * 60000);
+                }
+            }
+
+            function _idleListener() {
+                if (_isPaused) return;
+                _resetIdleTimer();
+            }
+
+            function _setupIdleListeners() {
+                window.addEventListener('touchstart', _idleListener, {passive: true});
+                window.addEventListener('mousedown', _idleListener, {passive: true});
+                window.addEventListener('keydown', _idleListener, {passive: true});
+                window.addEventListener('scroll', _idleListener, {passive: true});
+                _resetIdleTimer();
+            }
+
+            function _removeIdleListeners() {
+                window.removeEventListener('touchstart', _idleListener);
+                window.removeEventListener('mousedown', _idleListener);
+                window.removeEventListener('keydown', _idleListener);
+                window.removeEventListener('scroll', _idleListener);
+                if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
+            }
+
+            function pause() {
+                if (_isPaused) return;
+                _isPaused = true;
+                
+                // Immediately commit any pending time to state
+                if (_tickInterval) {
+                    let s = _getState();
+                    const now = Date.now();
+                    const elapsed = s.lastTickAt ? now - s.lastTickAt : 0;
+                    s.todayUsedMs += Math.min(elapsed, 5000);
+                    s.lastTickAt = null;
+                    _saveState(s);
+                }
+
+                _removeIdleListeners();
+                if (NovelMode.isTtsActive && NovelMode.isTtsActive()) {
+                    window.speechSynthesis.pause();
+                }
+                
+                const el = document.getElementById('novel-tl-pause-overlay');
+                if (el) el.classList.add('active');
+            }
+
+            function resume() {
+                if (!_isPaused) return;
+                _isPaused = false;
+                
+                let s = _getState();
+                s.lastTickAt = Date.now();
+                _saveState(s);
+
+                const el = document.getElementById('novel-tl-pause-overlay');
+                if (el) el.classList.remove('active');
+                
+                _setupIdleListeners();
+                if (NovelMode.isTtsActive && NovelMode.isTtsActive() && window.speechSynthesis.paused) {
+                    window.speechSynthesis.resume();
+                }
+            }
+
             // ── Timer ────────────────────────────────────────────────────────
             function startTimer() {
                 if (_tickInterval) return;
                 let state = _checkAndResetDay(_getState());
-                state.lastTickAt = Date.now();
+                state.lastTickAt = _isPaused ? null : Date.now();
                 _saveState(state);
 
+                document.body.classList.add('novel-tl-active');
+                if (!_isPaused) _setupIdleListeners();
+
                 _tickInterval = setInterval(() => {
+                    if (_isPaused) return;
                     let s = _getState();
                     const now = Date.now();
                     const elapsed = s.lastTickAt ? now - s.lastTickAt : 1000;
@@ -4286,6 +4444,9 @@
                     clearInterval(_tickInterval);
                     _tickInterval = null;
                 }
+                _removeIdleListeners();
+                document.body.classList.remove('novel-tl-active');
+                
                 // Final save
                 let s = _getState();
                 s.lastTickAt = null;
@@ -4332,9 +4493,19 @@
                 state.dailyLimitHours = hours;
                 _saveState(state);
                 _updateSettingsUI();
+                if (_tickInterval && !_isPaused) _resetIdleTimer();
                 // If now within limit, hide overlay
                 if (!_isOverLimit(_checkAndResetDay(state))) {
                     _hideOverlay();
+                }
+            }
+
+            function setAutoPause(min) {
+                let state = _getState();
+                state.autoPauseMinutes = min;
+                _saveState(state);
+                if (_tickInterval && !_isPaused) {
+                    _resetIdleTimer();
                 }
             }
 
@@ -4366,6 +4537,9 @@
                 const state = _checkAndResetDay(_getState());
                 const select = document.getElementById('novel-tl-limit-select');
                 if (select) select.value = String(state.dailyLimitHours);
+
+                const pauseSelect = document.getElementById('novel-tl-pause-select');
+                if (pauseSelect) pauseSelect.value = String(state.autoPauseMinutes);
 
                 const usedEl = document.getElementById('novel-tl-today-used');
                 if (usedEl) usedEl.textContent = _formatMs(state.todayUsedMs);
