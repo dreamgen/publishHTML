@@ -4176,6 +4176,16 @@
                 }
             }
 
+            function toggleHideLabels(checked) {
+                if (checked) {
+                    document.body.classList.add('hide-toolbar-labels');
+                    localStorage.setItem('pureReader_hide_labels', 'true');
+                } else {
+                    document.body.classList.remove('hide-toolbar-labels');
+                    localStorage.removeItem('pureReader_hide_labels');
+                }
+            }
+
             function _escHtml(str) {
                 const d = document.createElement('div');
                 d.textContent = str;
