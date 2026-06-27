@@ -6,7 +6,7 @@
  * 3. Background Fetch : 關掉 App 後仍可繼續下載
  */
 
-const SW_VERSION   = 'v4';
+const SW_VERSION   = 'v5';
 const CACHE_NAME   = `pureReader-${SW_VERSION}`;
 const SHARED_CACHE = `pureReader-shared-${SW_VERSION}`;
 const ALL_CACHES   = [CACHE_NAME, SHARED_CACHE];

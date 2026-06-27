@@ -328,6 +328,39 @@
             border-left-color: #818cf8;
             box-shadow: 0 2px 8px rgba(129, 140, 248, 0.08);
         }
+        /* ─── Novel Time Limit ─────────────────────────────────────── */
+        #novel-time-limit-overlay {
+            transition: opacity 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #novel-time-limit-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        #novel-tl-settings-overlay {
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            opacity: 0;
+        }
+        #novel-tl-settings-overlay.active {
+            pointer-events: auto;
+            opacity: 1;
+        }
+        #novel-tl-settings-panel {
+            transform: translateY(100%);
+            transition: transform 0.35s cubic-bezier(.4,0,.2,1);
+        }
+        #novel-tl-settings-panel.active {
+            transform: translateY(0);
+        }
+        .novel-tl-countdown-ring {
+            animation: novelTlPulse 1s ease-in-out infinite;
+        }
+        @keyframes novelTlPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 min-h-screen flex flex-col font-sans">
@@ -782,6 +815,8 @@
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.hideBars()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">🙈 隱藏工具列</button>
                     <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
+                    <button onclick="NovelTimeLimit.openSettings()" class="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold">⏱ 限時</button>
+                    <span class="text-xs text-gray-300 dark:text-gray-600">|</span>
                     <button onclick="NovelMode.deactivate()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">退出小說模式</button>
                 </div>
             </div>
@@ -795,6 +830,82 @@
             </div>
             <div id="novel-toc-list" class="max-w-3xl lg:max-w-4xl xl:max-w-5xl w-full mx-auto px-4 py-2 overflow-y-auto flex-1 divide-y divide-gray-100 dark:divide-gray-800 text-sm">
                 <!-- Injected dynamically -->
+            </div>
+        </div>
+
+        <!-- Novel Time Limit Overlay -->
+        <div id="novel-time-limit-overlay" class="fixed inset-0 z-50 bg-gray-900/80 dark:bg-black/85 backdrop-blur-sm flex items-center justify-center">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 sm:p-8 mx-4 max-w-sm w-full text-center border border-gray-200 dark:border-gray-700">
+                <div class="novel-tl-countdown-ring inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-50 dark:bg-amber-900/30 border-4 border-amber-300 dark:border-amber-700 mb-4">
+                    <span class="text-3xl">⏰</span>
+                </div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">今日閱讀已達上限</h3>
+                <p id="novel-tl-overlay-usage" class="text-sm text-gray-500 dark:text-gray-400 mb-4">已閱讀 0 分鐘 / 限額 60 分鐘</p>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mb-6">
+                    <div id="novel-tl-overlay-bar" class="bg-amber-500 h-2.5 rounded-full transition-all" style="width:100%"></div>
+                </div>
+                <div id="novel-tl-cooldown-area" class="mb-4">
+                    <p id="novel-tl-cooldown-msg" class="text-sm text-gray-500 dark:text-gray-400 mb-3">請稍候 <span id="novel-tl-cooldown-num" class="font-bold text-amber-600 dark:text-amber-400 text-lg">60</span> 秒後可延長時間</p>
+                    <button id="novel-tl-extend-btn" disabled onclick="NovelTimeLimit.extend()"
+                        class="w-full py-3 bg-amber-500 text-white font-medium rounded-xl shadow-md transition-all text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-600">
+                        <span id="novel-tl-extend-label">再延長 30 分鐘</span>
+                    </button>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="NovelTimeLimit.openSettings()" class="flex-1 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors text-sm">進入設定</button>
+                    <button onclick="NovelTimeLimit.exitReading()" class="flex-1 py-2.5 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 font-medium rounded-xl transition-colors text-sm border border-red-100 dark:border-red-800/50">結束閱讀</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Novel Time Limit Settings -->
+        <div id="novel-tl-settings-overlay" class="fixed inset-0 bg-black/40 z-50" onclick="NovelTimeLimit.closeSettings()"></div>
+        <div id="novel-tl-settings-panel" class="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-200 dark:border-gray-700 max-h-[85vh] overflow-y-auto">
+            <div class="max-w-lg mx-auto px-5 py-5">
+                <div class="flex items-center justify-between mb-5">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <span>⏱</span>
+                        <span>小說限時設定</span>
+                    </h3>
+                    <button onclick="NovelTimeLimit.closeSettings()" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </button>
+                </div>
+                <div class="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-4 mb-5 border border-gray-100 dark:border-gray-700">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">今日已讀</span>
+                        <span id="novel-tl-today-used" class="text-sm font-bold text-indigo-600 dark:text-indigo-400">0 分鐘</span>
+                    </div>
+                    <div id="novel-tl-remain-row" class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">剩餘時間</span>
+                        <span id="novel-tl-today-remain" class="text-sm font-bold text-emerald-600 dark:text-emerald-400">60 分鐘</span>
+                    </div>
+                </div>
+                <div class="mb-5">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">每日限額</label>
+                    <select id="novel-tl-limit-select" onchange="NovelTimeLimit.setLimit(parseInt(this.value))" class="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm font-medium">
+                        <option value="0">不限額</option>
+                        <option value="1">1 小時</option>
+                        <option value="2">2 小時</option>
+                        <option value="3">3 小時</option>
+                        <option value="4">4 小時</option>
+                        <option value="5">5 小時</option>
+                        <option value="6">6 小時</option>
+                        <option value="7">7 小時</option>
+                        <option value="8">8 小時</option>
+                    </select>
+                </div>
+                <div id="novel-tl-disable-today-row" class="mb-5">
+                    <button onclick="NovelTimeLimit.disableForToday()" class="w-full py-2.5 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-400 font-medium rounded-xl transition-colors text-sm border border-amber-200 dark:border-amber-800/50">
+                        🔓 關閉 1 日（明早 08:00 恢復）
+                    </button>
+                </div>
+                <div class="mb-2">
+                    <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">近 30 天閱讀時長</h4>
+                    <div class="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-3 border border-gray-100 dark:border-gray-700">
+                        <canvas id="novel-tl-chart" width="400" height="180" class="w-full"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -2000,11 +2111,15 @@
                 _showControls();
                 _updateIndicators();
 
+                if (NovelTimeLimit.checkLimit()) return;
+                NovelTimeLimit.startTimer();
+
                 // Start prefetching
                 prefetch();
             }
 
             function deactivate() {
+                NovelTimeLimit.stopTimer();
                 _active = false;
                 if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
                 _prefetching = false;
@@ -2545,6 +2660,7 @@
             // ── Navigation ───────────────────────────────────────────────────
             async function loadNext() {
                 if (!_session) return;
+                if (NovelTimeLimit.checkLimit()) return;
                 const nextIdx = _session.currentIdx + 1;
                 if (nextIdx >= _session.pages.length) {
                     // No prefetched pages left — try to fetch 1 on-demand
@@ -2574,6 +2690,7 @@
 
             async function loadPrev() {
                 if (!_session || _session.currentIdx <= 0) return;
+                if (NovelTimeLimit.checkLimit()) return;
                 await _navigateToPage(_session.currentIdx - 1);
             }
 
@@ -2683,6 +2800,9 @@
                     renderArticle(articleData, session.currentUrl, true);
                     _showControls();
                     _updateIndicators();
+
+                    if (NovelTimeLimit.checkLimit()) return;
+                    NovelTimeLimit.startTimer();
                 } else {
                     // Need to re-fetch
                     extractArticle(session.currentUrl);
@@ -3546,6 +3666,10 @@
                     _showControls();
                     _updateIndicators();
                     _handleTtsPageTransition();
+
+                    if (NovelTimeLimit.checkLimit()) return;
+                    NovelTimeLimit.startTimer();
+
                     // Trigger prefetch to keep filling the sliding window
                     prefetch();
                     return;
@@ -3569,6 +3693,10 @@
                     _updateIndicators();
                     _handleTtsPageTransition();
                     showSyncBar(`已自動切換至小說《${_session.title}》`, null, null, 2000);
+
+                    if (NovelTimeLimit.checkLimit()) return;
+                    NovelTimeLimit.startTimer();
+
                     prefetch();
                 } else {
                     // Doesn't belong to any session, deactivate novel mode
@@ -3977,6 +4105,429 @@
                 prevTTSParagraph, nextTTSParagraph, isTtsActive, jumpToTtsParagraph, syncWakeLock: _syncWakeLock,
                 get active() { return _active; },
                 get session() { return _session; }
+            };
+        })();
+
+        // ─── Novel Time Limit ─────────────────────────────────────────────────
+        const NovelTimeLimit = (() => {
+            const STORAGE_TIMER = 'pureReader_novel_timer';
+            const STORAGE_LOG   = 'pureReader_novel_usage_log';
+            const RESET_HOUR    = 8;
+            const COOLDOWN_SEC  = 60;
+
+            let _tickInterval   = null;
+            let _cooldownTimer  = null;
+            let _cooldownLeft   = 0;
+
+            // ── Helpers ──────────────────────────────────────────────────────
+            function _getTodayKey() {
+                const now = new Date();
+                const d = new Date(now);
+                if (d.getHours() < RESET_HOUR) d.setDate(d.getDate() - 1);
+                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            }
+
+            function _defaultState() {
+                return { dailyLimitHours: 1, todayUsedMs: 0, todayDate: _getTodayKey(), extensionsUsed: 0, extensionMs: 0, disabledUntil: null, lastTickAt: null };
+            }
+
+            function _getState() {
+                try { const s = JSON.parse(localStorage.getItem(STORAGE_TIMER)); return s || _defaultState(); }
+                catch(e) { return _defaultState(); }
+            }
+
+            function _saveState(s) {
+                localStorage.setItem(STORAGE_TIMER, JSON.stringify(s));
+            }
+
+            function _getLog() {
+                try { return JSON.parse(localStorage.getItem(STORAGE_LOG) || '[]'); }
+                catch(e) { return []; }
+            }
+
+            function _saveLog(log) {
+                localStorage.setItem(STORAGE_LOG, JSON.stringify(log));
+            }
+
+            function _archiveDay(state) {
+                if (!state.todayDate || state.todayUsedMs <= 0) return;
+                let log = _getLog();
+                const idx = log.findIndex(l => l.date === state.todayDate);
+                if (idx > -1) {
+                    log[idx].usedMs = Math.max(log[idx].usedMs, state.todayUsedMs);
+                } else {
+                    log.push({ date: state.todayDate, usedMs: state.todayUsedMs });
+                }
+                // Keep only last 30 days
+                log.sort((a, b) => b.date.localeCompare(a.date));
+                if (log.length > 30) log = log.slice(0, 30);
+                _saveLog(log);
+            }
+
+            function _checkAndResetDay(state) {
+                const today = _getTodayKey();
+                if (state.todayDate !== today) {
+                    _archiveDay(state);
+                    state.todayUsedMs = 0;
+                    state.todayDate = today;
+                    state.extensionsUsed = 0;
+                    state.extensionMs = 0;
+                    // Check if disabledUntil has expired
+                    if (state.disabledUntil && Date.now() >= state.disabledUntil) {
+                        state.disabledUntil = null;
+                    }
+                    _saveState(state);
+                }
+                return state;
+            }
+
+            function _isDisabledToday(state) {
+                return state.disabledUntil && Date.now() < state.disabledUntil;
+            }
+
+            function _getLimitMs(state) {
+                return state.dailyLimitHours * 3600000 + state.extensionMs;
+            }
+
+            function _isOverLimit(state) {
+                if (state.dailyLimitHours === 0) return false;
+                if (_isDisabledToday(state)) return false;
+                return state.todayUsedMs >= _getLimitMs(state);
+            }
+
+            function _formatMs(ms) {
+                const totalMin = Math.floor(ms / 60000);
+                if (totalMin < 60) return `${totalMin} 分鐘`;
+                const h = Math.floor(totalMin / 60);
+                const m = totalMin % 60;
+                return m > 0 ? `${h} 小時 ${m} 分鐘` : `${h} 小時`;
+            }
+
+            // ── Overlay ──────────────────────────────────────────────────────
+            function _showOverlay() {
+                const state = _checkAndResetDay(_getState());
+                const el = document.getElementById('novel-time-limit-overlay');
+                if (!el) return;
+
+                // Update usage display
+                const usageEl = document.getElementById('novel-tl-overlay-usage');
+                const limitMs = _getLimitMs(state);
+                if (usageEl) usageEl.textContent = `已閱讀 ${_formatMs(state.todayUsedMs)} / 限額 ${_formatMs(limitMs)}`;
+
+                const bar = document.getElementById('novel-tl-overlay-bar');
+                if (bar) bar.style.width = `${Math.min(100, (state.todayUsedMs / limitMs) * 100)}%`;
+
+                // Update extend label
+                const extLabel = document.getElementById('novel-tl-extend-label');
+                if (extLabel) extLabel.textContent = state.extensionsUsed === 0 ? '再延長 30 分鐘' : '再延長 10 分鐘';
+
+                el.classList.add('active');
+                _startCooldown();
+            }
+
+            function _hideOverlay() {
+                const el = document.getElementById('novel-time-limit-overlay');
+                if (el) el.classList.remove('active');
+                if (_cooldownTimer) { clearInterval(_cooldownTimer); _cooldownTimer = null; }
+            }
+
+            function _startCooldown() {
+                const btn = document.getElementById('novel-tl-extend-btn');
+                const numEl = document.getElementById('novel-tl-cooldown-num');
+                const msgEl = document.getElementById('novel-tl-cooldown-msg');
+                if (btn) btn.disabled = true;
+                _cooldownLeft = COOLDOWN_SEC;
+                if (numEl) numEl.textContent = _cooldownLeft;
+                if (msgEl) msgEl.style.display = '';
+
+                if (_cooldownTimer) clearInterval(_cooldownTimer);
+                _cooldownTimer = setInterval(() => {
+                    _cooldownLeft--;
+                    if (numEl) numEl.textContent = _cooldownLeft;
+                    if (_cooldownLeft <= 0) {
+                        clearInterval(_cooldownTimer);
+                        _cooldownTimer = null;
+                        if (btn) btn.disabled = false;
+                        if (msgEl) msgEl.style.display = 'none';
+                    }
+                }, 1000);
+            }
+
+            // ── Timer ────────────────────────────────────────────────────────
+            function startTimer() {
+                if (_tickInterval) return;
+                let state = _checkAndResetDay(_getState());
+                state.lastTickAt = Date.now();
+                _saveState(state);
+
+                _tickInterval = setInterval(() => {
+                    let s = _getState();
+                    const now = Date.now();
+                    const elapsed = s.lastTickAt ? now - s.lastTickAt : 1000;
+                    s.todayUsedMs += Math.min(elapsed, 5000); // cap delta to 5s to avoid jumps
+                    s.lastTickAt = now;
+                    _saveState(s);
+
+                    // Periodic archive (every 30s)
+                    if (Math.floor(s.todayUsedMs / 30000) !== Math.floor((s.todayUsedMs - elapsed) / 30000)) {
+                        _archiveDay(s);
+                    }
+
+                    // Check limit
+                    if (_isOverLimit(s)) {
+                        _showOverlay();
+                        stopTimer();
+                    }
+                }, 1000);
+            }
+
+            function stopTimer() {
+                if (_tickInterval) {
+                    clearInterval(_tickInterval);
+                    _tickInterval = null;
+                }
+                // Final save
+                let s = _getState();
+                s.lastTickAt = null;
+                _saveState(s);
+                _archiveDay(s);
+            }
+
+            // ── Actions ──────────────────────────────────────────────────────
+            function extend() {
+                let state = _getState();
+                const addMs = state.extensionsUsed === 0 ? 30 * 60000 : 10 * 60000;
+                state.extensionMs += addMs;
+                state.extensionsUsed++;
+                _saveState(state);
+                _hideOverlay();
+                startTimer();
+            }
+
+            function exitReading() {
+                _hideOverlay();
+                stopTimer();
+                NovelMode.deactivate();
+                resetView();
+            }
+
+            function disableForToday() {
+                let state = _getState();
+                // Set disabledUntil to tomorrow at RESET_HOUR
+                const now = new Date();
+                const tomorrow = new Date(now);
+                if (now.getHours() >= RESET_HOUR) {
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                }
+                tomorrow.setHours(RESET_HOUR, 0, 0, 0);
+                state.disabledUntil = tomorrow.getTime();
+                _saveState(state);
+                _hideOverlay();
+                closeSettings();
+                if (NovelMode.active) startTimer();
+            }
+
+            function setLimit(hours) {
+                let state = _getState();
+                state.dailyLimitHours = hours;
+                _saveState(state);
+                _updateSettingsUI();
+                // If now within limit, hide overlay
+                if (!_isOverLimit(_checkAndResetDay(state))) {
+                    _hideOverlay();
+                }
+            }
+
+            // ── Check (called by NovelMode) ──────────────────────────────────
+            function checkLimit() {
+                let state = _checkAndResetDay(_getState());
+                if (_isOverLimit(state)) {
+                    _showOverlay();
+                    stopTimer();
+                    return true; // blocked
+                }
+                return false;
+            }
+
+            // ── Settings Panel ───────────────────────────────────────────────
+            function openSettings() {
+                _updateSettingsUI();
+                renderChart();
+                document.getElementById('novel-tl-settings-overlay').classList.add('active');
+                document.getElementById('novel-tl-settings-panel').classList.add('active');
+            }
+
+            function closeSettings() {
+                document.getElementById('novel-tl-settings-overlay').classList.remove('active');
+                document.getElementById('novel-tl-settings-panel').classList.remove('active');
+            }
+
+            function _updateSettingsUI() {
+                const state = _checkAndResetDay(_getState());
+                const select = document.getElementById('novel-tl-limit-select');
+                if (select) select.value = String(state.dailyLimitHours);
+
+                const usedEl = document.getElementById('novel-tl-today-used');
+                if (usedEl) usedEl.textContent = _formatMs(state.todayUsedMs);
+
+                const remainRow = document.getElementById('novel-tl-remain-row');
+                const remainEl = document.getElementById('novel-tl-today-remain');
+                const disableRow = document.getElementById('novel-tl-disable-today-row');
+
+                if (state.dailyLimitHours === 0) {
+                    if (remainRow) remainRow.style.display = 'none';
+                    if (disableRow) disableRow.style.display = 'none';
+                } else {
+                    if (remainRow) remainRow.style.display = '';
+                    if (disableRow) disableRow.style.display = '';
+                    const limitMs = _getLimitMs(state);
+                    const remainMs = Math.max(0, limitMs - state.todayUsedMs);
+                    if (remainEl) {
+                        if (_isDisabledToday(state)) {
+                            remainEl.textContent = '今日不限';
+                            remainEl.className = 'text-sm font-bold text-amber-500';
+                        } else {
+                            remainEl.textContent = _formatMs(remainMs);
+                            remainEl.className = remainMs <= 0
+                                ? 'text-sm font-bold text-red-500'
+                                : 'text-sm font-bold text-emerald-600 dark:text-emerald-400';
+                        }
+                    }
+                }
+            }
+
+            // ── Chart ────────────────────────────────────────────────────────
+            function renderChart() {
+                const canvas = document.getElementById('novel-tl-chart');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const isDark = document.documentElement.classList.contains('dark');
+
+                // HiDPI
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.scale(dpr, dpr);
+                const W = rect.width;
+                const H = rect.height;
+
+                ctx.clearRect(0, 0, W, H);
+
+                // Build 30-day data
+                const log = _getLog();
+                const state = _getState();
+                const today = _getTodayKey();
+                const days = [];
+                for (let i = 29; i >= 0; i--) {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    if (d.getHours() < RESET_HOUR) d.setDate(d.getDate() - 1);
+                    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                    const entry = log.find(l => l.date === key);
+                    let ms = entry ? entry.usedMs : 0;
+                    if (key === today) ms = Math.max(ms, state.todayUsedMs);
+                    days.push({ date: key, hours: ms / 3600000 });
+                }
+
+                const pad = { top: 20, right: 15, bottom: 30, left: 35 };
+                const cW = W - pad.left - pad.right;
+                const cH = H - pad.top - pad.bottom;
+                const maxH = Math.max(1, ...days.map(d => d.hours), state.dailyLimitHours || 1);
+                const yMax = Math.ceil(maxH);
+
+                // Colors
+                const lineColor = isDark ? '#818cf8' : '#6366f1';
+                const fillTop = isDark ? 'rgba(129,140,248,0.3)' : 'rgba(99,102,241,0.15)';
+                const fillBot = isDark ? 'rgba(129,140,248,0.02)' : 'rgba(99,102,241,0.01)';
+                const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+                const textColor = isDark ? '#9ca3af' : '#6b7280';
+                const limitColor = '#ef4444';
+
+                // Y grid + labels
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                for (let y = 0; y <= yMax; y++) {
+                    const py = pad.top + cH - (y / yMax) * cH;
+                    ctx.strokeStyle = gridColor;
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(W - pad.right, py); ctx.stroke();
+                    ctx.fillStyle = textColor;
+                    ctx.fillText(`${y}h`, pad.left - 5, py);
+                }
+
+                // Limit reference line
+                if (state.dailyLimitHours > 0) {
+                    const ly = pad.top + cH - (state.dailyLimitHours / yMax) * cH;
+                    ctx.strokeStyle = limitColor;
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath(); ctx.moveTo(pad.left, ly); ctx.lineTo(W - pad.right, ly); ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = limitColor;
+                    ctx.textAlign = 'left';
+                    ctx.font = '9px sans-serif';
+                    ctx.fillText('限額', W - pad.right + 2, ly);
+                }
+
+                // Data points
+                const pts = days.map((d, i) => ({
+                    x: pad.left + (i / (days.length - 1)) * cW,
+                    y: pad.top + cH - (d.hours / yMax) * cH
+                }));
+
+                // Area fill
+                const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+                grad.addColorStop(0, fillTop);
+                grad.addColorStop(1, fillBot);
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pad.top + cH);
+                pts.forEach(p => ctx.lineTo(p.x, p.y));
+                ctx.lineTo(pts[pts.length-1].x, pad.top + cH);
+                ctx.closePath();
+                ctx.fill();
+
+                // Line
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 2;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+                ctx.stroke();
+
+                // Dots
+                pts.forEach((p, i) => {
+                    ctx.fillStyle = lineColor;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, i === pts.length - 1 ? 4 : 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (i === pts.length - 1) {
+                        ctx.strokeStyle = isDark ? '#1f2937' : '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+                });
+
+                // X labels (every 5 days)
+                ctx.fillStyle = textColor;
+                ctx.font = '9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                days.forEach((d, i) => {
+                    if (i % 5 === 0 || i === days.length - 1) {
+                        const label = d.date.substring(5); // MM-DD
+                        ctx.fillText(label, pts[i].x, pad.top + cH + 8);
+                    }
+                });
+            }
+
+            return {
+                startTimer, stopTimer, checkLimit,
+                extend, exitReading, disableForToday,
+                openSettings, closeSettings, setLimit,
+                renderChart
             };
         })();
 
