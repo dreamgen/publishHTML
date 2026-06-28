@@ -5096,6 +5096,9 @@
                 } else if (e.key === 'ArrowRight') {
                     e.preventDefault();
                     NovelMode.loadNext();
+                } else if (e.key === 'p' || e.key === 'P') {
+                    e.preventDefault();
+                    NovelTimeLimit.pause();
                 } else if (e.key === ' ' || e.key === 'Spacebar') {
                     if (NovelMode.isTtsActive()) {
                         e.preventDefault();
