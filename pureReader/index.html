@@ -491,6 +491,26 @@
                 </form>
             </div>
 
+            <!-- Novel Search Card -->
+            <div class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-md p-6 sm:p-8 border border-gray-100 dark:border-gray-700 text-center">
+                <h2 class="text-xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">小說搜尋</h2>
+                <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">直接搜尋想看的小說，並從結果中開啟章節連結進行淨化。</p>
+
+                <form id="novel-search-form" class="flex flex-col gap-3" onsubmit="handleNovelSearchSubmit(event)">
+                    <div class="flex gap-2">
+                        <input type="text" id="novel-search-input" placeholder="輸入小說名稱或作者..." required
+                            class="flex-1 px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm sm:text-base">
+                        <select id="novel-search-source" class="w-28 sm:w-32 px-2 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-xs sm:text-sm appearance-none cursor-pointer">
+                            <!-- Injected by JS -->
+                        </select>
+                    </div>
+                    <button type="submit" class="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-medium rounded-lg shadow-md transition-all flex justify-center items-center gap-2">
+                        <span>搜尋小說</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    </button>
+                </form>
+            </div>
+
             <!-- Background Jobs Section -->
             <div id="pending-section" class="hidden w-full">
                 <div class="flex items-center gap-2 mb-3">
@@ -745,6 +765,17 @@
                         <input type="checkbox" id="novel-hide-labels-checkbox" onchange="NovelMode.toggleHideLabels(this.checked)" class="sr-only peer">
                         <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
                     </label>
+                </div>
+                <!-- Novel Search Sources Settings -->
+                <div class="mb-5 border-t border-gray-100 dark:border-gray-700 pt-5">
+                    <label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">小說搜尋來源設定</label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">設定首頁搜尋功能的小說網站來源。網址中需包含 <code>{query_word}</code> 變數。</p>
+                    <ul id="novel-search-sources-list" class="flex flex-col gap-2 mb-3"></ul>
+                    <div class="flex gap-2">
+                        <input type="text" id="novel-search-source-name" placeholder="名稱" class="w-1/4 sm:w-1/3 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                        <input type="url" id="novel-search-source-url" placeholder="https://.../search/{query_word}" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                        <button onclick="addNovelSearchSource()" class="shrink-0 px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg text-sm font-medium transition-colors border border-indigo-100 dark:border-indigo-800/50">新增</button>
+                    </div>
                 </div>
                 <!-- Storage Info -->
                 <div id="novel-storage-info" class="hidden bg-gray-50 dark:bg-gray-700/50 rounded-lg px-4 py-3">
@@ -4897,6 +4928,87 @@
         window.addEventListener('offline', updateOfflineIndicator);
 
         // ─── Init ─────────────────────────────────────────────────────────────
+        // ─── Novel Search Sources ──────────────────────────────────────────
+        const DEFAULT_SEARCH_SOURCES = [
+            { name: '小說543', url: 'https://www.novel543.com/search/{query_word}' }
+        ];
+
+        function getSearchSources() {
+            try {
+                const stored = localStorage.getItem('pureReader_search_sources');
+                if (stored) return JSON.parse(stored);
+            } catch (e) { console.error(e); }
+            return DEFAULT_SEARCH_SOURCES;
+        }
+
+        function saveSearchSources(sources) {
+            localStorage.setItem('pureReader_search_sources', JSON.stringify(sources));
+        }
+
+        function renderSearchSources() {
+            const sources = getSearchSources();
+            const selectEl = document.getElementById('novel-search-source');
+            if (selectEl) {
+                selectEl.innerHTML = sources.map((s, i) => `<option value="${i}">${s.name}</option>`).join('');
+            }
+            const listEl = document.getElementById('novel-search-sources-list');
+            if (listEl) {
+                if (sources.length === 0) {
+                    listEl.innerHTML = '<li class="text-sm text-gray-500 dark:text-gray-400 py-2">無來源設定</li>';
+                } else {
+                    listEl.innerHTML = sources.map((s, i) => `
+                        <li class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2">
+                            <div class="flex flex-col overflow-hidden mr-2">
+                                <span class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">${s.name}</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 truncate">${s.url}</span>
+                            </div>
+                            <button onclick="deleteNovelSearchSource(${i})" class="shrink-0 p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="刪除">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                            </button>
+                        </li>
+                    `).join('');
+                }
+            }
+        }
+
+        function handleNovelSearchSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('novel-search-input').value.trim();
+            if (!input) return;
+            const sources = getSearchSources();
+            const sourceIndex = parseInt(document.getElementById('novel-search-source').value);
+            const source = sources[sourceIndex] || sources[0];
+            if (!source) return alert('請先新增搜尋來源');
+            
+            const queryUrl = source.url.replace('{query_word}', encodeURIComponent(input));
+            window.open(queryUrl, '_blank');
+        }
+
+        function addNovelSearchSource() {
+            const nameEl = document.getElementById('novel-search-source-name');
+            const urlEl = document.getElementById('novel-search-source-url');
+            const name = nameEl.value.trim();
+            const url = urlEl.value.trim();
+            if (!name || !url) return alert('請輸入名稱與網址');
+            if (!url.includes('{query_word}')) return alert('網址必須包含 {query_word}');
+            
+            const sources = getSearchSources();
+            sources.push({ name, url });
+            saveSearchSources(sources);
+            renderSearchSources();
+            
+            nameEl.value = '';
+            urlEl.value = '';
+        }
+
+        function deleteNovelSearchSource(index) {
+            if (!confirm('確定要刪除這個搜尋來源嗎？')) return;
+            const sources = getSearchSources();
+            sources.splice(index, 1);
+            saveSearchSources(sources);
+            renderSearchSources();
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             initTheme();
             changeFontSize(0); // Load saved font size on init
@@ -4907,6 +5019,7 @@
             NovelMode.renderBookmarks();
             updateOfflineIndicator();
             NovelMode.triggerAutoUpdates();
+            renderSearchSources();
 
             if (localStorage.getItem('pureReader_hide_labels') === 'true') {
                 document.body.classList.add('hide-toolbar-labels');
