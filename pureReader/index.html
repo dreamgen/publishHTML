@@ -4430,13 +4430,6 @@
                 return state;
             }
 
-            function exitReading() {
-                if (_isPaused) resume();
-                const el = document.getElementById('novel-tl-pause-overlay');
-                if (el) el.classList.remove('active');
-                NovelMode.deactivate();
-            }
-
             function _isDisabledToday(state) {
                 return state.disabledUntil && Date.now() < state.disabledUntil;
             }
@@ -4646,7 +4639,10 @@
             }
 
             function exitReading() {
-                _hideOverlay();
+                if (_isPaused) resume();
+                const pauseEl = document.getElementById('novel-tl-pause-overlay');
+                if (pauseEl) pauseEl.classList.remove('active');
+                _hideOverlay(); // hides novel-time-limit-overlay
                 stopTimer();
                 NovelMode.deactivate();
                 resetView();
