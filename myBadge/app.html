@@ -742,6 +742,7 @@ self.addEventListener('fetch', event => {
 
   <!-- ─── Main Content ──────────────────────────────────────────────────── -->
   <main id="main-content">
+    <div id="home-storage-actions-placeholder"></div>
     <div class="section-header">
       <span class="section-title">我的名牌</span>
       <span class="badge-count" id="badge-count-label">0 個</span>
@@ -912,7 +913,7 @@ self.addEventListener('fetch', event => {
         此環境（iframe）無法持久保存資料。請使用下方按鈕在新分頁開啟，或匯出備份。
       </div>
       <!-- Action buttons: Export / Import / Open in new tab -->
-      <div style="display:flex;gap:0.5rem;padding:0.75rem 1rem 0;flex-wrap:wrap;">
+      <div id="manage-actions-container" style="display:flex;gap:0.5rem;padding:0.75rem 1rem 0;flex-wrap:wrap;">
         <button onclick="exportBadges()" style="flex:1;min-width:80px;
           background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);
           color:#a78bfa;border-radius:10px;padding:0.6rem 0.5rem;
@@ -1026,9 +1027,26 @@ self.addEventListener('fetch', event => {
 
       // Warn user if storage is blocked (e.g. Safari ITP in cross-origin iframe)
       if (!storageAvailable) {
+        // Move banner and actions to the top of the homepage
+        const banner = document.getElementById('storage-warning-banner');
+        const actions = document.getElementById('manage-actions-container');
+        const placeholder = document.getElementById('home-storage-actions-placeholder');
+        placeholder.appendChild(banner);
+        placeholder.appendChild(actions);
+        banner.style.display = 'block';
+        banner.style.margin = '1rem 1rem 0';
+        actions.style.padding = '0.75rem 1rem 0';
+
         setTimeout(() => {
           showToast('⚠️ 儲存功能受限，名牌資料無法在此環境保留。請點右上角按鈕在新分頁開啟。', 6000);
         }, 800);
+      }
+
+      // Auto-open default badge on startup if available
+      if (badges.length > 0) {
+        let defaultIdx = badges.findIndex(b => b.isDefault);
+        if (defaultIdx === -1) defaultIdx = 0; // fallback to first badge if no default set
+        openDisplayModal(defaultIdx);
       }
 
       // ── Backdrop close: use pointerdown on backdrop itself ──
@@ -1483,9 +1501,10 @@ self.addEventListener('fetch', event => {
     // ─── Manage Drawer ──────────────────────────────────────────────────────
     window.openManageDrawer = function () {
       renderManageList();
-      // Show/hide storage warning banner
+      // Show/hide storage warning banner only if it's still in the drawer
       const banner = document.getElementById('storage-warning-banner');
-      if (banner) banner.style.display = storageAvailable ? 'none' : 'block';
+      if (banner && storageAvailable) banner.style.display = 'none';
+
       const drawer = document.getElementById('manage-drawer');
       const sheet  = document.getElementById('manage-sheet');
       drawer.classList.add('active');
@@ -1522,10 +1541,13 @@ self.addEventListener('fetch', event => {
             <p class="manage-item-content">${escHtml(badge.content)}</p>
           </div>
           <div class="manage-item-actions">
-            <button class="mini-action-btn edit-name" onclick="openRenameModal('${badge.id}'); closeManageDrawer();" aria-label="重新命名 ${escHtml(badge.name)}" title="重新命名">
+            <button class="mini-action-btn edit-name" onclick="setDefaultBadge('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="設為預設" title="設為預設">
+              <i data-lucide="star" style="width:14px;height:14px; ${badge.isDefault ? 'fill:var(--accent-1);color:var(--accent-1);' : ''}"></i>
+            </button>
+            <button class="mini-action-btn edit-name" onclick="openRenameModal('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="重新命名 ${escHtml(badge.name)}" title="重新命名">
               <i data-lucide="pencil" style="width:14px;height:14px;"></i>
             </button>
-            <button class="mini-action-btn delete" onclick="confirmDeleteBadge('${badge.id}'); closeManageDrawer();" aria-label="刪除 ${escHtml(badge.name)}" title="刪除">
+            <button class="mini-action-btn delete" onclick="confirmDeleteBadge('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="刪除 ${escHtml(badge.name)}" title="刪除">
               <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
             </button>
           </div>
@@ -1615,6 +1637,13 @@ self.addEventListener('fetch', event => {
       renderBadges();
       showToast('🗑️ 名牌已刪除');
     }
+
+    window.setDefaultBadge = function (id) {
+      badges = badges.map(b => ({ ...b, isDefault: b.id === id }));
+      saveBadgesToStorage();
+      renderBadges();
+      showToast('⭐ 已設為預設名牌，下次開啟將自動顯示');
+    };
 
     // ─── Export / Import / Open in New Tab ───────────────────────────────────
     window.exportBadges = function () {
