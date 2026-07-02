@@ -898,6 +898,7 @@
     let selectedColor = BADGE_COLORS[0];
     let scannerCodeReader = null;
     let scannerStream = null;
+    let scannerLocked = false; // prevents decodeFromStream callback from firing twice
     let torchOn = false;
     let currentZoom = 1;
     let displayIndex = 0;
@@ -1164,10 +1165,15 @@
         }
 
         // Start decoding
+        // NOTE: decodeFromStream fires the callback asynchronously and
+        // continues even after reset() is called (stream teardown is async).
+        // scannerLocked ensures only the very first decoded result is processed.
+        scannerLocked = false;
         codeReader.decodeFromStream(stream, videoEl, (result, err) => {
-          if (result) {
+          if (result && !scannerLocked) {
             const text = result.getText();
             if (text) {
+              scannerLocked = true;   // block any further callbacks immediately
               stopScanner();
               openSaveModal(text);
             }
@@ -1184,6 +1190,7 @@
     }
 
     window.stopScanner = function () {
+      scannerLocked = false; // reset so next scan session starts clean
       const overlay = document.getElementById('scanner-overlay');
       overlay.classList.remove('visible');
       setTimeout(() => overlay.classList.remove('active'), 300);
