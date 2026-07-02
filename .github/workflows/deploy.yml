@@ -6,9 +6,9 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
-# Allow one concurrent deployment; cancel in-progress runs for the same branch
+# Allow one concurrent deployment per branch; cancel in-progress runs for the same branch
 concurrency:
-  group: "pages"
+  group: "pages-${{ github.ref }}"
   cancel-in-progress: true
 
 permissions:
