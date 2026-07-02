@@ -938,38 +938,56 @@
       addBackdropClose('confirm-dialog', closeConfirm);
 
       // ── iOS iframe: lock body scroll when modal is open ──
-      // Prevents the keyboard-induced scroll from causing input blur.
-      const scrollLockCSS = 'overflow:hidden;position:fixed;width:100%;';
-      function lockScroll()   { if (isIOS) document.body.setAttribute('style', scrollLockCSS); }
-      function unlockScroll() { if (isIOS) document.body.removeAttribute('style'); }
+      // Use overflow:hidden ONLY — position:fixed resets scrollY and triggers blur.
+      function lockScroll() {
+        if (!isIOS) return;
+        document.body.style.overflow = 'hidden';
+      }
+      function unlockScroll() {
+        if (!isIOS) return;
+        document.body.style.overflow = '';
+      }
       window._lockScroll   = lockScroll;
       window._unlockScroll = unlockScroll;
 
-      // ── iOS input blur guard ──
-      // If keyboard causes a blur on our name/rename inputs while modal is still
-      // active, re-focus automatically so the user can keep typing.
+      // ── iOS input "initial focus" guard ──
+      // Problem: calling focus() during IME composition (e.g. Chinese keyboard)
+      // cancels the composition buffer — the typed text disappears.
+      // Solution: only retry focus BEFORE the user has typed anything.
+      //           Once compositionstart or input fires, stop intervening entirely.
       function addBlurGuard(inputId, isModalActiveCheck) {
         if (!isIOS) return;
         const inp = document.getElementById(inputId);
-        let _guard = false;
-        let _timer = null;
-        inp.addEventListener('focus',       () => { _guard = true; clearTimeout(_timer); });
-        inp.addEventListener('touchstart',  e  => { _guard = true; e.stopPropagation(); }, { passive: true });
-        inp.addEventListener('blur',        () => {
-          if (!_guard) return;
-          // Short delay: if modal is still showing, re-focus
-          _timer = setTimeout(() => {
-            if (_guard && isModalActiveCheck()) {
+        let userHasTyped = false; // set to true the moment any text is entered
+        let focusTries   = 0;
+        const MAX_TRIES  = 2;
+
+        // Either of these means composition / direct typing has started — hands off!
+        inp.addEventListener('compositionstart', () => { userHasTyped = true; });
+        inp.addEventListener('input',            () => { userHasTyped = true; });
+
+        inp.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+
+        inp.addEventListener('blur', () => {
+          // Once user has typed, never re-focus — it would cancel IME composition
+          if (userHasTyped)            return;
+          if (focusTries >= MAX_TRIES) return;
+          if (!isModalActiveCheck())   return;
+          focusTries++;
+          setTimeout(() => {
+            if (!userHasTyped && isModalActiveCheck() && document.activeElement !== inp) {
               inp.focus({ preventScroll: true });
             }
-          }, 80);
+          }, 120);
         });
+
         // Allow intentional blur when tapping non-input areas inside the sheet
         inp.closest('.modal-sheet')?.addEventListener('pointerdown', e => {
-          if (e.target !== inp) { _guard = false; clearTimeout(_timer); }
+          if (e.target !== inp) userHasTyped = false; // reset so tapping away is clean
         });
-        // Expose reset so closeSaveModal can clear state
-        inp._resetGuard = () => { _guard = false; clearTimeout(_timer); };
+
+        // Reset state when modal reopens
+        inp._resetGuard = () => { userHasTyped = false; focusTries = 0; };
       }
       addBlurGuard('save-name-input', () =>
         document.getElementById('save-modal').classList.contains('active'));
