@@ -386,6 +386,8 @@
       background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
       display: none; align-items: flex-end; justify-content: center;
       opacity: 0; transition: opacity 0.3s ease;
+      /* iOS: prevent scroll-triggered blur by blocking touch on backdrop only */
+      touch-action: none;
     }
     .modal-backdrop.active { display: flex; }
     .modal-backdrop.visible { opacity: 1; }
@@ -397,8 +399,12 @@
       border-bottom: none;
       border-radius: 28px 28px 0 0;
       padding: 1.5rem 1.5rem 2.5rem;
+      /* iOS: allow normal touch/scroll inside sheet */
+      touch-action: pan-y;
       transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
       display: flex; flex-direction: column; gap: 1.25rem;
+      /* iOS iframe: prevent sheet from being pushed off screen by keyboard */
+      max-height: 90dvh; overflow-y: auto;
     }
     .modal-sheet.up { transform: translateY(0); }
 
@@ -430,8 +436,14 @@
     .input-field {
       background: rgba(255,255,255,0.06); border: 1px solid var(--border);
       border-radius: 14px; padding: 0.75rem 1rem;
-      color: var(--text-primary); font-size: 0.95rem; font-family: var(--font);
+      color: var(--text-primary);
+      /* iOS: font-size must be >=16px to prevent auto-zoom on focus */
+      font-size: max(1rem, 16px); font-family: var(--font);
       width: 100%; outline: none; transition: border-color 0.2s;
+      /* iOS: prevent native appearance */
+      -webkit-appearance: none;
+      /* Ensure tap target is always clickable in iframe */
+      position: relative; z-index: 1;
     }
     .input-field::placeholder { color: var(--text-muted); }
     .input-field:focus { border-color: var(--accent-1); }
@@ -892,6 +904,10 @@
     let confirmCallback = null;
     let renameTargetId = null;
 
+    // ─── iOS Detection ──────────────────────────────────────────────────────
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
     // ─── Init ───────────────────────────────────────────────────────────────
     function init() {
       loadBadges();
@@ -900,19 +916,65 @@
       lucide.createIcons();
       if (window.registerSW) window.registerSW();
 
-      // Close modals on backdrop click
-      document.getElementById('save-modal').addEventListener('click', e => {
-        if (e.target === document.getElementById('save-modal')) closeSaveModal();
-      });
-      document.getElementById('rename-modal').addEventListener('click', e => {
-        if (e.target === document.getElementById('rename-modal')) closeRenameModal();
-      });
-      document.getElementById('manage-drawer').addEventListener('click', e => {
-        if (e.target === document.getElementById('manage-drawer')) closeManageDrawer();
-      });
-      document.getElementById('confirm-dialog').addEventListener('click', e => {
-        if (e.target === document.getElementById('confirm-dialog')) closeConfirm();
-      });
+      // ── Backdrop close: use pointerdown on backdrop itself ──
+      // On iOS, 'click' inside an iframe can misfire after keyboard causes scroll.
+      // We use pointerdown + check target to close only when truly tapping outside.
+      function addBackdropClose(backdropId, closeFn) {
+        const el = document.getElementById(backdropId);
+        // Prevent sheet touches from bubbling up to backdrop
+        el.querySelectorAll('.modal-sheet, .manage-sheet, .confirm-box')
+          .forEach(sheet => {
+            sheet.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+            sheet.addEventListener('pointerdown', e => e.stopPropagation());
+          });
+        // Only close when tapping directly on the backdrop dim area
+        el.addEventListener('pointerdown', e => {
+          if (e.target === el) closeFn();
+        });
+      }
+      addBackdropClose('save-modal',    closeSaveModal);
+      addBackdropClose('rename-modal',  closeRenameModal);
+      addBackdropClose('manage-drawer', closeManageDrawer);
+      addBackdropClose('confirm-dialog', closeConfirm);
+
+      // ── iOS iframe: lock body scroll when modal is open ──
+      // Prevents the keyboard-induced scroll from causing input blur.
+      const scrollLockCSS = 'overflow:hidden;position:fixed;width:100%;';
+      function lockScroll()   { if (isIOS) document.body.setAttribute('style', scrollLockCSS); }
+      function unlockScroll() { if (isIOS) document.body.removeAttribute('style'); }
+      window._lockScroll   = lockScroll;
+      window._unlockScroll = unlockScroll;
+
+      // ── iOS input blur guard ──
+      // If keyboard causes a blur on our name/rename inputs while modal is still
+      // active, re-focus automatically so the user can keep typing.
+      function addBlurGuard(inputId, isModalActiveCheck) {
+        if (!isIOS) return;
+        const inp = document.getElementById(inputId);
+        let _guard = false;
+        let _timer = null;
+        inp.addEventListener('focus',       () => { _guard = true; clearTimeout(_timer); });
+        inp.addEventListener('touchstart',  e  => { _guard = true; e.stopPropagation(); }, { passive: true });
+        inp.addEventListener('blur',        () => {
+          if (!_guard) return;
+          // Short delay: if modal is still showing, re-focus
+          _timer = setTimeout(() => {
+            if (_guard && isModalActiveCheck()) {
+              inp.focus({ preventScroll: true });
+            }
+          }, 80);
+        });
+        // Allow intentional blur when tapping non-input areas inside the sheet
+        inp.closest('.modal-sheet')?.addEventListener('pointerdown', e => {
+          if (e.target !== inp) { _guard = false; clearTimeout(_timer); }
+        });
+        // Expose reset so closeSaveModal can clear state
+        inp._resetGuard = () => { _guard = false; clearTimeout(_timer); };
+      }
+      addBlurGuard('save-name-input', () =>
+        document.getElementById('save-modal').classList.contains('active'));
+      addBlurGuard('rename-input', () =>
+        document.getElementById('rename-modal').classList.contains('active'));
 
       // Keyboard shortcuts
       document.addEventListener('keydown', e => {
@@ -1152,6 +1214,8 @@
 
       const modal = document.getElementById('save-modal');
       modal.classList.add('active');
+      // Lock body scroll on iOS to prevent keyboard scroll causing blur
+      if (window._lockScroll) window._lockScroll();
       requestAnimationFrame(() => {
         modal.classList.add('visible');
         document.getElementById('save-modal-sheet').classList.add('up');
@@ -1162,17 +1226,25 @@
         renderQR('save-qr-canvas', content, { size: 108, bg: '#ffffff', fg: '#000000' });
       });
 
+      // Focus: use longer delay on iOS iframe to wait for animation + keyboard
+      const delay = isIOS ? 650 : 400;
       setTimeout(() => {
-        document.getElementById('save-name-input').focus();
-      }, 400);
+        const inp = document.getElementById('save-name-input');
+        inp.focus({ preventScroll: true });
+      }, delay);
     }
 
     window.closeSaveModal = function () {
+      const inp = document.getElementById('save-name-input');
+      if (inp._resetGuard) inp._resetGuard();
       const modal = document.getElementById('save-modal');
       const sheet = document.getElementById('save-modal-sheet');
       modal.classList.remove('visible');
       sheet.classList.remove('up');
-      setTimeout(() => modal.classList.remove('active'), 350);
+      setTimeout(() => {
+        modal.classList.remove('active');
+        if (window._unlockScroll) window._unlockScroll();
+      }, 350);
       pendingQRContent = '';
     };
 
@@ -1305,19 +1377,30 @@
       const modal = document.getElementById('rename-modal');
       const sheet = document.getElementById('rename-modal-sheet');
       modal.classList.add('active');
+      if (window._lockScroll) window._lockScroll();
       requestAnimationFrame(() => {
         modal.classList.add('visible');
         sheet.classList.add('up');
       });
-      setTimeout(() => { document.getElementById('rename-input').focus(); document.getElementById('rename-input').select(); }, 400);
+      const delay = isIOS ? 650 : 400;
+      setTimeout(() => {
+        const inp = document.getElementById('rename-input');
+        inp.focus({ preventScroll: true });
+        inp.select();
+      }, delay);
     };
 
     window.closeRenameModal = function () {
+      const inp = document.getElementById('rename-input');
+      if (inp._resetGuard) inp._resetGuard();
       const modal = document.getElementById('rename-modal');
       const sheet = document.getElementById('rename-modal-sheet');
       modal.classList.remove('visible');
       sheet.classList.remove('up');
-      setTimeout(() => modal.classList.remove('active'), 350);
+      setTimeout(() => {
+        modal.classList.remove('active');
+        if (window._unlockScroll) window._unlockScroll();
+      }, 350);
       renameTargetId = null;
     };
 
