@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="pureReaderBg512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="pureReaderPage512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#eff6ff;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" ry="100" fill="url(#pureReaderBg512)"/>
+
+  <!-- Left page of open book -->
+  <path d="M256 160 C256 160 160 155 100 176 L100 372 C160 352 256 357 256 357 Z"
+        fill="url(#pureReaderPage512)" opacity="0.95"/>
+
+  <!-- Right page of open book -->
+  <path d="M256 160 C256 160 352 155 412 176 L412 372 C352 352 256 357 256 357 Z"
+        fill="url(#pureReaderPage512)" opacity="0.85"/>
+
+  <!-- Spine line -->
+  <line x1="256" y1="160" x2="256" y2="357" stroke="#93c5fd" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Text lines on left page -->
+  <line x1="138" y1="224" x2="234" y2="220" stroke="#93c5fd" stroke-width="10" stroke-linecap="round" opacity="0.8"/>
+  <line x1="138" y1="256" x2="234" y2="252" stroke="#93c5fd" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="138" y1="288" x2="210" y2="284" stroke="#93c5fd" stroke-width="10" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- Text lines on right page -->
+  <line x1="278" y1="220" x2="374" y2="224" stroke="#bfdbfe" stroke-width="10" stroke-linecap="round" opacity="0.8"/>
+  <line x1="278" y1="252" x2="374" y2="256" stroke="#bfdbfe" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="278" y1="284" x2="350" y2="288" stroke="#bfdbfe" stroke-width="10" stroke-linecap="round" opacity="0.4"/>
+</svg>

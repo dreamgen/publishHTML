@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>橋牌單機遊戲</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="./icons/bridgeGame-192.svg">
+    <link rel="apple-touch-icon" href="./icons/bridgeGame-192.svg">
+    <meta name="theme-color" content="#15803d">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="橋牌">
+    <meta name="description" content="橋牌單人練習版，含競叫、打牌、橡皮橋計分，支援離線遊玩">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        html, body {
+            height: 100%;
+            height: 100dvh;
+            margin: 0;
+            overflow: hidden;
+            touch-action: manipulation;
+            transition: font-size 0.3s ease; /* 讓切換字體大小時有平滑動畫 */
+        }
+        #root {
+            height: 100%;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: radial-gradient(ellipse at center, #065f46 0%, #022c22 100%);
+        }
+        .min-h-screen { min-height: 100dvh; }
+
+        /* Glass morphism */
+        .glass-panel {
+            background: rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .glass-light {
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        /* Card animations */
+        .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        @media (hover: hover) {
+            .card-hover:hover { transform: translateY(-12px); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 50; }
+        }
+        .card-selected { transform: translateY(-20px) scale(1.05) !important; box-shadow: 0 15px 35px rgba(250,204,21,0.6) !important; z-index: 100 !important; }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+        @keyframes pulseRing {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.6); }
+            70%       { box-shadow: 0 0 0 10px rgba(250, 204, 21, 0); }
+        }
+        .pulse-ring { animation: pulseRing 1.2s ease-in-out infinite; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+        .animate-fade-in { animation: fadeIn 0.25s ease-out; }
+
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 16px); }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ══════════════════════════════════════════════════════════════
+        // 常數
+        // ══════════════════════════════════════════════════════════════
+        const SUITS = ['S', 'H', 'D', 'C'];
+        const RANKS = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
+        const SUIT_SYMBOL = { S: '♠', H: '♥', D: '♦', C: '♣' };
+        const SUIT_COLOR_CSS  = { S: '#020617', H: '#dc2626', D: '#ea580c', C: '#15803d' };
+        const SUIT_COLOR_DARK_BG = { S: '#f8fafc', H: '#ef4444', D: '#f97316', C: '#4ade80' };
+        const RANK_LABEL  = { 14:'A', 13:'K', 12:'Q', 11:'J', 10:'10', 9:'9', 8:'8', 7:'7', 6:'6', 5:'5', 4:'4', 3:'3', 2:'2' };
+        const STRAINS = ['C', 'D', 'H', 'S', 'N'];
+        const STRAIN_SYMBOL = { C:'♣', D:'♦', H:'♥', S:'♠', N:'NT' };
+        const SEAT_NAME = ['北', '東', '南', '西'];
+        const SUIT_ORDER = { S: 0, H: 1, D: 2, C: 3 };
+
+        function buildDeck() {
+            const deck = [];
+            let id = 0;
+            for (const suit of SUITS) {
+                for (const rank of RANKS) {
+                    deck.push({ id: id++, suit, rank });
+                }
+            }
+            return deck;
+        }
+
+        function shuffle(deck) {
+            const d = [...deck];
+            for (let i = d.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [d[i], d[j]] = [d[j], d[i]];
+            }
+            return d;
+        }
+
+        function sortHand(cards) {
+            return [...cards].sort((a, b) =>
+                SUIT_ORDER[a.suit] !== SUIT_ORDER[b.suit]
+                    ? SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit]
+                    : b.rank - a.rank
+            );
+        }
+
+        function calcHCP(cards) {
+            return cards.reduce((sum, c) => {
+                if (c.rank === 14) return sum + 4;
+                if (c.rank === 13) return sum + 3;
+                if (c.rank === 12) return sum + 2;
+                if (c.rank === 11) return sum + 1;
+                return sum;
+            }, 0);
+        }
+
+        function suitLengths(cards) {
+            return cards.reduce((acc, c) => {
+                acc[c.suit] = (acc[c.suit] || 0) + 1;
+                return acc;
+            }, { S: 0, H: 0, D: 0, C: 0 });
+        }
+
+        function isBalanced(lengths) {
+            const vals = Object.values(lengths).sort((a, b) => b - a);
+            if (vals[0] > 5) return false;
+            if (vals[0] === 5 && vals[1] > 3) return false;
+            const hasSingleton = vals.some(v => v <= 1);
+            if (hasSingleton) return false;
+            return true;
+        }
+
+        function bidValue(bidStr) {
+            if (['pass', 'dbl', 'rdbl'].includes(bidStr)) return 0;
+            const level = parseInt(bidStr[0]);
+            const strain = bidStr.slice(1);
+            return (level - 1) * 5 + STRAINS.indexOf(strain) + 1;
+        }
+
+        function isAuctionOver(sequence) {
+            if (sequence.length < 4) return false;
+            const calls = sequence.map(b => b.call);
+            if (sequence.length === 4 && calls.every(c => c === 'pass')) return 'passedOut';
+            if (sequence.length >= 4) {
+                const last3 = calls.slice(-3);
+                const hasRealBid = calls.some(c => !['pass', 'dbl', 'rdbl'].includes(c));
+                if (hasRealBid && last3.every(c => c === 'pass')) return 'contract';
+            }
+            return false;
+        }
+
+        function extractContract(sequence) {
+            let lastBid = null;
+            let doubled = 0;
+            for (const entry of sequence) {
+                if (!['pass', 'dbl', 'rdbl'].includes(entry.call)) {
+                    lastBid = entry;
+                    doubled = 0;
+                } else if (entry.call === 'dbl') {
+                    doubled = 1;
+                } else if (entry.call === 'rdbl') {
+                    doubled = 2;
+                }
+            }
+            if (!lastBid) return null;
+            const strain = lastBid.call.slice(1);
+            const level  = parseInt(lastBid.call[0]);
+            const side   = lastBid.seat % 2;
+            let declarerSeat = lastBid.seat;
+            for (const entry of sequence) {
+                if (entry.seat % 2 === side && !['pass', 'dbl', 'rdbl'].includes(entry.call) && entry.call.slice(1) === strain) {
+                    declarerSeat = entry.seat;
+                    break;
+                }
+            }
+            return { level, strain, declarer: declarerSeat, doubled };
+        }
+
+        function canDoubleNow(sequence, humanSeat) {
+            const nonPasses = sequence.filter(b => b.call !== 'pass');
+            if (!nonPasses.length) return false;
+            const last = nonPasses[nonPasses.length - 1];
+            if (['dbl', 'rdbl'].includes(last.call)) return false;
+            return last.seat % 2 !== humanSeat % 2;
+        }
+
+        function canRedoubleNow(sequence, humanSeat) {
+            const nonPasses = sequence.filter(b => b.call !== 'pass');
+            if (!nonPasses.length) return false;
+            const last = nonPasses[nonPasses.length - 1];
+            if (last.call !== 'dbl') return false;
+            return last.seat % 2 !== humanSeat % 2;
+        }
+
+        function getCurrentHighestBid(sequence) {
+            const realBids = sequence.filter(b => !['pass', 'dbl', 'rdbl'].includes(b.call));
+            return realBids.length ? realBids[realBids.length - 1].call : null;
+        }
+
+        function getLongestSuit(lengths) {
+            return SUITS.reduce((best, s) => lengths[s] > lengths[best] ? s : best, 'S');
+        }
+
+        function computeOpeningBid(hcp, lengths) {
+            const bal = isBalanced(lengths);
+            if (hcp >= 22) return '2C';
+            if (hcp >= 20 && bal) return '2N';
+            if (hcp >= 15 && hcp <= 17 && bal) return '1N';
+            if (hcp >= 13) {
+                const longest = getLongestSuit(lengths);
+                if (lengths[longest] >= 5) return `1${longest}`;
+                if (lengths['S'] >= 4 && lengths['H'] >= 4) return '1S';
+                if (lengths['H'] >= 4) return '1H';
+                if (lengths['S'] >= 4) return '1S';
+                if (lengths['D'] >= 4) return '1D';
+                return '1C';
+            }
+            if (hcp >= 5 && hcp <= 11) {
+                if (lengths['S'] >= 6) return '2S';
+                if (lengths['H'] >= 6) return '2H';
+            }
+            return 'pass';
+        }
+
+        function computeResponse(hcp, lengths, partnerCall, highestBid) {
+            if (hcp <= 5) return 'pass';
+            const partnerStrain = partnerCall.slice(1);
+            const partnerLevel  = parseInt(partnerCall[0]);
+            const support = lengths[partnerStrain] || 0;
+            const canBid = (b) => !highestBid || bidValue(b) > bidValue(highestBid);
+
+            if (partnerCall === '1N') {
+                if (hcp >= 10) return '3N';
+                if (hcp >= 8)  return '2N';
+                return 'pass';
+            }
+            if (partnerCall === '2N') {
+                if (hcp >= 4)  return '3N';
+                return 'pass';
+            }
+            if (partnerCall === '2C') {
+                if (hcp >= 8 && (lengths['S'] >= 5 || lengths['H'] >= 5)) {
+                    const maj = lengths['S'] >= 5 ? 'S' : 'H';
+                    const bid = `2${maj}`;
+                    return canBid(bid) ? bid : '2D';
+                }
+                return '2D'; // waiting
+            }
+
+            // When partner opened a minor, prefer showing a 5+ card major over raising the minor.
+            // Otherwise raising 4-card minor support hides the longer/higher-ranking major suit.
+            if (['C','D'].includes(partnerStrain)) {
+                if (lengths['H'] >= 5 && canBid('1H')) return '1H';
+                if (lengths['S'] >= 5 && canBid('1S')) return '1S';
+            }
+
+            if (['S','H'].includes(partnerStrain) && support >= 3) {
+                if (hcp >= 13) return `4${partnerStrain}`;
+                if (hcp >= 10) return `3${partnerStrain}`;
+                return `2${partnerStrain}`;
+            }
+            if (['C','D'].includes(partnerStrain) && support >= 4) {
+                if (hcp >= 13) return '3N';
+                if (hcp >= 10) return `3${partnerStrain}`;
+                return `2${partnerStrain}`;
+            }
+
+            // Try 1-level new-suit response before jumping to NT, even with 10+ HCP.
+            // "Up the line": with 4-4 majors and partner opened a minor, bid 1H before 1S.
+            if (partnerLevel === 1) {
+                if (lengths['H'] >= 4 && lengths['S'] >= 4 && partnerStrain !== 'H' && canBid('1H')) return '1H';
+                if (lengths['S'] >= 4 && partnerStrain !== 'S' && canBid('1S')) return '1S';
+                if (lengths['H'] >= 4 && partnerStrain !== 'H' && canBid('1H')) return '1H';
+                if (lengths['D'] >= 4 && partnerStrain !== 'D' && canBid('1D')) return '1D';
+            }
+            if (hcp >= 10) return '2N';
+            return '1N';
+        }
+
+        function computeOvercall(hcp, lengths, highestBid) {
+            if (hcp < 8 || hcp > 17) return 'pass';
+            for (const s of ['S', 'H', 'D', 'C']) {
+                if (lengths[s] >= 5) {
+                    for (let lv = 1; lv <= 4; lv++) {
+                        const bid = `${lv}${s}`;
+                        if (!highestBid || bidValue(bid) > bidValue(highestBid)) return bid;
+                    }
+                }
+            }
+            if (hcp >= 15) return '1N';
+            return 'pass';
+        }
+
+        function aiBid(seat, hand, sequence) {
+            const hcp = calcHCP(hand);
+            const lengths = suitLengths(hand);
+            const partner = (seat + 2) % 4;
+            const partnerBids = sequence.filter(b => b.seat === partner && !['pass','dbl','rdbl'].includes(b.call));
+            const myBids      = sequence.filter(b => b.seat === seat   && !['pass','dbl','rdbl'].includes(b.call));
+            const oppBids     = sequence.filter(b => b.seat % 2 !== seat % 2 && !['pass','dbl','rdbl'].includes(b.call));
+            const realBids    = sequence.filter(b => !['pass','dbl','rdbl'].includes(b.call));
+            const highestBid  = realBids.length ? realBids[realBids.length - 1].call : null;
+            const legalBid    = (str) => !['pass','dbl','rdbl'].includes(str) && (!highestBid || bidValue(str) > bidValue(highestBid));
+
+            const anyRealCall = sequence.some(b => !['pass','dbl','rdbl'].includes(b.call));
+
+            if (!anyRealCall) return computeOpeningBid(hcp, lengths);
+
+            // 路徑 A：回應搭檔開叫
+            // 必須確認：搭檔的第一次叫牌是在對手叫牌「之前」，
+            // 否則搭檔只是在蓋叫（overcall），不應觸發正常回應邏輯。
+            if (partnerBids.length > 0 && myBids.length === 0) {
+                const partnerFirstBidIdx = sequence.findIndex(
+                    b => b.seat === partner && !['pass','dbl','rdbl'].includes(b.call)
+                );
+                // 檢查在搭檔叫牌之前，對手是否已有實叫
+                const oppBidBeforePartner = sequence
+                    .slice(0, partnerFirstBidIdx)
+                    .some(b => b.seat % 2 !== seat % 2 && !['pass','dbl','rdbl'].includes(b.call));
+
+                if (!oppBidBeforePartner) {
+                    // 搭檔是開叫方，正常回應
+                    const bid = computeResponse(hcp, lengths, partnerBids[0].call, highestBid);
+                    if (legalBid(bid)) return bid;
+                    if (bid === '1N' && legalBid('2N')) return '2N';
+                    return 'pass';
+                }
+                // 搭檔是蓋叫方，不做特別回應（落入下方競叫或 pass）
+            }
+
+            // 路徑 B：對手開叫，且我方（自己與搭檔）尚未叫 → 蓋叫
+            if (oppBids.length > 0 && myBids.length === 0 && partnerBids.length === 0) {
+                const bid = computeOvercall(hcp, lengths, highestBid);
+                if (legalBid(bid)) return bid;
+                return 'pass';
+            }
+            return 'pass';
+        }
+
+        function legalCards(hand, trick, trumpSuit) {
+            if (trick.length === 0) return hand;
+            const ledSuit = trick[0].card.suit;
+            const followers = hand.filter(c => c.suit === ledSuit);
+            return followers.length > 0 ? followers : hand;
+        }
+
+        function trickWinner(trick, trumpSuit) {
+            // Score every card: trumps outrank anything non-trump; non-trumps only
+            // contend if they match the led suit; everything else is a discard (-1).
+            // The highest score wins, which guarantees the largest legal card —
+            // never the "second-largest" — takes the trick.
+            const ledSuit = trick[0].card.suit;
+            const cardScore = ({ card }) => {
+                if (trumpSuit && card.suit === trumpSuit) return 1000 + card.rank;
+                if (card.suit === ledSuit) return card.rank;
+                return -1;
+            };
+            let winner = trick[0];
+            let winnerScore = cardScore(winner);
+            for (let i = 1; i < trick.length; i++) {
+                const score = cardScore(trick[i]);
+                if (score > winnerScore) {
+                    winner = trick[i];
+                    winnerScore = score;
+                }
+            }
+            return winner.seat;
+        }
+
+        function currentTrickWinner(trick, trumpSuit) {
+            if (trick.length === 0) return -1;
+            return trickWinner(trick, trumpSuit);
+        }
+
+        function aiSelectCard(seat, hand, trick, trumpSuit, contract) {
+            const legal = legalCards(hand, trick, trumpSuit);
+            if (legal.length === 1) return legal[0];
+            if (trick.length === 0) return aiLead(legal, trumpSuit);
+
+            const lowestOf = (arr) => [...arr].sort((a, b) => a.rank - b.rank)[0];
+
+            const winnerSeat = currentTrickWinner(trick, trumpSuit);
+            const partnerSeat = (seat + 2) % 4;
+            const partnerIsWinning = winnerSeat === partnerSeat;
+
+            if (partnerIsWinning) {
+                // Avoid trumping partner: when void in led suit, legal === hand and may
+                // contain trumps. Prefer non-trump discards so we don't overtake partner.
+                const nonTrump = trumpSuit ? legal.filter(c => c.suit !== trumpSuit) : legal;
+                const pool = nonTrump.length > 0 ? nonTrump : legal;
+                return lowestOf(pool);
+            }
+
+            const winningCard = trick.find(t => t.seat === winnerSeat).card;
+            const canBeat = legal.filter(c => {
+                if (trumpSuit && c.suit === trumpSuit && winningCard.suit !== trumpSuit) return true;
+                if (c.suit === winningCard.suit && c.rank > winningCard.rank) return true;
+                return false;
+            });
+
+            if (canBeat.length > 0) return lowestOf(canBeat);
+            return lowestOf(legal);
+        }
+
+        function aiLead(hand, trumpSuit) {
+            const nonTrump = trumpSuit ? hand.filter(c => c.suit !== trumpSuit) : hand;
+            const pool = nonTrump.length > 0 ? nonTrump : hand;
+
+            const bySuit = {};
+            for (const c of pool) {
+                if (!bySuit[c.suit]) bySuit[c.suit] = [];
+                bySuit[c.suit].push(c);
+            }
+            for (const s of Object.keys(bySuit)) bySuit[s].sort((a, b) => b.rank - a.rank);
+
+            for (const s of SUITS) {
+                const cards = bySuit[s];
+                if (!cards || cards.length < 2) continue;
+                if (cards[0].rank - cards[1].rank === 1) return cards[0];
+            }
+
+            const longest = Object.values(bySuit).sort((a, b) => b.length - a.length)[0];
+            if (longest) {
+                if (longest.length >= 4) return longest[3];
+                return longest[longest.length - 1];
+            }
+            return hand[0];
+        }
+
+        function contractPoints(level, strain, doubled) {
+            let base;
+            if (strain === 'N') base = 40 + 30 * (level - 1);
+            else { const tv = { C: 20, D: 20, H: 30, S: 30 }[strain]; base = tv * level; }
+            return base * (doubled === 0 ? 1 : doubled === 1 ? 2 : 4);
+        }
+
+        function isGameContract(level, strain, doubled) {
+            return contractPoints(level, strain, doubled) >= 100;
+        }
+
+        function calculateHandScore(contract, tricksWon, vulnerable) {
+            const { level, strain, declarer, doubled } = contract;
+            const contractTricks = level + 6;
+            const side = declarer % 2 === 0 ? 'NS' : 'EW';
+            const oppSide = side === 'NS' ? 'EW' : 'NS';
+            const isVul = vulnerable[side];
+            const made = tricksWon >= contractTricks;
+
+            if (made) {
+                const overtricks = tricksWon - contractTricks;
+                const below = contractPoints(level, strain, doubled);
+                let overtrickVal;
+                if (doubled === 0) {
+                    const tv = { C:20, D:20, H:30, S:30, N:30 }[strain];
+                    overtrickVal = tv * overtricks;
+                } else {
+                    const perOT = isVul ? 200 : 100;
+                    overtrickVal = perOT * doubled * overtricks;
+                }
+                const doubleBonus = doubled >= 1 ? 50 : 0;
+                let bonus = 0;
+                const isGame = isGameContract(level, strain, doubled);
+                if (level === 7)       bonus = isVul ? 1500 : 1000;
+                else if (level === 6)  bonus = isVul ? 750 : 500;
+                else if (isGame)       bonus = isVul ? 500 : 300;
+                else                   bonus = 50;
+                return { made: true, side, tricksWon, contractTricks, below, above: overtrickVal + doubleBonus + bonus, bonus, isGame };
+            } else {
+                const down = contractTricks - tricksWon;
+                let penalty = 0;
+                if (doubled === 0) {
+                    penalty = isVul ? down * 100 : down * 50;
+                } else {
+                    const mult = doubled === 2 ? 2 : 1;
+                    if (!isVul) penalty = mult * (100 + Math.max(0, down - 1) * 200 + Math.max(0, down - 3) * 100);
+                    else penalty = mult * (200 + Math.max(0, down - 1) * 300);
+                }
+                return { made: false, side: oppSide, penalty, down };
+            }
+        }
+
+        function updateRubberScore(rubberScore, gamesWon, vulnerable, handResult) {
+            const newScore = {
+                NS: { below: [...rubberScore.NS.below], above: [...rubberScore.NS.above] },
+                EW: { below: [...rubberScore.EW.below], above: [...rubberScore.EW.above] },
+            };
+            const newGames = { ...gamesWon };
+            const newVul   = { ...vulnerable };
+            let gameWon = false;
+
+            if (handResult.made) {
+                newScore[handResult.side].below.push(handResult.below);
+                if (handResult.above > 0) newScore[handResult.side].above.push(handResult.above);
+                const totalBelow = newScore[handResult.side].below.reduce((s, v) => s + v, 0);
+                if (totalBelow >= 100) {
+                    newGames[handResult.side]++;
+                    newVul[handResult.side] = true;
+                    newScore.NS.below = [];
+                    newScore.EW.below = [];
+                    gameWon = true;
+                }
+            } else {
+                newScore[handResult.side].above.push(handResult.penalty);
+            }
+            return { rubberScore: newScore, gamesWon: newGames, vulnerable: newVul, gameWon };
+        }
+
+        function rubberBonus(gamesWon, winner) {
+            const loser = winner === 'NS' ? 'EW' : 'NS';
+            return gamesWon[loser] === 0 ? 700 : 500;
+        }
+
+        function totalScore(rubberScore, side) {
+            const below = rubberScore[side].below.reduce((s, v) => s + v, 0);
+            const above = rubberScore[side].above.reduce((s, v) => s + v, 0);
+            return below + above;
+        }
+
+        // ── 打牌記錄用 helpers ─────────────────────────────────────
+        function logCard(card) {
+            return `${SUIT_SYMBOL[card.suit]}${RANK_LABEL[card.rank]}`;
+        }
+        function logCall(call) {
+            if (call === 'pass') return 'Pass';
+            if (call === 'dbl')  return 'X';
+            if (call === 'rdbl') return 'XX';
+            const lv = call[0];
+            const st = call.slice(1);
+            return `${lv}${st === 'N' ? 'NT' : SUIT_SYMBOL[st]}`;
+        }
+        function logHandSummary(hand) {
+            const bySuit = { S: [], H: [], D: [], C: [] };
+            for (const c of hand) bySuit[c.suit].push(c);
+            for (const s of SUITS) bySuit[s].sort((a, b) => b.rank - a.rank);
+            const parts = SUITS.map(s => {
+                const ranks = bySuit[s].map(c => RANK_LABEL[c.rank]).join('');
+                return `${SUIT_SYMBOL[s]}${ranks || '-'}`;
+            });
+            return `${parts.join(' ')}  (HCP=${calcHCP(hand)})`;
+        }
+        function appendLog(state, ...lines) {
+            return { ...state, gameLog: [...(state.gameLog || []), ...lines] };
+        }
+
+        const INITIAL_STATE = {
+            phase: 'menu',
+            dealer: 0,
+            vulnerable: { NS: false, EW: false },
+            rubberScore: { NS: { below: [], above: [] }, EW: { below: [], above: [] } },
+            gamesWon: { NS: 0, EW: 0 },
+            rubberCount: 1,
+            hands: [[], [], [], []],
+            biddingSequence: [],
+            currentBidder: 1,
+            contract: null,
+            auctionOver: false,
+            dummySeat: -1,
+            currentLeader: -1,
+            currentTrick: [],
+            tricksTaken: { NS: 0, EW: 0 },
+            completedTricks: [],
+            openingLeadMade: false,
+            dummyRevealed: false,
+            lastHandResult: null,
+            lastCompletedTrick: null,
+            rubberOver: false,
+            rubberWinner: null,
+            autoPlayDummy: false,
+            gameLog: [],
+        };
+
+        function startHand(state) {
+            const deck = shuffle(buildDeck());
+            const hands = [[], [], [], []];
+            for (let i = 0; i < 52; i++) {
+                hands[(state.dealer + 1 + i) % 4].push(deck[i]);
+            }
+            const sortedHands = hands.map(h => sortHand(h));
+            const vulStr = state.vulnerable.NS && state.vulnerable.EW
+                ? '雙方有局'
+                : state.vulnerable.NS ? 'NS有局'
+                : state.vulnerable.EW ? 'EW有局' : '無局';
+            const newLog = [
+                `=== 第 ${state.rubberCount} 橡皮 · 新局 (發牌: ${SEAT_NAME[state.dealer]}家 · ${vulStr}) ===`,
+                `[北] ${logHandSummary(sortedHands[0])}`,
+                `[東] ${logHandSummary(sortedHands[1])}`,
+                `[南] ${logHandSummary(sortedHands[2])}`,
+                `[西] ${logHandSummary(sortedHands[3])}`,
+                `--- 叫牌開始 ---`,
+            ];
+            return {
+                ...state,
+                phase: 'bidding',
+                hands: sortedHands,
+                biddingSequence: [],
+                currentBidder: (state.dealer + 1) % 4,
+                contract: null,
+                auctionOver: false,
+                dummySeat: -1,
+                currentLeader: -1,
+                currentTrick: [],
+                tricksTaken: { NS: 0, EW: 0 },
+                completedTricks: [],
+                openingLeadMade: false,
+                dummyRevealed: false,
+                lastHandResult: null,
+                lastCompletedTrick: null,
+                rubberOver: false,
+                rubberWinner: null,
+                gameLog: newLog,
+            };
+        }
+
+        function addBid(state, call) {
+            const newSeq = [...state.biddingSequence, { seat: state.currentBidder, call }];
+            const bidLog = `[${SEAT_NAME[state.currentBidder]}] 叫: ${logCall(call)}`;
+            const baseLog = [...(state.gameLog || []), bidLog];
+            const auctionStatus = isAuctionOver(newSeq);
+            if (auctionStatus === 'passedOut') {
+                return {
+                    ...state, biddingSequence: newSeq, auctionOver: true, phase: 'passedOut',
+                    gameLog: [...baseLog, '--- 四家皆 Pass，本局流局 ---'],
+                };
+            }
+            if (auctionStatus === 'contract') {
+                const contract = extractContract(newSeq);
+                const dummySeat = (contract.declarer + 2) % 4;
+                const openingLeader = (contract.declarer + 1) % 4;
+                const dblStr = contract.doubled === 1 ? ' X' : contract.doubled === 2 ? ' XX' : '';
+                const strainStr = contract.strain === 'N' ? 'NT' : SUIT_SYMBOL[contract.strain];
+                return {
+                    ...state, biddingSequence: newSeq, auctionOver: true, contract, dummySeat,
+                    phase: 'playing', currentLeader: openingLeader, currentTrick: [], lastCompletedTrick: null,
+                    openingLeadMade: false, dummyRevealed: false,
+                    gameLog: [
+                        ...baseLog,
+                        `--- 定約: ${contract.level}${strainStr}${dblStr}  莊家=${SEAT_NAME[contract.declarer]}  首攻=${SEAT_NAME[openingLeader]} ---`,
+                        `--- 出牌開始 ---`,
+                    ],
+                };
+            }
+            return {
+                ...state, biddingSequence: newSeq,
+                currentBidder: (state.currentBidder + 1) % 4,
+                gameLog: baseLog,
+            };
+        }
+
+        function playCard(state, seat, card) {
+            const newHand = state.hands[seat].filter(c => c.id !== card.id);
+            const newHands = state.hands.map((h, i) => i === seat ? newHand : h);
+            const newTrick = [...state.currentTrick, { seat, card }];
+            const openingLeadMade = true;
+            const dummyRevealed = true;
+            const trickNo = state.completedTricks.length + 1;
+            const isLeadCard = newTrick.length === 1;
+            const playLine = isLeadCard
+                ? `第${trickNo}墩  [${SEAT_NAME[seat]}] 首出: ${logCard(card)}`
+                : `         [${SEAT_NAME[seat]}] 跟出: ${logCard(card)}`;
+            const logAfterPlay = [...(state.gameLog || []), playLine];
+
+            if (newTrick.length < 4) {
+                return { ...state, hands: newHands, currentTrick: newTrick, openingLeadMade, dummyRevealed, gameLog: logAfterPlay };
+            }
+
+            const trumpSuit = state.contract.strain === 'N' ? null : state.contract.strain;
+            const winnerSeat = trickWinner(newTrick, trumpSuit);
+            const winnerSide = winnerSeat % 2 === 0 ? 'NS' : 'EW';
+            const winningCard = newTrick.find(t => t.seat === winnerSeat).card;
+            const newTricksTaken = { ...state.tricksTaken, [winnerSide]: state.tricksTaken[winnerSide] + 1 };
+            const completedTricks = [...state.completedTricks, newTrick];
+            const totalTricks = newTricksTaken.NS + newTricksTaken.EW;
+            const winnerLine = `   → ${SEAT_NAME[winnerSeat]}家以 ${logCard(winningCard)} 贏第${trickNo}墩 (NS=${newTricksTaken.NS} / EW=${newTricksTaken.EW})`;
+            const logAfterTrick = [...logAfterPlay, winnerLine];
+
+            if (totalTricks === 13) {
+                const declarerSide = state.contract.declarer % 2 === 0 ? 'NS' : 'EW';
+                const declarerTricks = newTricksTaken[declarerSide];
+                const handResult = calculateHandScore(state.contract, declarerTricks, state.vulnerable);
+                const { rubberScore, gamesWon, vulnerable, gameWon } = updateRubberScore(
+                    state.rubberScore, state.gamesWon, state.vulnerable, handResult
+                );
+
+                let rubberOver = gamesWon.NS >= 2 || gamesWon.EW >= 2;
+                let rubberWinner = null;
+                let finalRubberScore = { ...rubberScore };
+                if (rubberOver) {
+                    rubberWinner = gamesWon.NS >= 2 ? 'NS' : 'EW';
+                    const bonus = rubberBonus(gamesWon, rubberWinner);
+                    finalRubberScore = {
+                        ...rubberScore,
+                        [rubberWinner]: {
+                            ...rubberScore[rubberWinner],
+                            above: [...rubberScore[rubberWinner].above, bonus],
+                        },
+                    };
+                }
+
+                const resultLine = handResult.made
+                    ? `=== 本局結束: ${handResult.side} 完成定約 (贏 ${handResult.tricksWon} 墩，合約 ${handResult.contractTricks} 墩) 低線 ${handResult.below}，高線 ${handResult.above} ===`
+                    : `=== 本局結束: ${handResult.side} 防守成功，倒 ${handResult.down} 墩，罰分 ${handResult.penalty} ===`;
+                return {
+                    ...state, hands: newHands, currentTrick: [], lastCompletedTrick: newTrick,
+                    completedTricks, tricksTaken: newTricksTaken, currentLeader: winnerSeat,
+                    openingLeadMade, dummyRevealed, phase: 'handFinished',
+                    lastHandResult: handResult, rubberScore: finalRubberScore, gamesWon,
+                    vulnerable, rubberOver, rubberWinner,
+                    gameLog: [...logAfterTrick, resultLine],
+                };
+            }
+
+            return {
+                ...state, hands: newHands, currentTrick: [], lastCompletedTrick: newTrick,
+                completedTricks, tricksTaken: newTricksTaken, currentLeader: winnerSeat,
+                openingLeadMade, dummyRevealed,
+                gameLog: logAfterTrick,
+            };
+        }
+
+        function contractDisplay(contract) {
+            if (!contract) return '';
+            const dbl = contract.doubled === 1 ? ' ✕' : contract.doubled === 2 ? ' ✕✕' : '';
+            return `${contract.level}${STRAIN_SYMBOL[contract.strain]}${dbl}`;
+        }
+
+        function isHumanTurn(turnSeat, state) {
+            const HUMAN_SEAT = 2;
+            if (turnSeat === HUMAN_SEAT) return true;
+            if (!state.autoPlayDummy && turnSeat === 0) {
+                if (state.dummySeat === 0) return state.openingLeadMade;
+                return true;
+            }
+            return false;
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // 元件
+        // ══════════════════════════════════════════════════════════════
+
+        const Card = ({ card, onClick, isHidden, size = 'preview', selected, disabled, noHoverAnim }) => {
+            const sizeMap = {
+                preview: "w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28",
+                play: "w-16 h-24 sm:w-20 sm:h-32 md:w-24 md:h-36 lg:w-28 lg:h-40",
+                trick: "w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 lg:w-24 lg:h-36",
+                hidden: "w-10 h-14 sm:w-12 sm:h-16 md:w-16 md:h-24"
+            };
+            const textMap = {
+                preview: "text-2xl sm:text-3xl md:text-4xl",
+                play: "text-3xl sm:text-5xl md:text-6xl lg:text-7xl",
+                trick: "text-2xl sm:text-4xl md:text-5xl lg:text-6xl",
+                hidden: "text-xl sm:text-2xl"
+            };
+            const cornerTextMap = {
+                preview: "text-xs sm:text-sm md:text-base",
+                play: "text-sm sm:text-xl md:text-2xl lg:text-3xl",
+                trick: "text-xs sm:text-base md:text-lg lg:text-xl",
+                hidden: "text-[10px] sm:text-xs"
+            };
+
+            const szCls = sizeMap[size] || sizeMap['preview'];
+            const txtCls = textMap[size] || textMap['preview'];
+            const cornCls = cornerTextMap[size] || cornerTextMap['preview'];
+
+            if (isHidden) {
+                return (
+                    <div className={`${szCls} flex-shrink-0 bg-blue-900 rounded-lg sm:rounded-xl border border-blue-600 shadow-md relative overflow-hidden`}>
+                        <div className="absolute inset-1 sm:inset-1.5 rounded bg-gradient-to-br from-blue-700 to-blue-950 flex items-center justify-center">
+                            <span className="text-blue-500/30 text-xs sm:text-sm md:text-xl select-none">🂠</span>
+                        </div>
+                    </div>
+                );
+            }
+
+            const color = SUIT_COLOR_CSS[card.suit];
+            const rank = RANK_LABEL[card.rank];
+            const sym  = SUIT_SYMBOL[card.suit];
+
+            return (
+                <div
+                    onClick={disabled ? undefined : onClick}
+                    className={`${szCls} flex-shrink-0 bg-white rounded-lg sm:rounded-xl border border-gray-300 shadow-md
+                        select-none relative
+                        ${!disabled && !noHoverAnim ? 'cursor-pointer card-hover' : ''}
+                        ${!disabled && noHoverAnim ? 'cursor-pointer' : ''}
+                        ${selected ? 'card-selected ring-2 sm:ring-4 ring-yellow-400' : ''}
+                        transition-all duration-200
+                    `}
+                >
+                    {/* 使用 Tailwind REM 尺度的 0.5 (即 0.125rem) 代替硬刻的 px，確保縮放比例正確 */}
+                    <div className={`absolute top-0.5 left-0.5 sm:top-1 sm:left-1 font-bold flex flex-col items-center leading-none ${cornCls}`} style={{ color }}>
+                        <span className={rank === '10' ? 'tracking-tighter' : ''}>{rank}</span>
+                        <span className="-mt-0.5 sm:-mt-1 text-[0.85em]">{sym}</span>
+                    </div>
+                    <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none`}>
+                        <span className={`font-black ${txtCls} opacity-80`} style={{ color }}>{sym}</span>
+                    </div>
+                    <div className={`absolute bottom-0.5 right-0.5 sm:bottom-1 sm:right-1 font-bold flex flex-col items-center leading-none ${cornCls}`} style={{ color, transform: 'rotate(180deg)' }}>
+                        <span className={rank === '10' ? 'tracking-tighter' : ''}>{rank}</span>
+                        <span className="-mt-0.5 sm:-mt-1 text-[0.85em]">{sym}</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const HandDisplay = ({ cards, isExpanded, onCardClick, legalIds = [], selectedId, clickable, disabledOverall, size = "preview" }) => {
+            const [hoverIdx, setHoverIdx] = useState(null);
+            const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
+            
+            useEffect(() => {
+                const handleResize = () => setIsMobile(window.innerWidth < 640);
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
+            const useTwoRows = isMobile && cards.length > 5 && size === 'play';
+
+            const rows = useTwoRows
+                ? [cards.slice(0, Math.ceil(cards.length / 2)), cards.slice(Math.ceil(cards.length / 2))]
+                : [cards];
+
+            let containerHeight = "";
+            if (size === 'preview') {
+                containerHeight = isExpanded ? (useTwoRows ? "h-24 sm:h-32" : "h-16 sm:h-24") : "h-8 sm:h-10";
+            } else { 
+                containerHeight = isExpanded ? (useTwoRows ? "h-40 sm:h-52" : "h-24 sm:h-36") : "h-12 sm:h-16";
+            }
+
+            const clipStyle = isExpanded ? 'none' : 'inset(-150px -150px 0 -150px)';
+            let globalCardIndex = 0;
+
+            return (
+                <div
+                    className={`w-full max-w-full relative transition-all duration-300 ${containerHeight}`}
+                    style={{ clipPath: clipStyle }}
+                    onMouseLeave={() => setHoverIdx(null)}
+                >
+                    {rows.map((rowCards, rowIdx) => {
+                        let topOffset = '0';
+                        if (rowIdx > 0) {
+                            if (isExpanded) {
+                                topOffset = size === 'preview' ? '2rem' : '3.5rem';
+                            } else {
+                                topOffset = size === 'preview' ? '1rem' : '1.5rem';
+                            }
+                        }
+
+                        return (
+                            <div key={rowIdx} className="absolute inset-x-0 w-full transition-all duration-300" style={{ top: topOffset, zIndex: (rowIdx + 1) * 10 }}>
+                                {rowCards.map((c, idxInRow) => {
+                                    const i = globalCardIndex++;
+                                    const isLegal = legalIds.length === 0 || legalIds.includes(c.id);
+                                    const isSel = selectedId && selectedId === c.id;
+                                    
+                                    const ratio = rowCards.length > 1 ? (idxInRow / (rowCards.length - 1)) : 0.5;
+                                    const leftPercent = ratio * 100;
+
+                                    let translateY = 0;
+                                    let translateX = 0;
+                                    let scale = 1;
+                                    
+                                    if (hoverIdx !== null) {
+                                        if (i < hoverIdx) translateX = -10;
+                                        if (i > hoverIdx) translateX = 10;
+                                        if (i === hoverIdx) {
+                                            translateY = -12;
+                                            scale = 1.05;
+                                        }
+                                    }
+                                    
+                                    if (isSel) {
+                                        translateY = -20;
+                                        scale = 1.05;
+                                    }
+
+                                    return (
+                                        <div
+                                            key={c.id}
+                                            onMouseEnter={() => setHoverIdx(i)}
+                                            onClick={() => {
+                                                if (clickable && isLegal && onCardClick) onCardClick(c);
+                                                if (hoverIdx !== i) setHoverIdx(i);
+                                            }}
+                                            className="absolute transition-transform duration-200 ease-out cursor-pointer"
+                                            style={{
+                                                left: `${leftPercent}%`,
+                                                zIndex: isSel ? 100 : (hoverIdx === i ? 50 : idxInRow),
+                                                transform: `translate(calc(-${leftPercent}% + ${translateX}px), ${translateY}px) scale(${scale})`
+                                            }}
+                                        >
+                                            <Card
+                                                card={c}
+                                                size={size}
+                                                selected={isSel}
+                                                disabled={disabledOverall || (!clickable && legalIds.length === 0) || (clickable && !isLegal)}
+                                                noHoverAnim={true}
+                                            />
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const PlayerBadge = ({ name, isActive, isHuman }) => (
+            <div className={`glass-panel rounded-full px-3 sm:px-4 md:px-5 py-1 sm:py-1.5 md:py-2 text-[10px] sm:text-xs md:text-sm font-bold flex items-center gap-1.5 transition-all
+                ${isActive ? 'text-yellow-300 pulse-ring' : 'text-gray-400'}`}>
+                <span>{isHuman ? '👤' : '🤖'}</span>
+                <span>{name}</span>
+                {isActive && <span className="animate-pulse text-yellow-400">●</span>}
+            </div>
+        );
+
+        const AuctionBox = ({ sequence, dealer }) => {
+            const firstBidder = (dealer + 1) % 4;
+            const padded = [...Array(firstBidder).fill(null), ...sequence];
+            const rows = [];
+            for (let i = 0; i < padded.length; i += 4) {
+                rows.push(padded.slice(i, i + 4));
+            }
+            const headers = ['北', '東', '南', '西'];
+
+            const callDisplay = (call) => {
+                if (!call) return '-';
+                if (call === 'pass') return '過';
+                if (call === 'dbl') return '加';
+                if (call === 'rdbl') return '再';
+                return `${call[0]}${STRAIN_SYMBOL[call.slice(1)]}`;
+            };
+
+            const callColor = (call) => {
+                if (!call) return 'text-gray-600';
+                if (call === 'pass') return 'text-gray-400';
+                if (call === 'dbl') return 'text-orange-400 font-bold';
+                if (call === 'rdbl') return 'text-purple-400 font-bold';
+                if (call.endsWith('H') || call.endsWith('D')) return 'text-red-400 font-bold';
+                if (call.endsWith('C')) return 'text-green-400 font-bold';
+                return 'text-white font-bold';
+            };
+
+            return (
+                <div className="glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 md:p-6 w-full max-w-[17.5rem] sm:max-w-[23.75rem] md:max-w-[30rem] lg:max-w-[37.5rem] shadow-lg">
+                    <div className="grid grid-cols-4 gap-1 text-center mb-2 sm:mb-4">
+                        {headers.map((h, i) => (
+                            <span key={i} className="text-yellow-400 font-bold text-sm sm:text-base md:text-xl lg:text-2xl">{h}</span>
+                        ))}
+                    </div>
+                    <div className="border-b border-white/20 mb-2 sm:mb-4" />
+                    <div className="overflow-y-auto hide-scrollbar" style={{ maxHeight: '40vh' }}>
+                        {rows.map((row, ri) => (
+                            <div key={ri} className="grid grid-cols-4 gap-1 text-center py-1 sm:py-2">
+                                {row.map((entry, ci) => (
+                                    <span key={ci} className={`text-base sm:text-lg md:text-xl lg:text-2xl ${callColor(entry ? entry.call : null)}`}>
+                                        {callDisplay(entry ? entry.call : null)}
+                                    </span>
+                                ))}
+                            </div>
+                        ))}
+                        {rows.length === 0 && (
+                            <div className="text-gray-500 text-sm sm:text-base md:text-xl text-center py-4">等待叫牌...</div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const BiddingSheet = ({ onBid, sequence, visible }) => {
+            const [isExpanded, setIsExpanded] = useState(true);
+
+            useEffect(() => { if (visible) setIsExpanded(true); }, [visible]);
+            if (!visible) return null;
+
+            const highest = getCurrentHighestBid(sequence);
+            const canDbl  = canDoubleNow(sequence, 2);
+            const canRdbl = canRedoubleNow(sequence, 2);
+
+            if (!isExpanded) {
+                return (
+                    <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+                        <div className="glass-panel rounded-t-2xl px-4 py-3 flex items-center justify-center gap-2 cursor-pointer border-t border-white/20"
+                             onClick={() => setIsExpanded(true)}>
+                            <div className="w-10 h-1.5 bg-gray-400 rounded-full" />
+                            <span className="text-yellow-300 text-base font-bold">展開叫牌面板</span>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up max-w-2xl mx-auto">
+                    <div className="glass-panel rounded-t-3xl p-3 sm:p-5 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-white/20 bg-[#022c22]/95 flex flex-col max-h-[85vh]">
+                        <div className="flex items-center justify-center gap-2 cursor-pointer mb-2 shrink-0" onClick={() => setIsExpanded(false)}>
+                            <div className="w-12 h-1.5 bg-gray-500 rounded-full" />
+                        </div>
+                        <p className="text-yellow-300 text-center text-lg sm:text-xl font-bold mb-3 shrink-0 tracking-widest">請選擇叫牌</p>
+                        
+                        <div className="flex gap-2 sm:gap-3 mb-3 shrink-0">
+                            <button onClick={() => onBid('pass')}
+                                className="flex-[2] bg-slate-600 hover:bg-slate-500 text-white py-3.5 sm:py-4 rounded-xl font-bold text-xl active:scale-95 transition-all shadow-md">
+                                過 叫
+                            </button>
+                            <button onClick={() => canDbl && onBid('dbl')} disabled={!canDbl}
+                                className={`flex-1 py-3.5 sm:py-4 rounded-xl font-bold text-lg active:scale-95 transition-all shadow-md
+                                    ${canDbl ? 'bg-orange-700 text-white' : 'bg-gray-800/40 text-gray-600 opacity-40'}`}>
+                                加倍
+                            </button>
+                            <button onClick={() => canRdbl && onBid('rdbl')} disabled={!canRdbl}
+                                className={`flex-1 py-3.5 sm:py-4 rounded-xl font-bold text-lg active:scale-95 transition-all shadow-md
+                                    ${canRdbl ? 'bg-purple-700 text-white' : 'bg-gray-800/40 text-gray-600 opacity-40'}`}>
+                                再加
+                            </button>
+                        </div>
+
+                        <div className="overflow-y-auto hide-scrollbar shrink-0 max-h-[14rem] sm:max-h-[18rem] rounded-xl relative border-t border-white/10 pt-2">
+                            <div className="grid grid-cols-5 gap-1.5 sm:gap-2 pb-2">
+                                {[1,2,3,4,5,6,7].flatMap(level =>
+                                    ['C','D','H','S','N'].map(strain => {
+                                        const bid = `${level}${strain}`;
+                                        const legal = !highest || bidValue(bid) > bidValue(highest);
+                                        const isRed = strain === 'H' || strain === 'D';
+                                        const isGrn = strain === 'C';
+                                        
+                                        const madeBid = sequence.find(b => b.call === bid);
+                                        const bidderName = madeBid ? SEAT_NAME[madeBid.seat] : null;
+
+                                        return (
+                                            <button key={bid}
+                                                onClick={() => legal && onBid(bid)}
+                                                disabled={!legal}
+                                                className={`relative py-3.5 sm:py-5 rounded-xl text-sm sm:text-lg md:text-xl lg:text-2xl font-black transition-all shadow-md active:scale-95 overflow-hidden
+                                                    ${legal
+                                                        ? isRed ? 'bg-red-700/90 hover:bg-red-600 text-white'
+                                                        : isGrn ? 'bg-green-600/90 hover:bg-green-500 text-white'
+                                                        : 'bg-slate-700/90 hover:bg-slate-600 text-white'
+                                                        : 'bg-gray-800/40 text-gray-600 cursor-not-allowed opacity-30 shadow-none'
+                                                    }`}
+                                            >
+                                                {bidderName && (
+                                                    <div className="absolute top-0 right-0 bg-yellow-400 text-gray-900 text-[10px] sm:text-xs px-1.5 py-0.5 rounded-bl-lg font-bold shadow-sm z-10 opacity-100 border-b border-l border-yellow-600/50">
+                                                        {bidderName}
+                                                    </div>
+                                                )}
+                                                {level}{STRAIN_SYMBOL[strain]}
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const HandHCP = ({ hand }) => {
+            const hcp = calcHCP(hand);
+            const lens = suitLengths(hand);
+            return (
+                <div className="text-xs sm:text-sm text-gray-300 flex justify-center items-center gap-1.5 mt-1">
+                    <span className="text-yellow-300 font-bold bg-black/50 px-2 py-0.5 rounded border border-white/20">
+                        {hcp} 點
+                    </span>
+                    {SUITS.map(s => (
+                        <span key={s} style={{ color: SUIT_COLOR_DARK_BG[s] }} className="bg-black/50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                            <span className="opacity-90">{SUIT_SYMBOL[s]}</span><span>{lens[s]}</span>
+                        </span>
+                    ))}
+                </div>
+            );
+        };
+
+        const ScoreCard = ({ rubberScore, gamesWon, vulnerable }) => {
+            const nsBelow = rubberScore.NS.below;
+            const ewBelow = rubberScore.EW.below;
+            const nsAbove = rubberScore.NS.above;
+            const ewAbove = rubberScore.EW.above;
+
+            return (
+                <div className="glass-panel rounded-2xl p-4 sm:p-6 w-full max-w-sm shadow-lg border border-white/10 mx-auto">
+                    <div className="grid grid-cols-3 gap-2 text-sm sm:text-base text-center mb-3">
+                        <div></div>
+                        <div className="text-yellow-300 font-bold text-lg">NS{vulnerable.NS ? ' ●' : ''}</div>
+                        <div className="text-yellow-300 font-bold text-lg">EW{vulnerable.EW ? ' ●' : ''}</div>
+                    </div>
+                    <div className="text-xs text-gray-400 text-center mb-1 tracking-widest">── 高線 ──</div>
+                    {[...Array(Math.max(nsAbove.length, ewAbove.length, 1))].map((_, i) => (
+                        <div key={i} className="grid grid-cols-3 gap-2 text-base text-center py-0.5">
+                            <div></div>
+                            <div className="text-green-300 font-bold">{nsAbove[i] != null ? nsAbove[i] : ''}</div>
+                            <div className="text-green-300 font-bold">{ewAbove[i] != null ? ewAbove[i] : ''}</div>
+                        </div>
+                    ))}
+                    <div className="border-b border-white/20 my-2" />
+                    <div className="text-xs text-gray-400 text-center mb-1 tracking-widest">── 低線 ──</div>
+                    {[...Array(Math.max(nsBelow.length, ewBelow.length, 1))].map((_, i) => (
+                        <div key={i} className="grid grid-cols-3 gap-2 text-base text-center py-0.5">
+                            <div></div>
+                            <div className="text-white font-bold">{nsBelow[i] != null ? nsBelow[i] : ''}</div>
+                            <div className="text-white font-bold">{ewBelow[i] != null ? ewBelow[i] : ''}</div>
+                        </div>
+                    ))}
+                    <div className="border-b border-white/20 my-3" />
+                    <div className="grid grid-cols-3 gap-2 text-base text-center font-bold items-center">
+                        <div className="text-gray-400">局數</div>
+                        <div className="text-yellow-300 text-xl bg-black/30 rounded py-1">{gamesWon.NS}</div>
+                        <div className="text-yellow-300 text-xl bg-black/30 rounded py-1">{gamesWon.EW}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        const GameInfoModal = ({ visible, onClose, gameState }) => {
+            if (!visible) return null;
+            const { rubberCount, dealer, vulnerable, rubberScore, gamesWon } = gameState;
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+                    <div className="glass-panel rounded-3xl p-6 w-full max-w-sm shadow-2xl relative border border-white/20 bg-[#022c22]/95" onClick={e => e.stopPropagation()}>
+                        <button onClick={onClose} className="absolute top-3 right-4 text-gray-400 hover:text-white text-3xl font-black active:scale-90 transition-all">&times;</button>
+                        <h2 className="text-yellow-300 text-xl font-black mb-4 text-center tracking-widest">遊戲資訊</h2>
+                        
+                        <div className="bg-black/40 rounded-xl p-3 mb-4 text-gray-200 text-sm font-bold flex justify-between border border-white/10">
+                            <span>第 {rubberCount} 橡皮牌</span>
+                            <span>發牌：{SEAT_NAME[dealer]}家</span>
+                        </div>
+
+                        <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />
+                        
+                        <button onClick={onClose} className="w-full mt-5 bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-xl active:scale-95 transition-all shadow-md tracking-widest">
+                            關 閉
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const BoardStatsOverlay = ({ visible, hands }) => {
+            if (!visible) return null;
+            
+            const StatBox = ({ seat, label }) => {
+                const hand = hands[seat];
+                const hcp = calcHCP(hand);
+                const lens = suitLengths(hand);
+                return (
+                    <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-white/20 flex flex-col items-center shadow-[0_0_15px_rgba(0,0,0,0.8)] bg-black/80 backdrop-blur-md pointer-events-none">
+                        <div className="text-yellow-300 font-bold mb-1.5 text-sm sm:text-base tracking-widest">
+                            {label} · {hand.length}張 · {hcp}點
+                        </div>
+                        <div className="flex gap-2 sm:gap-3">
+                            {SUITS.map(s => (
+                                <span key={s} style={{ color: SUIT_COLOR_DARK_BG[s] }} className="font-bold flex items-center text-sm sm:text-base">
+                                    {SUIT_SYMBOL[s]}{lens[s]}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="absolute inset-0 z-[60] pointer-events-none transition-opacity duration-300 animate-fade-in">
+                    <div className="absolute top-12 left-1/2 -translate-x-1/2"><StatBox seat={0} label="北家" /></div>
+                    <div className="absolute top-1/2 -translate-y-1/2 left-2"><StatBox seat={3} label="西家" /></div>
+                    <div className="absolute top-1/2 -translate-y-1/2 right-2"><StatBox seat={1} label="東家" /></div>
+                    <div className="absolute bottom-36 sm:bottom-40 left-1/2 -translate-x-1/2"><StatBox seat={2} label="南家" /></div>
+                </div>
+            );
+        };
+
+        // ── 打牌記錄面板 (遊戲中浮層) ───────────────────────────────
+        const LogPanel = ({ gameLog, onClose }) => {
+            const [copied, setCopied] = useState(false);
+            const handleCopy = () => {
+                navigator.clipboard.writeText(gameLog.join('\n'))
+                    .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })
+                    .catch(() => { });
+            };
+            const lineCls = (line) => {
+                if (line.startsWith('===')) return 'text-yellow-400 font-bold mt-2';
+                if (line.startsWith('---')) return 'text-cyan-300 font-bold mt-1';
+                if (line.startsWith('   →')) return 'text-cyan-300';
+                if (line.startsWith('第')) return 'text-amber-200 mt-1';
+                return 'text-green-200';
+            };
+            return (
+                <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="bg-gray-900 rounded-2xl border border-gray-600 w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0">
+                            <span className="text-yellow-300 font-bold text-base">📋 打牌記錄 ({gameLog.length} 條)</span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${copied ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-500 text-gray-200 hover:bg-gray-600'}`}
+                                    onClick={handleCopy}
+                                >{copied ? '✓ 已複製' : '複製'}</button>
+                                <button className="text-gray-400 hover:text-white text-xl px-2" onClick={onClose}>✕</button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 font-mono text-xs sm:text-sm whitespace-pre-wrap leading-relaxed">
+                            {gameLog.length === 0
+                                ? <span className="text-gray-500">尚無記錄</span>
+                                : gameLog.map((line, i) => (
+                                    <div key={i} className={`py-0.5 ${lineCls(line)}`}>{line}</div>
+                                ))
+                            }
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ── 結算畫面內嵌記錄元件 ────────────────────────────────────
+        const GameOverLog = ({ gameLog }) => {
+            const [open, setOpen] = useState(false);
+            const [copied, setCopied] = useState(false);
+            const handleCopy = (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(gameLog.join('\n'))
+                    .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })
+                    .catch(() => { });
+            };
+            const lineCls = (line) => {
+                if (line.startsWith('===')) return 'text-yellow-400 font-bold mt-2';
+                if (line.startsWith('---')) return 'text-cyan-300 font-bold mt-1';
+                if (line.startsWith('   →')) return 'text-cyan-300';
+                if (line.startsWith('第')) return 'text-amber-200 mt-1';
+                return 'text-green-200';
+            };
+            return (
+                <div className="w-full max-w-[24rem] sm:max-w-lg bg-black/30 rounded-2xl border border-gray-700 shadow-md">
+                    <div className="flex items-center justify-between px-4 py-3 cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
+                        <span className="text-yellow-300 text-sm font-bold">📋 查看打牌記錄 ({gameLog.length} 條) {open ? '▲' : '▼'}</span>
+                        <button
+                            className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${copied ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-500 text-gray-200 hover:bg-gray-600'}`}
+                            onClick={handleCopy}
+                        >{copied ? '✓ 已複製' : '複製'}</button>
+                    </div>
+                    {open && (
+                        <div className="max-h-64 overflow-y-auto px-4 pb-4 font-mono text-xs whitespace-pre-wrap leading-relaxed">
+                            {gameLog.map((line, i) => (
+                                <div key={i} className={`py-0.5 ${lineCls(line)}`}>{line}</div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ══════════════════════════════════════════════════════════════
+        // 主應用
+        // ══════════════════════════════════════════════════════════════
+        function App() {
+            // ── UI 版面縮放 (REM 核心引擎) ──
+            const [uiScale, setUiScale] = useState(() => {
+                return localStorage.getItem('bridgeUiScale') || 'sm';
+            });
+
+            useEffect(() => {
+                localStorage.setItem('bridgeUiScale', uiScale);
+                // 調整根目錄字體大小，達成全局等比例縮放
+                if (uiScale === 'sm') document.documentElement.style.fontSize = '16px';
+                if (uiScale === 'md') document.documentElement.style.fontSize = '19px'; // 放大約 19%
+                if (uiScale === 'lg') document.documentElement.style.fontSize = '22px'; // 放大約 38%
+            }, [uiScale]);
+
+            // ── 遊戲核心狀態 ──
+            const [gameState, setGameState] = useState(INITIAL_STATE);
+            const [selectedCard, setSelectedCard] = useState(null);
+            const [southExpanded, setSouthExpanded] = useState(true);
+            const [northExpanded, setNorthExpanded] = useState(false);
+            
+            const [showInfoModal, setShowInfoModal] = useState(false);
+            const [showBoardStats, setShowBoardStats] = useState(false);
+            const [showLog, setShowLog] = useState(false);
+
+            const { phase, hands, biddingSequence, currentBidder, contract,
+                    dealer, vulnerable, rubberScore, gamesWon, dummySeat,
+                    currentLeader, currentTrick, tricksTaken, openingLeadMade,
+                    dummyRevealed, lastHandResult, lastCompletedTrick,
+                    rubberOver, rubberWinner, autoPlayDummy, gameLog = [] } = gameState;
+
+            const HUMAN_SEAT = 2;
+            const trumpSuit = contract && contract.strain !== 'N' ? contract.strain : null;
+
+            useEffect(() => {
+                if (phase !== 'bidding') return;
+                if (currentBidder === HUMAN_SEAT) return;
+                const t = setTimeout(() => {
+                    setGameState(prev => {
+                        if (prev.phase !== 'bidding' || prev.currentBidder === HUMAN_SEAT) return prev;
+                        const call = aiBid(prev.currentBidder, prev.hands[prev.currentBidder], prev.biddingSequence);
+                        return addBid(prev, call);
+                    });
+                }, 500);
+                return () => clearTimeout(t);
+            }, [phase, biddingSequence.length, currentBidder]);
+
+            useEffect(() => {
+                if (phase !== 'passedOut') return;
+                const t = setTimeout(() => setGameState(prev => prev.phase === 'passedOut' ? startHand({ ...prev, dealer: (prev.dealer + 1) % 4 }) : prev), 1500);
+                return () => clearTimeout(t);
+            }, [phase]);
+
+            useEffect(() => {
+                if (phase !== 'playing') return;
+                const turnSeat = (currentLeader + currentTrick.length) % 4;
+                if (isHumanTurn(turnSeat, gameState)) return;
+                const t = setTimeout(() => {
+                    setGameState(prev => {
+                        if (prev.phase !== 'playing') return prev;
+                        const ts = (prev.currentLeader + prev.currentTrick.length) % 4;
+                        if (isHumanTurn(ts, prev)) return prev;
+                        const tr = prev.contract.strain === 'N' ? null : prev.contract.strain;
+                        const card = aiSelectCard(ts, prev.hands[ts], prev.currentTrick, tr, prev.contract);
+                        return playCard(prev, ts, card);
+                    });
+                }, 700);
+                return () => clearTimeout(t);
+            }, [phase, currentTrick.length, currentLeader, openingLeadMade]);
+
+            useEffect(() => {
+                if (!lastCompletedTrick) return;
+                if (phase === 'handFinished') return; 
+                const t = setTimeout(() => setGameState(prev => ({ ...prev, lastCompletedTrick: null })), 2000);
+                return () => clearTimeout(t);
+            }, [lastCompletedTrick, phase]);
+
+            useEffect(() => {
+                if (phase === 'bidding') {
+                    setSouthExpanded(currentBidder === 2);
+                    setNorthExpanded(currentBidder === 0);
+                } else if (phase === 'playing') {
+                    const turnSeat = (currentLeader + currentTrick.length) % 4;
+                    setSouthExpanded(turnSeat === 2);
+                    if (turnSeat === 0 && (!autoPlayDummy && (dummySeat === 0 ? openingLeadMade : true))) {
+                        setNorthExpanded(true);
+                    } else {
+                        setNorthExpanded(false);
+                    }
+                } else if (phase === 'handFinished' || phase === 'scoring') {
+                    setSouthExpanded(false);
+                    setNorthExpanded(false);
+                }
+            }, [phase, currentBidder, currentLeader, currentTrick.length, autoPlayDummy, dummySeat, openingLeadMade]);
+
+            const handleCardClick = (seat, card) => {
+                if (phase !== 'playing') return;
+                const turnSeat = (currentLeader + currentTrick.length) % 4;
+                if (turnSeat !== seat) return;
+                if (!isHumanTurn(seat, gameState)) return;
+                const legal = legalCards(hands[seat], currentTrick, trumpSuit);
+                if (!legal.find(c => c.id === card.id)) return;
+                if (selectedCard && selectedCard.id === card.id) {
+                    setSelectedCard(null);
+                    setGameState(prev => playCard(prev, seat, card));
+                } else {
+                    setSelectedCard(card);
+                }
+            };
+
+            const handleConfirmPlay = (seat) => {
+                if (!selectedCard) return;
+                const legal = legalCards(hands[seat], currentTrick, trumpSuit);
+                if (!legal.find(c => c.id === selectedCard.id)) return;
+                const card = selectedCard;
+                setSelectedCard(null);
+                setGameState(prev => playCard(prev, seat, card));
+            };
+
+            const handleBid = (call) => {
+                if (phase !== 'bidding' || currentBidder !== HUMAN_SEAT) return;
+                setGameState(prev => addBid(prev, call));
+            };
+
+            const turnSeat = phase === 'playing' ? (currentLeader + currentTrick.length) % 4 : -1;
+            const isMyTurn = phase === 'playing' && isHumanTurn(turnSeat, gameState);
+            const displayTrick = currentTrick.length > 0 ? currentTrick : lastCompletedTrick;
+            const isLastTrick  = currentTrick.length === 0 && lastCompletedTrick !== null;
+            const lastTrickWinner = isLastTrick ? trickWinner(lastCompletedTrick, contract && contract.strain !== 'N' ? contract.strain : null) : -1;
+
+            const humanControlsDummy = !autoPlayDummy;
+            const southLegal = phase === 'playing' && turnSeat === HUMAN_SEAT ? legalCards(hands[HUMAN_SEAT], currentTrick, trumpSuit).map(c => c.id) : [];
+            const northIsHumanControlled = humanControlsDummy && (dummySeat !== 0 || openingLeadMade);
+            const northLegal = phase === 'playing' && turnSeat === 0 && northIsHumanControlled ? legalCards(hands[0], currentTrick, trumpSuit).map(c => c.id) : [];
+            const isNorthTurn = turnSeat === 0;
+            const isSouthTurn = turnSeat === HUMAN_SEAT;
+            const northClickable = isNorthTurn && northIsHumanControlled;
+            const southClickable = isSouthTurn;
+
+            // ── 渲染階段 ──────────────────────────────────────────────
+
+            if (phase === 'menu') {
+                const hasGame = gamesWon.NS > 0 || gamesWon.EW > 0 || rubberScore.NS.below.length > 0 || rubberScore.EW.below.length > 0 || rubberScore.NS.above.length > 0 || rubberScore.EW.above.length > 0;
+                return (
+                    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4 sm:gap-6 overflow-y-auto hide-scrollbar">
+                        <div className="glass-panel rounded-3xl p-6 text-center w-full max-w-[24rem] animate-fade-in shadow-2xl">
+                            <div className="text-5xl mb-2 flex justify-center gap-2">
+                                <span style={{color:'#f8fafc'}}>♠</span><span style={{color:'#ef4444'}}>♥</span><span style={{color:'#f97316'}}>♦</span><span style={{color:'#4ade80'}}>♣</span>
+                            </div>
+                            <h1 className="text-white text-3xl font-black mb-1">橋牌單機版</h1>
+                            <p className="text-green-300 text-base font-bold">橡皮橋制 · 南家視角</p>
+                        </div>
+
+                        {/* UI 縮放與字體設定 */}
+                        <div className="glass-panel rounded-3xl p-4 sm:p-5 w-full max-w-[24rem] flex flex-col gap-3">
+                            <div className="text-yellow-300 font-bold text-sm sm:text-base text-center tracking-widest">
+                                介面字體與卡牌縮放
+                            </div>
+                            <div className="flex gap-2">
+                                {[
+                                    { id: 'sm', label: '小' },
+                                    { id: 'md', label: '中' },
+                                    { id: 'lg', label: '大' }
+                                ].map(sz => (
+                                    <button
+                                        key={sz.id}
+                                        onClick={() => setUiScale(sz.id)}
+                                        className={`flex-1 py-2.5 rounded-xl font-bold text-sm sm:text-base transition-all active:scale-95 ${
+                                            uiScale === sz.id
+                                                ? 'bg-yellow-500 text-gray-900 shadow-md border-2 border-yellow-300'
+                                                : 'bg-black/40 text-gray-300 border border-gray-600 hover:bg-black/60'
+                                        }`}
+                                    >
+                                        {sz.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {hasGame && <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />}
+
+                        <div className="flex flex-col gap-3 w-full max-w-[24rem] px-2">
+                            <button onClick={() => setGameState(prev => startHand(prev))}
+                                className="w-full bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 rounded-2xl text-xl shadow-[0_0_20px_rgba(250,204,21,0.4)] active:scale-95 transition-all">
+                                {hasGame ? '繼續下一局 →' : '開始遊戲 →'}
+                            </button>
+                            <button onClick={() => setGameState(prev => ({ ...prev, autoPlayDummy: !prev.autoPlayDummy }))}
+                                className={`w-full font-bold py-3 rounded-2xl text-sm shadow active:scale-95 transition-all border
+                                    ${autoPlayDummy ? 'glass-panel border-gray-500/50 text-gray-300' : 'bg-blue-900/40 border-blue-400/50 text-blue-200'}`}>
+                                北家(明手)：{autoPlayDummy ? 'AI 代出' : '自己出牌'} (點擊切換)
+                            </button>
+                            <button onClick={() => setGameState({ ...INITIAL_STATE, rubberCount: gameState.rubberCount + (hasGame ? 1 : 0) })}
+                                className="w-full glass-panel border border-white/10 text-gray-400 font-bold py-3 rounded-2xl text-sm active:scale-95 transition-all">
+                                清除分數 (新橡皮牌)
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (phase === 'passedOut') {
+                return (
+                    <div className="flex-1 flex flex-col items-center justify-center p-4">
+                        <div className="glass-panel rounded-3xl p-10 text-center animate-fade-in shadow-2xl">
+                            <div className="text-6xl mb-4">🃏</div>
+                            <h2 className="text-white text-3xl font-bold mb-2">四家皆過叫</h2>
+                            <p className="text-green-300 text-lg">重新發牌...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (phase === 'bidding') {
+                const isHumanBidTurn = currentBidder === HUMAN_SEAT;
+                const vulStr = vulnerable.NS && vulnerable.EW ? '雙方有局' : vulnerable.NS ? 'NS有局' : vulnerable.EW ? 'EW有局' : '無局';
+                return (
+                    <div className="flex-1 flex flex-col overflow-hidden relative">
+                        <div className="glass-panel flex items-center px-2 py-2 shrink-0 border-b border-white/10 relative z-20">
+                            <div className="flex-1 flex justify-start">
+                                <PlayerBadge name="北" isActive={currentBidder === 0} isHuman={false} />
+                            </div>
+                            <div className="shrink-0 flex justify-center px-1">
+                                <span className="text-gray-200 text-xs sm:text-sm font-bold bg-black/30 px-2 sm:px-3 py-1 rounded-full whitespace-nowrap">{vulStr}</span>
+                            </div>
+                            <div className="flex-1 flex justify-end items-center gap-1 sm:gap-2">
+                                <PlayerBadge name="東" isActive={currentBidder === 1} isHuman={false} />
+                                <button onClick={() => setShowLog(true)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full border border-white/20 active:scale-95 transition-all text-xs sm:text-sm text-yellow-300 shadow-sm" title="打牌記錄">
+                                    📋
+                                </button>
+                                <button onClick={() => setShowBoardStats(!showBoardStats)} className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full border active:scale-95 transition-all text-xs sm:text-sm shadow-sm ${showBoardStats ? 'bg-yellow-500/20 border-yellow-400 text-yellow-300' : 'bg-white/10 hover:bg-white/20 border-white/20 text-gray-300'}`}>
+                                    👁️
+                                </button>
+                                <button onClick={() => setShowInfoModal(true)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full border border-white/20 active:scale-95 transition-all text-xs sm:text-sm text-yellow-300 shadow-sm">
+                                    ℹ️
+                                </button>
+                            </div>
+                        </div>
+
+                        {showLog && <LogPanel gameLog={gameLog} onClose={() => setShowLog(false)} />}
+
+                        <div className="glass-light mx-2 mt-2 rounded-2xl p-2 shrink-0 shadow-lg relative">
+                            <div className="flex flex-col items-center gap-1">
+                                <HandHCP hand={hands[0]} />
+                                {/* 叫牌階段統一使用 'preview' 尺寸 */}
+                                <div className="w-[90%] sm:w-[80%] mx-auto">
+                                    <HandDisplay cards={hands[0]} isExpanded={northExpanded} disabledOverall={true} size="preview" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex items-center justify-center py-2 px-1">
+                            <AuctionBox sequence={biddingSequence} dealer={dealer} />
+                        </div>
+
+                        <div className="glass-light mx-2 mb-2 rounded-2xl p-2 shrink-0 shadow-lg relative">
+                            <div className="flex flex-col items-center gap-1.5">
+                                <div className="flex justify-between w-full px-2 items-center">
+                                    <PlayerBadge name="南家(您)" isActive={isHumanBidTurn} isHuman={true} />
+                                    <button onClick={() => setSouthExpanded(!southExpanded)}
+                                        className="text-xs text-yellow-300 bg-black/40 px-2 py-1 rounded font-bold border border-yellow-600/50">
+                                        {southExpanded ? '收合 ▲' : '展開 ▼'}
+                                    </button>
+                                </div>
+                                <HandHCP hand={hands[HUMAN_SEAT]} />
+                                {/* 叫牌階段統一使用 'preview' 尺寸 */}
+                                <div className="w-[90%] sm:w-[80%] mx-auto">
+                                    <HandDisplay cards={hands[HUMAN_SEAT]} isExpanded={southExpanded} disabledOverall={true} size="preview" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <BiddingSheet onBid={handleBid} sequence={biddingSequence} visible={isHumanBidTurn} />
+                        
+                        <BoardStatsOverlay visible={showBoardStats} hands={hands} />
+                        <GameInfoModal visible={showInfoModal} onClose={() => setShowInfoModal(false)} gameState={gameState} />
+                    </div>
+                );
+            }
+
+            if (phase === 'playing' || phase === 'handFinished') {
+                const contractStr = contractDisplay(contract);
+                const declarerName = contract ? SEAT_NAME[contract.declarer] : '';
+
+                return (
+                    <div className="flex-1 flex flex-col overflow-hidden w-full h-full justify-between relative">
+                        <div className="glass-panel flex items-center justify-between px-3 py-2 shrink-0 z-20 border-b border-white/10">
+                            <div className="flex flex-col">
+                                <span className="text-yellow-400 font-black text-lg sm:text-xl leading-tight">{contractStr}</span>
+                                <span className="text-gray-300 text-[10px] sm:text-xs">{declarerName}家莊</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 sm:gap-3">
+                                <div className="text-xs sm:text-sm text-gray-200 flex items-center gap-1.5 bg-black/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-white/10">
+                                    <span className="font-bold">NS <span className="text-yellow-300 ml-0.5 text-sm sm:text-lg">{tricksTaken.NS}</span></span>
+                                    <span className="text-gray-500">|</span>
+                                    <span className="font-bold">EW <span className="text-yellow-300 ml-0.5 text-sm sm:text-lg">{tricksTaken.EW}</span></span>
+                                </div>
+                                <button onClick={() => setShowLog(true)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full border border-white/20 active:scale-95 transition-all text-xs sm:text-sm text-yellow-300 shadow-sm" title="打牌記錄">
+                                    📋
+                                </button>
+                                <button onClick={() => setShowBoardStats(!showBoardStats)} className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full border active:scale-95 transition-all text-xs sm:text-sm shadow-sm ${showBoardStats ? 'bg-yellow-500/20 border-yellow-400 text-yellow-300' : 'bg-white/10 hover:bg-white/20 border-white/20 text-gray-300'}`}>
+                                    👁️
+                                </button>
+                                <button onClick={() => setShowInfoModal(true)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full border border-white/20 active:scale-95 transition-all text-xs sm:text-sm text-yellow-300 shadow-sm">
+                                    ℹ️
+                                </button>
+                            </div>
+                        </div>
+
+                        {showLog && <LogPanel gameLog={gameLog} onClose={() => setShowLog(false)} />}
+
+                        {/* North hand - 打牌階段使用 'play' 尺寸並啟動雙排放大 */}
+                        {(() => {
+                            const northFaceUp = dummyRevealed || (humanControlsDummy && dummySeat !== 0);
+                            return (
+                                <div className="glass-light mx-1 sm:mx-4 mt-2 rounded-xl p-2 shrink-0 shadow-lg relative">
+                                    <div className="flex justify-between items-center mb-1 px-2">
+                                        <PlayerBadge name={northFaceUp ? "北(明手)" : "北家"} isActive={isNorthTurn} isHuman={false} />
+                                        {northFaceUp && (
+                                            <button onClick={() => setNorthExpanded(!northExpanded)} className="text-[10px] sm:text-xs text-yellow-300 bg-black/40 px-2 py-1 rounded font-bold border border-yellow-600/50">
+                                                {northExpanded ? '收合 ▲' : '展開 ▼'}
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="w-[90%] sm:w-[80%] mx-auto">
+                                        {northFaceUp ? (
+                                            <HandDisplay cards={hands[0]} isExpanded={northExpanded} onCardClick={(c) => handleCardClick(0, c)}
+                                                legalIds={northLegal} selectedId={selectedCard && northClickable ? selectedCard.id : null}
+                                                clickable={northClickable} size="play" />
+                                        ) : (
+                                            <div className="flex justify-center -space-x-5 py-1">
+                                                {Array.from({ length: Math.min(hands[0].length, 13) }).map((_, i) => (
+                                                    <div key={i} style={{ zIndex: i }}><Card isHidden size="hidden" /></div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
+                        {/* Center Table */}
+                        <div className="flex-1 flex items-center justify-between px-1 w-full relative min-h-[13.75rem]">
+                            <div className="flex flex-col items-center gap-1 shrink-0 w-10 sm:w-16">
+                                <PlayerBadge name="西" isActive={turnSeat === 3} isHuman={false} />
+                                <div className="flex flex-col -space-y-8 sm:-space-y-12 pt-2">
+                                    {Array.from({ length: Math.min(hands[3].length, 13) }).map((_, i) => (
+                                        <div key={i} style={{ zIndex: i }}><Card isHidden size="hidden" /></div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="flex-1 flex flex-col items-center justify-center relative h-full max-h-[17.5rem]">
+                                <div className="glass-panel rounded-2xl p-2 w-full max-w-[12.5rem] sm:max-w-[15rem] aspect-square flex flex-col items-center justify-center shadow-xl relative border border-white/20">
+                                    {!displayTrick ? (
+                                        <div className="text-gray-300 text-sm font-bold opacity-70">等待首攻...</div>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center w-full relative">
+                                            {isLastTrick && (
+                                                <div className="absolute -top-4 left-1/2 -translate-x-1/2 text-yellow-300 text-sm font-bold bg-black/80 px-3 py-1 rounded-full shadow-md z-40 border border-yellow-600/50 whitespace-nowrap">
+                                                    {SEAT_NAME[lastTrickWinner]}家贏墩
+                                                </div>
+                                            )}
+                                            <div className="flex justify-center -mb-6 relative z-10">
+                                                {displayTrick.find(t => t.seat === 0) ? <Card card={displayTrick.find(t => t.seat === 0).card} size="trick" disabled /> : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 opacity-0" />}
+                                            </div>
+                                            <div className="flex justify-between items-center w-full px-2 sm:px-4 relative z-20">
+                                                {displayTrick.find(t => t.seat === 3) ? <Card card={displayTrick.find(t => t.seat === 3).card} size="trick" disabled /> : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 opacity-0" />}
+                                                {displayTrick.find(t => t.seat === 1) ? <Card card={displayTrick.find(t => t.seat === 1).card} size="trick" disabled /> : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 opacity-0" />}
+                                            </div>
+                                            <div className="flex justify-center -mt-6 relative z-30">
+                                                {displayTrick.find(t => t.seat === 2) ? <Card card={displayTrick.find(t => t.seat === 2).card} size="trick" disabled /> : <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 opacity-0" />}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                <div className="h-8 mt-2 flex items-center justify-center">
+                                    {phase === 'handFinished' ? (
+                                        <button onClick={() => setGameState(prev => ({ ...prev, phase: 'scoring' }))}
+                                            className="bg-yellow-500 text-gray-900 font-bold px-5 py-2 rounded-full text-sm shadow-[0_0_15px_rgba(250,204,21,0.6)] animate-pulse">
+                                            結算成績 →
+                                        </button>
+                                    ) : isMyTurn ? (
+                                        <span className="text-yellow-300 text-sm font-bold bg-black/50 px-3 py-1 rounded-full border border-yellow-500/30">
+                                            {selectedCard ? '點擊確認按鈕出牌' : (isSouthTurn ? '請出牌 (南家)' : '請出牌 (明手)')}
+                                        </span>
+                                    ) : turnSeat >= 0 ? (
+                                        <span className="text-gray-400 text-xs font-bold">{SEAT_NAME[turnSeat]}家出牌中...</span>
+                                    ) : null}
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col items-center gap-1 shrink-0 w-10 sm:w-16">
+                                <PlayerBadge name="東" isActive={turnSeat === 1} isHuman={false} />
+                                <div className="flex flex-col -space-y-8 sm:-space-y-12 pt-2">
+                                    {Array.from({ length: Math.min(hands[1].length, 13) }).map((_, i) => (
+                                        <div key={i} style={{ zIndex: i }}><Card isHidden size="hidden" /></div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* South hand - 打牌階段使用 'play' 尺寸並啟動雙排放大 */}
+                        <div className="glass-light mx-1 sm:mx-4 mb-2 rounded-xl p-2 shrink-0 shadow-[0_-5px_20px_rgba(0,0,0,0.3)] relative">
+                            <div className="flex justify-between items-center mb-1 px-2">
+                                <PlayerBadge name="南(您)" isActive={isSouthTurn} isHuman={true} />
+                                <button onClick={() => setSouthExpanded(!southExpanded)} className="text-[10px] sm:text-xs text-yellow-300 bg-black/40 px-2 py-1 rounded font-bold border border-yellow-600/50">
+                                    {southExpanded ? '收合 ▲' : '展開 ▼'}
+                                </button>
+                            </div>
+                            <div className="relative w-[90%] sm:w-[80%] mx-auto">
+                                <HandDisplay cards={hands[HUMAN_SEAT]} isExpanded={southExpanded}
+                                    onCardClick={(c) => handleCardClick(HUMAN_SEAT, c)} legalIds={southLegal}
+                                    selectedId={selectedCard && isSouthTurn ? selectedCard.id : null} clickable={southClickable} size="play" />
+                                
+                                <div className="absolute -top-14 left-0 right-0 flex justify-center z-50 pointer-events-none">
+                                    {selectedCard && (isSouthTurn || (northClickable && turnSeat === 0)) && (
+                                        <button onClick={() => handleConfirmPlay(turnSeat === 0 ? 0 : HUMAN_SEAT)}
+                                            className="pointer-events-auto bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black px-8 py-3 rounded-full text-lg shadow-[0_5px_20px_rgba(0,0,0,0.5)] border-2 border-yellow-200 animate-slide-up">
+                                            確認打出 {RANK_LABEL[selectedCard.rank]}{SUIT_SYMBOL[selectedCard.suit]}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <BoardStatsOverlay visible={showBoardStats} hands={hands} />
+                        <GameInfoModal visible={showInfoModal} onClose={() => setShowInfoModal(false)} gameState={gameState} />
+                    </div>
+                );
+            }
+
+            if (phase === 'scoring') {
+                const result = lastHandResult;
+                const contractStr = contractDisplay(contract);
+                const isNSResult = result && result.side === 'NS';
+
+                return (
+                    <div className="flex-1 flex flex-col items-center overflow-y-auto hide-scrollbar p-4 sm:p-8 gap-4 sm:gap-6 animate-slide-up pb-10">
+                        <h2 className="text-white text-2xl sm:text-3xl md:text-4xl font-bold mt-2">本局結算</h2>
+
+                        <div className={`glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-[24rem] sm:max-w-lg md:max-w-xl text-center border-l-8 shadow-2xl
+                            ${result.made ? (isNSResult ? 'border-l-green-400' : 'border-l-blue-400') : 'border-l-red-400'}`}>
+                            <div className="text-4xl sm:text-5xl md:text-6xl font-black text-white mb-2">{contractStr}</div>
+                            <div className="text-gray-300 text-sm sm:text-base md:text-xl mb-4">
+                                {SEAT_NAME[contract.declarer]}家 · {vulnerable[contract.declarer % 2 === 0 ? 'NS' : 'EW'] ? '有局' : '無局'}
+                            </div>
+                            {result.made ? (
+                                <>
+                                    <div className="text-green-300 text-2xl sm:text-3xl md:text-4xl font-bold mb-1">✓ 完成{result.tricksWon > result.contractTricks ? ` +${result.tricksWon - result.contractTricks}` : ''}</div>
+                                    <div className="text-gray-400 text-sm sm:text-lg">贏得 {result.tricksWon} 墩</div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="text-red-400 text-2xl sm:text-3xl md:text-4xl font-bold mb-1">✗ 倒 {result.down} 墩</div>
+                                    <div className="text-gray-400 text-sm sm:text-lg">僅贏 {result.tricksWon || (contract.level + 6 - result.down)} 墩</div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="glass-panel rounded-2xl p-5 w-full max-w-[24rem] sm:max-w-lg shadow-md">
+                            <h3 className="text-yellow-300 font-bold text-lg mb-3 text-center border-b border-white/10 pb-2">計分明細</h3>
+                            {result.made ? (
+                                <div className="space-y-2 text-base sm:text-lg">
+                                    <div className="flex justify-between"><span className="text-gray-300">低線 (合約分)</span><span className="text-white font-bold">{result.below}</span></div>
+                                    {result.above > 0 && <div className="flex justify-between"><span className="text-gray-300">高線 (獎勵分)</span><span className="text-green-300 font-bold">{result.above}</span></div>}
+                                    <div className="flex justify-between pt-2 border-t border-white/10 mt-2"><span className="text-yellow-300 text-sm">得分方</span><span className="text-yellow-300 font-bold">{result.side}</span></div>
+                                </div>
+                            ) : (
+                                <div className="space-y-2 text-base sm:text-lg">
+                                    <div className="flex justify-between"><span className="text-gray-300">罰分</span><span className="text-red-300 font-bold">{result.penalty}</span></div>
+                                    <div className="flex justify-between pt-2 border-t border-white/10 mt-2"><span className="text-yellow-300 text-sm">得分方 (防守)</span><span className="text-yellow-300 font-bold">{result.side}</span></div>
+                                </div>
+                            )}
+                        </div>
+
+                        <ScoreCard rubberScore={rubberScore} gamesWon={gamesWon} vulnerable={vulnerable} />
+
+                        <GameOverLog gameLog={gameLog} />
+
+                        {rubberOver ? (
+                            <div className="glass-panel border-2 border-yellow-500 rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-full max-w-[24rem] sm:max-w-lg text-center shadow-2xl bg-yellow-900/30 mt-2">
+                                <div className="text-5xl sm:text-6xl mb-3">🏆</div>
+                                <div className="text-yellow-300 text-2xl sm:text-3xl font-black mb-2">橡皮牌結束！</div>
+                                <div className="text-white font-bold text-xl sm:text-2xl mb-3">{rubberWinner} 獲勝</div>
+                                <div className="text-gray-300 text-sm sm:text-lg mb-5 font-mono">NS: {totalScore(rubberScore, 'NS')} | EW: {totalScore(rubberScore, 'EW')}</div>
+                                <button onClick={() => setGameState({ ...INITIAL_STATE, rubberCount: gameState.rubberCount + 1 })}
+                                    className="w-full bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 sm:py-5 rounded-xl sm:rounded-2xl text-lg sm:text-xl active:scale-95 transition-all shadow-lg">
+                                    開始新橡皮牌 →
+                                </button>
+                            </div>
+                        ) : (
+                            <button onClick={() => setGameState(prev => startHand({ ...prev, dealer: (prev.dealer + 1) % 4 }))}
+                                className="w-full max-w-[24rem] sm:max-w-lg bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-black py-4 sm:py-5 rounded-xl sm:rounded-2xl text-lg sm:text-xl shadow-lg active:scale-95 transition-all mt-2">
+                                下一局 →
+                            </button>
+                        )}
+                    </div>
+                );
+            }
+
+            return null;
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

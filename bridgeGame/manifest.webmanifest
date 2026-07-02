@@ -1,0 +1,50 @@
+{
+  "id": "bridgeGame",
+  "name": "橋牌單機遊戲",
+  "short_name": "橋牌",
+  "description": "橋牌單人練習版，含競叫、打牌、橡皮橋計分，支援離線遊玩",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f4c2a",
+  "theme_color": "#15803d",
+  "lang": "zh-TW",
+  "categories": ["games"],
+  "icons": [
+    {
+      "src": "./icons/bridgeGame-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/bridgeGame-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/bridgeGame-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "開始叫牌",
+      "short_name": "開始",
+      "description": "快速開始橋牌對局",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./icons/bridgeGame-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

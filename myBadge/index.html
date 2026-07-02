@@ -1,0 +1,1657 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>我的名牌</title>
+  <meta name="description" content="掃描並儲存 QR Code 名牌，隨時展示給他人掃描">
+  <meta name="theme-color" content="#0f0f23">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="我的名牌">
+
+  <!-- Dynamic PWA Manifest -->
+  <script>
+    (function () {
+      try {
+        const iconUrl = new URL('icon.png', window.location.href).href;
+        const manifest = {
+          name: '我的名牌',
+          short_name: '我的名牌',
+          start_url: window.location.pathname,
+          display: 'standalone',
+          background_color: '#0f0f23',
+          theme_color: '#0f0f23',
+          icons: [
+            { src: iconUrl, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+            { src: iconUrl, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+          ]
+        };
+        const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+        const link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = URL.createObjectURL(blob);
+        document.head.appendChild(link);
+
+        window.registerSW = function () {
+          if (!('serviceWorker' in navigator)) return;
+          navigator.serviceWorker.register('./sw.js', { scope: './' })
+            .then(reg => {
+              console.log('[SW] registered, scope:', reg.scope);
+              setInterval(() => reg.update(), 60000);
+              reg.addEventListener('updatefound', () => {
+                const nw = reg.installing;
+                if (!nw) return;
+                nw.addEventListener('statechange', () => {
+                  if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                    showToast('🆕 新版本已就緒，點此更新', 5000, () => {
+                      nw.postMessage({ type: 'SKIP_WAITING' });
+                    });
+                  }
+                });
+              });
+            })
+            .catch(err => console.warn('[SW] registration failed:', err));
+          let isReloading = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (isReloading) return;
+            isReloading = true;
+            window.location.reload();
+          });
+        };
+      } catch (e) { console.error('PWA Init Error:', e); }
+    })();
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- ZXing QR Scanner -->
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+
+  <!-- QRious (QR Code Generator) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+
+  <style>
+    /* ─── Reset & Base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:    #0f0f23;
+      --bg-secondary:  #1a1a35;
+      --bg-card:       rgba(255,255,255,0.06);
+      --bg-card-hover: rgba(255,255,255,0.10);
+      --border:        rgba(255,255,255,0.10);
+      --border-hover:  rgba(139,92,246,0.5);
+      --accent-1:      #8b5cf6;
+      --accent-2:      #3b82f6;
+      --accent-3:      #06b6d4;
+      --text-primary:  #f1f5f9;
+      --text-secondary:#94a3b8;
+      --text-muted:    #475569;
+      --success:       #10b981;
+      --danger:        #ef4444;
+      --glow-purple:   rgba(139,92,246,0.3);
+      --glow-blue:     rgba(59,130,246,0.3);
+      --radius-card:   20px;
+      --radius-btn:    14px;
+      --font:          'Inter', sans-serif;
+    }
+
+    html { font-size: 16px; height: 100%; }
+    body {
+      font-family: var(--font);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Scrollbar ────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+    /* ─── Background glow blobs ────────────────────────────────────────────── */
+    .bg-blob {
+      position: fixed; border-radius: 50%; filter: blur(80px);
+      pointer-events: none; z-index: 0;
+    }
+    .bg-blob-1 {
+      width: 400px; height: 400px; top: -100px; right: -100px;
+      background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%);
+    }
+    .bg-blob-2 {
+      width: 350px; height: 350px; bottom: 100px; left: -100px;
+      background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
+    }
+
+    /* ─── Header ───────────────────────────────────────────────────────────── */
+    #app-header {
+      position: sticky; top: 0; z-index: 30;
+      background: rgba(15,15,35,0.85);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1rem;
+      height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 0.75rem; }
+    .header-logo {
+      width: 36px; height: 36px; border-radius: 10px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .header-logo img { width: 100%; height: 100%; object-fit: cover; }
+    .header-title { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
+    .header-right { display: flex; align-items: center; gap: 0.5rem; }
+    .icon-btn {
+      width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border);
+      background: var(--bg-card); color: var(--text-secondary);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.2s ease; outline: none;
+    }
+    .icon-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); border-color: var(--border-hover); }
+    .icon-btn:active { transform: scale(0.93); }
+
+    /* ─── Main Layout ──────────────────────────────────────────────────────── */
+    #main-content {
+      flex: 1; display: flex; flex-direction: column;
+      padding: 1.25rem 1rem 6rem; gap: 1.5rem;
+      position: relative; z-index: 1; overflow-y: auto;
+    }
+
+    /* ─── Section Title ────────────────────────────────────────────────────── */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+    .section-title {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .badge-count {
+      font-size: 0.7rem; font-weight: 600;
+      background: var(--bg-card); border: 1px solid var(--border);
+      color: var(--text-secondary); padding: 0.15rem 0.6rem; border-radius: 99px;
+    }
+
+    /* ─── Badge Grid ───────────────────────────────────────────────────────── */
+    #badges-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.875rem;
+    }
+    @media (min-width: 480px) {
+      #badges-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (min-width: 700px) {
+      #badges-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    /* ─── Badge Card ───────────────────────────────────────────────────────── */
+    .badge-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 1rem 0.875rem;
+      display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+      cursor: pointer; position: relative; overflow: hidden;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      animation: cardIn 0.4s ease-out forwards;
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(16px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .badge-card::before {
+      content: ''; position: absolute; inset: 0; border-radius: inherit;
+      background: linear-gradient(135deg, rgba(139,92,246,0.08) 0%, transparent 60%);
+      opacity: 0; transition: opacity 0.25s;
+    }
+    .badge-card:hover { transform: translateY(-4px); border-color: var(--border-hover); box-shadow: 0 8px 32px var(--glow-purple); }
+    .badge-card:hover::before { opacity: 1; }
+    .badge-card:active { transform: scale(0.96); }
+
+    .badge-card-color-bar {
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      border-radius: var(--radius-card) var(--radius-card) 0 0;
+    }
+
+    .badge-qr-wrapper {
+      width: 100%; aspect-ratio: 1;
+      background: white; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      padding: 6px; overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .badge-qr-wrapper canvas { width: 100% !important; height: 100% !important; }
+
+    .badge-name {
+      font-size: 0.8rem; font-weight: 600; color: var(--text-primary);
+      text-align: center; line-height: 1.3;
+      max-width: 100%; overflow: hidden;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .badge-content-preview {
+      font-size: 0.65rem; color: var(--text-muted);
+      text-align: center; line-height: 1.2;
+      max-width: 100%; overflow: hidden;
+      display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+    }
+
+    .badge-card-actions {
+      position: absolute; top: 0.5rem; right: 0.5rem;
+      display: flex; gap: 0.25rem; opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .badge-card:hover .badge-card-actions { opacity: 1; }
+    .card-action-btn {
+      width: 28px; height: 28px; border-radius: 8px;
+      background: rgba(15,15,35,0.85); border: 1px solid var(--border);
+      color: var(--text-secondary);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.15s; outline: none;
+    }
+    .card-action-btn:hover { background: var(--danger); color: white; border-color: var(--danger); }
+    .card-action-btn.edit:hover { background: var(--accent-1); color: white; border-color: var(--accent-1); }
+
+    /* ─── Empty State ──────────────────────────────────────────────────────── */
+    #empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 1.25rem;
+      padding: 3rem 2rem; text-align: center;
+    }
+    .empty-icon-ring {
+      width: 90px; height: 90px; border-radius: 50%;
+      background: var(--bg-card); border: 2px dashed var(--border);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted);
+    }
+    .empty-title { font-size: 1.1rem; font-weight: 700; color: var(--text-secondary); }
+    .empty-desc { font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; max-width: 220px; }
+
+    /* ─── FAB ──────────────────────────────────────────────────────────────── */
+    #fab-scan {
+      position: fixed; bottom: 1.75rem; left: 50%; transform: translateX(-50%);
+      z-index: 25;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+      color: white; border: none; border-radius: 99px;
+      padding: 0 1.75rem; height: 58px;
+      font-size: 1rem; font-weight: 700; letter-spacing: 0.03em;
+      display: flex; align-items: center; gap: 0.625rem;
+      cursor: pointer; outline: none;
+      box-shadow: 0 4px 20px rgba(139,92,246,0.45), 0 0 0 1px rgba(139,92,246,0.2);
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      white-space: nowrap;
+    }
+    #fab-scan:hover { transform: translateX(-50%) translateY(-3px); box-shadow: 0 8px 28px rgba(139,92,246,0.55), 0 0 0 1px rgba(139,92,246,0.3); }
+    #fab-scan:active { transform: translateX(-50%) scale(0.96); }
+    #fab-scan svg { flex-shrink: 0; }
+
+    /* ─── Scanner Overlay ──────────────────────────────────────────────────── */
+    #scanner-overlay {
+      position: fixed; inset: 0; z-index: 50;
+      background: #000;
+      display: none; flex-direction: column;
+      opacity: 0; transition: opacity 0.3s ease;
+    }
+    #scanner-overlay.active { display: flex; }
+    #scanner-overlay.visible { opacity: 1; }
+
+    #scanner-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    .scanner-top-bar {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+      padding: 1rem 1rem 2rem;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .scanner-close-btn {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2);
+      color: white; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; backdrop-filter: blur(8px); outline: none;
+      transition: all 0.2s;
+    }
+    .scanner-close-btn:hover { background: rgba(255,255,255,0.25); }
+    .scanner-title-bar { color: white; font-size: 1rem; font-weight: 600; }
+
+    /* QR Viewfinder */
+    #qr-viewfinder {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    #qr-box {
+      width: 260px; height: 260px;
+      border-radius: 20px; position: relative;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.6);
+      background: transparent;
+    }
+    .qr-corner {
+      position: absolute; width: 32px; height: 32px;
+      border-color: #a78bfa; border-style: solid;
+    }
+    .qr-corner.tl { top: -1px; left: -1px; border-width: 4px 0 0 4px; border-radius: 16px 0 0 0; }
+    .qr-corner.tr { top: -1px; right: -1px; border-width: 4px 4px 0 0; border-radius: 0 16px 0 0; }
+    .qr-corner.bl { bottom: -1px; left: -1px; border-width: 0 0 4px 4px; border-radius: 0 0 0 16px; }
+    .qr-corner.br { bottom: -1px; right: -1px; border-width: 0 4px 4px 0; border-radius: 0 0 16px 0; }
+
+    #scan-line {
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(to right, transparent, #a78bfa, #60a5fa, #a78bfa, transparent);
+      border-radius: 99px;
+      box-shadow: 0 0 12px rgba(167,139,250,0.8);
+      animation: scanAnim 2s ease-in-out infinite;
+    }
+    @keyframes scanAnim {
+      0%, 100% { top: 0; } 50% { top: calc(100% - 2px); }
+    }
+
+    .scanner-hint {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+      padding: 2rem 1rem 3rem;
+      background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+      text-align: center; color: rgba(255,255,255,0.8); font-size: 0.875rem;
+    }
+    .scanner-hint b { color: #a78bfa; }
+
+    /* Scanner side controls */
+    .scanner-side-controls {
+      position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+      z-index: 10; display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .scanner-ctrl-btn {
+      width: 46px; height: 46px; border-radius: 50%;
+      background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
+      color: white; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; backdrop-filter: blur(8px); outline: none;
+      transition: all 0.2s;
+    }
+    .scanner-ctrl-btn:hover { background: rgba(255,255,255,0.2); }
+    .scanner-ctrl-btn:active { transform: scale(0.9); }
+    .scanner-ctrl-btn.active { background: rgba(255,200,0,0.3); border-color: rgba(255,200,0,0.5); }
+
+    /* ─── Save Badge Modal ─────────────────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 60;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      display: none; align-items: flex-end; justify-content: center;
+      opacity: 0; transition: opacity 0.3s ease;
+      /* iOS: prevent scroll-triggered blur by blocking touch on backdrop only */
+      touch-action: none;
+    }
+    .modal-backdrop.active { display: flex; }
+    .modal-backdrop.visible { opacity: 1; }
+
+    .modal-sheet {
+      width: 100%; max-width: 480px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 28px 28px 0 0;
+      padding: 1.5rem 1.5rem 2.5rem;
+      /* iOS: allow normal touch/scroll inside sheet */
+      touch-action: pan-y;
+      transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+      display: flex; flex-direction: column; gap: 1.25rem;
+      /* iOS iframe: prevent sheet from being pushed off screen by keyboard */
+      max-height: 90dvh; overflow-y: auto;
+    }
+    .modal-sheet.up { transform: translateY(0); }
+
+    .modal-drag-bar {
+      width: 40px; height: 4px; background: var(--border);
+      border-radius: 99px; margin: 0 auto -0.25rem;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-title { font-size: 1.1rem; font-weight: 700; }
+
+    .qr-preview-box {
+      background: white; border-radius: 16px;
+      padding: 1rem; display: flex; align-items: center; justify-content: center;
+      width: 140px; margin: 0 auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .qr-preview-box canvas { display: block; }
+
+    .content-preview-text {
+      font-size: 0.78rem; color: var(--text-muted);
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.625rem 0.875rem;
+      word-break: break-all; line-height: 1.5;
+      max-height: 72px; overflow: hidden;
+    }
+
+    .input-field {
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      border-radius: 14px; padding: 0.75rem 1rem;
+      color: var(--text-primary);
+      /* iOS: font-size must be >=16px to prevent auto-zoom on focus */
+      font-size: max(1rem, 16px); font-family: var(--font);
+      width: 100%; outline: none; transition: border-color 0.2s;
+      /* iOS: prevent native appearance */
+      -webkit-appearance: none;
+      /* Ensure tap target is always clickable in iframe */
+      position: relative; z-index: 1;
+    }
+    .input-field::placeholder { color: var(--text-muted); }
+    .input-field:focus { border-color: var(--accent-1); }
+
+    .input-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.375rem; }
+
+    /* Color Picker */
+    .color-row { display: flex; gap: 0.625rem; flex-wrap: wrap; }
+    .color-swatch {
+      width: 32px; height: 32px; border-radius: 50%;
+      cursor: pointer; border: 2px solid transparent;
+      transition: all 0.2s; outline: none;
+    }
+    .color-swatch.selected { border-color: white; transform: scale(1.15); box-shadow: 0 0 0 2px var(--accent-1); }
+
+    .btn-primary {
+      width: 100%; padding: 0.875rem;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+      border: none; border-radius: var(--radius-btn);
+      color: white; font-size: 1rem; font-weight: 700; font-family: var(--font);
+      cursor: pointer; transition: all 0.2s;
+      box-shadow: 0 4px 16px rgba(139,92,246,0.35);
+    }
+    .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-secondary {
+      flex: 1; padding: 0.875rem;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-btn);
+      color: var(--text-secondary); font-size: 0.95rem; font-weight: 600; font-family: var(--font);
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn-secondary:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+
+    /* ─── Display Modal (Full Screen Badge) ───────────────────────────────── */
+    #display-modal {
+      position: fixed; inset: 0; z-index: 70;
+      background: #000;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.3s ease;
+      padding: 2rem 1.5rem;
+      gap: 1.5rem;
+    }
+    #display-modal.active { display: flex; }
+    #display-modal.visible { opacity: 1; }
+
+    .display-top-bar {
+      position: absolute; top: 0; left: 0; right: 0;
+      padding: 1rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .display-badge-name {
+      font-size: 1.5rem; font-weight: 800;
+      color: white; text-align: center;
+      max-width: 280px;
+    }
+    .display-qr-container {
+      background: white; border-radius: 24px;
+      padding: 1.25rem;
+      box-shadow: 0 0 60px rgba(255,255,255,0.1), 0 0 120px rgba(139,92,246,0.3);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .display-qr-container canvas { display: block; }
+    .display-content-text {
+      color: rgba(255,255,255,0.5); font-size: 0.8rem; text-align: center;
+      max-width: 300px; word-break: break-all; line-height: 1.5;
+    }
+    .display-nav {
+      position: absolute; bottom: 2.5rem; left: 0; right: 0;
+      display: flex; align-items: center; justify-content: center; gap: 1rem;
+    }
+    .display-nav-btn {
+      width: 50px; height: 50px; border-radius: 50%;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+      color: white; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; outline: none; transition: all 0.2s;
+    }
+    .display-nav-btn:hover { background: rgba(255,255,255,0.2); }
+    .display-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .display-counter {
+      font-size: 0.875rem; color: rgba(255,255,255,0.5); min-width: 50px; text-align: center;
+    }
+
+    /* ─── Manage Menu (Drawer) ─────────────────────────────────────────────── */
+    #manage-drawer {
+      position: fixed; inset: 0; z-index: 65;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      display: none; align-items: flex-end;
+      opacity: 0; transition: opacity 0.3s ease;
+    }
+    #manage-drawer.active { display: flex; }
+    #manage-drawer.visible { opacity: 1; }
+
+    .manage-sheet {
+      width: 100%; max-width: 480px; margin: 0 auto;
+      background: var(--bg-secondary); border: 1px solid var(--border); border-bottom: none;
+      border-radius: 28px 28px 0 0; overflow: hidden;
+      transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .manage-sheet.up { transform: translateY(0); }
+
+    .manage-header {
+      padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .manage-title { font-size: 1rem; font-weight: 700; }
+    .manage-list { padding: 0.75rem 0; max-height: 60vh; overflow-y: auto; }
+
+    .manage-item {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0.875rem 1.25rem;
+      transition: background 0.15s; cursor: pointer;
+    }
+    .manage-item:hover { background: var(--bg-card); }
+    .manage-item-icon {
+      width: 40px; height: 40px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; color: white; font-size: 1rem;
+    }
+    .manage-item-info { flex: 1; overflow: hidden; }
+    .manage-item-name {
+      font-size: 0.9rem; font-weight: 600; color: var(--text-primary);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .manage-item-content {
+      font-size: 0.72rem; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .manage-item-actions { display: flex; gap: 0.5rem; }
+    .mini-action-btn {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      color: var(--text-secondary);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; outline: none; transition: all 0.15s;
+    }
+    .mini-action-btn:hover { background: var(--bg-card-hover); }
+    .mini-action-btn.delete:hover { background: rgba(239,68,68,0.2); border-color: var(--danger); color: var(--danger); }
+    .mini-action-btn.edit-name:hover { background: rgba(139,92,246,0.2); border-color: var(--accent-1); color: var(--accent-1); }
+
+    /* ─── Toast ────────────────────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed; bottom: 5.5rem; left: 0; right: 0;
+      display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+      z-index: 100; pointer-events: none;
+    }
+    .toast {
+      background: rgba(30,30,55,0.95); border: 1px solid var(--border);
+      color: var(--text-primary); border-radius: 14px;
+      padding: 0.75rem 1.25rem; font-size: 0.875rem; font-weight: 500;
+      max-width: 320px; text-align: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      backdrop-filter: blur(12px);
+      pointer-events: auto; cursor: pointer;
+      animation: toastIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .toast.out { animation: toastOut 0.25s ease-in forwards; }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.94); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to   { opacity: 0; transform: translateY(8px) scale(0.94); }
+    }
+
+    /* ─── Rename inline input ──────────────────────────────────────────────── */
+    #rename-modal .modal-sheet { gap: 1rem; }
+
+    /* ─── Confirm Dialog ───────────────────────────────────────────────────── */
+    #confirm-dialog {
+      position: fixed; inset: 0; z-index: 80;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(12px);
+      display: none; align-items: center; justify-content: center; padding: 1.5rem;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    #confirm-dialog.active { display: flex; }
+    #confirm-dialog.visible { opacity: 1; }
+    .confirm-box {
+      background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: 24px; padding: 2rem 1.5rem;
+      width: 100%; max-width: 340px; text-align: center;
+      transform: scale(0.92); transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    #confirm-dialog.visible .confirm-box { transform: scale(1); }
+    .confirm-icon {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 1rem; color: var(--danger);
+    }
+    .confirm-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .confirm-desc { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1.5rem; }
+    .confirm-actions { display: flex; gap: 0.75rem; }
+    .btn-danger {
+      flex: 1; padding: 0.875rem;
+      background: var(--danger); border: none; border-radius: var(--radius-btn);
+      color: white; font-size: 0.95rem; font-weight: 700; font-family: var(--font);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btn-danger:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+
+  <!-- Background Blobs -->
+  <div class="bg-blob bg-blob-1"></div>
+  <div class="bg-blob bg-blob-2"></div>
+
+  <!-- ─── Header ──────────────────────────────────────────────────────────── -->
+  <header id="app-header">
+    <div class="header-left">
+      <div class="header-logo">
+        <img src="icon.png" alt="我的名牌">
+      </div>
+      <h1 class="header-title">我的名牌</h1>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn" id="manage-btn" onclick="openManageDrawer()" title="管理名牌" aria-label="管理名牌">
+        <i data-lucide="settings-2" style="width:18px;height:18px;"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ─── Main Content ──────────────────────────────────────────────────── -->
+  <main id="main-content">
+    <div id="home-storage-actions-placeholder"></div>
+    <div class="section-header">
+      <span class="section-title">我的名牌</span>
+      <span class="badge-count" id="badge-count-label">0 個</span>
+    </div>
+
+    <!-- Badge Grid -->
+    <div id="badges-grid"></div>
+
+    <!-- Empty State -->
+    <div id="empty-state" style="display:none;">
+      <div class="empty-icon-ring">
+        <i data-lucide="badge-check" style="width:40px;height:40px;"></i>
+      </div>
+      <p class="empty-title">尚無名牌</p>
+      <p class="empty-desc">點擊下方「掃描新增」按鈕，<br>掃描 QR Code 來建立你的第一張名牌</p>
+    </div>
+  </main>
+
+  <!-- ─── FAB ──────────────────────────────────────────────────────────── -->
+  <button id="fab-scan" onclick="startScanner()" aria-label="掃描新增名牌">
+    <i data-lucide="scan-line" style="width:22px;height:22px;"></i>
+    掃描新增名牌
+  </button>
+
+  <!-- ─── Toast Container ────────────────────────────────────────────── -->
+  <div id="toast-container"></div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       SCANNER OVERLAY
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="scanner-overlay" role="dialog" aria-label="QR Code 掃描器">
+    <video id="scanner-video" playsinline muted></video>
+
+    <!-- Top bar -->
+    <div class="scanner-top-bar">
+      <button class="scanner-close-btn" onclick="stopScanner()" aria-label="關閉掃描器">
+        <i data-lucide="x" style="width:22px;height:22px;"></i>
+      </button>
+      <span class="scanner-title-bar">掃描 QR Code</span>
+      <div style="width:44px;"></div>
+    </div>
+
+    <!-- Viewfinder -->
+    <div id="qr-viewfinder">
+      <div id="qr-box">
+        <div class="qr-corner tl"></div>
+        <div class="qr-corner tr"></div>
+        <div class="qr-corner bl"></div>
+        <div class="qr-corner br"></div>
+        <div id="scan-line"></div>
+      </div>
+    </div>
+
+    <!-- Side Controls -->
+    <div class="scanner-side-controls">
+      <button class="scanner-ctrl-btn" id="torch-btn" onclick="toggleTorch()" aria-label="手電筒" title="手電筒" style="display:none;">
+        <i data-lucide="flashlight" style="width:20px;height:20px;"></i>
+      </button>
+      <button class="scanner-ctrl-btn" onclick="adjustZoom(1)" aria-label="放大">
+        <i data-lucide="zoom-in" style="width:20px;height:20px;"></i>
+      </button>
+      <button class="scanner-ctrl-btn" onclick="adjustZoom(-1)" aria-label="縮小">
+        <i data-lucide="zoom-out" style="width:20px;height:20px;"></i>
+      </button>
+    </div>
+
+    <!-- Bottom Hint -->
+    <div class="scanner-hint">
+      將 <b>QR Code</b> 放入框內即可自動識別
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       SAVE BADGE MODAL
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="save-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="儲存名牌">
+    <div class="modal-sheet" id="save-modal-sheet">
+      <div class="modal-drag-bar"></div>
+      <div class="modal-header">
+        <span class="modal-title">儲存名牌</span>
+        <button class="icon-btn" onclick="closeSaveModal()" aria-label="關閉">
+          <i data-lucide="x" style="width:18px;height:18px;"></i>
+        </button>
+      </div>
+
+      <!-- QR Preview -->
+      <div class="qr-preview-box">
+        <canvas id="save-qr-canvas" width="108" height="108"></canvas>
+      </div>
+
+      <!-- Scanned Content -->
+      <div>
+        <p class="input-label">掃描到的內容</p>
+        <div class="content-preview-text" id="save-content-preview"></div>
+      </div>
+
+      <!-- Name Input -->
+      <div>
+        <p class="input-label">名牌名稱</p>
+        <input type="text" id="save-name-input" class="input-field"
+               placeholder="例如：我的會員卡、活動入場券…"
+               maxlength="40" autocomplete="off" autocorrect="off" spellcheck="false">
+      </div>
+
+      <!-- Color Picker -->
+      <div>
+        <p class="input-label">顏色標籤</p>
+        <div class="color-row" id="color-row"></div>
+      </div>
+
+      <button class="btn-primary" onclick="saveBadge()" id="save-btn">
+        <i data-lucide="bookmark-plus" style="width:18px;height:18px;display:inline;vertical-align:middle;margin-right:6px;"></i>
+        儲存名牌
+      </button>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       DISPLAY MODAL (Full Screen)
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="display-modal" role="dialog" aria-modal="true" aria-label="展示名牌">
+    <div class="display-top-bar">
+      <button class="scanner-close-btn" onclick="closeDisplayModal()" aria-label="關閉">
+        <i data-lucide="x" style="width:22px;height:22px;"></i>
+      </button>
+      <div style="width:44px;"></div>
+    </div>
+
+    <p class="display-badge-name" id="display-badge-name"></p>
+    <div class="display-qr-container" id="display-qr-container">
+      <canvas id="display-qr-canvas"></canvas>
+    </div>
+    <p class="display-content-text" id="display-content-text"></p>
+
+    <!-- Navigation (prev/next badge) -->
+    <div class="display-nav">
+      <button class="display-nav-btn" id="display-prev-btn" onclick="navigateDisplay(-1)" aria-label="上一個名牌">
+        <i data-lucide="chevron-left" style="width:22px;height:22px;"></i>
+      </button>
+      <span class="display-counter" id="display-counter"></span>
+      <button class="display-nav-btn" id="display-next-btn" onclick="navigateDisplay(1)" aria-label="下一個名牌">
+        <i data-lucide="chevron-right" style="width:22px;height:22px;"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       MANAGE DRAWER
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="manage-drawer" role="dialog" aria-modal="true" aria-label="管理名牌"
+       onclick="e => { if(e.target === this) closeManageDrawer(); }">
+    <div class="manage-sheet" id="manage-sheet">
+      <div class="manage-header">
+        <span class="manage-title">
+          <i data-lucide="settings-2" style="width:16px;height:16px;display:inline;vertical-align:middle;margin-right:6px;"></i>
+          管理名牌
+        </span>
+        <button class="icon-btn" onclick="closeManageDrawer()" aria-label="關閉">
+          <i data-lucide="x" style="width:18px;height:18px;"></i>
+        </button>
+      </div>
+      <!-- Storage warning banner (shown when localStorage is unavailable) -->
+      <div id="storage-warning-banner" style="display:none;
+           background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);
+           border-radius:12px;margin:0.75rem 1rem 0;padding:0.75rem 1rem;
+           font-size:0.8rem;color:#fca5a5;line-height:1.5;">
+        <b>⚠️ 儲存功能受限</b><br>
+        此環境（iframe）無法持久保存資料。請使用下方按鈕在新分頁開啟，或匯出備份。
+      </div>
+      <!-- Action buttons: Export / Import / Open in new tab -->
+      <div id="manage-actions-container" style="display:flex;gap:0.5rem;padding:0.75rem 1rem 0;flex-wrap:wrap;">
+        <button onclick="exportBadges()" style="flex:1;min-width:80px;
+          background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);
+          color:#a78bfa;border-radius:10px;padding:0.6rem 0.5rem;
+          font-size:0.78rem;font-weight:600;cursor:pointer;display:flex;
+          align-items:center;justify-content:center;gap:0.4rem;" aria-label="匯出名牌為 JSON">
+          <i data-lucide="download" style="width:14px;height:14px;"></i>匯出備份
+        </button>
+        <label style="flex:1;min-width:80px;
+          background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);
+          color:#60a5fa;border-radius:10px;padding:0.6rem 0.5rem;
+          font-size:0.78rem;font-weight:600;cursor:pointer;display:flex;
+          align-items:center;justify-content:center;gap:0.4rem;" aria-label="匯入名牌 JSON">
+          <i data-lucide="upload" style="width:14px;height:14px;"></i>匯入備份
+          <input type="file" accept=".json" id="import-json-input"
+                 style="display:none;" onchange="importBadges(event)">
+        </label>
+        <button onclick="openInNewTab()" style="flex:1;min-width:80px;
+          background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);
+          color:#34d399;border-radius:10px;padding:0.6rem 0.5rem;
+          font-size:0.78rem;font-weight:600;cursor:pointer;display:flex;
+          align-items:center;justify-content:center;gap:0.4rem;" aria-label="在新分頁開啟">
+          <i data-lucide="external-link" style="width:14px;height:14px;"></i>新分頁
+        </button>
+      </div>
+      <div class="manage-list" id="manage-list"></div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       RENAME MODAL
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="rename-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="重新命名">
+    <div class="modal-sheet" id="rename-modal-sheet">
+      <div class="modal-drag-bar"></div>
+      <div class="modal-header">
+        <span class="modal-title">重新命名</span>
+        <button class="icon-btn" onclick="closeRenameModal()" aria-label="關閉">
+          <i data-lucide="x" style="width:18px;height:18px;"></i>
+        </button>
+      </div>
+      <div>
+        <p class="input-label">名牌名稱</p>
+        <input type="text" id="rename-input" class="input-field"
+               placeholder="輸入新名稱…" maxlength="40"
+               autocomplete="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div style="display:flex;gap:0.75rem;">
+        <button class="btn-secondary" onclick="closeRenameModal()">取消</button>
+        <button class="btn-primary" style="flex:2;" onclick="confirmRename()">確認更名</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       CONFIRM DIALOG
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="confirm-dialog" role="alertdialog" aria-modal="true">
+    <div class="confirm-box">
+      <div class="confirm-icon">
+        <i data-lucide="trash-2" style="width:28px;height:28px;"></i>
+      </div>
+      <p class="confirm-title">刪除名牌</p>
+      <p class="confirm-desc" id="confirm-desc">確定要刪除這張名牌嗎？此操作無法復原。</p>
+      <div class="confirm-actions">
+        <button class="btn-secondary" onclick="closeConfirm()">取消</button>
+        <button class="btn-danger" id="confirm-ok-btn">確認刪除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       JAVASCRIPT
+       ════════════════════════════════════════════════════════════════ -->
+  <script>
+  (() => {
+    'use strict';
+
+    // ─── Constants ─────────────────────────────────────────────────────────
+    const STORAGE_KEY = 'myBadge_badges';
+    const BADGE_COLORS = [
+      '#8b5cf6', '#3b82f6', '#06b6d4', '#10b981',
+      '#f59e0b', '#ef4444', '#ec4899', '#6366f1',
+      '#84cc16', '#f97316'
+    ];
+
+    // ─── State ─────────────────────────────────────────────────────────────
+    let badges = [];
+    let pendingQRContent = '';
+    let selectedColor = BADGE_COLORS[0];
+    let scannerCodeReader = null;
+    let scannerStream = null;
+    let scannerLocked = false; // prevents decodeFromStream callback from firing twice
+    let torchOn = false;
+    let currentZoom = 1;
+    let displayIndex = 0;
+    let confirmCallback = null;
+    let renameTargetId = null;
+
+    // ─── iOS Detection ──────────────────────────────────────────────────────
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    // ─── Init ───────────────────────────────────────────────────────────────
+    function init() {
+      checkStorage();
+      loadBadges();
+      renderBadges();
+      buildColorRow();
+      lucide.createIcons();
+      if (window.registerSW) window.registerSW();
+
+      // Warn user if storage is blocked (e.g. Safari ITP in cross-origin iframe)
+      if (!storageAvailable) {
+        // Move banner and actions to the top of the homepage
+        const banner = document.getElementById('storage-warning-banner');
+        const actions = document.getElementById('manage-actions-container');
+        const placeholder = document.getElementById('home-storage-actions-placeholder');
+        placeholder.appendChild(banner);
+        placeholder.appendChild(actions);
+        banner.style.display = 'block';
+        banner.style.margin = '1rem 1rem 0';
+        actions.style.padding = '0.75rem 1rem 0';
+
+        setTimeout(() => {
+          showToast('⚠️ 儲存功能受限，名牌資料無法在此環境保留。請點右上角按鈕在新分頁開啟。', 6000);
+        }, 800);
+      }
+
+      // Auto-open default badge on startup if available
+      if (badges.length > 0) {
+        let defaultIdx = badges.findIndex(b => b.isDefault);
+        if (defaultIdx === -1) defaultIdx = 0; // fallback to first badge if no default set
+        openDisplayModal(defaultIdx);
+      }
+
+      // ── Backdrop close: use pointerdown on backdrop itself ──
+      // On iOS, 'click' inside an iframe can misfire after keyboard causes scroll.
+      // We use pointerdown + check target to close only when truly tapping outside.
+      function addBackdropClose(backdropId, closeFn) {
+        const el = document.getElementById(backdropId);
+        // Prevent sheet touches from bubbling up to backdrop
+        el.querySelectorAll('.modal-sheet, .manage-sheet, .confirm-box')
+          .forEach(sheet => {
+            sheet.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+            sheet.addEventListener('pointerdown', e => e.stopPropagation());
+          });
+        // Only close when tapping directly on the backdrop dim area
+        el.addEventListener('pointerdown', e => {
+          if (e.target === el) closeFn();
+        });
+      }
+      addBackdropClose('save-modal',    closeSaveModal);
+      addBackdropClose('rename-modal',  closeRenameModal);
+      addBackdropClose('manage-drawer', closeManageDrawer);
+      addBackdropClose('confirm-dialog', closeConfirm);
+
+      // ── iOS iframe: lock body scroll when modal is open ──
+      // Use overflow:hidden ONLY — position:fixed resets scrollY and triggers blur.
+      function lockScroll() {
+        if (!isIOS) return;
+        document.body.style.overflow = 'hidden';
+      }
+      function unlockScroll() {
+        if (!isIOS) return;
+        document.body.style.overflow = '';
+      }
+      window._lockScroll   = lockScroll;
+      window._unlockScroll = unlockScroll;
+
+      // ── iOS input "initial focus" guard ──
+      // Problem: calling focus() during IME composition (e.g. Chinese keyboard)
+      // cancels the composition buffer — the typed text disappears.
+      // Solution: only retry focus BEFORE the user has typed anything.
+      //           Once compositionstart or input fires, stop intervening entirely.
+      function addBlurGuard(inputId, isModalActiveCheck) {
+        if (!isIOS) return;
+        const inp = document.getElementById(inputId);
+        let userHasTyped = false; // set to true the moment any text is entered
+        let focusTries   = 0;
+        const MAX_TRIES  = 2;
+
+        // Either of these means composition / direct typing has started — hands off!
+        inp.addEventListener('compositionstart', () => { userHasTyped = true; });
+        inp.addEventListener('input',            () => { userHasTyped = true; });
+
+        inp.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+
+        inp.addEventListener('blur', () => {
+          // Once user has typed, never re-focus — it would cancel IME composition
+          if (userHasTyped)            return;
+          if (focusTries >= MAX_TRIES) return;
+          if (!isModalActiveCheck())   return;
+          focusTries++;
+          setTimeout(() => {
+            if (!userHasTyped && isModalActiveCheck() && document.activeElement !== inp) {
+              inp.focus({ preventScroll: true });
+            }
+          }, 120);
+        });
+
+        // Allow intentional blur when tapping non-input areas inside the sheet
+        inp.closest('.modal-sheet')?.addEventListener('pointerdown', e => {
+          if (e.target !== inp) userHasTyped = false; // reset so tapping away is clean
+        });
+
+        // Reset state when modal reopens
+        inp._resetGuard = () => { userHasTyped = false; focusTries = 0; };
+      }
+      addBlurGuard('save-name-input', () =>
+        document.getElementById('save-modal').classList.contains('active'));
+      addBlurGuard('rename-input', () =>
+        document.getElementById('rename-modal').classList.contains('active'));
+
+      // Keyboard shortcuts
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+          if (document.getElementById('display-modal').classList.contains('active')) { closeDisplayModal(); return; }
+          if (document.getElementById('scanner-overlay').classList.contains('active')) { stopScanner(); return; }
+          if (document.getElementById('save-modal').classList.contains('active')) { closeSaveModal(); return; }
+          if (document.getElementById('rename-modal').classList.contains('active')) { closeRenameModal(); return; }
+          if (document.getElementById('manage-drawer').classList.contains('active')) { closeManageDrawer(); return; }
+        }
+        if (document.getElementById('display-modal').classList.contains('active')) {
+          if (e.key === 'ArrowLeft')  navigateDisplay(-1);
+          if (e.key === 'ArrowRight') navigateDisplay(1);
+        }
+      });
+
+      // Save on Enter in name input
+      document.getElementById('save-name-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') saveBadge();
+      });
+      document.getElementById('rename-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') confirmRename();
+      });
+    }
+
+    // ─── Storage ─────────────────────────────────────────────────────────────
+    // Safari ITP blocks localStorage when loaded as cross-origin iframe.
+    // We detect availability upfront so we can warn the user.
+    let storageAvailable = false;
+    function checkStorage() {
+      try {
+        const k = '__myBadge_test__';
+        localStorage.setItem(k, '1');
+        storageAvailable = localStorage.getItem(k) === '1';
+        localStorage.removeItem(k);
+      } catch { storageAvailable = false; }
+      return storageAvailable;
+    }
+
+    function loadBadges() {
+      if (!storageAvailable) { badges = []; return; }
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        badges = raw ? JSON.parse(raw) : [];
+      } catch { badges = []; }
+    }
+
+    function saveBadgesToStorage() {
+      if (!storageAvailable) {
+        showToast('⚠️ 此環境無法儲存資料，請點右上角「在新分頁開啟」後使用');
+        return;
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(badges));
+      } catch (e) {
+        showToast('⚠️ 儲存失敗：' + (e.message || '儲存空間不足'));
+      }
+    }
+
+    function genId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    }
+
+    // ─── Render Badges ──────────────────────────────────────────────────────
+    function renderBadges() {
+      const grid = document.getElementById('badges-grid');
+      const empty = document.getElementById('empty-state');
+      const countLabel = document.getElementById('badge-count-label');
+
+      countLabel.textContent = `${badges.length} 個`;
+
+      if (badges.length === 0) {
+        grid.innerHTML = '';
+        empty.style.display = 'flex';
+        lucide.createIcons();
+        return;
+      }
+      empty.style.display = 'none';
+
+      grid.innerHTML = '';
+      badges.forEach((badge, idx) => {
+        const card = document.createElement('div');
+        card.className = 'badge-card';
+        card.setAttribute('data-id', badge.id);
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('aria-label', `展示名牌：${badge.name}`);
+        card.setAttribute('role', 'button');
+
+        card.innerHTML = `
+          <div class="badge-card-color-bar" style="background: linear-gradient(90deg, ${badge.color}, ${shiftColor(badge.color)});"></div>
+          <div class="badge-card-actions">
+            <button class="card-action-btn edit" onclick="openRenameModal('${badge.id}'); event.stopPropagation();" aria-label="重新命名" title="重新命名">
+              <i data-lucide="pencil" style="width:12px;height:12px;"></i>
+            </button>
+            <button class="card-action-btn" onclick="confirmDeleteBadge('${badge.id}'); event.stopPropagation();" aria-label="刪除" title="刪除">
+              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            </button>
+          </div>
+          <div class="badge-qr-wrapper">
+            <canvas id="card-qr-${badge.id}" width="120" height="120"></canvas>
+          </div>
+          <p class="badge-name">${escHtml(badge.name)}</p>
+          <p class="badge-content-preview">${escHtml(badge.content)}</p>
+        `;
+
+        card.addEventListener('click', () => openDisplayModal(idx));
+        card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') openDisplayModal(idx); });
+
+        grid.appendChild(card);
+
+        // Render QR code after DOM insert
+        requestAnimationFrame(() => {
+          renderQR(`card-qr-${badge.id}`, badge.content, { size: 120, bg: '#ffffff', fg: '#000000' });
+        });
+      });
+
+      lucide.createIcons();
+    }
+
+    function shiftColor(hex) {
+      // Slightly shift hue for gradient effect
+      const r = parseInt(hex.slice(1,3), 16);
+      const g = parseInt(hex.slice(3,5), 16);
+      const b = parseInt(hex.slice(5,7), 16);
+      return `rgb(${Math.min(r+40,255)},${Math.min(g+20,255)},${Math.min(b+60,255)})`;
+    }
+
+    function renderQR(canvasId, content, { size = 120, bg = '#fff', fg = '#000' } = {}) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      try {
+        new QRious({ element: canvas, value: content || ' ', size, backgroundAlpha: 1, background: bg, foreground: fg, level: 'M', padding: 4 });
+      } catch (e) { console.warn('QR render error:', e); }
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ─── Color Row ──────────────────────────────────────────────────────────
+    function buildColorRow() {
+      const row = document.getElementById('color-row');
+      row.innerHTML = '';
+      BADGE_COLORS.forEach(color => {
+        const btn = document.createElement('button');
+        btn.className = 'color-swatch' + (color === selectedColor ? ' selected' : '');
+        btn.style.background = color;
+        btn.setAttribute('aria-label', `顏色 ${color}`);
+        btn.addEventListener('click', () => {
+          selectedColor = color;
+          row.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+          btn.classList.add('selected');
+        });
+        row.appendChild(btn);
+      });
+    }
+
+    // ─── Scanner ────────────────────────────────────────────────────────────
+    async function startScanner() {
+      const overlay = document.getElementById('scanner-overlay');
+      overlay.classList.add('active');
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+
+      try {
+        const hints = new Map();
+        hints.set(ZXingBrowser.DecodeHintType?.TRY_HARDER, true);
+
+        const codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+        scannerCodeReader = codeReader;
+
+        const constraints = {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        scannerStream = stream;
+
+        const videoEl = document.getElementById('scanner-video');
+        videoEl.srcObject = stream;
+        await videoEl.play();
+
+        // Check torch support
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities?.() || {};
+        if (caps.torch) {
+          document.getElementById('torch-btn').style.display = 'flex';
+        }
+
+        // Start decoding
+        // NOTE: decodeFromStream fires the callback asynchronously and
+        // continues even after reset() is called (stream teardown is async).
+        // scannerLocked ensures only the very first decoded result is processed.
+        scannerLocked = false;
+        codeReader.decodeFromStream(stream, videoEl, (result, err) => {
+          if (result && !scannerLocked) {
+            const text = result.getText();
+            if (text) {
+              scannerLocked = true;   // block any further callbacks immediately
+              stopScanner();
+              openSaveModal(text);
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Scanner error:', err);
+        stopScanner();
+        let msg = '無法開啟相機';
+        if (err.name === 'NotAllowedError') msg = '請允許相機權限後再試';
+        else if (err.name === 'NotFoundError') msg = '找不到相機裝置';
+        showToast('⚠️ ' + msg);
+      }
+    }
+
+    window.stopScanner = function () {
+      // NOTE: do NOT reset scannerLocked here.
+      // It is set to true the moment a QR result is detected, and stopScanner()
+      // is called synchronously right after. Resetting it here would immediately
+      // undo the lock, letting subsequent async callbacks re-trigger openSaveModal.
+      // scannerLocked is reset only at the top of startScanner() for the next session.
+      const overlay = document.getElementById('scanner-overlay');
+      overlay.classList.remove('visible');
+      setTimeout(() => overlay.classList.remove('active'), 300);
+
+      if (scannerCodeReader) {
+        try { scannerCodeReader.reset(); } catch {}
+        scannerCodeReader = null;
+      }
+      if (scannerStream) {
+        scannerStream.getTracks().forEach(t => t.stop());
+        scannerStream = null;
+      }
+      torchOn = false;
+      currentZoom = 1;
+      document.getElementById('torch-btn').style.display = 'none';
+    };
+
+    window.toggleTorch = function () {
+      if (!scannerStream) return;
+      const track = scannerStream.getVideoTracks()[0];
+      torchOn = !torchOn;
+      track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {});
+      const btn = document.getElementById('torch-btn');
+      if (torchOn) btn.classList.add('active'); else btn.classList.remove('active');
+    };
+
+    window.adjustZoom = function (dir) {
+      if (!scannerStream) return;
+      const track = scannerStream.getVideoTracks()[0];
+      const caps = track.getCapabilities?.() || {};
+      if (!caps.zoom) return;
+      const step = (caps.zoom.max - caps.zoom.min) / 10;
+      currentZoom = Math.min(caps.zoom.max, Math.max(caps.zoom.min, currentZoom + dir * step));
+      track.applyConstraints({ advanced: [{ zoom: currentZoom }] }).catch(() => {});
+    };
+
+    // ─── Save Modal ─────────────────────────────────────────────────────────
+    function openSaveModal(content) {
+      pendingQRContent = content;
+      document.getElementById('save-content-preview').textContent = content;
+      document.getElementById('save-name-input').value = '';
+
+      // Reset color
+      selectedColor = BADGE_COLORS[0];
+      buildColorRow();
+
+      const modal = document.getElementById('save-modal');
+      modal.classList.add('active');
+      // Lock body scroll on iOS to prevent keyboard scroll causing blur
+      if (window._lockScroll) window._lockScroll();
+      requestAnimationFrame(() => {
+        modal.classList.add('visible');
+        document.getElementById('save-modal-sheet').classList.add('up');
+      });
+
+      // Render QR preview
+      requestAnimationFrame(() => {
+        renderQR('save-qr-canvas', content, { size: 108, bg: '#ffffff', fg: '#000000' });
+      });
+
+      // Focus: use longer delay on iOS iframe to wait for animation + keyboard
+      const delay = isIOS ? 650 : 400;
+      setTimeout(() => {
+        const inp = document.getElementById('save-name-input');
+        inp.focus({ preventScroll: true });
+      }, delay);
+    }
+
+    window.closeSaveModal = function () {
+      const inp = document.getElementById('save-name-input');
+      if (inp._resetGuard) inp._resetGuard();
+      const modal = document.getElementById('save-modal');
+      const sheet = document.getElementById('save-modal-sheet');
+      modal.classList.remove('visible');
+      sheet.classList.remove('up');
+      setTimeout(() => {
+        modal.classList.remove('active');
+        if (window._unlockScroll) window._unlockScroll();
+      }, 350);
+      pendingQRContent = '';
+    };
+
+    window.saveBadge = function () {
+      const name = document.getElementById('save-name-input').value.trim();
+      if (!name) {
+        document.getElementById('save-name-input').focus();
+        document.getElementById('save-name-input').style.borderColor = 'var(--danger)';
+        setTimeout(() => { document.getElementById('save-name-input').style.borderColor = ''; }, 1500);
+        showToast('⚠️ 請輸入名牌名稱');
+        return;
+      }
+      if (!pendingQRContent) { closeSaveModal(); return; }
+
+      const badge = {
+        id: genId(),
+        name,
+        content: pendingQRContent,
+        color: selectedColor,
+        createdAt: Date.now()
+      };
+      badges.unshift(badge);
+      saveBadgesToStorage();
+      closeSaveModal();
+      renderBadges();
+      showToast('✅ 名牌已儲存！');
+    };
+
+    // ─── Display Modal ──────────────────────────────────────────────────────
+    window.openDisplayModal = function (idx) {
+      if (badges.length === 0) return;
+      displayIndex = idx;
+      const modal = document.getElementById('display-modal');
+      modal.classList.add('active');
+      requestAnimationFrame(() => modal.classList.add('visible'));
+      updateDisplayModal();
+    };
+
+    window.closeDisplayModal = function () {
+      const modal = document.getElementById('display-modal');
+      modal.classList.remove('visible');
+      setTimeout(() => modal.classList.remove('active'), 300);
+    };
+
+    window.navigateDisplay = function (dir) {
+      displayIndex = (displayIndex + dir + badges.length) % badges.length;
+      updateDisplayModal();
+    };
+
+    function updateDisplayModal() {
+      const badge = badges[displayIndex];
+      if (!badge) return;
+
+      document.getElementById('display-badge-name').textContent = badge.name;
+      document.getElementById('display-content-text').textContent = badge.content;
+      document.getElementById('display-counter').textContent = `${displayIndex + 1} / ${badges.length}`;
+      document.getElementById('display-prev-btn').disabled = badges.length <= 1;
+      document.getElementById('display-next-btn').disabled = badges.length <= 1;
+
+      // Compute QR size based on viewport
+      const size = Math.min(window.innerWidth - 80, window.innerHeight - 280, 300);
+      const container = document.getElementById('display-qr-container');
+      container.style.width = size + 24 + 'px';
+      container.style.height = size + 24 + 'px';
+
+      const canvas = document.getElementById('display-qr-canvas');
+      canvas.width = size; canvas.height = size;
+      renderQR('display-qr-canvas', badge.content, { size, bg: '#ffffff', fg: '#111111' });
+    }
+
+    // ─── Manage Drawer ──────────────────────────────────────────────────────
+    window.openManageDrawer = function () {
+      renderManageList();
+      // Show/hide storage warning banner only if it's still in the drawer
+      const banner = document.getElementById('storage-warning-banner');
+      if (banner && storageAvailable) banner.style.display = 'none';
+
+      const drawer = document.getElementById('manage-drawer');
+      const sheet  = document.getElementById('manage-sheet');
+      drawer.classList.add('active');
+      requestAnimationFrame(() => {
+        drawer.classList.add('visible');
+        sheet.classList.add('up');
+      });
+    };
+
+    window.closeManageDrawer = function () {
+      const drawer = document.getElementById('manage-drawer');
+      const sheet  = document.getElementById('manage-sheet');
+      drawer.classList.remove('visible');
+      sheet.classList.remove('up');
+      setTimeout(() => drawer.classList.remove('active'), 350);
+    };
+
+    function renderManageList() {
+      const list = document.getElementById('manage-list');
+      if (badges.length === 0) {
+        list.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--text-muted);font-size:0.875rem;">目前沒有任何名牌</div>`;
+        return;
+      }
+      list.innerHTML = '';
+      badges.forEach(badge => {
+        const item = document.createElement('div');
+        item.className = 'manage-item';
+        item.innerHTML = `
+          <div class="manage-item-icon" style="background: linear-gradient(135deg, ${badge.color}, ${shiftColor(badge.color)});">
+            <i data-lucide="badge-check" style="width:18px;height:18px;"></i>
+          </div>
+          <div class="manage-item-info">
+            <p class="manage-item-name">${escHtml(badge.name)}</p>
+            <p class="manage-item-content">${escHtml(badge.content)}</p>
+          </div>
+          <div class="manage-item-actions">
+            <button class="mini-action-btn edit-name" onclick="setDefaultBadge('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="設為預設" title="設為預設">
+              <i data-lucide="star" style="width:14px;height:14px; ${badge.isDefault ? 'fill:var(--accent-1);color:var(--accent-1);' : ''}"></i>
+            </button>
+            <button class="mini-action-btn edit-name" onclick="openRenameModal('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="重新命名 ${escHtml(badge.name)}" title="重新命名">
+              <i data-lucide="pencil" style="width:14px;height:14px;"></i>
+            </button>
+            <button class="mini-action-btn delete" onclick="confirmDeleteBadge('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="刪除 ${escHtml(badge.name)}" title="刪除">
+              <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+            </button>
+          </div>
+        `;
+        list.appendChild(item);
+      });
+      lucide.createIcons();
+    }
+
+    // ─── Rename Modal ────────────────────────────────────────────────────────
+    window.openRenameModal = function (id) {
+      renameTargetId = id;
+      const badge = badges.find(b => b.id === id);
+      if (!badge) return;
+      document.getElementById('rename-input').value = badge.name;
+
+      const modal = document.getElementById('rename-modal');
+      const sheet = document.getElementById('rename-modal-sheet');
+      modal.classList.add('active');
+      if (window._lockScroll) window._lockScroll();
+      requestAnimationFrame(() => {
+        modal.classList.add('visible');
+        sheet.classList.add('up');
+      });
+      const delay = isIOS ? 650 : 400;
+      setTimeout(() => {
+        const inp = document.getElementById('rename-input');
+        inp.focus({ preventScroll: true });
+        inp.select();
+      }, delay);
+    };
+
+    window.closeRenameModal = function () {
+      const inp = document.getElementById('rename-input');
+      if (inp._resetGuard) inp._resetGuard();
+      const modal = document.getElementById('rename-modal');
+      const sheet = document.getElementById('rename-modal-sheet');
+      modal.classList.remove('visible');
+      sheet.classList.remove('up');
+      setTimeout(() => {
+        modal.classList.remove('active');
+        if (window._unlockScroll) window._unlockScroll();
+      }, 350);
+      renameTargetId = null;
+    };
+
+    window.confirmRename = function () {
+      const newName = document.getElementById('rename-input').value.trim();
+      if (!newName) {
+        document.getElementById('rename-input').focus();
+        showToast('⚠️ 請輸入名稱');
+        return;
+      }
+      const badge = badges.find(b => b.id === renameTargetId);
+      if (badge) {
+        badge.name = newName;
+        saveBadgesToStorage();
+        renderBadges();
+        showToast(`✏️ 已更名為「${newName}」`);
+      }
+      closeRenameModal();
+    };
+
+    // ─── Delete ──────────────────────────────────────────────────────────────
+    window.confirmDeleteBadge = function (id) {
+      const badge = badges.find(b => b.id === id);
+      if (!badge) return;
+      document.getElementById('confirm-desc').textContent = `確定要刪除「${badge.name}」嗎？此操作無法復原。`;
+      document.getElementById('confirm-ok-btn').onclick = () => {
+        deleteBadge(id);
+        closeConfirm();
+      };
+      const dialog = document.getElementById('confirm-dialog');
+      dialog.classList.add('active');
+      requestAnimationFrame(() => dialog.classList.add('visible'));
+    };
+
+    window.closeConfirm = function () {
+      const dialog = document.getElementById('confirm-dialog');
+      dialog.classList.remove('visible');
+      setTimeout(() => dialog.classList.remove('active'), 250);
+    };
+
+    function deleteBadge(id) {
+      badges = badges.filter(b => b.id !== id);
+      saveBadgesToStorage();
+      renderBadges();
+      showToast('🗑️ 名牌已刪除');
+    }
+
+    window.setDefaultBadge = function (id) {
+      badges = badges.map(b => ({ ...b, isDefault: b.id === id }));
+      saveBadgesToStorage();
+      renderBadges();
+      showToast('⭐ 已設為預設名牌，下次開啟將自動顯示');
+    };
+
+    // ─── Export / Import / Open in New Tab ───────────────────────────────────
+    window.exportBadges = function () {
+      if (badges.length === 0) { showToast('⚠️ 目前沒有任何名牌可以匯出'); return; }
+      try {
+        const data = JSON.stringify({ version: 1, badges }, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `myBadge_backup_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+        showToast(`✅ 已匯出 ${badges.length} 張名牌`);
+      } catch (e) {
+        showToast('⚠️ 匯出失敗：' + e.message);
+      }
+    };
+
+    window.importBadges = function (event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const obj = JSON.parse(e.target.result);
+          const imported = Array.isArray(obj) ? obj
+                         : Array.isArray(obj.badges) ? obj.badges : null;
+          if (!imported) throw new Error('格式錯誤');
+          // Merge: skip duplicates by id
+          const existingIds = new Set(badges.map(b => b.id));
+          const newOnes = imported.filter(b => b.id && b.name && b.content && !existingIds.has(b.id));
+          if (newOnes.length === 0) {
+            showToast('ℹ️ 沒有新的名牌可匯入（已全部存在）');
+          } else {
+            badges = [...newOnes, ...badges];
+            saveBadgesToStorage();
+            renderBadges();
+            closeManageDrawer();
+            showToast(`✅ 已匯入 ${newOnes.length} 張名牌`);
+          }
+        } catch (err) {
+          showToast('⚠️ 匯入失敗：' + err.message);
+        }
+        // Reset input so the same file can be selected again
+        event.target.value = '';
+      };
+      reader.readAsText(file);
+    };
+
+    window.openInNewTab = function () {
+      window.open(window.location.href, '_blank', 'noopener');
+    };
+
+    // ─── Toast ───────────────────────────────────────────────────────────────
+    window.showToast = function (msg, duration = 3000, onClick) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = msg;
+      if (onClick) toast.addEventListener('click', onClick);
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('out');
+        toast.addEventListener('animationend', () => toast.remove());
+      }, duration);
+    };
+
+    // ─── Expose globals ──────────────────────────────────────────────────────
+    window.startScanner = startScanner;
+    window.openDisplayModal = openDisplayModal;
+
+    // ─── Start ───────────────────────────────────────────────────────────────
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+  </script>
+</body>
+</html>
