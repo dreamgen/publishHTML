@@ -1190,7 +1190,11 @@
     }
 
     window.stopScanner = function () {
-      scannerLocked = false; // reset so next scan session starts clean
+      // NOTE: do NOT reset scannerLocked here.
+      // It is set to true the moment a QR result is detected, and stopScanner()
+      // is called synchronously right after. Resetting it here would immediately
+      // undo the lock, letting subsequent async callbacks re-trigger openSaveModal.
+      // scannerLocked is reset only at the top of startScanner() for the next session.
       const overlay = document.getElementById('scanner-overlay');
       overlay.classList.remove('visible');
       setTimeout(() => overlay.classList.remove('active'), 300);
