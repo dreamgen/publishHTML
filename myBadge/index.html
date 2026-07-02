@@ -831,6 +831,40 @@
           <i data-lucide="x" style="width:18px;height:18px;"></i>
         </button>
       </div>
+      <!-- Storage warning banner (shown when localStorage is unavailable) -->
+      <div id="storage-warning-banner" style="display:none;
+           background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);
+           border-radius:12px;margin:0.75rem 1rem 0;padding:0.75rem 1rem;
+           font-size:0.8rem;color:#fca5a5;line-height:1.5;">
+        <b>⚠️ 儲存功能受限</b><br>
+        此環境（iframe）無法持久保存資料。請使用下方按鈕在新分頁開啟，或匯出備份。
+      </div>
+      <!-- Action buttons: Export / Import / Open in new tab -->
+      <div style="display:flex;gap:0.5rem;padding:0.75rem 1rem 0;flex-wrap:wrap;">
+        <button onclick="exportBadges()" style="flex:1;min-width:80px;
+          background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);
+          color:#a78bfa;border-radius:10px;padding:0.6rem 0.5rem;
+          font-size:0.78rem;font-weight:600;cursor:pointer;display:flex;
+          align-items:center;justify-content:center;gap:0.4rem;" aria-label="匯出名牌為 JSON">
+          <i data-lucide="download" style="width:14px;height:14px;"></i>匯出備份
+        </button>
+        <label style="flex:1;min-width:80px;
+          background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);
+          color:#60a5fa;border-radius:10px;padding:0.6rem 0.5rem;
+          font-size:0.78rem;font-weight:600;cursor:pointer;display:flex;
+          align-items:center;justify-content:center;gap:0.4rem;" aria-label="匯入名牌 JSON">
+          <i data-lucide="upload" style="width:14px;height:14px;"></i>匯入備份
+          <input type="file" accept=".json" id="import-json-input"
+                 style="display:none;" onchange="importBadges(event)">
+        </label>
+        <button onclick="openInNewTab()" style="flex:1;min-width:80px;
+          background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);
+          color:#34d399;border-radius:10px;padding:0.6rem 0.5rem;
+          font-size:0.78rem;font-weight:600;cursor:pointer;display:flex;
+          align-items:center;justify-content:center;gap:0.4rem;" aria-label="在新分頁開啟">
+          <i data-lucide="external-link" style="width:14px;height:14px;"></i>新分頁
+        </button>
+      </div>
       <div class="manage-list" id="manage-list"></div>
     </div>
   </div>
@@ -911,11 +945,19 @@
 
     // ─── Init ───────────────────────────────────────────────────────────────
     function init() {
+      checkStorage();
       loadBadges();
       renderBadges();
       buildColorRow();
       lucide.createIcons();
       if (window.registerSW) window.registerSW();
+
+      // Warn user if storage is blocked (e.g. Safari ITP in cross-origin iframe)
+      if (!storageAvailable) {
+        setTimeout(() => {
+          showToast('⚠️ 儲存功能受限，名牌資料無法在此環境保留。請點右上角按鈕在新分頁開啟。', 6000);
+        }, 800);
+      }
 
       // ── Backdrop close: use pointerdown on backdrop itself ──
       // On iOS, 'click' inside an iframe can misfire after keyboard causes scroll.
@@ -1019,8 +1061,22 @@
       });
     }
 
-    // ─── Storage ────────────────────────────────────────────────────────────
+    // ─── Storage ─────────────────────────────────────────────────────────────
+    // Safari ITP blocks localStorage when loaded as cross-origin iframe.
+    // We detect availability upfront so we can warn the user.
+    let storageAvailable = false;
+    function checkStorage() {
+      try {
+        const k = '__myBadge_test__';
+        localStorage.setItem(k, '1');
+        storageAvailable = localStorage.getItem(k) === '1';
+        localStorage.removeItem(k);
+      } catch { storageAvailable = false; }
+      return storageAvailable;
+    }
+
     function loadBadges() {
+      if (!storageAvailable) { badges = []; return; }
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         badges = raw ? JSON.parse(raw) : [];
@@ -1028,7 +1084,15 @@
     }
 
     function saveBadgesToStorage() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(badges));
+      if (!storageAvailable) {
+        showToast('⚠️ 此環境無法儲存資料，請點右上角「在新分頁開啟」後使用');
+        return;
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(badges));
+      } catch (e) {
+        showToast('⚠️ 儲存失敗：' + (e.message || '儲存空間不足'));
+      }
     }
 
     function genId() {
@@ -1347,6 +1411,9 @@
     // ─── Manage Drawer ──────────────────────────────────────────────────────
     window.openManageDrawer = function () {
       renderManageList();
+      // Show/hide storage warning banner
+      const banner = document.getElementById('storage-warning-banner');
+      if (banner) banner.style.display = storageAvailable ? 'none' : 'block';
       const drawer = document.getElementById('manage-drawer');
       const sheet  = document.getElementById('manage-sheet');
       drawer.classList.add('active');
@@ -1476,6 +1543,60 @@
       renderBadges();
       showToast('🗑️ 名牌已刪除');
     }
+
+    // ─── Export / Import / Open in New Tab ───────────────────────────────────
+    window.exportBadges = function () {
+      if (badges.length === 0) { showToast('⚠️ 目前沒有任何名牌可以匯出'); return; }
+      try {
+        const data = JSON.stringify({ version: 1, badges }, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `myBadge_backup_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+        showToast(`✅ 已匯出 ${badges.length} 張名牌`);
+      } catch (e) {
+        showToast('⚠️ 匯出失敗：' + e.message);
+      }
+    };
+
+    window.importBadges = function (event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const obj = JSON.parse(e.target.result);
+          const imported = Array.isArray(obj) ? obj
+                         : Array.isArray(obj.badges) ? obj.badges : null;
+          if (!imported) throw new Error('格式錯誤');
+          // Merge: skip duplicates by id
+          const existingIds = new Set(badges.map(b => b.id));
+          const newOnes = imported.filter(b => b.id && b.name && b.content && !existingIds.has(b.id));
+          if (newOnes.length === 0) {
+            showToast('ℹ️ 沒有新的名牌可匯入（已全部存在）');
+          } else {
+            badges = [...newOnes, ...badges];
+            saveBadgesToStorage();
+            renderBadges();
+            closeManageDrawer();
+            showToast(`✅ 已匯入 ${newOnes.length} 張名牌`);
+          }
+        } catch (err) {
+          showToast('⚠️ 匯入失敗：' + err.message);
+        }
+        // Reset input so the same file can be selected again
+        event.target.value = '';
+      };
+      reader.readAsText(file);
+    };
+
+    window.openInNewTab = function () {
+      window.open(window.location.href, '_blank', 'noopener');
+    };
 
     // ─── Toast ───────────────────────────────────────────────────────────────
     window.showToast = function (msg, duration = 3000, onClick) {
