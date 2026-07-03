@@ -604,15 +604,16 @@ self.addEventListener('fetch', event => {
       display: flex; align-items: center; justify-content: center; gap: 1rem;
     }
     .display-nav-btn {
-      width: 50px; height: 50px; border-radius: 50%;
-      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
-      color: white; display: flex; align-items: center; justify-content: center;
+      height: 46px; border-radius: 99px; padding: 0 1rem;
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2);
+      color: white; display: flex; align-items: center; justify-content: center; gap: 0.25rem;
       cursor: pointer; outline: none; transition: all 0.2s;
+      max-width: 140px; backdrop-filter: blur(8px);
     }
-    .display-nav-btn:hover { background: rgba(255,255,255,0.2); }
-    .display-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-    .display-counter {
-      font-size: 0.875rem; color: rgba(255,255,255,0.5); min-width: 50px; text-align: center;
+    .display-nav-btn:hover { background: rgba(255,255,255,0.25); }
+    .display-nav-btn:active { transform: scale(0.95); }
+    .display-nav-btn .nav-text {
+      font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     /* ─── Manage Menu (Drawer) ─────────────────────────────────────────────── */
@@ -896,13 +897,8 @@ self.addEventListener('fetch', event => {
 
     <!-- Navigation (prev/next badge) -->
     <div class="display-nav">
-      <button class="display-nav-btn" id="display-prev-btn" onclick="navigateDisplay(-1)" aria-label="上一個名牌">
-        <i data-lucide="chevron-left" style="width:22px;height:22px;"></i>
-      </button>
-      <span class="display-counter" id="display-counter"></span>
-      <button class="display-nav-btn" id="display-next-btn" onclick="navigateDisplay(1)" aria-label="下一個名牌">
-        <i data-lucide="chevron-right" style="width:22px;height:22px;"></i>
-      </button>
+      <button class="display-nav-btn" id="display-prev-btn" onclick="navigateDisplay(-1)" aria-label="上一個名牌" style="display: none;"></button>
+      <button class="display-nav-btn" id="display-next-btn" onclick="navigateDisplay(1)" aria-label="下一個名牌" style="display: none;"></button>
     </div>
   </div>
 
@@ -1508,9 +1504,26 @@ self.addEventListener('fetch', event => {
 
       document.getElementById('display-badge-name').textContent = badge.name;
       document.getElementById('display-content-text').textContent = badge.content;
-      document.getElementById('display-counter').textContent = `${displayIndex + 1} / ${badges.length}`;
-      document.getElementById('display-prev-btn').disabled = badges.length <= 1;
-      document.getElementById('display-next-btn').disabled = badges.length <= 1;
+      const prevBtn = document.getElementById('display-prev-btn');
+      const nextBtn = document.getElementById('display-next-btn');
+
+      if (badges.length <= 1) {
+        prevBtn.style.display = 'none';
+        nextBtn.style.display = 'none';
+      } else if (badges.length === 2) {
+        prevBtn.style.display = 'none';
+        nextBtn.style.display = 'flex';
+        const nextIdx = (displayIndex + 1) % badges.length;
+        nextBtn.innerHTML = `<span class="nav-text">${badges[nextIdx].name}</span><i data-lucide="chevron-right" style="width:20px;height:20px;"></i>`;
+      } else {
+        prevBtn.style.display = 'flex';
+        nextBtn.style.display = 'flex';
+        const prevIdx = (displayIndex - 1 + badges.length) % badges.length;
+        const nextIdx = (displayIndex + 1) % badges.length;
+        prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:20px;height:20px;"></i><span class="nav-text">${badges[prevIdx].name}</span>`;
+        nextBtn.innerHTML = `<span class="nav-text">${badges[nextIdx].name}</span><i data-lucide="chevron-right" style="width:20px;height:20px;"></i>`;
+      }
+      if (window.lucide) lucide.createIcons();
 
       // Compute QR size based on viewport
       const size = Math.min(window.innerWidth - 80, window.innerHeight - 280, 300);
