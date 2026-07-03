@@ -1317,7 +1317,15 @@
     function openSaveModal(content) {
       pendingQRContent = content;
       document.getElementById('save-content-preview').textContent = content;
-      document.getElementById('save-name-input').value = '';
+      let defaultName = '';
+      if (content.startsWith('https://docs.google.com/forms/d/e/1FAIpQLSf4BvZ74BPES2-jrvX82IHhx-N5_stNRKonGZ1jelyUXmGlow/formResponse')) {
+        defaultName = '點傳師班';
+      } else if (content.startsWith('https://docs.google.com/forms/d/e/1FAIpQLSfhdxC9vWcAdjlidDRET5JeKHV-sBoehkEuXAcM3WIV1wcrzw/formResponse')) {
+        defaultName = '天達分部';
+      } else {
+        defaultName = `名牌 ${badges.length + 1}`;
+      }
+      document.getElementById('save-name-input').value = defaultName;
 
       // Reset color
       selectedColor = BADGE_COLORS[0];
