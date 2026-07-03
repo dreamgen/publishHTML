@@ -1310,7 +1310,12 @@ self.addEventListener('fetch', event => {
       try {
         // Convert Unicode to UTF-8 to prevent garbled text in QR code (QRious limitation)
         const utf8Content = content ? unescape(encodeURIComponent(content)) : ' ';
-        new QRious({ element: canvas, value: utf8Content, size, backgroundAlpha: 1, background: bg, foreground: fg, level: 'M', padding: 4 });
+        // Render at a high fixed resolution to prevent off-center rendering and improve Retina sharpness
+        const hiResSize = 1024;
+        new QRious({ element: canvas, value: utf8Content, size: hiResSize, backgroundAlpha: 1, background: bg, foreground: fg, level: 'M' });
+        // Scale down to desired display size using CSS
+        canvas.style.width = size + 'px';
+        canvas.style.height = size + 'px';
       } catch (e) { console.warn('QR render error:', e); }
     }
 
