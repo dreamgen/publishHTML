@@ -1875,15 +1875,17 @@
                 setStatus('網頁已獲取，正在萃取正文…');
 
                 // ── JS Redirect 偵測 ──
-                const jsRedirectMatch = htmlContent.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
-                if (jsRedirectMatch && jsRedirectMatch[1]) {
-                    const redirectUrl = new URL(jsRedirectMatch[1], url).href;
-                    console.info('[pureReader] Detected JS redirect to:', redirectUrl);
-                    if (!window._extractRedirects) window._extractRedirects = new Set();
-                    if (!window._extractRedirects.has(redirectUrl)) {
-                        window._extractRedirects.add(redirectUrl);
-                        extractArticle(redirectUrl);
-                        return;
+                if (htmlContent.length < 3000) {
+                    const jsRedirectMatch = htmlContent.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
+                    if (jsRedirectMatch && jsRedirectMatch[1]) {
+                        const redirectUrl = new URL(jsRedirectMatch[1], url).href;
+                        console.info('[pureReader] Detected JS redirect to:', redirectUrl);
+                        if (!window._extractRedirects) window._extractRedirects = new Set();
+                        if (!window._extractRedirects.has(redirectUrl)) {
+                            window._extractRedirects.add(redirectUrl);
+                            extractArticle(redirectUrl);
+                            return;
+                        }
                     }
                 }
 
@@ -3310,14 +3312,16 @@
                 for (const fn of strategies) {
                     try {
                         const html = await fn();
-                        if (html && html.length > 200) {
-                            const jsRedirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
-                            if (jsRedirectMatch && jsRedirectMatch[1]) {
-                                const redirectUrl = new URL(jsRedirectMatch[1], url).href;
-                                console.info('[pureReader] _fetchHtml followed JS redirect to:', redirectUrl);
-                                return await _fetchHtml(redirectUrl, signal, depth + 1);
+                        if (html && html.length > 50) {
+                            if (html.length < 3000) {
+                                const jsRedirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
+                                if (jsRedirectMatch && jsRedirectMatch[1]) {
+                                    const redirectUrl = new URL(jsRedirectMatch[1], url).href;
+                                    console.info('[pureReader] _fetchHtml followed JS redirect to:', redirectUrl);
+                                    return await _fetchHtml(redirectUrl, signal, depth + 1);
+                                }
                             }
-                            return html;
+                            if (html.length > 200) return html;
                         }
                     } catch (e) {
                         if (e.name === 'AbortError') throw e;
