@@ -1874,6 +1874,18 @@
 
                 setStatus('網頁已獲取，正在萃取正文…');
 
+                // ── JS Redirect 偵測 ──
+                const jsRedirectMatch = htmlContent.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
+                if (jsRedirectMatch && jsRedirectMatch[1]) {
+                    const redirectUrl = new URL(jsRedirectMatch[1], url).href;
+                    console.info('[pureReader] Detected JS redirect to:', redirectUrl);
+                    if (!window._extractRedirects) window._extractRedirects = new Set();
+                    if (!window._extractRedirects.has(redirectUrl)) {
+                        window._extractRedirects.add(redirectUrl);
+                        extractArticle(redirectUrl);
+                        return;
+                    }
+                }
 
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(htmlContent, 'text/html');
@@ -2696,7 +2708,7 @@
                         const plainText = article.textContent || '';
                         const textTail = plainText.slice(-300); // check last 300 characters
                         
-                        let endKeywords = ['讀完', '待續', '全書完', '已完結', '未完待續', '下回待續', '敬請期待', '全劇終', '完結'];
+                        let endKeywords = ['讀完', '全書完', '已完結', '全劇終', '完結'];
                         if (_session.endKeywords) {
                             const customKeywords = _session.endKeywords.split(/[,，]/).map(k => k.trim()).filter(Boolean);
                             endKeywords = [...endKeywords, ...customKeywords];
@@ -3275,7 +3287,8 @@
             }
 
             // ── Fetch helper (reuses proxy strategy from main app) ───────────
-            async function _fetchHtml(url, signal) {
+            async function _fetchHtml(url, signal, depth = 0) {
+                if (depth > 3) return null; // Prevent infinite JS redirect loops
                 const strategies = [
                     async () => {
                         const res = await fetch(`https://purereader-proxy.vercel.app/api/proxy?url=${encodeURIComponent(url)}`, { signal });
@@ -3297,7 +3310,15 @@
                 for (const fn of strategies) {
                     try {
                         const html = await fn();
-                        if (html && html.length > 200) return html;
+                        if (html && html.length > 200) {
+                            const jsRedirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
+                            if (jsRedirectMatch && jsRedirectMatch[1]) {
+                                const redirectUrl = new URL(jsRedirectMatch[1], url).href;
+                                console.info('[pureReader] _fetchHtml followed JS redirect to:', redirectUrl);
+                                return await _fetchHtml(redirectUrl, signal, depth + 1);
+                            }
+                            return html;
+                        }
                     } catch (e) {
                         if (e.name === 'AbortError') throw e;
                     }
@@ -3467,7 +3488,7 @@
                         const plainText = article.textContent || '';
                         const textTail = plainText.slice(-300);
                         
-                        let endKeywordsList = ['讀完', '待續', '全書完', '已完結', '未完待續', '下回待續', '敬請期待', '全劇終', '完結'];
+                        let endKeywordsList = ['讀完', '全書完', '已完結', '全劇終', '完結'];
                         if (session.endKeywords) {
                             const customKeywords = session.endKeywords.split(/[,，]/).map(k => k.trim()).filter(Boolean);
                             endKeywordsList = [...endKeywordsList, ...customKeywords];
