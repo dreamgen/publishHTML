@@ -145,7 +145,9 @@
       display: flex; align-items: center; justify-content: space-between;
       flex-shrink: 0;
     }
-    .header-left { display: flex; align-items: center; gap: 0.75rem; }
+    .header-left { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; transition: opacity 0.2s; border-radius: 12px; padding: 4px; margin-left: -4px; }
+    .header-left:hover { opacity: 0.8; background: rgba(255,255,255,0.05); }
+    .header-left:active { transform: scale(0.96); }
     .header-logo {
       width: 36px; height: 36px; border-radius: 10px; overflow: hidden;
       border: 1px solid var(--border);
@@ -656,7 +658,7 @@
 
   <!-- ─── Header ──────────────────────────────────────────────────────────── -->
   <header id="app-header">
-    <div class="header-left">
+    <div class="header-left" onclick="openAboutDrawer()" title="關於與分享" aria-label="關於與分享">
       <div class="header-logo">
         <img src="icon.png" alt="我的名牌">
       </div>
@@ -867,6 +869,40 @@
   </div>
 
   <!-- ════════════════════════════════════════════════════════════════════
+       ABOUT DRAWER
+       ════════════════════════════════════════════════════════════════ -->
+  <div id="about-drawer" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="關於與分享">
+    <div class="modal-sheet" id="about-sheet" style="align-items: center; text-align: center;">
+      <div class="modal-drag-bar"></div>
+      <div class="modal-header" style="width: 100%;">
+        <span class="modal-title">關於與分享</span>
+        <button class="icon-btn" onclick="closeAboutDrawer()" aria-label="關閉">
+          <i data-lucide="x" style="width:18px;height:18px;"></i>
+        </button>
+      </div>
+      
+      <div style="margin-bottom: 0.5rem;">
+        <img src="icon.png" alt="Logo" style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+        <h2 style="font-size: 1.25rem; font-weight: 800; color: var(--text-primary);">我的名牌</h2>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem;">隨身攜帶、隨時展示的數位名牌夾</p>
+      </div>
+
+      <div style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 16px; padding: 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;">
+        <p style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.05em;">掃描或複製網址分享給朋友</p>
+        <div class="qr-preview-box" style="width: 160px; box-shadow: none; border: 1px solid var(--border);">
+          <canvas id="about-qr-canvas" width="128" height="128"></canvas>
+        </div>
+        <div style="display: flex; gap: 0.5rem; width: 100%;">
+          <input type="text" id="about-url-input" class="input-field" readonly style="font-size: 0.8rem; padding: 0.6rem 0.8rem; color: var(--text-secondary);">
+          <button class="btn-primary" onclick="copyAboutUrl()" style="width: auto; padding: 0.6rem 1rem; flex-shrink: 0;" aria-label="複製網址">
+            <i data-lucide="copy" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
        RENAME MODAL
        ════════════════════════════════════════════════════════════════ -->
   <div id="rename-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="重新命名">
@@ -992,6 +1028,7 @@
       addBackdropClose('save-modal',    closeSaveModal);
       addBackdropClose('rename-modal',  closeRenameModal);
       addBackdropClose('manage-drawer', closeManageDrawer);
+      addBackdropClose('about-drawer',  closeAboutDrawer);
       addBackdropClose('confirm-dialog', closeConfirm);
 
       // ── iOS iframe: lock body scroll when modal is open ──
@@ -1058,6 +1095,7 @@
           if (document.getElementById('scanner-overlay').classList.contains('active')) { stopScanner(); return; }
           if (document.getElementById('save-modal').classList.contains('active')) { closeSaveModal(); return; }
           if (document.getElementById('rename-modal').classList.contains('active')) { closeRenameModal(); return; }
+          if (document.getElementById('about-drawer').classList.contains('active')) { closeAboutDrawer(); return; }
           if (document.getElementById('manage-drawer').classList.contains('active')) { closeManageDrawer(); return; }
         }
         if (document.getElementById('display-modal').classList.contains('active')) {
@@ -1461,6 +1499,40 @@
         drawer.classList.add('visible');
         sheet.classList.add('up');
       });
+    };
+
+    // ─── About Drawer ──────────────────────────────────────────────────────
+    window.openAboutDrawer = function () {
+      const drawer = document.getElementById('about-drawer');
+      const sheet  = document.getElementById('about-sheet');
+      const url = window.location.origin + window.location.pathname;
+      document.getElementById('about-url-input').value = url;
+      renderQR('about-qr-canvas', url, { size: 128, bg: '#ffffff', fg: '#000000' });
+      drawer.classList.add('active');
+      requestAnimationFrame(() => {
+        drawer.classList.add('visible');
+        sheet.classList.add('up');
+      });
+    };
+
+    window.closeAboutDrawer = function () {
+      const drawer = document.getElementById('about-drawer');
+      const sheet  = document.getElementById('about-sheet');
+      drawer.classList.remove('visible');
+      sheet.classList.remove('up');
+      setTimeout(() => drawer.classList.remove('active'), 350);
+    };
+
+    window.copyAboutUrl = function () {
+      const input = document.getElementById('about-url-input');
+      input.select();
+      input.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(input.value)
+        .then(() => showToast('✅ 網址已複製！'))
+        .catch(() => {
+          document.execCommand('copy');
+          showToast('✅ 網址已複製！');
+        });
     };
 
     window.closeManageDrawer = function () {
