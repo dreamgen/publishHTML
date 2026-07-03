@@ -40,7 +40,7 @@
  * Stale-While-Revalidate caching strategy
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v3';
 const CACHE_NAME = \`myBadge-\${SW_VERSION}\`;
 const SHARED_CACHE = \`myBadge-shared-\${SW_VERSION}\`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
@@ -89,6 +89,23 @@ self.addEventListener('fetch', event => {
 
   if (!cacheName) return;
 
+  // Network-First for HTML/Navigation to ensure latest content
+  if (request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/' || url.pathname.endsWith('/myBadge/')) {
+    event.respondWith(
+      fetch(request)
+        .then(res => {
+          if (res?.ok) {
+            const resClone = res.clone();
+            caches.open(cacheName).then(cache => cache.put(request, resClone));
+          }
+          return res;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate for everything else
   event.respondWith(
     caches.open(cacheName).then(cache =>
       cache.match(request).then(cached => {
