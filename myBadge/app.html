@@ -1308,7 +1308,9 @@ self.addEventListener('fetch', event => {
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
       try {
-        new QRious({ element: canvas, value: content || ' ', size, backgroundAlpha: 1, background: bg, foreground: fg, level: 'M', padding: 4 });
+        // Convert Unicode to UTF-8 to prevent garbled text in QR code (QRious limitation)
+        const utf8Content = content ? unescape(encodeURIComponent(content)) : ' ';
+        new QRious({ element: canvas, value: utf8Content, size, backgroundAlpha: 1, background: bg, foreground: fg, level: 'M', padding: 4 });
       } catch (e) { console.warn('QR render error:', e); }
     }
 
