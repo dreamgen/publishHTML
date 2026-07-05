@@ -44,6 +44,10 @@
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:#666; margin-top:10px; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   .overseasBox { font-size:11.5px; color:#4a5a8a; background:#eef2fb; border:1px solid #c4d0ec; border-radius:8px; padding:8px 10px; margin-top:10px; }
+  .mapTooltip { position:absolute; z-index:10; background:#2b2b2b; color:#fff; font-size:12.5px; line-height:1.5; padding:6px 10px; border-radius:8px; box-shadow:0 3px 10px rgba(0,0,0,0.25); pointer-events:none; transform:translate(-50%,-100%); white-space:nowrap; opacity:0; transition:opacity 0.12s; }
+  .mapTooltip.visible { opacity:1; pointer-events:auto; }
+  .mapTooltip::after { content:''; position:absolute; left:50%; top:100%; transform:translateX(-50%); border:6px solid transparent; border-top-color:#2b2b2b; }
+  .mapTooltip .closeBtn { position:absolute; top:-6px; right:-6px; width:16px; height:16px; background:#fff; color:#2b2b2b; border-radius:50%; font-size:11px; line-height:16px; text-align:center; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,0.3); }
 </style>
 </head>
 <body>
@@ -900,6 +904,7 @@
         <circle class="bubble" id="bubble-58" data-base-r="8.74" data-cx="71.74" data-cy="187.01" cx="71.7" cy="187.0" r="8.74" fill="#7aa6c2" fill-opacity="0.65" stroke="#7aa6c2" stroke-width="1"><title>金門縣金寧鄉：2 壇</title></circle>
         </g>
       </svg>
+      <div class="mapTooltip" id="mapTooltip"></div>
       </div>
       <div class="note">
         ※ 縣市界線與鄉鎮市區界線資料來源：內政部行政區域圖資（透過 taiwan-atlas 套件，mercatorTw 投影，離島已內縮靠近本島顯示）。圓圈面積對應壇數；放大地圖時圓圈會依比例縮小，避免重疊成一團。點擊右側明細列可將地圖定位到該地區並放大至市級比例。左上角可切換鄉鎮市區界線圖層，區名文字會隨縮放比例調整大小。
@@ -1075,14 +1080,53 @@
   });
 
   var dragging = false, lastX = 0, lastY = 0;
+  var pointerDownX = 0, pointerDownY = 0, pointerMoved = false;
+  var TAP_THRESHOLD = 6; // px
+  var mapTooltip = document.getElementById('mapTooltip');
+  var mapWrapEl = document.getElementById('mapWrap');
+
+  function showTooltipFor(bubbleEl){
+    var titleEl = bubbleEl.querySelector('title');
+    var text = titleEl ? titleEl.textContent : '';
+    mapTooltip.innerHTML = text.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '<span class="closeBtn">×</span>';
+    var bRect = bubbleEl.getBoundingClientRect();
+    var wRect = mapWrapEl.getBoundingClientRect();
+    var left = bRect.left + bRect.width/2 - wRect.left;
+    var top = bRect.top - wRect.top - 6;
+    mapTooltip.style.left = left + 'px';
+    mapTooltip.style.top = Math.max(top, 24) + 'px';
+    mapTooltip.classList.add('visible');
+    var closeBtn = mapTooltip.querySelector('.closeBtn');
+    if (closeBtn) {
+      closeBtn.addEventListener('pointerdown', function(ev){
+        ev.stopPropagation();
+      });
+      closeBtn.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        hideTooltip();
+      });
+    }
+  }
+  function hideTooltip(){
+    mapTooltip.classList.remove('visible');
+  }
+
   svg.addEventListener('pointerdown', function(e){
     dragging = true;
+    pointerMoved = false;
+    pointerDownX = e.clientX; pointerDownY = e.clientY;
     svg.classList.add('dragging');
     lastX = e.clientX; lastY = e.clientY;
     svg.setPointerCapture(e.pointerId);
+    if (!(e.target && e.target.closest && e.target.closest('.mapTooltip'))) {
+      hideTooltip();
+    }
   });
   svg.addEventListener('pointermove', function(e){
     if(!dragging) return;
+    if (Math.abs(e.clientX - pointerDownX) > TAP_THRESHOLD || Math.abs(e.clientY - pointerDownY) > TAP_THRESHOLD) {
+      pointerMoved = true;
+    }
     var rect = svg.getBoundingClientRect();
     var dx = (e.clientX - lastX) / rect.width * view.w;
     var dy = (e.clientY - lastY) / rect.height * view.h;
@@ -1095,10 +1139,22 @@
   function endDrag(e){
     dragging = false;
     svg.classList.remove('dragging');
+    if (e && e.type === 'pointerup' && !pointerMoved) {
+      var target = e.target;
+      var bubbleEl = target && target.closest ? target.closest('.bubble') : null;
+      if (bubbleEl) {
+        showTooltipFor(bubbleEl);
+      } else {
+        hideTooltip();
+      }
+    }
   }
   svg.addEventListener('pointerup', endDrag);
   svg.addEventListener('pointercancel', endDrag);
   svg.addEventListener('pointerleave', endDrag);
+
+  document.addEventListener('scroll', hideTooltip, true);
+  window.addEventListener('resize', hideTooltip);
 
   document.getElementById('zoomIn').addEventListener('click', function(){
     zoomAt(view.x + view.w/2, view.y + view.h/2, 1.4);
