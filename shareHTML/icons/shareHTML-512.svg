@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="shareHTMLBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#shareHTMLBg)" />
+  <path d="M133.3 378.7V133.3C133.3 121.5 142.9 112 154.7 112H272L378.7 218.7V378.7C378.7 390.5 369.1 400 357.3 400H154.7C142.9 400 133.3 390.5 133.3 378.7Z" fill="white" opacity="0.9" />
+  <path d="M272 112L378.7 218.7H293.3C281.5 218.7 272 209.1 272 197.3V112Z" fill="#e2e8f0" />
+  <path d="M197.3 282.7L224 256L197.3 229.3" stroke="#4f46e5" stroke-width="21.3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <path d="M314.7 282.7L288 256L314.7 229.3" stroke="#4f46e5" stroke-width="21.3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <path d="M245.3 304L266.7 208" stroke="#4f46e5" stroke-width="21.3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+</svg>
