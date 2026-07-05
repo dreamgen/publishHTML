@@ -1,5 +1,5 @@
-const CACHE_NAME = 'shareHTML-v1';
-const SHARED_CACHE = 'shareHTML-shared-v1';
+const CACHE_NAME = 'shareHTML-v2';
+const SHARED_CACHE = 'shareHTML-shared-v2';
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
 
 const ASSETS_TO_CACHE = [
@@ -54,7 +54,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-While-Revalidate for other assets
+  // Network First for data.json (always get the latest list if online)
+  if (url.pathname.endsWith('data.json')) {
+    event.respondWith(
+      fetch(event.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+        }
+        return networkResponse;
+      }).catch(() => {
+        return caches.match(event.request);
+      })
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate for other assets (index.html, icons, etc.)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {
