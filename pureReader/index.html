@@ -1126,6 +1126,20 @@
         let currentArticleTitle = null;
         let currentArticleDomain = null;
 
+        function normalizeUrl(urlStr) {
+            if (!urlStr || typeof urlStr !== 'string') return urlStr;
+            if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) return urlStr;
+            try {
+                const u = new URL(urlStr);
+                if (u.hostname === 'look.twword.com' || u.hostname === 'look.thisiscm.com') {
+                    u.hostname = 'www.novel543.com';
+                }
+                return u.href;
+            } catch (e) {
+                return urlStr;
+            }
+        }
+
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
@@ -1771,6 +1785,7 @@
 
         // ─── Core: Extract + Render ───────────────────────────────────────────
         async function extractArticle(url) {
+            url = normalizeUrl(url);
             currentFetchUrl   = url;
             currentFetchAbort = new AbortController();
             showLoading();
@@ -3290,6 +3305,7 @@
 
             // ── Fetch helper (reuses proxy strategy from main app) ───────────
             async function _fetchHtml(url, signal, depth = 0) {
+                url = normalizeUrl(url);
                 if (depth > 3) return null; // Prevent infinite JS redirect loops
                 const strategies = [
                     async () => {
