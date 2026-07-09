@@ -1880,6 +1880,17 @@
                 }},
                 { idx: 4, label: 'Jina Reader', fn: async () => {
                     if (setStatus) setStatus(label(5, 'Jina Reader'));
+                    // Jina Reader 頻率限制防護（每分鐘最多 20 次請求），在此處加入最少 3 秒請求間隔以防預載被阻擋
+                    if (typeof window._lastJinaFetchTime === 'undefined') window._lastJinaFetchTime = 0;
+                    const now = Date.now();
+                    const diff = now - window._lastJinaFetchTime;
+                    if (diff < 3000) {
+                        const delay = 3000 - diff;
+                        console.info(`[pureReader] Jina Reader 頻率限制防護：延遲 ${delay}ms`);
+                        await new Promise(res => setTimeout(res, delay));
+                    }
+                    window._lastJinaFetchTime = Date.now();
+
                     try {
                         const res = await fetch(`https://r.jina.ai/${url}`, {
                             headers: { 'X-Return-Format': 'html' },
@@ -1891,6 +1902,17 @@
                         if (e.name === 'AbortError') throw e;
                         // X-Return-Format 觸發 CORS preflight 失敗時，改用預設 markdown 搭配連結摘要以支持下一章預載
                         console.warn('[pureReader] Jina Reader (html) failed, falling back to markdown:', e.message);
+
+                        // Fallback 請求同樣需要頻率防護
+                        const now2 = Date.now();
+                        const diff2 = now2 - window._lastJinaFetchTime;
+                        if (diff2 < 3000) {
+                            const delay2 = 3000 - diff2;
+                            console.info(`[pureReader] Jina Reader 頻率限制防護 (Fallback)：延遲 ${delay2}ms`);
+                            await new Promise(res => setTimeout(res, delay2));
+                        }
+                        window._lastJinaFetchTime = Date.now();
+
                         const res2 = await fetch(`https://r.jina.ai/${url}`, {
                             headers: { 'X-With-Links-Summary': 'true' },
                             signal
@@ -1968,8 +1990,8 @@
                 const { html: htmlContent, winnerIdx, lastError, hadChallengePage } =
                     await fetchViaProxies(url, { signal: currentFetchAbort?.signal, preferredIdx, setStatus });
 
-                // 成功：儲存此 hostname 的偏好策略（僅在通過 isUsableHtml 驗證後寫入）
-                if (winnerIdx >= 0) saveStratPref(hostname, winnerIdx);
+                // 成功：儲存此 hostname 的偏好策略（僅在通過 isUsableHtml 驗證且非 Jina Reader 時寫入，避免把 rate-limited 備援當首選）
+                if (winnerIdx >= 0 && winnerIdx !== 4) saveStratPref(hostname, winnerIdx);
 
                 if (!htmlContent) {
                     if (hadChallengePage) {
