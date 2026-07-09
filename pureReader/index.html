@@ -1990,8 +1990,8 @@
                 const { html: htmlContent, winnerIdx, lastError, hadChallengePage } =
                     await fetchViaProxies(url, { signal: currentFetchAbort?.signal, preferredIdx, setStatus });
 
-                // 成功：儲存此 hostname 的偏好策略（僅在通過 isUsableHtml 驗證且非 Jina Reader 時寫入，避免把 rate-limited 備援當首選）
-                if (winnerIdx >= 0 && winnerIdx !== 4) saveStratPref(hostname, winnerIdx);
+                // 成功：儲存此 hostname 的偏好策略（僅在通過 isUsableHtml 驗證後寫入）
+                if (winnerIdx >= 0) saveStratPref(hostname, winnerIdx);
 
                 if (!htmlContent) {
                     if (hadChallengePage) {
