@@ -1806,7 +1806,7 @@
         }
 
         // 方案 B：把 Jina Reader 的 markdown 回應（附加 Title:/URL Source:/Markdown Content: 前綴）
-        // 轉成最簡單的 HTML 段落，讓下游可以繼續沿用 Readability 解析。
+        // 轉成最簡單的 HTML 段落，並將連結分離至 footer 以便 _findNextUrl 提取，下游可以繼續沿用 Readability 解析。
         function _jinaMarkdownToHtml(markdown) {
             if (!markdown) return '';
             let title = '';
@@ -1815,13 +1815,37 @@
             if (titleMatch) title = titleMatch[1].trim();
             const contentIdx = markdown.indexOf('Markdown Content:');
             if (contentIdx >= 0) body = markdown.slice(contentIdx + 'Markdown Content:'.length);
+            
             const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const paragraphs = body.split(/\n{2,}/)
+            
+            let bodyText = body;
+            let linksText = '';
+            const linksIdx = body.indexOf('Links/Buttons:');
+            if (linksIdx >= 0) {
+                bodyText = body.slice(0, linksIdx);
+                linksText = body.slice(linksIdx);
+            }
+
+            const paragraphs = bodyText.split(/\n{2,}/)
                 .map(p => p.trim())
                 .filter(Boolean)
                 .map(p => `<p>${esc(p)}</p>`)
                 .join('\n');
-            return `<html><head><title>${esc(title)}</title></head><body><article>${paragraphs}</article></body></html>`;
+
+            let footerHtml = '';
+            if (linksText) {
+                const linkParagraphs = linksText.split(/\n{2,}/)
+                    .map(p => p.trim())
+                    .filter(Boolean)
+                    .map(p => {
+                        let escaped = esc(p);
+                        return `<p>${escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')}</p>`;
+                    })
+                    .join('\n');
+                footerHtml = `<footer>${linkParagraphs}</footer>`;
+            }
+
+            return `<html><head><title>${esc(title)}</title></head><body><article>${paragraphs}</article>${footerHtml}</body></html>`;
         }
 
         // 方案 B：新增第五個策略 Jina Reader 作為最終防線（真實無頭瀏覽器渲染，可通過多數 Cloudflare 檢查）。
@@ -1865,9 +1889,12 @@
                         return await res.text();
                     } catch (e) {
                         if (e.name === 'AbortError') throw e;
-                        // X-Return-Format 觸發 CORS preflight 失敗時，改用預設 markdown 回應繞過 Readability 直接渲染
+                        // X-Return-Format 觸發 CORS preflight 失敗時，改用預設 markdown 搭配連結摘要以支持下一章預載
                         console.warn('[pureReader] Jina Reader (html) failed, falling back to markdown:', e.message);
-                        const res2 = await fetch(`https://r.jina.ai/${url}`, { signal });
+                        const res2 = await fetch(`https://r.jina.ai/${url}`, {
+                            headers: { 'X-With-Links-Summary': 'true' },
+                            signal
+                        });
                         if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
                         const markdown = await res2.text();
                         return _jinaMarkdownToHtml(markdown);
