@@ -1,0 +1,13 @@
+{
+  "name": "purereader-proxy-cf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PureReader CORS proxy on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

@@ -1852,9 +1852,9 @@
         function _buildProxyStrategies(url, signal, preferredIdx, setStatus) {
             const label = (n, name) => `嘗試策略${n}${preferredIdx === (n - 1) ? ' ★慣用' : ''} (${name})…`;
             const allStrategies = [
-                { idx: 0, label: 'PureReader Proxy', fn: async () => {
-                    if (setStatus) setStatus(label(1, '自有代理'));
-                    const res = await fetch(`https://purereader-proxy.vercel.app/api/proxy?url=${encodeURIComponent(url)}`, { signal });
+                { idx: 0, label: 'PureReader Proxy (CF)', fn: async () => {
+                    if (setStatus) setStatus(label(1, '自有代理 (CF)'));
+                    const res = await fetch(`https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(url)}`, { signal });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return await res.text();
                 }},
@@ -2134,7 +2134,7 @@
             let deepContainer = document.getElementById('deep-fetch-container');
             if (deepContainer) deepContainer.remove();
 
-            const deepUrl = `https://purereader-proxy.vercel.app/api/deep?url=${encodeURIComponent(originalUrl)}`;
+            const deepUrl = `https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(originalUrl)}`;
 
             contentEl.insertAdjacentHTML('afterend', `
                 <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
