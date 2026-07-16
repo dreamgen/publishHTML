@@ -1,5 +1,6 @@
-const SW_VERSION = "v5";
+const SW_VERSION = "v10";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
+const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const AUXILIARY_MANIFEST = "./vendor/pdfjs/offline-assets.json";
 const APP_SHELL = [
   "./",
@@ -64,8 +65,37 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  if (request.method !== "GET") return;
   const url = new URL(request.url);
+
+  if (request.method === "POST" && url.pathname.endsWith("/share-target")) {
+    event.respondWith(
+      (async () => {
+        const formData = await request.formData();
+        const file = formData.get("pdf");
+        if (!(file instanceof File)) {
+          return Response.redirect(new URL("./", request.url).href, 303);
+        }
+        const cache = await caches.open(SHARE_CACHE_NAME);
+        const key = new URL("./shared-pdf", self.registration.scope).href;
+        await cache.put(
+          key,
+          new Response(file, {
+            headers: {
+              "Content-Type": "application/pdf",
+              "X-PDF-File-Name": encodeURIComponent(file.name || "分享的文件.pdf"),
+            },
+          })
+        );
+        return Response.redirect(
+          new URL("./?shared=1", self.registration.scope).href,
+          303
+        );
+      })()
+    );
+    return;
+  }
+
+  if (request.method !== "GET") return;
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === "navigate") {

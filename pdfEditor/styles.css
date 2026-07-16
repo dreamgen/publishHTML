@@ -1158,6 +1158,388 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+.theme-button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.theme-moon {
+  display: none;
+}
+
+[data-theme="dark"] .theme-sun {
+  display: none;
+}
+
+[data-theme="dark"] .theme-moon {
+  display: block;
+}
+
+.selection-bar {
+  flex-wrap: wrap;
+}
+
+.drawing-controls {
+  position: relative;
+  z-index: 11;
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 7px 20px rgba(21, 31, 47, .06);
+}
+
+.stroke-field {
+  width: 160px;
+}
+
+.stroke-field input {
+  height: 38px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.stroke-field output {
+  color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+.annotation-layer.drawing {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.annotation-vector-layer {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.vector-annotation {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.vector-annotation.selected {
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 4px var(--accent));
+}
+
+.annotation-image {
+  display: block;
+  object-fit: contain;
+}
+
+.annotation-image.selected {
+  box-shadow: 0 0 0 1px #fff, 0 0 0 3px rgba(239, 90, 82, .35);
+}
+
+.recent-files {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  text-align: left;
+}
+
+.recent-files > strong {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.recent-file-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.recent-file-row span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.recent-file-row small {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.panel-dialog {
+  width: min(560px, calc(100% - 28px));
+  max-height: min(760px, calc(100dvh - 36px));
+  padding: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.panel-dialog::backdrop {
+  background: rgba(20, 28, 42, .46);
+  backdrop-filter: blur(4px);
+}
+
+.panel-dialog > form {
+  display: grid;
+  gap: 17px;
+  padding: 24px;
+}
+
+.dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dialog-heading h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  letter-spacing: -.02em;
+}
+
+.panel-dialog > form > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dialog-note {
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--ink-soft);
+  background: var(--surface-muted);
+  font-size: 11px !important;
+  line-height: 1.55 !important;
+}
+
+.field-error {
+  color: var(--danger) !important;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
+.password-dialog {
+  width: min(430px, calc(100% - 28px));
+}
+
+.insert-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.insert-card {
+  min-height: 174px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  cursor: pointer;
+  text-align: center;
+}
+
+.insert-card:hover {
+  border-color: #efaaa5;
+  background: var(--accent-soft);
+}
+
+.insert-card strong {
+  font-size: 12px;
+}
+
+.insert-card small {
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.insert-icon {
+  display: block;
+  border: 2px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.insert-icon.portrait {
+  width: 48px;
+  height: 68px;
+}
+
+.insert-icon.landscape {
+  width: 68px;
+  height: 48px;
+}
+
+.insert-photo-icon {
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.insert-photo-icon svg {
+  width: 32px;
+  height: 32px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.signature-dialog {
+  width: min(720px, calc(100% - 28px));
+}
+
+#signatureCanvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 720 / 260;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background:
+    linear-gradient(transparent calc(72% - 1px), #d8dee7 72%, transparent calc(72% + 1px)),
+    #ffffff;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.split-actions {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+}
+
+.form-dialog {
+  width: min(620px, calc(100% - 28px));
+}
+
+.form-field-list {
+  max-height: 50vh;
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.form-field-row {
+  display: grid;
+  grid-template-columns: minmax(120px, .8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.form-field-row > span {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.form-field-row input:not([type="checkbox"]),
+.form-field-row select {
+  width: 100%;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1420;
+  --surface: #151e2c;
+  --surface-soft: #1b2636;
+  --surface-muted: #202c3d;
+  --ink: #edf2f8;
+  --ink-soft: #b4becb;
+  --ink-faint: #8794a5;
+  --line: #2b3849;
+  --line-strong: #3b4a5d;
+  --accent-soft: #38262a;
+  --navy: #0b111b;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .25), 0 4px 14px rgba(0, 0, 0, .18);
+  --shadow-lg: 0 18px 45px rgba(0, 0, 0, .42), 0 4px 12px rgba(0, 0, 0, .26);
+}
+
+[data-theme="dark"] .app-header,
+[data-theme="dark"] .toolbar,
+[data-theme="dark"] .statusbar {
+  background: rgba(21, 30, 44, .94);
+}
+
+[data-theme="dark"] .sidebar,
+[data-theme="dark"] .button-ghost,
+[data-theme="dark"] .zoom-controls,
+[data-theme="dark"] .field input,
+[data-theme="dark"] .field textarea,
+[data-theme="dark"] .mini-button {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+[data-theme="dark"] .viewer-scroll {
+  background:
+    radial-gradient(circle at top center, rgba(42, 55, 73, .5), transparent 46%),
+    var(--bg);
+}
+
+[data-theme="dark"] .empty-illustration rect,
+[data-theme="dark"] .insert-icon {
+  fill: var(--surface-soft);
+  background: var(--surface-soft);
+}
+
+[data-theme="dark"] .thumbnail-wrap {
+  border-color: var(--line);
+  background: var(--surface-muted);
+}
+
+[data-theme="dark"] .page-card:hover,
+[data-theme="dark"] .tool-button:hover:not(:disabled),
+[data-theme="dark"] .icon-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+[data-theme="dark"] .page-card.active {
+  background: var(--accent-soft);
+}
+
+[data-theme="dark"] .page-stage {
+  box-shadow: 0 20px 48px rgba(0, 0, 0, .42), 0 3px 12px rgba(0, 0, 0, .3);
+}
+
 @media (max-width: 900px) {
   :root {
     --sidebar-width: 228px;
@@ -1320,6 +1702,43 @@ input[type="checkbox"] {
     flex: 1;
   }
 
+  .drawing-controls {
+    flex-wrap: wrap;
+    padding: 9px 10px;
+  }
+
+  .drawing-controls .text-controls-copy {
+    min-width: 100%;
+  }
+
+  .stroke-field {
+    flex: 1;
+    width: auto;
+  }
+
+  .insert-options {
+    grid-template-columns: 1fr;
+  }
+
+  .insert-card {
+    min-height: 105px;
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .insert-card > :first-child {
+    grid-row: 1 / 3;
+    align-self: center;
+    justify-self: center;
+  }
+
+  .form-field-row {
+    grid-template-columns: 1fr;
+  }
+
   .document-view {
     padding: 22px 18px 34px;
   }
@@ -1362,6 +1781,12 @@ input[type="checkbox"] {
 
   .empty-state p {
     font-size: 13px;
+  }
+}
+
+@media (max-width: 380px) {
+  .brand > span:last-child {
+    display: none;
   }
 }
 

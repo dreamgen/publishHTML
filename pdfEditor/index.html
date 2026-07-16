@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PDF 工坊</title>
-  <meta name="description" content="完全在裝置本機處理的 PDF 頁面整理、合併、拆分與文字標註工具。">
+  <meta name="description" content="完全在裝置本機處理的 PDF 編輯器，支援密碼文件、頁面整理、手寫標註、簽名與表單。">
   <meta name="theme-color" content="#f8fafc">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -41,9 +41,17 @@
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           <span>合併</span>
         </button>
+        <button class="button button-ghost" id="insertButton" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 14h6M12 11v6"/></svg>
+          <span>插入</span>
+        </button>
         <button class="button button-ghost requires-document compact-hide" id="shareButton" type="button" disabled>
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></svg>
           <span>分享</span>
+        </button>
+        <button class="icon-button theme-button" id="themeButton" type="button" aria-label="切換深色模式" title="切換深色模式">
+          <svg class="theme-sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+          <svg class="theme-moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5z"/></svg>
         </button>
         <button class="button button-primary requires-document" id="exportButton" type="button" disabled>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>
@@ -68,6 +76,7 @@
             <input id="selectAllCheckbox" type="checkbox">
             <span>全選</span>
           </label>
+          <button class="text-button" id="rangeButton" type="button" disabled>頁碼範圍</button>
           <button class="text-button" id="extractButton" type="button" disabled>擷取所選</button>
         </div>
         <div class="page-list" id="pageList">
@@ -108,6 +117,34 @@
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8.5 19h7"/></svg>
               <span>文字</span>
             </button>
+            <button class="tool-button requires-document" id="penToolButton" type="button" disabled title="自由畫筆（P）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 20 4.2-1 10.6-10.6a2.1 2.1 0 0 0-3-3L5.2 16z"/><path d="m14.5 6.7 2.8 2.8"/></svg>
+              <span>畫筆</span>
+            </button>
+            <button class="tool-button requires-document" id="highlightToolButton" type="button" disabled title="螢光筆（H）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 16 7-11 5 3-7 11z"/><path d="m6 16-2 4 5-1M14 18h6"/></svg>
+              <span>螢光</span>
+            </button>
+            <button class="tool-button requires-document" id="rectToolButton" type="button" disabled title="矩形框">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/></svg>
+              <span>矩形</span>
+            </button>
+            <button class="tool-button requires-document" id="arrowToolButton" type="button" disabled title="箭頭">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19 19 5M11 5h8v8"/></svg>
+              <span>箭頭</span>
+            </button>
+            <button class="tool-button requires-document" id="imageToolButton" type="button" disabled title="加入圖片或印章">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 5-5 4 4 2-2 5 4"/></svg>
+              <span>圖片</span>
+            </button>
+            <button class="tool-button requires-document" id="signatureToolButton" type="button" disabled title="加入手寫簽名">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 17c3-5 4-10 6-10 3 0-1 9 2 9 2 0 3-4 5-4 1.5 0 1 3 2.5 3 1 0 1.5-.7 2.5-1.5"/><path d="M3 20h18"/></svg>
+              <span>簽名</span>
+            </button>
+            <button class="tool-button requires-document" id="formToolButton" type="button" disabled title="填寫目前來源的 PDF 表單">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h3M8 16h8"/><rect x="13" y="10" width="3" height="3"/></svg>
+              <span>表單</span>
+            </button>
           </div>
 
           <div class="toolbar-spacer"></div>
@@ -121,6 +158,22 @@
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
             </button>
           </div>
+        </div>
+
+        <div class="drawing-controls" id="drawingControls" hidden>
+          <div class="text-controls-copy">
+            <strong id="drawingToolName">畫筆</strong>
+            <span id="drawingToolHint">直接在頁面上拖曳繪製，按 Esc 回到選取模式。</span>
+          </div>
+          <label class="field color-field">
+            <span>顏色</span>
+            <input id="drawingColor" type="color" value="#ef5a52">
+          </label>
+          <label class="field stroke-field">
+            <span>粗細 <output id="drawingWidthValue">3</output></span>
+            <input id="drawingWidth" type="range" min="1" max="24" step="1" value="3">
+          </label>
+          <button class="button button-ghost" id="closeDrawingButton" type="button">完成</button>
         </div>
 
         <div class="text-controls" id="textControls" hidden>
@@ -160,12 +213,16 @@
               本機處理，不會上傳
             </span>
             <h1>整理 PDF，不必交出文件</h1>
-            <p>拖放 PDF 到這裡，或從裝置選擇檔案。支援合併、拆分、排序、旋轉、刪除與文字標註。</p>
+            <p>拖放 PDF 到這裡，或從裝置選擇檔案。支援密碼文件、合併拆分、手寫標註、簽名、圖片與表單。</p>
             <button class="button button-primary button-large" id="emptyOpenButton" type="button">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/><path d="m3.5 10 2 8.5h13l2-8.5z"/></svg>
               選擇 PDF
             </button>
             <small>也可以一次選取多個檔案直接合併</small>
+            <div class="recent-files" id="recentFiles" hidden>
+              <strong>最近使用</strong>
+              <div id="recentFileList"></div>
+            </div>
           </section>
 
           <section class="document-view" id="documentView" hidden>
@@ -178,8 +235,8 @@
           <div class="drop-overlay" id="dropOverlay" hidden>
             <div>
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v5h16v-5"/></svg>
-              <strong>放開以加入 PDF</strong>
-              <span>已有文件時會將新頁面合併到末尾</span>
+              <strong>放開以加入 PDF 或圖片</strong>
+              <span>圖片會自動轉成 PDF 頁面並加入文件</span>
             </div>
           </div>
         </div>
@@ -198,6 +255,8 @@
 
   <input id="openFileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
   <input id="mergeFileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+  <input id="annotationImageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+  <input id="imageToPdfInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
 
   <div class="busy-overlay" id="busyOverlay" hidden aria-live="polite" aria-busy="true">
     <div class="busy-card">
@@ -220,6 +279,114 @@
       <div class="dialog-actions">
         <button class="button button-ghost" value="cancel">取消</button>
         <button class="button button-danger" id="confirmAcceptButton" value="confirm">確認</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog password-dialog" id="passwordDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">受保護文件</span>
+          <h2>輸入 PDF 密碼</h2>
+        </div>
+      </div>
+      <p id="passwordFileName"></p>
+      <label class="field">
+        <span>文件密碼</span>
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="輸入開啟密碼" required>
+      </label>
+      <p class="field-error" id="passwordError" hidden>密碼不正確，請再試一次。</p>
+      <p class="dialog-note">密碼只用於這次開啟，不會儲存在草稿或傳送到網路。匯出後會成為新的無密碼 PDF。</p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">取消</button>
+        <button class="button button-primary" id="passwordAcceptButton" value="confirm">解鎖</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog" id="insertDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">新增內容</span>
+          <h2>插入頁面</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="關閉"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="insert-options">
+        <button class="insert-card" id="blankPortraitButton" type="button">
+          <span class="insert-icon portrait"></span>
+          <strong>A4 直向空白頁</strong>
+          <small>插入在目前頁面之後</small>
+        </button>
+        <button class="insert-card" id="blankLandscapeButton" type="button">
+          <span class="insert-icon landscape"></span>
+          <strong>A4 橫向空白頁</strong>
+          <small>適合手寫與圖表</small>
+        </button>
+        <button class="insert-card" id="imageToPdfButton" type="button">
+          <span class="insert-photo-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 17 5-5 4 4 2-2 5 4"/></svg></span>
+          <strong>圖片轉 PDF</strong>
+          <small>可一次選擇多張圖片</small>
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog" id="rangeDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">批次選取</span>
+          <h2>依頁碼選取</h2>
+        </div>
+      </div>
+      <label class="field">
+        <span>頁碼或範圍</span>
+        <input id="rangeInput" type="text" inputmode="numeric" placeholder="例如：1-3, 6, 9-12">
+      </label>
+      <p class="dialog-note">可使用逗號分隔，重複頁碼會自動忽略。</p>
+      <p class="field-error" id="rangeError" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">取消</button>
+        <button class="button button-primary" id="rangeAcceptButton" value="confirm">套用選取</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog signature-dialog" id="signatureDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">本機手寫</span>
+          <h2>建立簽名</h2>
+        </div>
+      </div>
+      <canvas id="signatureCanvas" width="720" height="260" aria-label="手寫簽名區"></canvas>
+      <p class="dialog-note">可使用滑鼠、觸控或觸控筆。透明背景會保留。</p>
+      <div class="dialog-actions split-actions">
+        <button class="button button-ghost" id="clearSignatureButton" type="button">清除</button>
+        <span></span>
+        <button class="button button-ghost" value="cancel">取消</button>
+        <button class="button button-primary" id="saveSignatureButton" type="button">加入文件</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog form-dialog" id="formDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">PDF 表單</span>
+          <h2>填寫表單欄位</h2>
+        </div>
+      </div>
+      <div class="form-field-list" id="formFieldList"></div>
+      <p class="dialog-note">套用後會將欄位扁平化為頁面內容；這個動作無法使用復原還原，但原始檔不會被覆寫。</p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">取消</button>
+        <button class="button button-primary" id="applyFormButton" type="button">套用並扁平化</button>
       </div>
     </form>
   </dialog>

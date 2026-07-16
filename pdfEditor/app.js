@@ -18,6 +18,10 @@ const PDFJS_WASM_URL = new URL(
 ).href;
 
 const { PDFDocument, degrees } = window.PDFLib || {};
+const EDITOR_DB_NAME = "pdfEditor-db";
+const EDITOR_DB_VERSION = 1;
+const AUTOSAVE_KEY = "autosave";
+const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -48,30 +52,50 @@ class PdfWorkshop {
     this.thumbnailGeneration = 0;
     this.draggedPageId = null;
     this.annotationDrag = null;
+    this.activeTool = "select";
+    this.drawingDraft = null;
+    this.drawingFrame = null;
     this.dragDepth = 0;
     this.resizeTimer = null;
+    this.autosaveTimer = null;
+    this.dbPromise = null;
+    this.restoringAutosave = false;
     this.annotationFontBytesPromise = null;
+    this.signatureDrawing = false;
+    this.signatureHasInk = false;
 
     this.elements = {
       openButton: $("#openButton"),
       emptyOpenButton: $("#emptyOpenButton"),
       mergeButton: $("#mergeButton"),
+      insertButton: $("#insertButton"),
       shareButton: $("#shareButton"),
+      themeButton: $("#themeButton"),
       exportButton: $("#exportButton"),
       openFileInput: $("#openFileInput"),
       mergeFileInput: $("#mergeFileInput"),
+      annotationImageInput: $("#annotationImageInput"),
+      imageToPdfInput: $("#imageToPdfInput"),
       sidebar: $("#sidebar"),
       openSidebarButton: $("#openSidebarButton"),
       closeSidebarButton: $("#closeSidebarButton"),
       pageList: $("#pageList"),
       pageCount: $("#pageCount"),
       selectAllCheckbox: $("#selectAllCheckbox"),
+      rangeButton: $("#rangeButton"),
       extractButton: $("#extractButton"),
       undoButton: $("#undoButton"),
       redoButton: $("#redoButton"),
       rotateButton: $("#rotateButton"),
       deleteButton: $("#deleteButton"),
       textToolButton: $("#textToolButton"),
+      penToolButton: $("#penToolButton"),
+      highlightToolButton: $("#highlightToolButton"),
+      rectToolButton: $("#rectToolButton"),
+      arrowToolButton: $("#arrowToolButton"),
+      imageToolButton: $("#imageToolButton"),
+      signatureToolButton: $("#signatureToolButton"),
+      formToolButton: $("#formToolButton"),
       zoomOutButton: $("#zoomOutButton"),
       zoomInButton: $("#zoomInButton"),
       zoomResetButton: $("#zoomResetButton"),
@@ -82,6 +106,13 @@ class PdfWorkshop {
       armTextButton: $("#armTextButton"),
       cancelTextButton: $("#cancelTextButton"),
       textToolHint: $("#textToolHint"),
+      drawingControls: $("#drawingControls"),
+      drawingToolName: $("#drawingToolName"),
+      drawingToolHint: $("#drawingToolHint"),
+      drawingColor: $("#drawingColor"),
+      drawingWidth: $("#drawingWidth"),
+      drawingWidthValue: $("#drawingWidthValue"),
+      closeDrawingButton: $("#closeDrawingButton"),
       viewerScroll: $("#viewerScroll"),
       emptyState: $("#emptyState"),
       documentView: $("#documentView"),
@@ -101,18 +132,41 @@ class PdfWorkshop {
       confirmTitle: $("#confirmTitle"),
       confirmMessage: $("#confirmMessage"),
       confirmAcceptButton: $("#confirmAcceptButton"),
+      recentFiles: $("#recentFiles"),
+      recentFileList: $("#recentFileList"),
+      passwordDialog: $("#passwordDialog"),
+      passwordFileName: $("#passwordFileName"),
+      passwordInput: $("#passwordInput"),
+      passwordError: $("#passwordError"),
+      insertDialog: $("#insertDialog"),
+      blankPortraitButton: $("#blankPortraitButton"),
+      blankLandscapeButton: $("#blankLandscapeButton"),
+      imageToPdfButton: $("#imageToPdfButton"),
+      rangeDialog: $("#rangeDialog"),
+      rangeInput: $("#rangeInput"),
+      rangeError: $("#rangeError"),
+      rangeAcceptButton: $("#rangeAcceptButton"),
+      signatureDialog: $("#signatureDialog"),
+      signatureCanvas: $("#signatureCanvas"),
+      clearSignatureButton: $("#clearSignatureButton"),
+      saveSignatureButton: $("#saveSignatureButton"),
+      formDialog: $("#formDialog"),
+      formFieldList: $("#formFieldList"),
+      applyFormButton: $("#applyFormButton"),
     };
   }
 
-  init() {
+  async init() {
     if (!PDFDocument) {
       this.toast("PDF 編輯元件載入失敗，請重新整理頁面。", "error", 8000);
       return;
     }
 
+    this.applySavedTheme();
     this.bindEvents();
     this.updateConnectivity();
     this.updateUI();
+    this.renderRecentFiles();
     this.registerServiceWorker();
     this.registerFileHandler();
 
@@ -120,8 +174,15 @@ class PdfWorkshop {
       navigator.storage.persist().catch(() => {});
     }
 
-    if (new URLSearchParams(location.search).get("action") === "open") {
+    const openAction =
+      new URLSearchParams(location.search).get("action") === "open";
+    if (openAction) {
       setTimeout(() => this.elements.openFileInput.click(), 350);
+    }
+
+    const consumedSharedFile = await this.consumeSharedFile();
+    if (!consumedSharedFile && !openAction) {
+      await this.offerAutosaveRestore();
     }
   }
 
@@ -130,24 +191,37 @@ class PdfWorkshop {
       openButton,
       emptyOpenButton,
       mergeButton,
+      insertButton,
       shareButton,
+      themeButton,
       exportButton,
       openFileInput,
       mergeFileInput,
+      annotationImageInput,
+      imageToPdfInput,
       openSidebarButton,
       closeSidebarButton,
       selectAllCheckbox,
+      rangeButton,
       extractButton,
       undoButton,
       redoButton,
       rotateButton,
       deleteButton,
       textToolButton,
+      penToolButton,
+      highlightToolButton,
+      rectToolButton,
+      arrowToolButton,
+      imageToolButton,
+      signatureToolButton,
+      formToolButton,
       zoomOutButton,
       zoomInButton,
       zoomResetButton,
       armTextButton,
       cancelTextButton,
+      closeDrawingButton,
       annotationLayer,
       viewerScroll,
     } = this.elements;
@@ -155,6 +229,8 @@ class PdfWorkshop {
     openButton.addEventListener("click", () => openFileInput.click());
     emptyOpenButton.addEventListener("click", () => openFileInput.click());
     mergeButton.addEventListener("click", () => mergeFileInput.click());
+    insertButton.addEventListener("click", () => this.elements.insertDialog.showModal());
+    themeButton.addEventListener("click", () => this.toggleTheme());
     exportButton.addEventListener("click", () =>
       this.exportPages(this.pages.map((page) => page.id), {
         mode: "download",
@@ -189,6 +265,18 @@ class PdfWorkshop {
       if (files.length) await this.loadFiles(files, { replace: false });
     });
 
+    annotationImageInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) await this.insertImageAnnotation(file);
+    });
+
+    imageToPdfInput.addEventListener("change", async (event) => {
+      const files = [...(event.target.files || [])];
+      event.target.value = "";
+      if (files.length) await this.convertImagesToPdf(files);
+    });
+
     openSidebarButton.addEventListener("click", () =>
       document.body.classList.add("sidebar-visible")
     );
@@ -214,6 +302,17 @@ class PdfWorkshop {
       this.renderSidebar();
     });
 
+    rangeButton.addEventListener("click", () => {
+      this.elements.rangeInput.value = "";
+      this.elements.rangeError.hidden = true;
+      this.elements.rangeDialog.showModal();
+      setTimeout(() => this.elements.rangeInput.focus(), 50);
+    });
+    this.elements.rangeAcceptButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.applyPageRange();
+    });
+
     extractButton.addEventListener("click", () =>
       this.exportPages(
         this.pages
@@ -228,8 +327,48 @@ class PdfWorkshop {
     rotateButton.addEventListener("click", () => this.rotateSelectedPages());
     deleteButton.addEventListener("click", () => this.deleteSelection());
     textToolButton.addEventListener("click", () => this.toggleTextControls());
+    penToolButton.addEventListener("click", () => this.activateDrawingTool("pen"));
+    highlightToolButton.addEventListener("click", () =>
+      this.activateDrawingTool("highlight")
+    );
+    rectToolButton.addEventListener("click", () => this.activateDrawingTool("rect"));
+    arrowToolButton.addEventListener("click", () =>
+      this.activateDrawingTool("arrow")
+    );
+    imageToolButton.addEventListener("click", () => annotationImageInput.click());
+    signatureToolButton.addEventListener("click", () => this.openSignatureDialog());
+    formToolButton.addEventListener("click", () => this.openFormDialog());
     armTextButton.addEventListener("click", () => this.toggleTextPlacement());
     cancelTextButton.addEventListener("click", () => this.closeTextControls());
+    closeDrawingButton.addEventListener("click", () => this.activateDrawingTool("select"));
+    this.elements.drawingWidth.addEventListener("input", () => {
+      this.elements.drawingWidthValue.textContent =
+        this.elements.drawingWidth.value;
+    });
+
+    this.elements.blankPortraitButton.addEventListener("click", async () => {
+      this.elements.insertDialog.close();
+      await this.insertBlankPage("portrait");
+    });
+    this.elements.blankLandscapeButton.addEventListener("click", async () => {
+      this.elements.insertDialog.close();
+      await this.insertBlankPage("landscape");
+    });
+    this.elements.imageToPdfButton.addEventListener("click", () => {
+      this.elements.insertDialog.close();
+      imageToPdfInput.click();
+    });
+
+    this.bindSignaturePad();
+    this.elements.clearSignatureButton.addEventListener("click", () =>
+      this.clearSignaturePad()
+    );
+    this.elements.saveSignatureButton.addEventListener("click", () =>
+      this.saveSignature()
+    );
+    this.elements.applyFormButton.addEventListener("click", () =>
+      this.applyFormValues()
+    );
 
     zoomOutButton.addEventListener("click", () => this.changeZoom(-0.15));
     zoomInButton.addEventListener("click", () => this.changeZoom(0.15));
@@ -286,8 +425,20 @@ class PdfWorkshop {
       this.dragDepth = 0;
       this.elements.dropOverlay.hidden = true;
       const files = [...(event.dataTransfer?.files || [])];
-      if (files.length) {
-        await this.loadFiles(files, { replace: !this.pages.length });
+      const pdfFiles = files.filter(
+        (file) =>
+          file.type === "application/pdf" ||
+          file.name.toLowerCase().endsWith(".pdf")
+      );
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      if (pdfFiles.length) {
+        await this.loadFiles(pdfFiles, { replace: !this.pages.length });
+      }
+      if (imageFiles.length) {
+        await this.convertImagesToPdf(imageFiles);
+      }
+      if (!pdfFiles.length && !imageFiles.length && files.length) {
+        this.toast("請拖入 PDF 或圖片檔案。", "error");
       }
     });
 
@@ -298,7 +449,7 @@ class PdfWorkshop {
     }).observe(viewerScroll);
   }
 
-  async loadFiles(fileList, { replace = false } = {}) {
+  async loadFiles(fileList, { replace = false, remember = true } = {}) {
     const files = fileList.filter(
       (file) =>
         file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
@@ -306,12 +457,13 @@ class PdfWorkshop {
 
     if (!files.length) {
       this.toast("請選擇 PDF 檔案。", "error");
-      return;
+      return [];
     }
 
     this.setBusy(true, "正在讀取 PDF", `準備載入 ${files.length} 個檔案`, 0);
     const loaded = [];
     const errors = [];
+    let newPageIds = [];
 
     for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
       const file = files[fileIndex];
@@ -342,7 +494,7 @@ class PdfWorkshop {
         this.pushHistory();
       }
 
-      const newPageIds = [];
+      newPageIds = [];
       for (const { source, pages } of loaded) {
         this.sources.set(source.id, source);
         this.pages.push(...pages);
@@ -355,15 +507,26 @@ class PdfWorkshop {
       this.dirty = !replace || loaded.length > 1;
       this.zoom = 1;
       this.closeTextControls();
+      this.activateDrawingTool("select");
       this.renderAll();
+      if (remember) this.rememberRecentFiles(files);
+      this.scheduleAutosave();
 
       const pageTotal = loaded.reduce((sum, item) => sum + item.pages.length, 0);
+      const encryptedCount = loaded.filter((item) => item.source.encrypted).length;
       this.toast(
         replace
           ? `已開啟 ${pageTotal} 頁 PDF。`
           : `已加入 ${files.length - errors.length} 份文件、${pageTotal} 頁。`,
         "success"
       );
+      if (encryptedCount) {
+        this.toast(
+          `已解鎖 ${encryptedCount} 份受保護文件；匯出時會重建為無密碼 PDF。`,
+          "success",
+          7000
+        );
+      }
     }
 
     this.setBusy(false);
@@ -376,16 +539,26 @@ class PdfWorkshop {
       );
       this.toast(
         passwordProtected
-          ? `${errors.length} 個檔案無法開啟；目前不支援有密碼或加密的 PDF。`
+          ? `${errors.length} 個受保護檔案未解鎖或密碼不正確。`
           : `${errors.length} 個檔案讀取失敗，請確認檔案是否完整。`,
         "error",
         7000
       );
     }
+    return newPageIds;
   }
 
   async loadSource(file) {
     const bytes = new Uint8Array(await file.arrayBuffer());
+    return this.loadSourceFromBytes({
+      bytes,
+      name: file.name,
+      size: file.size,
+    });
+  }
+
+  async loadSourceFromBytes({ bytes, name, size, sourceId = makeId("source") }) {
+    let passwordWasRequested = false;
     const loadingTask = pdfjsLib.getDocument({
       data: bytes.slice(),
       isEvalSupported: false,
@@ -397,19 +570,43 @@ class PdfWorkshop {
       useSystemFonts: true,
     });
 
-    const pdfjsDoc = await loadingTask.promise;
-    let pdfLibDoc;
+    loadingTask.onPassword = async (updatePassword, reason) => {
+      passwordWasRequested = true;
+      const password = await this.requestPassword(
+        name,
+        reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD
+      );
+      updatePassword(
+        password === null ? new Error("Password entry cancelled") : password
+      );
+    };
+
+    let pdfjsDoc;
     try {
-      pdfLibDoc = await PDFDocument.load(bytes, {
-        ignoreEncryption: false,
-        updateMetadata: false,
-      });
+      pdfjsDoc = await loadingTask.promise;
     } catch (error) {
       await loadingTask.destroy().catch(() => {});
       throw error;
     }
 
-    const sourceId = makeId("source");
+    let pdfLibDoc = null;
+    let encrypted = passwordWasRequested;
+    if (!encrypted) {
+      try {
+        pdfLibDoc = await PDFDocument.load(bytes, {
+          ignoreEncryption: false,
+          updateMetadata: false,
+        });
+      } catch (error) {
+        if (/encrypt|password/i.test(error?.message || "")) {
+          encrypted = true;
+        } else {
+          await loadingTask.destroy().catch(() => {});
+          throw error;
+        }
+      }
+    }
+
     const pages = [];
 
     for (let index = 0; index < pdfjsDoc.numPages; index += 1) {
@@ -427,15 +624,37 @@ class PdfWorkshop {
     return {
       source: {
         id: sourceId,
-        name: file.name,
-        size: file.size,
+        name,
+        size,
         bytes,
         loadingTask,
         pdfjsDoc,
         pdfLibDoc,
+        encrypted,
       },
       pages,
     };
+  }
+
+  requestPassword(fileName, incorrect = false) {
+    const dialog = this.elements.passwordDialog;
+    this.elements.passwordFileName.textContent = fileName;
+    this.elements.passwordError.hidden = !incorrect;
+    this.elements.passwordInput.value = "";
+    if (!dialog.open) dialog.showModal();
+    setTimeout(() => this.elements.passwordInput.focus(), 40);
+
+    return new Promise((resolve) => {
+      const handleClose = () => {
+        dialog.removeEventListener("close", handleClose);
+        const value =
+          dialog.returnValue === "confirm"
+            ? this.elements.passwordInput.value
+            : null;
+        resolve(value || null);
+      };
+      dialog.addEventListener("close", handleClose, { once: true });
+    });
   }
 
   renderAll() {
@@ -478,10 +697,22 @@ class PdfWorkshop {
     this.elements.rotateButton.disabled = !hasDocument;
     this.elements.deleteButton.disabled = !hasDocument;
     this.elements.textToolButton.disabled = !hasDocument;
+    [
+      this.elements.penToolButton,
+      this.elements.highlightToolButton,
+      this.elements.rectToolButton,
+      this.elements.arrowToolButton,
+      this.elements.imageToolButton,
+      this.elements.signatureToolButton,
+      this.elements.formToolButton,
+    ].forEach((button) => {
+      button.disabled = !hasDocument;
+    });
     this.elements.zoomOutButton.disabled = !hasDocument || this.zoom <= 0.5;
     this.elements.zoomInButton.disabled = !hasDocument || this.zoom >= 2.5;
     this.elements.zoomResetButton.disabled = !hasDocument;
     this.elements.extractButton.disabled = !selectedCount;
+    this.elements.rangeButton.disabled = !hasDocument;
     this.elements.selectAllCheckbox.disabled = !hasDocument;
 
     this.elements.zoomResetButton.textContent = `${Math.round(this.zoom * 100)}%`;
@@ -506,6 +737,9 @@ class PdfWorkshop {
       );
       this.elements.documentStatus.textContent =
         `${this.sources.size} 份文件・${this.formatBytes(totalSize)}` +
+        ([...this.sources.values()].some((source) => source.encrypted)
+          ? "・含已解鎖文件"
+          : "") +
         (this.dirty ? "・尚未匯出" : "・已匯出");
     } else {
       this.elements.documentStatus.textContent = "準備就緒";
@@ -567,7 +801,9 @@ class PdfWorkshop {
       const pageLabel = document.createElement("span");
       pageLabel.textContent = `第 ${index + 1} 頁`;
       const sourceLabel = document.createElement("span");
-      sourceLabel.textContent = source?.name || "PDF";
+      sourceLabel.textContent = `${source?.encrypted ? "🔓 " : ""}${
+        source?.name || "PDF"
+      }`;
       sourceLabel.title = source?.name || "";
       meta.append(pageLabel, sourceLabel);
       previewColumn.append(thumbWrap, meta);
@@ -787,35 +1023,180 @@ class PdfWorkshop {
     const layer = this.elements.annotationLayer;
     layer.replaceChildren();
     layer.classList.toggle("placing", this.textPlacementArmed);
+    layer.classList.toggle(
+      "drawing",
+      ["pen", "highlight", "rect", "arrow"].includes(this.activeTool)
+    );
 
     const pageRecord = this.pages.find(
       (page) => page.id === this.currentRenderedPageId
     );
     if (!pageRecord || !this.currentViewport) return;
 
+    const vectorLayer = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg"
+    );
+    vectorLayer.classList.add("annotation-vector-layer");
+    vectorLayer.setAttribute("width", this.currentViewport.width);
+    vectorLayer.setAttribute("height", this.currentViewport.height);
+    vectorLayer.setAttribute(
+      "viewBox",
+      `0 0 ${this.currentViewport.width} ${this.currentViewport.height}`
+    );
+    layer.append(vectorLayer);
+
     for (const annotation of pageRecord.annotations) {
-      if (annotation.type !== "text") continue;
-      const [left, bottom] = this.currentViewport.convertToViewportPoint(
-        annotation.x,
-        annotation.y
-      );
-      const metrics = this.getAnnotationMetrics(annotation);
-      const item = document.createElement("div");
-      item.className = `annotation-item${
-        annotation.id === this.selectedAnnotationId ? " selected" : ""
-      }`;
-      item.dataset.annotationId = annotation.id;
-      item.tabIndex = 0;
-      item.textContent = annotation.text;
-      item.style.left = `${left}px`;
-      item.style.top = `${
-        bottom - metrics.height * this.currentViewport.scale
-      }px`;
-      item.style.fontSize = `${annotation.fontSize * this.currentViewport.scale}px`;
-      item.style.color = annotation.color;
-      item.style.lineHeight = `${metrics.lineHeight * this.currentViewport.scale}px`;
-      layer.append(item);
+      if (annotation.type === "text") {
+        const [left, bottom] = this.currentViewport.convertToViewportPoint(
+          annotation.x,
+          annotation.y
+        );
+        const metrics = this.getAnnotationMetrics(annotation);
+        const item = document.createElement("div");
+        item.className = `annotation-item annotation-text${
+          annotation.id === this.selectedAnnotationId ? " selected" : ""
+        }`;
+        item.dataset.annotationId = annotation.id;
+        item.tabIndex = 0;
+        item.textContent = annotation.text;
+        item.style.left = `${left}px`;
+        item.style.top = `${
+          bottom - metrics.height * this.currentViewport.scale
+        }px`;
+        item.style.fontSize = `${
+          annotation.fontSize * this.currentViewport.scale
+        }px`;
+        item.style.color = annotation.color;
+        item.style.lineHeight = `${
+          metrics.lineHeight * this.currentViewport.scale
+        }px`;
+        layer.append(item);
+      } else if (annotation.type === "image") {
+        const [left, bottom] = this.currentViewport.convertToViewportPoint(
+          annotation.x,
+          annotation.y
+        );
+        const item = document.createElement("img");
+        item.className = `annotation-item annotation-image${
+          annotation.id === this.selectedAnnotationId ? " selected" : ""
+        }`;
+        item.dataset.annotationId = annotation.id;
+        item.tabIndex = 0;
+        item.draggable = false;
+        item.alt = annotation.label || "圖片標註";
+        item.src = annotation.dataUrl;
+        item.style.left = `${left}px`;
+        item.style.top = `${
+          bottom - annotation.height * this.currentViewport.scale
+        }px`;
+        item.style.width = `${
+          annotation.width * this.currentViewport.scale
+        }px`;
+        item.style.height = `${
+          annotation.height * this.currentViewport.scale
+        }px`;
+        layer.append(item);
+      } else {
+        const shape = this.createSvgAnnotation(annotation);
+        if (shape) vectorLayer.append(shape);
+      }
     }
+
+    if (this.drawingDraft) {
+      const draftShape = this.createSvgAnnotation(this.drawingDraft, true);
+      if (draftShape) vectorLayer.append(draftShape);
+    }
+  }
+
+  createSvgAnnotation(annotation, draft = false) {
+    const points = (annotation.points || []).map(([x, y]) =>
+      this.currentViewport.convertToViewportPoint(x, y)
+    );
+    if (!points.length) return null;
+    const namespace = "http://www.w3.org/2000/svg";
+    const selected =
+      !draft && annotation.id === this.selectedAnnotationId;
+    let shape;
+
+    if (annotation.type === "path") {
+      shape = document.createElementNS(namespace, "path");
+      shape.setAttribute(
+        "d",
+        points
+          .map(([x, y], index) => `${index ? "L" : "M"} ${x} ${y}`)
+          .join(" ")
+      );
+      shape.setAttribute("fill", "none");
+      shape.setAttribute("stroke", annotation.color);
+      shape.setAttribute(
+        "stroke-width",
+        Math.max(1, annotation.width * this.currentViewport.scale)
+      );
+      shape.setAttribute("stroke-linecap", "round");
+      shape.setAttribute("stroke-linejoin", "round");
+      shape.setAttribute("opacity", annotation.opacity ?? 1);
+    } else if (annotation.type === "rect" && points.length >= 2) {
+      const [[x1, y1], [x2, y2]] = points;
+      shape = document.createElementNS(namespace, "rect");
+      shape.setAttribute("x", Math.min(x1, x2));
+      shape.setAttribute("y", Math.min(y1, y2));
+      shape.setAttribute("width", Math.abs(x2 - x1));
+      shape.setAttribute("height", Math.abs(y2 - y1));
+      shape.setAttribute("fill", "none");
+      shape.setAttribute("stroke", annotation.color);
+      shape.setAttribute(
+        "stroke-width",
+        Math.max(1, annotation.width * this.currentViewport.scale)
+      );
+    } else if (annotation.type === "arrow" && points.length >= 2) {
+      const [[x1, y1], [x2, y2]] = points;
+      shape = document.createElementNS(namespace, "g");
+      const line = document.createElementNS(namespace, "line");
+      line.setAttribute("x1", x1);
+      line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2);
+      line.setAttribute("y2", y2);
+      line.setAttribute("stroke", annotation.color);
+      line.setAttribute(
+        "stroke-width",
+        Math.max(1, annotation.width * this.currentViewport.scale)
+      );
+      line.setAttribute("stroke-linecap", "round");
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const head = Math.max(
+        9,
+        annotation.width * this.currentViewport.scale * 3.5
+      );
+      const polygon = document.createElementNS(namespace, "polygon");
+      polygon.setAttribute(
+        "points",
+        [
+          [x2, y2],
+          [
+            x2 - head * Math.cos(angle - Math.PI / 6),
+            y2 - head * Math.sin(angle - Math.PI / 6),
+          ],
+          [
+            x2 - head * Math.cos(angle + Math.PI / 6),
+            y2 - head * Math.sin(angle + Math.PI / 6),
+          ],
+        ]
+          .map((point) => point.join(","))
+          .join(" ")
+      );
+      polygon.setAttribute("fill", annotation.color);
+      shape.append(line, polygon);
+    }
+
+    if (!shape) return null;
+    shape.classList.add("vector-annotation");
+    if (selected) shape.classList.add("selected");
+    if (!draft) {
+      shape.dataset.annotationId = annotation.id;
+      shape.setAttribute("tabindex", "0");
+    }
+    return shape;
   }
 
   getAnnotationMetrics(annotation) {
@@ -829,7 +1210,7 @@ class PdfWorkshop {
   }
 
   handleAnnotationLayerClick(event) {
-    const annotationItem = event.target.closest(".annotation-item");
+    const annotationItem = event.target.closest("[data-annotation-id]");
     if (annotationItem) {
       this.selectedAnnotationId = annotationItem.dataset.annotationId;
       this.renderAnnotations();
@@ -837,6 +1218,10 @@ class PdfWorkshop {
     }
 
     this.selectedAnnotationId = null;
+
+    if (this.activeTool !== "select" && this.activeTool !== "text") {
+      return;
+    }
 
     if (
       !this.textPlacementArmed ||
@@ -892,8 +1277,42 @@ class PdfWorkshop {
   }
 
   handleAnnotationPointerDown(event) {
+    if (!this.currentViewport) return;
+    const annotationTarget = event.target.closest("[data-annotation-id]");
+    if (
+      !annotationTarget &&
+      ["pen", "highlight", "rect", "arrow"].includes(this.activeTool)
+    ) {
+      event.preventDefault();
+      const point = this.eventToPdfPoint(event);
+      if (!point) return;
+      this.drawingDraft = {
+        id: makeId("annotation"),
+        type:
+          this.activeTool === "pen" || this.activeTool === "highlight"
+            ? "path"
+            : this.activeTool,
+        tool: this.activeTool,
+        color: this.elements.drawingColor.value,
+        width:
+          this.activeTool === "highlight"
+            ? Math.max(10, Number(this.elements.drawingWidth.value) * 3)
+            : Number(this.elements.drawingWidth.value),
+        opacity: this.activeTool === "highlight" ? 0.35 : 1,
+        points: [point, point],
+      };
+      this.renderAnnotations();
+      return;
+    }
+
     const item = event.target.closest(".annotation-item");
-    if (!item || !this.currentViewport) return;
+    if (!item) {
+      if (annotationTarget) {
+        this.selectedAnnotationId = annotationTarget.dataset.annotationId;
+        this.renderAnnotations();
+      }
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const rect = item.getBoundingClientRect();
@@ -916,6 +1335,33 @@ class PdfWorkshop {
   }
 
   handleAnnotationPointerMove(event) {
+    if (this.drawingDraft) {
+      const point = this.eventToPdfPoint(event);
+      if (!point) return;
+      if (this.drawingDraft.type === "path") {
+        const previous =
+          this.drawingDraft.points[this.drawingDraft.points.length - 1];
+        const [prevX, prevY] = this.currentViewport.convertToViewportPoint(
+          previous[0],
+          previous[1]
+        );
+        const [nextX, nextY] =
+          this.currentViewport.convertToViewportPoint(point[0], point[1]);
+        if (Math.hypot(nextX - prevX, nextY - prevY) >= 2) {
+          this.drawingDraft.points.push(point);
+        }
+      } else {
+        this.drawingDraft.points[1] = point;
+      }
+      if (!this.drawingFrame) {
+        this.drawingFrame = requestAnimationFrame(() => {
+          this.drawingFrame = null;
+          this.renderAnnotations();
+        });
+      }
+      return;
+    }
+
     const drag = this.annotationDrag;
     if (!drag || !drag.item?.isConnected) return;
     const deltaX = event.clientX - drag.startClientX;
@@ -937,6 +1383,34 @@ class PdfWorkshop {
   }
 
   handleAnnotationPointerUp() {
+    if (this.drawingDraft) {
+      const draft = this.drawingDraft;
+      this.drawingDraft = null;
+      if (this.drawingFrame) {
+        cancelAnimationFrame(this.drawingFrame);
+        this.drawingFrame = null;
+      }
+      const hasEnoughPoints =
+        draft.type === "path"
+          ? draft.points.length >= 3
+          : this.annotationDistance(draft.points[0], draft.points[1]) >= 4;
+      if (hasEnoughPoints) {
+        this.mutate(
+          () => {
+            const page = this.pages.find(
+              (item) => item.id === this.activePageId
+            );
+            page.annotations.push(draft);
+            this.selectedAnnotationId = draft.id;
+          },
+          { sidebar: false }
+        );
+      } else {
+        this.renderAnnotations();
+      }
+      return;
+    }
+
     const drag = this.annotationDrag;
     if (!drag) return;
 
@@ -957,6 +1431,7 @@ class PdfWorkshop {
         this.dirty = true;
       }
       this.updateUI();
+      this.scheduleAutosave();
     }
 
     this.annotationDrag = null;
@@ -964,12 +1439,27 @@ class PdfWorkshop {
   }
 
   renderAnnotationsSelectionOnly() {
-    $$(".annotation-item").forEach((item) => {
+    $$("[data-annotation-id]").forEach((item) => {
       item.classList.toggle(
         "selected",
         item.dataset.annotationId === this.selectedAnnotationId
       );
     });
+  }
+
+  eventToPdfPoint(event) {
+    if (!this.currentViewport) return null;
+    const rect = this.elements.annotationLayer.getBoundingClientRect();
+    const x = Math.min(rect.width, Math.max(0, event.clientX - rect.left));
+    const y = Math.min(rect.height, Math.max(0, event.clientY - rect.top));
+    return this.currentViewport.convertToPdfPoint(x, y);
+  }
+
+  annotationDistance(pointA, pointB) {
+    if (!pointA || !pointB || !this.currentViewport) return 0;
+    const a = this.currentViewport.convertToViewportPoint(...pointA);
+    const b = this.currentViewport.convertToViewportPoint(...pointB);
+    return Math.hypot(b[0] - a[0], b[1] - a[1]);
   }
 
   selectPage(pageId) {
@@ -1073,7 +1563,7 @@ class PdfWorkshop {
       },
       { sidebar: false }
     );
-    this.toast("文字標註已刪除。", "success");
+    this.toast("標註已刪除。", "success");
   }
 
   getTargetPageIds() {
@@ -1094,6 +1584,7 @@ class PdfWorkshop {
     this.updateUI();
     if (sidebar) this.renderSidebar();
     this.renderActivePage();
+    this.scheduleAutosave();
   }
 
   pushHistory() {
@@ -1109,6 +1600,7 @@ class PdfWorkshop {
     this.selectedAnnotationId = null;
     this.normalizeState();
     this.renderAll();
+    this.scheduleAutosave();
   }
 
   redo() {
@@ -1119,6 +1611,7 @@ class PdfWorkshop {
     this.selectedAnnotationId = null;
     this.normalizeState();
     this.renderAll();
+    this.scheduleAutosave();
   }
 
   changeZoom(delta) {
@@ -1127,13 +1620,58 @@ class PdfWorkshop {
     this.renderActivePage();
   }
 
+  activateDrawingTool(tool) {
+    this.activeTool = tool;
+    this.textPlacementArmed = false;
+    this.elements.textControls.hidden = true;
+    this.elements.drawingControls.hidden = tool === "select";
+    const labels = {
+      pen: ["自由畫筆", "直接在頁面上拖曳繪製；按 Esc 回到選取模式。"],
+      highlight: [
+        "螢光筆",
+        "以半透明筆畫標記內容；可調整顏色與基礎粗細。",
+      ],
+      rect: ["矩形框", "從一個角拖曳到另一個角建立外框。"],
+      arrow: ["箭頭", "從起點拖曳到箭頭指向的位置。"],
+    };
+    if (labels[tool]) {
+      [this.elements.drawingToolName.textContent, this.elements.drawingToolHint.textContent] =
+        labels[tool];
+      if (tool === "highlight" && this.elements.drawingColor.value === "#ef5a52") {
+        this.elements.drawingColor.value = "#ffe066";
+      } else if (tool !== "highlight" && this.elements.drawingColor.value === "#ffe066") {
+        this.elements.drawingColor.value = "#ef5a52";
+      }
+    }
+    const buttonMap = {
+      text: this.elements.textToolButton,
+      pen: this.elements.penToolButton,
+      highlight: this.elements.highlightToolButton,
+      rect: this.elements.rectToolButton,
+      arrow: this.elements.arrowToolButton,
+    };
+    Object.entries(buttonMap).forEach(([name, button]) =>
+      button.classList.toggle("active", name === tool)
+    );
+    this.renderAnnotations();
+  }
+
   toggleTextControls() {
     const willOpen = this.elements.textControls.hidden;
     this.elements.textControls.hidden = !willOpen;
     this.elements.textToolButton.classList.toggle("active", willOpen);
     if (willOpen) {
+      this.activeTool = "text";
+      this.elements.drawingControls.hidden = true;
+      [
+        this.elements.penToolButton,
+        this.elements.highlightToolButton,
+        this.elements.rectToolButton,
+        this.elements.arrowToolButton,
+      ].forEach((button) => button.classList.remove("active"));
       this.elements.annotationText.focus();
     } else {
+      this.activeTool = "select";
       this.textPlacementArmed = false;
       this.elements.armTextButton.textContent = "準備放置";
       this.renderAnnotations();
@@ -1143,6 +1681,7 @@ class PdfWorkshop {
   closeTextControls() {
     this.elements.textControls.hidden = true;
     this.elements.textToolButton.classList.remove("active");
+    if (this.activeTool === "text") this.activeTool = "select";
     this.textPlacementArmed = false;
     this.elements.armTextButton.textContent = "準備放置";
     this.elements.textToolHint.textContent =
@@ -1178,6 +1717,476 @@ class PdfWorkshop {
     this.elements.textToolHint.textContent = "現在請點一下頁面上的放置位置。";
     this.renderAnnotations();
     this.elements.viewerScroll.focus();
+  }
+
+  applyPageRange() {
+    const input = this.elements.rangeInput.value.trim();
+    const result = this.parsePageRange(input);
+    if (result.error) {
+      this.elements.rangeError.textContent = result.error;
+      this.elements.rangeError.hidden = false;
+      return;
+    }
+    this.selectedPageIds = new Set(
+      result.pages.map((pageNumber) => this.pages[pageNumber - 1].id)
+    );
+    this.activePageId =
+      this.pages[result.pages[0] - 1]?.id || this.activePageId;
+    this.elements.rangeDialog.close();
+    this.updateUI();
+    this.renderSidebar();
+    this.renderActivePage();
+    this.toast(`已選取 ${result.pages.length} 頁。`, "success");
+  }
+
+  parsePageRange(input) {
+    if (!input) return { error: "請輸入頁碼或範圍。" };
+    const selected = new Set();
+    for (const rawPart of input.split(/[,，]/)) {
+      const part = rawPart.trim();
+      if (!part) continue;
+      const range = part.match(/^(\d+)\s*-\s*(\d+)$/);
+      const single = part.match(/^\d+$/);
+      if (!range && !single) {
+        return { error: `無法辨識「${part}」，請使用 1-3, 6 的格式。` };
+      }
+      const start = range ? Number(range[1]) : Number(part);
+      const end = range ? Number(range[2]) : start;
+      if (
+        start < 1 ||
+        end < 1 ||
+        start > this.pages.length ||
+        end > this.pages.length
+      ) {
+        return { error: `頁碼必須介於 1 到 ${this.pages.length}。` };
+      }
+      const step = start <= end ? 1 : -1;
+      for (let value = start; value !== end + step; value += step) {
+        selected.add(value);
+      }
+    }
+    const pages = [...selected].sort((a, b) => a - b);
+    return pages.length ? { pages } : { error: "沒有可選取的頁碼。" };
+  }
+
+  async insertBlankPage(orientation) {
+    const previousActiveId = this.activePageId;
+    const document = await PDFDocument.create();
+    const size =
+      orientation === "landscape" ? [841.89, 595.28] : [595.28, 841.89];
+    document.addPage(size);
+    const bytes = await document.save();
+    const file = new File(
+      [bytes],
+      orientation === "landscape" ? "空白頁-橫向.pdf" : "空白頁-直向.pdf",
+      { type: "application/pdf" }
+    );
+    const insertedIds = await this.loadFiles([file], {
+      replace: !this.pages.length,
+      remember: false,
+    });
+    if (previousActiveId && insertedIds.length) {
+      this.placePagesAfter(insertedIds, previousActiveId);
+    } else if (insertedIds.length) {
+      this.dirty = true;
+      this.updateUI();
+      this.scheduleAutosave();
+    }
+  }
+
+  placePagesAfter(insertedIds, afterPageId) {
+    const insertedSet = new Set(insertedIds);
+    const inserted = this.pages.filter((page) => insertedSet.has(page.id));
+    const remaining = this.pages.filter((page) => !insertedSet.has(page.id));
+    const targetIndex = remaining.findIndex((page) => page.id === afterPageId);
+    if (targetIndex < 0) return;
+    this.pages = [
+      ...remaining.slice(0, targetIndex + 1),
+      ...inserted,
+      ...remaining.slice(targetIndex + 1),
+    ];
+    this.activePageId = inserted[0]?.id || this.activePageId;
+    this.selectedPageIds = new Set(insertedIds);
+    this.dirty = true;
+    this.renderAll();
+    this.scheduleAutosave();
+  }
+
+  async convertImagesToPdf(files) {
+    const previousActiveId = this.activePageId;
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (!images.length) {
+      this.toast("請選擇圖片檔案。", "error");
+      return;
+    }
+    this.setBusy(true, "正在建立圖片 PDF", `準備 ${images.length} 張圖片`, 0);
+    try {
+      const document = await PDFDocument.create();
+      for (let index = 0; index < images.length; index += 1) {
+        const file = images[index];
+        const bytes = await this.imageFileToCompatibleBytes(file);
+        const embedded =
+          bytes.type === "image/jpeg"
+            ? await document.embedJpg(bytes.data)
+            : await document.embedPng(bytes.data);
+        const landscape = embedded.width > embedded.height;
+        const [pageWidth, pageHeight] = landscape
+          ? [841.89, 595.28]
+          : [595.28, 841.89];
+        const page = document.addPage([pageWidth, pageHeight]);
+        const margin = 24;
+        const scale = Math.min(
+          (pageWidth - margin * 2) / embedded.width,
+          (pageHeight - margin * 2) / embedded.height
+        );
+        const width = embedded.width * scale;
+        const height = embedded.height * scale;
+        page.drawImage(embedded, {
+          x: (pageWidth - width) / 2,
+          y: (pageHeight - height) / 2,
+          width,
+          height,
+        });
+        this.setBusy(
+          true,
+          "正在建立圖片 PDF",
+          `${index + 1} / ${images.length}`,
+          Math.round(((index + 1) / images.length) * 80)
+        );
+      }
+      const output = await document.save();
+      const pdfFile = new File([output], "圖片文件.pdf", {
+        type: "application/pdf",
+      });
+      this.setBusy(false);
+      const insertedIds = await this.loadFiles([pdfFile], {
+        replace: !this.pages.length,
+        remember: false,
+      });
+      if (previousActiveId && insertedIds.length) {
+        this.placePagesAfter(insertedIds, previousActiveId);
+      } else if (insertedIds.length) {
+        this.dirty = true;
+        this.updateUI();
+        this.scheduleAutosave();
+      }
+    } catch (error) {
+      console.error("[PDF Editor] Image conversion failed", error);
+      this.setBusy(false);
+      this.toast("圖片轉 PDF 失敗，請確認圖片格式。", "error");
+    }
+  }
+
+  async imageFileToCompatibleBytes(file) {
+    if (file.type === "image/jpeg" || file.type === "image/png") {
+      return {
+        type: file.type,
+        data: new Uint8Array(await file.arrayBuffer()),
+      };
+    }
+    const dataUrl = await this.fileToDataUrl(file);
+    const image = await this.loadHtmlImage(dataUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d").drawImage(image, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    return {
+      type: "image/png",
+      data: new Uint8Array(await blob.arrayBuffer()),
+    };
+  }
+
+  async insertImageAnnotation(file) {
+    if (!this.pages.length || !this.currentViewport) return;
+    try {
+      const dataUrl = await this.fileToDataUrl(file);
+      const image = await this.loadHtmlImage(dataUrl);
+      this.addImageAnnotationData(dataUrl, image.naturalWidth, image.naturalHeight, {
+        label: file.name,
+      });
+    } catch (error) {
+      console.error("[PDF Editor] Image annotation failed", error);
+      this.toast("圖片讀取失敗。", "error");
+    }
+  }
+
+  addImageAnnotationData(
+    dataUrl,
+    naturalWidth,
+    naturalHeight,
+    { label = "圖片標註", preferredWidth = 180 } = {}
+  ) {
+    if (!this.currentViewport) return;
+    const visibleWidth = this.currentViewport.width / this.currentViewport.scale;
+    const visibleHeight =
+      this.currentViewport.height / this.currentViewport.scale;
+    let width = Math.min(preferredWidth, visibleWidth * 0.42);
+    let height = width * (naturalHeight / naturalWidth);
+    if (height > visibleHeight * 0.35) {
+      height = visibleHeight * 0.35;
+      width = height * (naturalWidth / naturalHeight);
+    }
+    const screenLeft =
+      (this.currentViewport.width - width * this.currentViewport.scale) / 2;
+    const screenBottom =
+      (this.currentViewport.height + height * this.currentViewport.scale) / 2;
+    const [x, y] = this.currentViewport.convertToPdfPoint(
+      screenLeft,
+      screenBottom
+    );
+    const annotation = {
+      id: makeId("annotation"),
+      type: "image",
+      dataUrl,
+      label,
+      x,
+      y,
+      width,
+      height,
+    };
+    this.mutate(
+      () => {
+        const page = this.pages.find((item) => item.id === this.activePageId);
+        page.annotations.push(annotation);
+        this.selectedAnnotationId = annotation.id;
+      },
+      { sidebar: false }
+    );
+    this.toast("圖片已加入，可拖曳調整位置。", "success");
+  }
+
+  fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  loadHtmlImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = dataUrl;
+    });
+  }
+
+  openSignatureDialog() {
+    this.clearSignaturePad();
+    this.elements.signatureDialog.showModal();
+  }
+
+  bindSignaturePad() {
+    const canvas = this.elements.signatureCanvas;
+    const getPoint = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return [
+        ((event.clientX - rect.left) / rect.width) * canvas.width,
+        ((event.clientY - rect.top) / rect.height) * canvas.height,
+      ];
+    };
+    canvas.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.signatureDrawing = true;
+      this.signatureHasInk = true;
+      const context = canvas.getContext("2d");
+      const [x, y] = getPoint(event);
+      context.beginPath();
+      context.moveTo(x, y);
+      canvas.setPointerCapture?.(event.pointerId);
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!this.signatureDrawing) return;
+      const context = canvas.getContext("2d");
+      const [x, y] = getPoint(event);
+      context.lineTo(x, y);
+      context.stroke();
+    });
+    const finish = () => {
+      this.signatureDrawing = false;
+    };
+    canvas.addEventListener("pointerup", finish);
+    canvas.addEventListener("pointercancel", finish);
+  }
+
+  clearSignaturePad() {
+    const canvas = this.elements.signatureCanvas;
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "#172033";
+    context.lineWidth = 5;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    this.signatureHasInk = false;
+  }
+
+  saveSignature() {
+    if (!this.signatureHasInk) {
+      this.toast("請先在簽名區手寫簽名。", "error");
+      return;
+    }
+    const source = this.elements.signatureCanvas;
+    const context = source.getContext("2d");
+    const pixels = context.getImageData(0, 0, source.width, source.height);
+    let minX = source.width;
+    let minY = source.height;
+    let maxX = 0;
+    let maxY = 0;
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        if (pixels.data[(y * source.width + x) * 4 + 3] > 20) {
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    const padding = 12;
+    const width = Math.max(1, maxX - minX + padding * 2);
+    const height = Math.max(1, maxY - minY + padding * 2);
+    const cropped = document.createElement("canvas");
+    cropped.width = width;
+    cropped.height = height;
+    cropped
+      .getContext("2d")
+      .drawImage(
+        source,
+        minX - padding,
+        minY - padding,
+        width,
+        height,
+        0,
+        0,
+        width,
+        height
+      );
+    this.elements.signatureDialog.close();
+    this.addImageAnnotationData(
+      cropped.toDataURL("image/png"),
+      width,
+      height,
+      { label: "手寫簽名", preferredWidth: 170 }
+    );
+  }
+
+  async openFormDialog() {
+    const page = this.pages.find((item) => item.id === this.activePageId);
+    const source = this.sources.get(page?.sourceId);
+    if (!source || source.encrypted || !source.pdfLibDoc) {
+      this.toast("受密碼保護的 PDF 目前不支援直接填寫表單。", "error");
+      return;
+    }
+    const fields = source.pdfLibDoc.getForm().getFields();
+    if (!fields.length) {
+      this.toast("目前來源沒有可填寫的 PDF 表單欄位。");
+      return;
+    }
+    this.elements.formFieldList.replaceChildren();
+    for (const field of fields) {
+      const row = document.createElement("label");
+      row.className = "form-field-row";
+      const title = document.createElement("span");
+      title.textContent = field.getName();
+      row.append(title);
+      let control;
+      if (field instanceof window.PDFLib.PDFTextField) {
+        control = document.createElement("input");
+        control.type = "text";
+        control.value = field.getText() || "";
+        control.dataset.fieldType = "text";
+      } else if (field instanceof window.PDFLib.PDFCheckBox) {
+        control = document.createElement("input");
+        control.type = "checkbox";
+        control.checked = field.isChecked();
+        control.dataset.fieldType = "checkbox";
+      } else if (
+        field instanceof window.PDFLib.PDFDropdown ||
+        field instanceof window.PDFLib.PDFRadioGroup ||
+        field instanceof window.PDFLib.PDFOptionList
+      ) {
+        control = document.createElement("select");
+        control.dataset.fieldType =
+          field instanceof window.PDFLib.PDFRadioGroup ? "radio" : "select";
+        const selected = field.getSelected?.() || "";
+        for (const option of field.getOptions()) {
+          const optionElement = document.createElement("option");
+          optionElement.value = option;
+          optionElement.textContent = option;
+          optionElement.selected = Array.isArray(selected)
+            ? selected.includes(option)
+            : selected === option;
+          control.append(optionElement);
+        }
+      } else {
+        const unsupported = document.createElement("small");
+        unsupported.textContent = "此欄位類型暫不支援";
+        row.append(unsupported);
+        this.elements.formFieldList.append(row);
+        continue;
+      }
+      control.dataset.fieldName = field.getName();
+      row.append(control);
+      this.elements.formFieldList.append(row);
+    }
+    this.elements.formDialog.dataset.sourceId = source.id;
+    this.elements.formDialog.showModal();
+  }
+
+  async applyFormValues() {
+    const source = this.sources.get(this.elements.formDialog.dataset.sourceId);
+    if (!source) return;
+    this.setBusy(true, "正在套用表單", source.name, 12);
+    try {
+      const document = await PDFDocument.load(source.bytes.slice(), {
+        updateMetadata: false,
+      });
+      const form = document.getForm();
+      for (const control of this.elements.formFieldList.querySelectorAll(
+        "[data-field-name]"
+      )) {
+        const field = form.getField(control.dataset.fieldName);
+        if (control.dataset.fieldType === "text") {
+          field.setText(control.value);
+        } else if (control.dataset.fieldType === "checkbox") {
+          control.checked ? field.check() : field.uncheck();
+        } else if (control.value) {
+          field.select(control.value);
+        }
+      }
+      const font = await this.loadAnnotationFont(document);
+      form.updateFieldAppearances(font);
+      form.flatten();
+      const bytes = new Uint8Array(await document.save());
+      const replacement = await this.loadSourceFromBytes({
+        bytes,
+        name: source.name,
+        size: bytes.byteLength,
+        sourceId: source.id,
+      });
+      await source.loadingTask?.destroy?.().catch?.(() => {});
+      this.sources.set(source.id, replacement.source);
+      for (const page of this.pages.filter(
+        (item) => item.sourceId === source.id
+      )) {
+        page.baseRotation =
+          replacement.pages[page.sourcePageIndex]?.baseRotation ||
+          page.baseRotation;
+      }
+      this.elements.formDialog.close();
+      this.dirty = true;
+      this.renderAll();
+      this.scheduleAutosave();
+      this.toast("表單內容已套用並扁平化。", "success");
+    } catch (error) {
+      console.error("[PDF Editor] Form fill failed", error);
+      this.toast("表單套用失敗；部分特殊欄位可能不受支援。", "error");
+    } finally {
+      this.setBusy(false);
+    }
   }
 
   async exportPages(pageIds, { mode = "download", suffix = "edited" } = {}) {
@@ -1219,7 +2228,9 @@ class PdfWorkshop {
       await document.fonts?.ready;
       const needsVectorFont = records.some(
         (record) =>
-          record.annotations.length > 0 && this.getPageRotation(record) === 0
+          record.annotations.some((annotation) => annotation.type === "text") &&
+          this.getPageRotation(record) === 0 &&
+          !this.sources.get(record.sourceId)?.encrypted
       );
       const annotationFont = needsVectorFont
         ? await this.loadAnnotationFont(output)
@@ -1241,9 +2252,10 @@ class PdfWorkshop {
         const canDrawAsVector =
           record.annotations.length > 0 &&
           rotation === 0 &&
+          !source.encrypted &&
           this.canEncodeAnnotations(record.annotations, annotationFont);
 
-        if (record.annotations.length && !canDrawAsVector) {
+        if (source.encrypted || (record.annotations.length && !canDrawAsVector)) {
           await this.addRasterizedAnnotatedPage(output, record);
         } else {
           const [copiedPage] = await output.copyPages(source.pdfLibDoc, [
@@ -1252,10 +2264,11 @@ class PdfWorkshop {
           output.addPage(copiedPage);
           copiedPage.setRotation(degrees(rotation));
           if (record.annotations.length) {
-            this.drawVectorAnnotations(
+            await this.drawVectorAnnotations(
               copiedPage,
               record.annotations,
-              annotationFont
+              annotationFont,
+              output
             );
           }
         }
@@ -1292,6 +2305,7 @@ class PdfWorkshop {
 
       this.dirty = false;
       this.updateUI();
+      this.scheduleAutosave();
       this.toast(
         mode === "share" ? "PDF 已交由系統分享。" : `已輸出 ${records.length} 頁 PDF。`,
         "success"
@@ -1330,31 +2344,106 @@ class PdfWorkshop {
     });
   }
 
-  drawVectorAnnotations(page, annotations, font) {
+  async drawVectorAnnotations(page, annotations, font, outputDocument) {
     for (const annotation of annotations) {
-      if (annotation.type !== "text") continue;
-      const metrics = this.getAnnotationMetrics(annotation);
       const color = this.hexToRgb(annotation.color);
-      const firstBaseline =
-        annotation.y + metrics.height - annotation.fontSize - 1;
-      metrics.lines.forEach((line, index) => {
-        page.drawText(line || " ", {
-          x: annotation.x,
-          y: firstBaseline - index * metrics.lineHeight,
-          size: annotation.fontSize,
-          font,
-          color: window.PDFLib.rgb(color.r, color.g, color.b),
+      const pdfColor = window.PDFLib.rgb(color.r, color.g, color.b);
+      if (annotation.type === "text") {
+        const metrics = this.getAnnotationMetrics(annotation);
+        const firstBaseline =
+          annotation.y + metrics.height - annotation.fontSize - 1;
+        metrics.lines.forEach((line, index) => {
+          page.drawText(line || " ", {
+            x: annotation.x,
+            y: firstBaseline - index * metrics.lineHeight,
+            size: annotation.fontSize,
+            font,
+            color: pdfColor,
+          });
         });
-      });
+      } else if (annotation.type === "path") {
+        for (let index = 1; index < annotation.points.length; index += 1) {
+          page.drawLine({
+            start: {
+              x: annotation.points[index - 1][0],
+              y: annotation.points[index - 1][1],
+            },
+            end: {
+              x: annotation.points[index][0],
+              y: annotation.points[index][1],
+            },
+            thickness: annotation.width,
+            color: pdfColor,
+            opacity: annotation.opacity ?? 1,
+            lineCap: window.PDFLib.LineCapStyle.Round,
+          });
+        }
+      } else if (annotation.type === "rect") {
+        const [[x1, y1], [x2, y2]] = annotation.points;
+        page.drawRectangle({
+          x: Math.min(x1, x2),
+          y: Math.min(y1, y2),
+          width: Math.abs(x2 - x1),
+          height: Math.abs(y2 - y1),
+          borderColor: pdfColor,
+          borderWidth: annotation.width,
+          borderOpacity: annotation.opacity ?? 1,
+        });
+      } else if (annotation.type === "arrow") {
+        const [[x1, y1], [x2, y2]] = annotation.points;
+        page.drawLine({
+          start: { x: x1, y: y1 },
+          end: { x: x2, y: y2 },
+          thickness: annotation.width,
+          color: pdfColor,
+          lineCap: window.PDFLib.LineCapStyle.Round,
+        });
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const head = Math.max(8, annotation.width * 4);
+        for (const offset of [-Math.PI / 6, Math.PI / 6]) {
+          page.drawLine({
+            start: { x: x2, y: y2 },
+            end: {
+              x: x2 - head * Math.cos(angle + offset),
+              y: y2 - head * Math.sin(angle + offset),
+            },
+            thickness: annotation.width,
+            color: pdfColor,
+            lineCap: window.PDFLib.LineCapStyle.Round,
+          });
+        }
+      } else if (annotation.type === "image") {
+        const embedded = annotation.dataUrl.startsWith("data:image/png")
+          ? await outputDocument.embedPng(annotation.dataUrl)
+          : await outputDocument.embedJpg(annotation.dataUrl);
+        page.drawImage(embedded, {
+          x: annotation.x,
+          y: annotation.y,
+          width: annotation.width,
+          height: annotation.height,
+        });
+      }
     }
   }
 
   canEncodeAnnotations(annotations, font) {
-    if (!font) return false;
     try {
       annotations
         .filter((annotation) => annotation.type === "text")
-        .forEach((annotation) => font.encodeText(annotation.text));
+        .forEach((annotation) => {
+          if (!font) throw new Error("Font is required");
+          font.encodeText(annotation.text);
+        });
+      annotations
+        .filter((annotation) => annotation.type === "image")
+        .forEach((annotation) => {
+          if (
+            !annotation.dataUrl.startsWith("data:image/png") &&
+            !annotation.dataUrl.startsWith("data:image/jpeg")
+          ) {
+            throw new Error("Image needs raster fallback");
+          }
+        });
       return true;
     } catch {
       return false;
@@ -1383,29 +2472,12 @@ class PdfWorkshop {
       annotationMode: pdfjsLib.AnnotationMode.ENABLE,
     }).promise;
 
-    const fontFamily =
-      '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", Arial, sans-serif';
-    for (const annotation of record.annotations) {
-      if (annotation.type !== "text") continue;
-      const metrics = this.getAnnotationMetrics(annotation);
-      const [left, bottom] = viewport.convertToViewportPoint(
-        annotation.x,
-        annotation.y
-      );
-      context.fillStyle = annotation.color;
-      context.font = `${annotation.fontSize * renderScale}px ${fontFamily}`;
-      context.textBaseline = "top";
-      metrics.lines.forEach((line, index) => {
-        context.fillText(
-          line,
-          left,
-          bottom -
-            metrics.height * renderScale +
-            1 +
-            index * metrics.lineHeight * renderScale
-        );
-      });
-    }
+    await this.drawRasterAnnotations(
+      context,
+      viewport,
+      record.annotations,
+      renderScale
+    );
 
     const image = await outputDocument.embedJpg(
       canvas.toDataURL("image/jpeg", 0.94)
@@ -1419,6 +2491,96 @@ class PdfWorkshop {
       width: pageWidth,
       height: pageHeight,
     });
+  }
+
+  async drawRasterAnnotations(context, viewport, annotations, renderScale) {
+    const fontFamily =
+      '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", Arial, sans-serif';
+    for (const annotation of annotations) {
+      context.save();
+      context.globalAlpha = annotation.opacity ?? 1;
+      context.strokeStyle = annotation.color || "#172033";
+      context.fillStyle = annotation.color || "#172033";
+      context.lineWidth = Math.max(1, (annotation.width || 1) * renderScale);
+      context.lineCap = "round";
+      context.lineJoin = "round";
+
+      if (annotation.type === "text") {
+        const metrics = this.getAnnotationMetrics(annotation);
+        const [left, bottom] = viewport.convertToViewportPoint(
+          annotation.x,
+          annotation.y
+        );
+        context.font = `${annotation.fontSize * renderScale}px ${fontFamily}`;
+        context.textBaseline = "top";
+        metrics.lines.forEach((line, index) => {
+          context.fillText(
+            line,
+            left,
+            bottom -
+              metrics.height * renderScale +
+              1 +
+              index * metrics.lineHeight * renderScale
+          );
+        });
+      } else if (annotation.type === "path") {
+        const points = annotation.points.map((point) =>
+          viewport.convertToViewportPoint(...point)
+        );
+        context.beginPath();
+        points.forEach(([x, y], index) =>
+          index ? context.lineTo(x, y) : context.moveTo(x, y)
+        );
+        context.stroke();
+      } else if (annotation.type === "rect") {
+        const [start, end] = annotation.points.map((point) =>
+          viewport.convertToViewportPoint(...point)
+        );
+        context.strokeRect(
+          Math.min(start[0], end[0]),
+          Math.min(start[1], end[1]),
+          Math.abs(end[0] - start[0]),
+          Math.abs(end[1] - start[1])
+        );
+      } else if (annotation.type === "arrow") {
+        const [start, end] = annotation.points.map((point) =>
+          viewport.convertToViewportPoint(...point)
+        );
+        context.beginPath();
+        context.moveTo(...start);
+        context.lineTo(...end);
+        context.stroke();
+        const angle = Math.atan2(end[1] - start[1], end[0] - start[0]);
+        const head = Math.max(10, (annotation.width || 2) * renderScale * 4);
+        context.beginPath();
+        context.moveTo(...end);
+        context.lineTo(
+          end[0] - head * Math.cos(angle - Math.PI / 6),
+          end[1] - head * Math.sin(angle - Math.PI / 6)
+        );
+        context.lineTo(
+          end[0] - head * Math.cos(angle + Math.PI / 6),
+          end[1] - head * Math.sin(angle + Math.PI / 6)
+        );
+        context.closePath();
+        context.fill();
+      } else if (annotation.type === "image") {
+        const image = await this.loadHtmlImage(annotation.dataUrl);
+        const [left, bottom] = viewport.convertToViewportPoint(
+          annotation.x,
+          annotation.y
+        );
+        context.globalAlpha = 1;
+        context.drawImage(
+          image,
+          left,
+          bottom - annotation.height * renderScale,
+          annotation.width * renderScale,
+          annotation.height * renderScale
+        );
+      }
+      context.restore();
+    }
   }
 
   hexToRgb(hex) {
@@ -1457,6 +2619,231 @@ class PdfWorkshop {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
+  applySavedTheme() {
+    let saved = null;
+    try {
+      saved = localStorage.getItem("pdfEditor-theme");
+    } catch {}
+    const theme =
+      saved ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = theme;
+    this.updateThemeMeta(theme);
+  }
+
+  toggleTheme() {
+    const theme =
+      document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("pdfEditor-theme", theme);
+    } catch {}
+    this.updateThemeMeta(theme);
+  }
+
+  updateThemeMeta(theme) {
+    const color = theme === "dark" ? "#111827" : "#f8fafc";
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", color);
+    this.elements.themeButton?.setAttribute(
+      "aria-label",
+      theme === "dark" ? "切換淺色模式" : "切換深色模式"
+    );
+  }
+
+  rememberRecentFiles(files) {
+    let current = [];
+    try {
+      current = JSON.parse(localStorage.getItem("pdfEditor-recent") || "[]");
+    } catch {}
+    if (!Array.isArray(current)) current = [];
+    const now = Date.now();
+    for (const file of files) {
+      const index = current.findIndex((item) => item.name === file.name);
+      if (index >= 0) current.splice(index, 1);
+      current.unshift({
+        name: file.name,
+        size: file.size,
+        openedAt: now,
+      });
+    }
+    try {
+      localStorage.setItem(
+        "pdfEditor-recent",
+        JSON.stringify(current.slice(0, 5))
+      );
+    } catch {}
+    this.renderRecentFiles();
+  }
+
+  renderRecentFiles() {
+    let recent = [];
+    try {
+      recent = JSON.parse(localStorage.getItem("pdfEditor-recent") || "[]");
+    } catch {}
+    if (!Array.isArray(recent)) recent = [];
+    this.elements.recentFileList?.replaceChildren();
+    this.elements.recentFiles.hidden = !recent.length;
+    for (const item of recent) {
+      const row = document.createElement("div");
+      row.className = "recent-file-row";
+      const name = document.createElement("span");
+      name.textContent = item.name;
+      const meta = document.createElement("small");
+      meta.textContent = `${this.formatBytes(item.size)}・${new Date(
+        item.openedAt
+      ).toLocaleDateString("zh-TW")}`;
+      row.append(name, meta);
+      this.elements.recentFileList.append(row);
+    }
+  }
+
+  openEditorDb() {
+    if (this.dbPromise) return this.dbPromise;
+    this.dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(EDITOR_DB_NAME, EDITOR_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains("projects")) {
+          db.createObjectStore("projects", { keyPath: "id" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return this.dbPromise;
+  }
+
+  async projectDbOperation(mode, operation) {
+    const db = await this.openEditorDb();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction("projects", mode);
+      const store = transaction.objectStore("projects");
+      const request = operation(store);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  scheduleAutosave() {
+    if (this.restoringAutosave) return;
+    clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = setTimeout(() => this.saveAutosave(), 900);
+  }
+
+  async saveAutosave() {
+    if (!this.pages.length) return;
+    try {
+      const sources = [...this.sources.values()].map((source) => ({
+        id: source.id,
+        name: source.name,
+        size: source.size,
+        encrypted: source.encrypted,
+        bytes: source.bytes.slice(),
+      }));
+      await this.projectDbOperation("readwrite", (store) =>
+        store.put({
+          id: AUTOSAVE_KEY,
+          savedAt: Date.now(),
+          pages: clonePages(this.pages),
+          activePageId: this.activePageId,
+          sources,
+        })
+      );
+    } catch (error) {
+      console.warn("[PDF Editor] Autosave failed", error);
+      if (!this.autosaveWarningShown) {
+        this.autosaveWarningShown = true;
+        this.toast("草稿自動儲存失敗，可能是裝置空間不足。", "error", 7000);
+      }
+    }
+  }
+
+  async offerAutosaveRestore() {
+    try {
+      const project = await this.projectDbOperation("readonly", (store) =>
+        store.get(AUTOSAVE_KEY)
+      );
+      if (!project?.pages?.length) return;
+      const confirmed = await this.confirmAction({
+        title: "還原上次草稿？",
+        message: `找到 ${new Date(project.savedAt).toLocaleString(
+          "zh-TW"
+        )} 自動儲存的 ${project.pages.length} 頁文件。`,
+        acceptLabel: "還原草稿",
+      });
+      if (confirmed) await this.restoreAutosave(project);
+    } catch (error) {
+      console.warn("[PDF Editor] Autosave restore check failed", error);
+    }
+  }
+
+  async restoreAutosave(project) {
+    this.restoringAutosave = true;
+    this.setBusy(true, "正在還原草稿", "重新載入文件來源", 5);
+    const restoredSources = new Map();
+    try {
+      for (let index = 0; index < project.sources.length; index += 1) {
+        const saved = project.sources[index];
+        this.setBusy(
+          true,
+          "正在還原草稿",
+          `${saved.name}（${index + 1}/${project.sources.length}）`,
+          10 + Math.round((index / project.sources.length) * 70)
+        );
+        const loaded = await this.loadSourceFromBytes({
+          bytes: new Uint8Array(saved.bytes),
+          name: saved.name,
+          size: saved.size,
+          sourceId: saved.id,
+        });
+        restoredSources.set(saved.id, loaded.source);
+      }
+      this.sources = restoredSources;
+      this.pages = clonePages(project.pages);
+      this.activePageId = project.activePageId;
+      this.selectedPageIds = new Set([this.activePageId].filter(Boolean));
+      this.undoStack = [];
+      this.redoStack = [];
+      this.dirty = true;
+      this.renderAll();
+      this.toast("上次草稿已還原。", "success");
+    } catch (error) {
+      for (const source of restoredSources.values()) {
+        source.loadingTask?.destroy?.().catch?.(() => {});
+      }
+      console.error("[PDF Editor] Autosave restore failed", error);
+      this.toast("草稿無法完整還原，可能缺少受保護文件的密碼。", "error");
+    } finally {
+      this.restoringAutosave = false;
+      this.setBusy(false);
+    }
+  }
+
+  async consumeSharedFile() {
+    if (!("caches" in window)) return false;
+    try {
+      const cache = await caches.open(SHARE_CACHE_NAME);
+      const key = new URL("./shared-pdf", location.href).href;
+      const response = await cache.match(key);
+      if (!response) return false;
+      await cache.delete(key);
+      const blob = await response.blob();
+      const encodedName = response.headers.get("X-PDF-File-Name");
+      const fileName = encodedName
+        ? decodeURIComponent(encodedName)
+        : "分享的文件.pdf";
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      await this.loadFiles([file], { replace: true });
+      history.replaceState(null, "", "./");
+      return true;
+    } catch (error) {
+      console.warn("[PDF Editor] Shared file import failed", error);
+      return false;
+    }
+  }
+
   handleKeyboard(event) {
     const isTyping =
       event.target instanceof HTMLInputElement ||
@@ -1480,6 +2867,14 @@ class PdfWorkshop {
       this.redo();
       return;
     }
+    if (command && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      this.exportPages(this.pages.map((page) => page.id), {
+        mode: "download",
+        suffix: "edited",
+      });
+      return;
+    }
     if (isTyping) return;
 
     if (event.key === "Delete" || event.key === "Backspace") {
@@ -1494,11 +2889,23 @@ class PdfWorkshop {
     } else if (event.key.toLowerCase() === "r" && this.pages.length) {
       event.preventDefault();
       this.rotateSelectedPages();
+    } else if (event.key.toLowerCase() === "p" && this.pages.length) {
+      event.preventDefault();
+      this.activateDrawingTool("pen");
+    } else if (event.key.toLowerCase() === "h" && this.pages.length) {
+      event.preventDefault();
+      this.activateDrawingTool("highlight");
+    } else if (event.key.toLowerCase() === "t" && this.pages.length) {
+      event.preventDefault();
+      this.toggleTextControls();
+    } else if (event.key.toLowerCase() === "v" && this.pages.length) {
+      event.preventDefault();
+      this.activateDrawingTool("select");
     } else if (event.key === "Escape") {
       this.textPlacementArmed = false;
       this.selectedAnnotationId = null;
       this.elements.armTextButton.textContent = "準備放置";
-      this.renderAnnotations();
+      this.activateDrawingTool("select");
     }
   }
 
