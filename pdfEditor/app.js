@@ -63,6 +63,16 @@ class PdfWorkshop {
     this.annotationFontBytesPromise = null;
     this.signatureDrawing = false;
     this.signatureHasInk = false;
+    this.textIndex = new Map();
+    this.searchMatches = [];
+    this.searchCursor = -1;
+    this.searchBuildToken = 0;
+    this.searchDebounceTimer = null;
+    this.ocrWorker = null;
+    this.ocrRunning = false;
+    this.ocrCancelled = false;
+    this.ocrPageNumber = 0;
+    this.ocrPageTotal = 0;
 
     this.elements = {
       openButton: $("#openButton"),
@@ -96,6 +106,8 @@ class PdfWorkshop {
       imageToolButton: $("#imageToolButton"),
       signatureToolButton: $("#signatureToolButton"),
       formToolButton: $("#formToolButton"),
+      searchToolButton: $("#searchToolButton"),
+      ocrToolButton: $("#ocrToolButton"),
       zoomOutButton: $("#zoomOutButton"),
       zoomInButton: $("#zoomInButton"),
       zoomResetButton: $("#zoomResetButton"),
@@ -113,6 +125,12 @@ class PdfWorkshop {
       drawingWidth: $("#drawingWidth"),
       drawingWidthValue: $("#drawingWidthValue"),
       closeDrawingButton: $("#closeDrawingButton"),
+      searchControls: $("#searchControls"),
+      searchInput: $("#searchInput"),
+      searchResultStatus: $("#searchResultStatus"),
+      searchPreviousButton: $("#searchPreviousButton"),
+      searchNextButton: $("#searchNextButton"),
+      closeSearchButton: $("#closeSearchButton"),
       viewerScroll: $("#viewerScroll"),
       emptyState: $("#emptyState"),
       documentView: $("#documentView"),
@@ -153,6 +171,20 @@ class PdfWorkshop {
       formDialog: $("#formDialog"),
       formFieldList: $("#formFieldList"),
       applyFormButton: $("#applyFormButton"),
+      ocrDialog: $("#ocrDialog"),
+      ocrCloseButton: $("#ocrCloseButton"),
+      ocrScope: $("#ocrScope"),
+      ocrLanguage: $("#ocrLanguage"),
+      ocrSkipTextPages: $("#ocrSkipTextPages"),
+      ocrProgressPanel: $("#ocrProgressPanel"),
+      ocrProgressTitle: $("#ocrProgressTitle"),
+      ocrProgressDetail: $("#ocrProgressDetail"),
+      ocrProgressBar: $("#ocrProgressBar"),
+      ocrResultField: $("#ocrResultField"),
+      ocrResultText: $("#ocrResultText"),
+      copyOcrButton: $("#copyOcrButton"),
+      cancelOcrButton: $("#cancelOcrButton"),
+      startOcrButton: $("#startOcrButton"),
     };
   }
 
@@ -216,12 +248,18 @@ class PdfWorkshop {
       imageToolButton,
       signatureToolButton,
       formToolButton,
+      searchToolButton,
+      ocrToolButton,
       zoomOutButton,
       zoomInButton,
       zoomResetButton,
       armTextButton,
       cancelTextButton,
       closeDrawingButton,
+      searchInput,
+      searchPreviousButton,
+      searchNextButton,
+      closeSearchButton,
       annotationLayer,
       viewerScroll,
     } = this.elements;
@@ -338,6 +376,8 @@ class PdfWorkshop {
     imageToolButton.addEventListener("click", () => annotationImageInput.click());
     signatureToolButton.addEventListener("click", () => this.openSignatureDialog());
     formToolButton.addEventListener("click", () => this.openFormDialog());
+    searchToolButton.addEventListener("click", () => this.toggleSearchControls());
+    ocrToolButton.addEventListener("click", () => this.openOcrDialog());
     armTextButton.addEventListener("click", () => this.toggleTextPlacement());
     cancelTextButton.addEventListener("click", () => this.closeTextControls());
     closeDrawingButton.addEventListener("click", () => this.activateDrawingTool("select"));
@@ -369,6 +409,34 @@ class PdfWorkshop {
     this.elements.applyFormButton.addEventListener("click", () =>
       this.applyFormValues()
     );
+    searchInput.addEventListener("input", () => {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = setTimeout(() => this.performSearch(), 240);
+    });
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      if (this.searchMatches.length) {
+        this.stepSearch(event.shiftKey ? -1 : 1);
+      } else {
+        this.performSearch();
+      }
+    });
+    searchPreviousButton.addEventListener("click", () => this.stepSearch(-1));
+    searchNextButton.addEventListener("click", () => this.stepSearch(1));
+    closeSearchButton.addEventListener("click", () => this.closeSearchControls());
+    this.elements.startOcrButton.addEventListener("click", () => this.startOcr());
+    this.elements.cancelOcrButton.addEventListener("click", () =>
+      this.cancelOcr()
+    );
+    this.elements.copyOcrButton.addEventListener("click", () =>
+      this.copyOcrText()
+    );
+    this.elements.ocrDialog.addEventListener("cancel", (event) => {
+      if (!this.ocrRunning) return;
+      event.preventDefault();
+      this.cancelOcr();
+    });
 
     zoomOutButton.addEventListener("click", () => this.changeZoom(-0.15));
     zoomInButton.addEventListener("click", () => this.changeZoom(0.15));
@@ -488,6 +556,7 @@ class PdfWorkshop {
         }
         this.sources.clear();
         this.pages = [];
+        this.textIndex.clear();
         this.undoStack = [];
         this.redoStack = [];
       } else {
@@ -504,6 +573,9 @@ class PdfWorkshop {
       this.activePageId = newPageIds[0] || this.activePageId;
       this.selectedPageIds = new Set(newPageIds.slice(0, 1));
       this.selectedAnnotationId = null;
+      this.searchBuildToken += 1;
+      this.searchMatches = [];
+      this.searchCursor = -1;
       this.dirty = !replace || loaded.length > 1;
       this.zoom = 1;
       this.closeTextControls();
@@ -511,6 +583,12 @@ class PdfWorkshop {
       this.renderAll();
       if (remember) this.rememberRecentFiles(files);
       this.scheduleAutosave();
+      if (
+        !this.elements.searchControls.hidden &&
+        this.elements.searchInput.value.trim()
+      ) {
+        this.performSearch();
+      }
 
       const pageTotal = loaded.reduce((sum, item) => sum + item.pages.length, 0);
       const encryptedCount = loaded.filter((item) => item.source.encrypted).length;
@@ -678,6 +756,16 @@ class PdfWorkshop {
       this.activePageId = null;
       this.selectedPageIds.clear();
       this.selectedAnnotationId = null;
+      clearTimeout(this.searchDebounceTimer);
+      this.searchBuildToken += 1;
+      this.searchMatches = [];
+      this.searchCursor = -1;
+      this.elements.searchControls.hidden = true;
+      this.elements.searchToolButton.classList.remove("active");
+      this.elements.searchInput.value = "";
+      this.elements.searchPreviousButton.disabled = true;
+      this.elements.searchNextButton.disabled = true;
+      this.elements.searchResultStatus.textContent = "輸入文字開始搜尋";
     }
   }
 
@@ -705,6 +793,8 @@ class PdfWorkshop {
       this.elements.imageToolButton,
       this.elements.signatureToolButton,
       this.elements.formToolButton,
+      this.elements.searchToolButton,
+      this.elements.ocrToolButton,
     ].forEach((button) => {
       button.disabled = !hasDocument;
     });
@@ -735,11 +825,15 @@ class PdfWorkshop {
         (sum, source) => sum + source.size,
         0
       );
+      const ocrPageCount = this.pages.filter(
+        (page) => this.textIndex.get(page.id)?.ocr
+      ).length;
       this.elements.documentStatus.textContent =
         `${this.sources.size} 份文件・${this.formatBytes(totalSize)}` +
         ([...this.sources.values()].some((source) => source.encrypted)
           ? "・含已解鎖文件"
           : "") +
+        (ocrPageCount ? `・OCR ${ocrPageCount} 頁` : "") +
         (this.dirty ? "・尚未匯出" : "・已匯出");
     } else {
       this.elements.documentStatus.textContent = "準備就緒";
@@ -1033,6 +1127,12 @@ class PdfWorkshop {
     );
     if (!pageRecord || !this.currentViewport) return;
 
+    const searchLayer = document.createElement("div");
+    searchLayer.className = "search-highlight-layer";
+    searchLayer.setAttribute("aria-hidden", "true");
+    layer.append(searchLayer);
+    this.renderSearchHighlights(searchLayer, pageRecord);
+
     const vectorLayer = document.createElementNS(
       "http://www.w3.org/2000/svg",
       "svg"
@@ -1107,6 +1207,672 @@ class PdfWorkshop {
       const draftShape = this.createSvgAnnotation(this.drawingDraft, true);
       if (draftShape) vectorLayer.append(draftShape);
     }
+  }
+
+  toggleSearchControls() {
+    if (!this.pages.length) return;
+    const willOpen = this.elements.searchControls.hidden;
+    if (!willOpen) {
+      this.closeSearchControls();
+      return;
+    }
+    this.closeTextControls();
+    this.activateDrawingTool("select");
+    this.elements.searchControls.hidden = false;
+    this.elements.searchToolButton.classList.add("active");
+    setTimeout(() => {
+      this.elements.searchInput.focus();
+      this.elements.searchInput.select();
+    }, 20);
+  }
+
+  closeSearchControls() {
+    clearTimeout(this.searchDebounceTimer);
+    this.searchBuildToken += 1;
+    this.elements.searchControls.hidden = true;
+    this.elements.searchToolButton.classList.remove("active");
+    this.clearSearchResults();
+  }
+
+  clearSearchResults({ preserveQuery = false } = {}) {
+    this.searchMatches = [];
+    this.searchCursor = -1;
+    if (!preserveQuery) this.elements.searchInput.value = "";
+    this.elements.searchPreviousButton.disabled = true;
+    this.elements.searchNextButton.disabled = true;
+    this.elements.searchResultStatus.textContent = "輸入文字開始搜尋";
+    this.renderAnnotations();
+  }
+
+  async performSearch() {
+    const query = this.elements.searchInput.value.trim();
+    const token = ++this.searchBuildToken;
+    this.searchMatches = [];
+    this.searchCursor = -1;
+    this.elements.searchPreviousButton.disabled = true;
+    this.elements.searchNextButton.disabled = true;
+
+    if (!query) {
+      this.elements.searchResultStatus.textContent = "輸入文字開始搜尋";
+      this.renderAnnotations();
+      return;
+    }
+
+    this.elements.searchResultStatus.textContent = "正在建立文字索引…";
+    const matches = [];
+
+    try {
+      for (let index = 0; index < this.pages.length; index += 1) {
+        if (token !== this.searchBuildToken) return;
+        const pageRecord = this.pages[index];
+        this.elements.searchResultStatus.textContent =
+          `搜尋第 ${index + 1} / ${this.pages.length} 頁…`;
+        let entry;
+        try {
+          entry = await this.buildNativeTextIndex(pageRecord);
+        } catch (error) {
+          console.warn(
+            `[PDF Editor] Could not index page ${index + 1}`,
+            error
+          );
+          entry = this.textIndex.get(pageRecord.id) || {};
+        }
+        if (token !== this.searchBuildToken) return;
+        matches.push(
+          ...this.findMatchesInText(
+            pageRecord,
+            entry.native,
+            query,
+            "native"
+          ),
+          ...this.findMatchesInText(pageRecord, entry.ocr, query, "ocr")
+        );
+      }
+
+      if (token !== this.searchBuildToken) return;
+      this.searchMatches = matches;
+      this.searchCursor = matches.length ? 0 : -1;
+      const hasMatches = matches.length > 0;
+      this.elements.searchPreviousButton.disabled = !hasMatches;
+      this.elements.searchNextButton.disabled = !hasMatches;
+
+      if (hasMatches) {
+        await this.showSearchMatch(0);
+      } else {
+        this.elements.searchResultStatus.textContent = "找不到符合的文字";
+        this.renderAnnotations();
+      }
+    } catch (error) {
+      if (token !== this.searchBuildToken) return;
+      console.error("[PDF Editor] Text search failed", error);
+      this.elements.searchResultStatus.textContent = "搜尋失敗";
+      this.toast("文字搜尋失敗，請重新開啟文件後再試。", "error");
+    }
+  }
+
+  async buildNativeTextIndex(pageRecord) {
+    const current = this.textIndex.get(pageRecord.id) || {};
+    if (current.native) return current;
+    const source = this.sources.get(pageRecord.sourceId);
+    if (!source) return current;
+
+    const pdfPage = await source.pdfjsDoc.getPage(
+      pageRecord.sourcePageIndex + 1
+    );
+    const content = await pdfPage.getTextContent();
+    let text = "";
+    const segments = [];
+
+    for (const item of content.items || []) {
+      if (typeof item?.str !== "string" || !item.str) continue;
+      if (text && !/\s$/.test(text) && !/^\s/.test(item.str)) text += " ";
+      const start = text.length;
+      text += item.str;
+      const end = text.length;
+      segments.push({
+        text: item.str,
+        start,
+        end,
+        transform: Array.from(item.transform || []),
+        width: Number(item.width) || 0,
+        height: Number(item.height) || 0,
+        dir: item.dir || "ltr",
+      });
+      if (item.hasEOL) text += "\n";
+    }
+
+    current.native = {
+      text,
+      segments,
+      indexedAt: Date.now(),
+    };
+    this.textIndex.set(pageRecord.id, current);
+    return current;
+  }
+
+  findMatchesInText(pageRecord, indexPart, query, sourceKind) {
+    if (!indexPart?.text) return [];
+    const text = String(indexPart.text);
+    const normalized = this.normalizeSearchText(text);
+    const normalizedText = normalized.text;
+    const normalizedQuery = this.normalizeSearchText(query).text;
+    if (!normalizedQuery) return [];
+    const units =
+      sourceKind === "ocr" ? indexPart.words || [] : indexPart.segments || [];
+    const results = [];
+    let offset = 0;
+
+    while (offset <= normalizedText.length - normalizedQuery.length) {
+      const normalizedStart = normalizedText.indexOf(normalizedQuery, offset);
+      if (normalizedStart < 0) break;
+      const normalizedEnd = normalizedStart + normalizedQuery.length;
+      const start = normalized.starts[normalizedStart] ?? 0;
+      const end =
+        normalized.ends[normalizedEnd - 1] ?? Math.min(text.length, start + 1);
+      const boxes = units
+        .filter((unit) => unit.end > start && unit.start < end)
+        .map((unit) =>
+          sourceKind === "ocr"
+            ? {
+                kind: "ocr",
+                x0: unit.x0,
+                y0: unit.y0,
+                x1: unit.x1,
+                y1: unit.y1,
+                rotation: indexPart.rotation || 0,
+              }
+            : {
+                kind: "native",
+                text: unit.text,
+                transform: unit.transform,
+                width: unit.width,
+                height: unit.height,
+                dir: unit.dir,
+              }
+        );
+      results.push({
+        pageId: pageRecord.id,
+        pageNumber: this.pages.indexOf(pageRecord) + 1,
+        source: sourceKind,
+        start,
+        end,
+        snippet: this.createSearchSnippet(text, start, end),
+        boxes,
+      });
+      offset = Math.max(normalizedEnd, normalizedStart + 1);
+    }
+
+    return results;
+  }
+
+  normalizeSearchText(value) {
+    let text = "";
+    const starts = [];
+    const ends = [];
+    let originalOffset = 0;
+    for (const character of String(value || "")) {
+      const characterEnd = originalOffset + character.length;
+      if (!/\s/u.test(character)) {
+        const folded = character.toLocaleLowerCase("zh-TW");
+        for (const foldedCharacter of folded) {
+          text += foldedCharacter;
+          for (let index = 0; index < foldedCharacter.length; index += 1) {
+            starts.push(originalOffset);
+            ends.push(characterEnd);
+          }
+        }
+      }
+      originalOffset = characterEnd;
+    }
+    return { text, starts, ends };
+  }
+
+  createSearchSnippet(text, start, end) {
+    const before = Math.max(0, start - 28);
+    const after = Math.min(text.length, end + 34);
+    const snippet = text.slice(before, after).replace(/\s+/g, " ").trim();
+    return `${before ? "…" : ""}${snippet}${after < text.length ? "…" : ""}`;
+  }
+
+  stepSearch(direction) {
+    if (!this.searchMatches.length) return;
+    const next =
+      (this.searchCursor + direction + this.searchMatches.length) %
+      this.searchMatches.length;
+    this.showSearchMatch(next);
+  }
+
+  async showSearchMatch(index) {
+    const match = this.searchMatches[index];
+    if (!match) return;
+    this.searchCursor = index;
+    const pageChanged = this.activePageId !== match.pageId;
+    this.activePageId = match.pageId;
+    this.selectedPageIds = new Set([match.pageId]);
+    this.selectedAnnotationId = null;
+    this.updateUI();
+    if (pageChanged) this.renderSidebar();
+    await this.renderActivePage();
+    this.elements.viewerScroll.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "smooth",
+    });
+    const sourceLabel = match.source === "ocr" ? "OCR" : "PDF 文字";
+    const currentPageNumber =
+      this.pages.findIndex((page) => page.id === match.pageId) + 1;
+    this.elements.searchResultStatus.textContent =
+      `${index + 1} / ${this.searchMatches.length}・第 ${currentPageNumber} 頁・${sourceLabel}`;
+    this.elements.searchResultStatus.title = match.snippet;
+  }
+
+  renderSearchHighlights(layer, pageRecord) {
+    const match = this.searchMatches[this.searchCursor];
+    if (!match || match.pageId !== pageRecord.id) return;
+    const boxes = match.boxes || [];
+
+    if (!boxes.length) {
+      const pageHit = document.createElement("div");
+      pageHit.className = "search-page-hit";
+      layer.append(pageHit);
+      return;
+    }
+
+    for (const box of boxes) {
+      const highlight = document.createElement("div");
+      highlight.className = `search-highlight${
+        box.kind === "ocr" ? " ocr" : ""
+      }`;
+      if (box.kind === "ocr") {
+        const adjusted = this.transformOcrBox(
+          box,
+          this.getPageRotation(pageRecord)
+        );
+        highlight.style.left = `${adjusted.x0 * this.currentViewport.width}px`;
+        highlight.style.top = `${adjusted.y0 * this.currentViewport.height}px`;
+        highlight.style.width = `${Math.max(
+          4,
+          (adjusted.x1 - adjusted.x0) * this.currentViewport.width
+        )}px`;
+        highlight.style.height = `${Math.max(
+          4,
+          (adjusted.y1 - adjusted.y0) * this.currentViewport.height
+        )}px`;
+      } else if (box.transform?.length === 6) {
+        const transformed = pdfjsLib.Util.transform(
+          this.currentViewport.transform,
+          box.transform
+        );
+        const fontHeight = Math.max(
+          4,
+          Math.hypot(transformed[2], transformed[3])
+        );
+        const angle = Math.atan2(transformed[1], transformed[0]);
+        const width = Math.max(
+          4,
+          box.width * this.currentViewport.scale ||
+            fontHeight * Math.max(1, box.text?.length || 1) * 0.55
+        );
+        highlight.style.left = `${transformed[4]}px`;
+        highlight.style.top = `${transformed[5] - fontHeight}px`;
+        highlight.style.width = `${width}px`;
+        highlight.style.height = `${fontHeight}px`;
+        highlight.style.transform = `rotate(${angle}rad)`;
+      }
+      layer.append(highlight);
+    }
+  }
+
+  transformOcrBox(box, currentRotation) {
+    const delta = normalizedRotation(
+      currentRotation - normalizedRotation(box.rotation || 0)
+    );
+    const transformPoint = ([x, y]) => {
+      if (delta === 90) return [1 - y, x];
+      if (delta === 180) return [1 - x, 1 - y];
+      if (delta === 270) return [y, 1 - x];
+      return [x, y];
+    };
+    const points = [
+      [box.x0, box.y0],
+      [box.x1, box.y0],
+      [box.x1, box.y1],
+      [box.x0, box.y1],
+    ].map(transformPoint);
+    const xValues = points.map(([x]) => x);
+    const yValues = points.map(([, y]) => y);
+    return {
+      x0: Math.min(...xValues),
+      y0: Math.min(...yValues),
+      x1: Math.max(...xValues),
+      y1: Math.max(...yValues),
+    };
+  }
+
+  openOcrDialog() {
+    if (!this.pages.length) return;
+    const selectedOption = this.elements.ocrScope.querySelector(
+      'option[value="selected"]'
+    );
+    selectedOption.textContent = this.selectedPageIds.size
+      ? `所選頁面（${this.selectedPageIds.size} 頁）`
+      : "所選頁面（未選時使用目前頁）";
+    this.elements.ocrScope.value =
+      this.selectedPageIds.size > 1 ? "selected" : "active";
+    const existing = this.textIndex.get(this.activePageId)?.ocr;
+    this.elements.ocrResultText.value = existing?.rawText || "";
+    this.elements.ocrResultField.hidden = !existing?.rawText;
+    this.elements.copyOcrButton.hidden = !existing?.rawText;
+    this.elements.ocrProgressPanel.hidden = true;
+    this.elements.ocrProgressBar.style.width = "0%";
+    this.setOcrRunningState(false);
+    this.elements.ocrDialog.showModal();
+  }
+
+  getOcrPageRecords() {
+    const scope = this.elements.ocrScope.value;
+    if (scope === "all") return [...this.pages];
+    if (scope === "selected" && this.selectedPageIds.size) {
+      return this.pages.filter((page) => this.selectedPageIds.has(page.id));
+    }
+    const active = this.pages.find((page) => page.id === this.activePageId);
+    return active ? [active] : [];
+  }
+
+  setOcrRunningState(running) {
+    this.ocrRunning = running;
+    this.elements.ocrScope.disabled = running;
+    this.elements.ocrSkipTextPages.disabled = running;
+    this.elements.ocrCloseButton.disabled = running;
+    this.elements.startOcrButton.disabled = running;
+    this.elements.cancelOcrButton.hidden = !running;
+    if (!running) this.elements.startOcrButton.textContent = "開始辨識";
+  }
+
+  async ensureOcrWorker() {
+    if (this.ocrWorker) return this.ocrWorker;
+    if (!window.Tesseract?.createWorker) {
+      throw new Error("Tesseract.js is unavailable");
+    }
+    this.elements.ocrProgressPanel.hidden = false;
+    this.elements.ocrProgressTitle.textContent = "載入 OCR 引擎";
+    this.elements.ocrProgressDetail.textContent = "準備繁體中文與英文模型";
+    this.elements.ocrProgressBar.style.width = "3%";
+
+    this.ocrWorker = await window.Tesseract.createWorker(
+      ["chi_tra", "eng"],
+      window.Tesseract.OEM?.LSTM_ONLY ?? 1,
+      {
+        workerPath: new URL(
+          "./vendor/tesseract/worker.min.js",
+          location.href
+        ).href,
+        corePath: new URL("./vendor/tesseract/core/", location.href).href,
+        langPath: new URL(
+          "./vendor/tesseract/lang-data/",
+          location.href
+        ).href,
+        workerBlobURL: false,
+        gzip: true,
+        logger: (message) => this.updateOcrProgress(message),
+        errorHandler: (error) =>
+          console.error("[PDF Editor] OCR worker error", error),
+      }
+    );
+    return this.ocrWorker;
+  }
+
+  updateOcrProgress(message) {
+    if (!this.ocrRunning) return;
+    const labels = {
+      "loading tesseract core": "載入 OCR 核心",
+      "initializing tesseract": "初始化 OCR",
+      "loading language traineddata": "載入語言模型",
+      "initializing api": "初始化辨識模型",
+      "recognizing text": "辨識頁面文字",
+    };
+    const status = labels[message.status] || "處理 OCR";
+    const progress = Number.isFinite(message.progress) ? message.progress : 0;
+    const pageBase =
+      this.ocrPageTotal && this.ocrPageNumber
+        ? (this.ocrPageNumber - 1) / this.ocrPageTotal
+        : 0;
+    const totalProgress = this.ocrPageTotal
+      ? (pageBase + progress / this.ocrPageTotal) * 100
+      : Math.max(3, progress * 10);
+    this.elements.ocrProgressTitle.textContent = status;
+    this.elements.ocrProgressDetail.textContent = this.ocrPageNumber
+      ? `第 ${this.ocrPageNumber} / ${this.ocrPageTotal} 頁`
+      : "首次使用正在準備本機模型";
+    this.elements.ocrProgressBar.style.width = `${Math.min(
+      99,
+      Math.max(3, totalProgress)
+    )}%`;
+  }
+
+  async startOcr() {
+    if (this.ocrRunning) return;
+    const pageRecords = this.getOcrPageRecords();
+    if (!pageRecords.length) {
+      this.toast("沒有可辨識的頁面。", "error");
+      return;
+    }
+
+    this.ocrCancelled = false;
+    this.ocrPageNumber = 0;
+    this.ocrPageTotal = pageRecords.length;
+    this.elements.ocrResultText.value = "";
+    this.elements.ocrResultField.hidden = true;
+    this.elements.copyOcrButton.hidden = true;
+    this.elements.ocrProgressPanel.hidden = false;
+    this.elements.ocrProgressTitle.textContent = "準備 OCR";
+    this.elements.ocrProgressDetail.textContent =
+      `共 ${pageRecords.length} 頁`;
+    this.elements.ocrProgressBar.style.width = "2%";
+    this.setOcrRunningState(true);
+
+    const resultSections = [];
+    let recognizedCount = 0;
+    let skippedCount = 0;
+
+    try {
+      const worker = await this.ensureOcrWorker();
+      if (this.ocrCancelled) {
+        await worker.terminate().catch(() => {});
+        this.ocrWorker = null;
+        return;
+      }
+
+      for (let index = 0; index < pageRecords.length; index += 1) {
+        if (this.ocrCancelled) break;
+        const pageRecord = pageRecords[index];
+        const pageNumber = this.pages.indexOf(pageRecord) + 1;
+        this.ocrPageNumber = index + 1;
+
+        if (this.elements.ocrSkipTextPages.checked) {
+          const entry = await this.buildNativeTextIndex(pageRecord);
+          if ((entry.native?.text || "").replace(/\s/g, "").length >= 8) {
+            skippedCount += 1;
+            this.elements.ocrProgressTitle.textContent = "略過已有文字的頁面";
+            this.elements.ocrProgressDetail.textContent =
+              `第 ${index + 1} / ${pageRecords.length} 頁`;
+            this.elements.ocrProgressBar.style.width =
+              `${Math.round(((index + 1) / pageRecords.length) * 100)}%`;
+            continue;
+          }
+        }
+
+        this.elements.ocrProgressTitle.textContent = "建立頁面影像";
+        this.elements.ocrProgressDetail.textContent =
+          `第 ${index + 1} / ${pageRecords.length} 頁`;
+        const canvas = await this.renderPageForOcr(pageRecord);
+        if (this.ocrCancelled) break;
+        const recognition = await worker.recognize(
+          canvas,
+          {},
+          { text: true, blocks: true }
+        );
+        const ocrIndex = this.buildOcrIndex(
+          recognition.data,
+          canvas.width,
+          canvas.height,
+          this.getPageRotation(pageRecord)
+        );
+        const entry = this.textIndex.get(pageRecord.id) || {};
+        entry.ocr = ocrIndex;
+        this.textIndex.set(pageRecord.id, entry);
+        recognizedCount += 1;
+        resultSections.push(
+          `【第 ${pageNumber} 頁】\n${ocrIndex.rawText || "（未辨識到文字）"}`
+        );
+      }
+
+      if (this.ocrCancelled) {
+        this.elements.ocrProgressTitle.textContent = "已停止辨識";
+        this.elements.ocrProgressDetail.textContent =
+          `已完成 ${recognizedCount} 頁`;
+        this.toast("OCR 已停止；已完成的頁面仍會保留。");
+      } else {
+        this.elements.ocrProgressTitle.textContent = "OCR 完成";
+        this.elements.ocrProgressDetail.textContent =
+          `辨識 ${recognizedCount} 頁${skippedCount ? `・略過 ${skippedCount} 頁` : ""}`;
+        this.elements.ocrProgressBar.style.width = "100%";
+        this.toast(
+          recognizedCount
+            ? `OCR 已完成 ${recognizedCount} 頁，可立即搜尋辨識文字。`
+            : "所選頁面已有可搜尋文字，不需要 OCR。",
+          "success",
+          6500
+        );
+      }
+
+      const resultText = resultSections.join("\n\n");
+      this.elements.ocrResultText.value = resultText;
+      this.elements.ocrResultField.hidden = !resultText;
+      this.elements.copyOcrButton.hidden = !resultText;
+      this.updateUI();
+      this.scheduleAutosave();
+      if (
+        !this.elements.searchControls.hidden &&
+        this.elements.searchInput.value.trim()
+      ) {
+        await this.performSearch();
+      } else {
+        this.renderAnnotations();
+      }
+    } catch (error) {
+      if (!this.ocrCancelled) {
+        console.error("[PDF Editor] OCR failed", error);
+        this.elements.ocrProgressTitle.textContent = "OCR 無法完成";
+        this.elements.ocrProgressDetail.textContent =
+          "請確認瀏覽器允許 WebAssembly 與背景工作執行";
+        this.toast("OCR 辨識失敗，請重新整理後再試。", "error", 7000);
+      }
+    } finally {
+      this.setOcrRunningState(false);
+      this.ocrPageNumber = 0;
+      this.ocrPageTotal = 0;
+    }
+  }
+
+  async cancelOcr() {
+    if (!this.ocrRunning) return;
+    this.ocrCancelled = true;
+    this.elements.cancelOcrButton.disabled = true;
+    this.elements.ocrProgressTitle.textContent = "正在停止 OCR";
+    this.elements.ocrProgressDetail.textContent = "保留已完成的辨識結果";
+    const worker = this.ocrWorker;
+    this.ocrWorker = null;
+    if (worker) await worker.terminate().catch(() => {});
+    this.elements.cancelOcrButton.disabled = false;
+  }
+
+  async renderPageForOcr(pageRecord) {
+    const source = this.sources.get(pageRecord.sourceId);
+    if (!source) throw new Error("OCR source is unavailable");
+    const pdfPage = await source.pdfjsDoc.getPage(
+      pageRecord.sourcePageIndex + 1
+    );
+    const rotation = this.getPageRotation(pageRecord);
+    const baseViewport = pdfPage.getViewport({ scale: 1, rotation });
+    const scale = Math.min(
+      2.7,
+      Math.max(1, 2300 / Math.max(baseViewport.width, baseViewport.height))
+    );
+    const viewport = pdfPage.getViewport({ scale, rotation });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext("2d", {
+      alpha: false,
+      willReadFrequently: true,
+    });
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await pdfPage.render({
+      canvasContext: context,
+      viewport,
+      background: "#ffffff",
+    }).promise;
+    return canvas;
+  }
+
+  buildOcrIndex(data, imageWidth, imageHeight, rotation) {
+    const detectedWords = [];
+    for (const block of data?.blocks || []) {
+      for (const paragraph of block.paragraphs || []) {
+        for (const line of paragraph.lines || []) {
+          for (const word of line.words || []) {
+            const wordText = String(word.text || "").trim();
+            const bbox = word.bbox;
+            if (!wordText || !bbox) continue;
+            detectedWords.push({
+              text: wordText,
+              x0: Math.max(0, Math.min(1, bbox.x0 / imageWidth)),
+              y0: Math.max(0, Math.min(1, bbox.y0 / imageHeight)),
+              x1: Math.max(0, Math.min(1, bbox.x1 / imageWidth)),
+              y1: Math.max(0, Math.min(1, bbox.y1 / imageHeight)),
+              confidence: Number(word.confidence) || 0,
+            });
+          }
+        }
+      }
+    }
+
+    let searchableText = "";
+    const words = detectedWords.map((word) => {
+      if (searchableText) searchableText += " ";
+      const start = searchableText.length;
+      searchableText += word.text;
+      return {
+        ...word,
+        start,
+        end: searchableText.length,
+      };
+    });
+    const rawText = String(data?.text || "").trim();
+    if (!searchableText) searchableText = rawText;
+
+    return {
+      text: searchableText,
+      rawText,
+      words,
+      rotation,
+      indexedAt: Date.now(),
+    };
+  }
+
+  async copyOcrText() {
+    const text = this.elements.ocrResultText.value;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      this.elements.ocrResultText.focus();
+      this.elements.ocrResultText.select();
+      document.execCommand("copy");
+    }
+    this.toast("OCR 文字已複製。", "success");
   }
 
   createSvgAnnotation(annotation, draft = false) {
@@ -1517,6 +2283,12 @@ class PdfWorkshop {
       }
     });
     this.toast(`${targetIds.length} 頁已旋轉 90 度。`, "success");
+    if (
+      !this.elements.searchControls.hidden &&
+      this.elements.searchInput.value.trim()
+    ) {
+      this.performSearch();
+    }
   }
 
   async deleteSelection() {
@@ -1546,6 +2318,12 @@ class PdfWorkshop {
         this.pages[Math.min(firstIndex, this.pages.length - 1)]?.id || null;
     });
     this.toast(`已刪除 ${targetIds.length} 頁。`, "success");
+    if (
+      !this.elements.searchControls.hidden &&
+      this.elements.searchInput.value.trim()
+    ) {
+      this.performSearch();
+    }
   }
 
   deleteSelectedAnnotation() {
@@ -1621,6 +2399,9 @@ class PdfWorkshop {
   }
 
   activateDrawingTool(tool) {
+    if (tool !== "select" && !this.elements.searchControls.hidden) {
+      this.closeSearchControls();
+    }
     this.activeTool = tool;
     this.textPlacementArmed = false;
     this.elements.textControls.hidden = true;
@@ -1658,6 +2439,9 @@ class PdfWorkshop {
 
   toggleTextControls() {
     const willOpen = this.elements.textControls.hidden;
+    if (willOpen && !this.elements.searchControls.hidden) {
+      this.closeSearchControls();
+    }
     this.elements.textControls.hidden = !willOpen;
     this.elements.textToolButton.classList.toggle("active", willOpen);
     if (willOpen) {
@@ -2175,11 +2959,18 @@ class PdfWorkshop {
         page.baseRotation =
           replacement.pages[page.sourcePageIndex]?.baseRotation ||
           page.baseRotation;
+        this.textIndex.delete(page.id);
       }
       this.elements.formDialog.close();
       this.dirty = true;
       this.renderAll();
       this.scheduleAutosave();
+      if (
+        !this.elements.searchControls.hidden &&
+        this.elements.searchInput.value.trim()
+      ) {
+        this.performSearch();
+      }
       this.toast("表單內容已套用並扁平化。", "success");
     } catch (error) {
       console.error("[PDF Editor] Form fill failed", error);
@@ -2742,6 +3533,12 @@ class PdfWorkshop {
         encrypted: source.encrypted,
         bytes: source.bytes.slice(),
       }));
+      const activePageIds = new Set(this.pages.map((page) => page.id));
+      const textIndex = [...this.textIndex.entries()]
+        .filter(
+          ([pageId, entry]) => activePageIds.has(pageId) && entry?.ocr
+        )
+        .map(([pageId, entry]) => [pageId, { ocr: entry.ocr }]);
       await this.projectDbOperation("readwrite", (store) =>
         store.put({
           id: AUTOSAVE_KEY,
@@ -2749,6 +3546,7 @@ class PdfWorkshop {
           pages: clonePages(this.pages),
           activePageId: this.activePageId,
           sources,
+          textIndex,
         })
       );
     } catch (error) {
@@ -2802,6 +3600,9 @@ class PdfWorkshop {
       }
       this.sources = restoredSources;
       this.pages = clonePages(project.pages);
+      this.textIndex = new Map(
+        Array.isArray(project.textIndex) ? project.textIndex : []
+      );
       this.activePageId = project.activePageId;
       this.selectedPageIds = new Set([this.activePageId].filter(Boolean));
       this.undoStack = [];
@@ -2856,6 +3657,15 @@ class PdfWorkshop {
       this.elements.openFileInput.click();
       return;
     }
+    if (command && event.key.toLowerCase() === "f" && this.pages.length) {
+      event.preventDefault();
+      if (this.elements.searchControls.hidden) this.toggleSearchControls();
+      else {
+        this.elements.searchInput.focus();
+        this.elements.searchInput.select();
+      }
+      return;
+    }
     if (command && event.key.toLowerCase() === "z") {
       event.preventDefault();
       if (event.shiftKey) this.redo();
@@ -2902,6 +3712,10 @@ class PdfWorkshop {
       event.preventDefault();
       this.activateDrawingTool("select");
     } else if (event.key === "Escape") {
+      if (!this.elements.searchControls.hidden) {
+        this.closeSearchControls();
+        return;
+      }
       this.textPlacementArmed = false;
       this.selectedAnnotationId = null;
       this.elements.armTextButton.textContent = "準備放置";

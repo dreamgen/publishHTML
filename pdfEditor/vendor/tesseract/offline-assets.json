@@ -1,0 +1,12 @@
+[
+  "./vendor/tesseract/tesseract.min.js",
+  "./vendor/tesseract/worker.min.js",
+  "./vendor/tesseract/core/tesseract-core-lstm.wasm.js",
+  "./vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
+  "./vendor/tesseract/core/tesseract-core-relaxedsimd-lstm.wasm.js",
+  "./vendor/tesseract/lang-data/chi_tra.traineddata.gz",
+  "./vendor/tesseract/lang-data/eng.traineddata.gz",
+  "./vendor/tesseract/LICENSE.md",
+  "./vendor/tesseract/core/LICENSE",
+  "./vendor/tesseract/lang-data/LICENSE"
+]

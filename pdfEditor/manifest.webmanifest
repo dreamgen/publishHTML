@@ -2,7 +2,7 @@
   "id": "pdfEditor",
   "name": "PDF 工坊 - 本機 PDF 編輯器",
   "short_name": "PDF 工坊",
-  "description": "完全在裝置本機處理的 PDF 編輯器，支援密碼文件、頁面整理、手寫標註、簽名與表單。",
+  "description": "完全在裝置本機處理的 PDF 編輯器，支援密碼文件、OCR、文字搜尋、頁面整理、手寫標註、簽名與表單。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

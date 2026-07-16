@@ -1,7 +1,10 @@
-const SW_VERSION = "v10";
+const SW_VERSION = "v11";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
-const AUXILIARY_MANIFEST = "./vendor/pdfjs/offline-assets.json";
+const AUXILIARY_MANIFESTS = [
+  "./vendor/pdfjs/offline-assets.json",
+  "./vendor/tesseract/offline-assets.json",
+];
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -12,7 +15,7 @@ const APP_SHELL = [
   "./icons/pdfEditor-512.svg",
   "./vendor/pdfjs/pdf.mjs",
   "./vendor/pdfjs/pdf.worker.mjs",
-  AUXILIARY_MANIFEST,
+  ...AUXILIARY_MANIFESTS,
   "./vendor/pdfjs/standard_fonts/FoxitDingbats.pfb",
   "./vendor/pdfjs/standard_fonts/FoxitFixed.pfb",
   "./vendor/pdfjs/standard_fonts/FoxitFixedBold.pfb",
@@ -37,12 +40,14 @@ self.addEventListener("install", (event) => {
     (async () => {
       const cache = await caches.open(CACHE_NAME);
       await cache.addAll(APP_SHELL);
-      const manifestResponse = await fetch(AUXILIARY_MANIFEST);
-      if (!manifestResponse.ok) {
-        throw new Error("Unable to load PDF.js offline asset manifest");
+      for (const manifestUrl of AUXILIARY_MANIFESTS) {
+        const manifestResponse = await fetch(manifestUrl);
+        if (!manifestResponse.ok) {
+          throw new Error(`Unable to load offline asset manifest: ${manifestUrl}`);
+        }
+        const auxiliaryAssets = await manifestResponse.json();
+        await cache.addAll(auxiliaryAssets);
       }
-      const auxiliaryAssets = await manifestResponse.json();
-      await cache.addAll(auxiliaryAssets);
       await self.skipWaiting();
     })()
   );

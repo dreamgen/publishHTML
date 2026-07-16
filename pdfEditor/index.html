@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PDF 工坊</title>
-  <meta name="description" content="完全在裝置本機處理的 PDF 編輯器，支援密碼文件、頁面整理、手寫標註、簽名與表單。">
+  <meta name="description" content="完全在裝置本機處理的 PDF 編輯器，支援密碼文件、OCR、文字搜尋、頁面整理、手寫標註、簽名與表單。">
   <meta name="theme-color" content="#f8fafc">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -145,6 +145,14 @@
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h3M8 16h8"/><rect x="13" y="10" width="3" height="3"/></svg>
               <span>表單</span>
             </button>
+            <button class="tool-button requires-document" id="searchToolButton" type="button" disabled title="搜尋 PDF 與 OCR 文字（Ctrl/⌘ + F）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+              <span>搜尋</span>
+            </button>
+            <button class="tool-button requires-document" id="ocrToolButton" type="button" disabled title="掃描頁面文字辨識">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M7 12h10M9 9v6M15 9v6"/></svg>
+              <span>OCR</span>
+            </button>
           </div>
 
           <div class="toolbar-spacer"></div>
@@ -158,6 +166,27 @@
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
             </button>
           </div>
+        </div>
+
+        <div class="search-controls" id="searchControls" hidden role="search" aria-label="搜尋 PDF 文字">
+          <div class="text-controls-copy">
+            <strong>搜尋文字</strong>
+            <span>同時搜尋 PDF 原生文字與已完成的 OCR 辨識結果。</span>
+          </div>
+          <label class="field grow search-field">
+            <span>關鍵字</span>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="輸入要尋找的文字">
+          </label>
+          <span class="search-result-status" id="searchResultStatus" aria-live="polite">輸入文字開始搜尋</span>
+          <div class="search-navigation" aria-label="搜尋結果導覽">
+            <button class="icon-button" id="searchPreviousButton" type="button" disabled aria-label="上一個搜尋結果" title="上一個">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 14 5-5 5 5"/></svg>
+            </button>
+            <button class="icon-button" id="searchNextButton" type="button" disabled aria-label="下一個搜尋結果" title="下一個">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg>
+            </button>
+          </div>
+          <button class="button button-ghost" id="closeSearchButton" type="button">關閉</button>
         </div>
 
         <div class="drawing-controls" id="drawingControls" hidden>
@@ -213,7 +242,7 @@
               本機處理，不會上傳
             </span>
             <h1>整理 PDF，不必交出文件</h1>
-            <p>拖放 PDF 到這裡，或從裝置選擇檔案。支援密碼文件、合併拆分、手寫標註、簽名、圖片與表單。</p>
+            <p>拖放 PDF 到這裡，或從裝置選擇檔案。支援密碼文件、OCR、文字搜尋、合併拆分、手寫標註、簽名、圖片與表單。</p>
             <button class="button button-primary button-large" id="emptyOpenButton" type="button">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/><path d="m3.5 10 2 8.5h13l2-8.5z"/></svg>
               選擇 PDF
@@ -391,8 +420,59 @@
     </form>
   </dialog>
 
+  <dialog class="panel-dialog ocr-dialog" id="ocrDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">本機文字辨識</span>
+          <h2>OCR 掃描文字辨識</h2>
+        </div>
+        <button class="icon-button" id="ocrCloseButton" value="cancel" aria-label="關閉"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="ocr-options">
+        <label class="field">
+          <span>辨識頁面</span>
+          <select id="ocrScope">
+            <option value="active">目前頁面</option>
+            <option value="selected">所選頁面</option>
+            <option value="all">全部頁面</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>辨識語言</span>
+          <select id="ocrLanguage" disabled>
+            <option value="chi_tra+eng">繁體中文＋英文</option>
+          </select>
+        </label>
+      </div>
+      <label class="check-label ocr-skip-option">
+        <input id="ocrSkipTextPages" type="checkbox" checked>
+        <span>跳過已有可搜尋文字的頁面</span>
+      </label>
+      <div class="ocr-progress-panel" id="ocrProgressPanel" hidden aria-live="polite">
+        <div>
+          <strong id="ocrProgressTitle">準備 OCR</strong>
+          <span id="ocrProgressDetail">語言模型只會從本機載入。</span>
+        </div>
+        <div class="progress-track"><span id="ocrProgressBar"></span></div>
+      </div>
+      <label class="field ocr-result-field" id="ocrResultField" hidden>
+        <span>辨識文字</span>
+        <textarea id="ocrResultText" rows="9" readonly placeholder="辨識完成後會顯示文字"></textarea>
+      </label>
+      <p class="dialog-note">OCR 與搜尋索引只儲存在這個裝置，不會上傳。辨識掃描頁可能需要數十秒，時間取決於頁數與裝置效能。</p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" id="copyOcrButton" type="button" hidden>複製文字</button>
+        <span class="dialog-action-spacer"></span>
+        <button class="button button-ghost" id="cancelOcrButton" type="button" hidden>停止辨識</button>
+        <button class="button button-primary" id="startOcrButton" type="button">開始辨識</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="./vendor/pdf-lib/pdf-lib.min.js"></script>
   <script src="./vendor/pdf-lib/fontkit.umd.min.js"></script>
+  <script src="./vendor/tesseract/tesseract.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

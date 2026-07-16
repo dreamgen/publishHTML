@@ -604,7 +604,8 @@ input[type="checkbox"] {
   background: var(--surface-muted);
 }
 
-.text-controls {
+.text-controls,
+.search-controls {
   position: relative;
   z-index: 11;
   display: flex;
@@ -614,6 +615,38 @@ input[type="checkbox"] {
   border-bottom: 1px solid var(--line);
   background: #fff;
   box-shadow: 0 7px 20px rgba(21, 31, 47, .06);
+}
+
+.search-controls {
+  align-items: center;
+}
+
+.search-field {
+  min-width: 210px;
+}
+
+.search-result-status {
+  min-width: 150px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+
+.search-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.search-navigation .icon-button {
+  width: 32px;
+  height: 32px;
 }
 
 .text-controls-copy {
@@ -646,7 +679,8 @@ input[type="checkbox"] {
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: 9px;
@@ -654,7 +688,8 @@ input[type="checkbox"] {
   background: #fff;
 }
 
-.field input {
+.field input,
+.field select {
   height: 38px;
   padding: 0 9px;
 }
@@ -668,7 +703,8 @@ input[type="checkbox"] {
 }
 
 .field input:focus,
-.field textarea:focus {
+.field textarea:focus,
+.field select:focus {
   border-color: #ed8b84;
   outline: 3px solid rgba(239, 90, 82, .13);
 }
@@ -828,6 +864,39 @@ input[type="checkbox"] {
   inset: 0;
   overflow: hidden;
   cursor: default;
+}
+
+.search-highlight-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.search-highlight {
+  position: absolute;
+  min-width: 4px;
+  min-height: 4px;
+  border: 1px solid rgba(207, 139, 0, .62);
+  border-radius: 2px;
+  background: rgba(255, 224, 80, .48);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .25);
+  mix-blend-mode: multiply;
+  transform-origin: left top;
+}
+
+.search-highlight.ocr {
+  border-color: rgba(226, 71, 69, .58);
+  background: rgba(255, 154, 117, .4);
+}
+
+.search-page-hit {
+  position: absolute;
+  inset: 8px;
+  border: 3px solid rgba(239, 90, 82, .76);
+  border-radius: 4px;
+  background: rgba(255, 224, 80, .08);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .7);
 }
 
 .annotation-layer.placing {
@@ -1476,6 +1545,62 @@ input[type="checkbox"] {
   background: var(--surface);
 }
 
+.ocr-dialog {
+  width: min(660px, calc(100% - 28px));
+}
+
+.ocr-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ocr-skip-option {
+  width: fit-content;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.ocr-progress-panel {
+  display: grid;
+  gap: 8px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.ocr-progress-panel > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ocr-progress-panel strong {
+  font-size: 12px;
+}
+
+.ocr-progress-panel span {
+  color: var(--ink-soft);
+  font-size: 10px;
+  text-align: right;
+}
+
+.ocr-result-field textarea {
+  min-height: 180px;
+  max-height: 34vh;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.65;
+}
+
+.dialog-action-spacer {
+  flex: 1;
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: #0d1420;
@@ -1504,6 +1629,7 @@ input[type="checkbox"] {
 [data-theme="dark"] .zoom-controls,
 [data-theme="dark"] .field input,
 [data-theme="dark"] .field textarea,
+[data-theme="dark"] .field select,
 [data-theme="dark"] .mini-button {
   background: var(--surface);
   color: var(--ink);
@@ -1555,6 +1681,10 @@ input[type="checkbox"] {
   }
 
   .text-controls {
+    flex-wrap: wrap;
+  }
+
+  .search-controls {
     flex-wrap: wrap;
   }
 
@@ -1702,6 +1832,36 @@ input[type="checkbox"] {
     flex: 1;
   }
 
+  .search-controls {
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+  }
+
+  .search-controls .text-controls-copy {
+    min-width: 100%;
+  }
+
+  .search-controls .search-field {
+    flex-basis: calc(100% - 170px);
+    min-width: 180px;
+  }
+
+  .search-result-status {
+    order: 3;
+    flex: 1;
+    min-width: 120px;
+    text-align: left;
+  }
+
+  .search-navigation {
+    order: 4;
+  }
+
+  .search-controls > .button {
+    order: 5;
+  }
+
   .drawing-controls {
     flex-wrap: wrap;
     padding: 9px 10px;
@@ -1736,6 +1896,10 @@ input[type="checkbox"] {
   }
 
   .form-field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ocr-options {
     grid-template-columns: 1fr;
   }
 
