@@ -728,15 +728,18 @@
                 <!-- Prefetch Count -->
                 <div>
                     <label class="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-300">預載頁數</label>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">背景自動預先載入的章節數量。長途飛行建議設定較大數字（如 50-200）。</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">背景自動預先載入的章節數量，可選擇 10、50 或 100 章。</p>
                     <div class="flex items-center gap-3">
-                        <input type="number" id="novel-prefetch-count" value="10" min="1" max="9999" class="w-24 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <select id="novel-prefetch-count" class="w-24 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="10">10</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
                         <span class="text-sm text-gray-500 dark:text-gray-400">頁</span>
                         <div class="flex gap-1.5 ml-auto">
                             <button onclick="document.getElementById('novel-prefetch-count').value=10" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">10</button>
                             <button onclick="document.getElementById('novel-prefetch-count').value=50" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">50</button>
                             <button onclick="document.getElementById('novel-prefetch-count').value=100" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">100</button>
-                            <button onclick="document.getElementById('novel-prefetch-count').value=200" class="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">200</button>
                         </div>
                     </div>
                 </div>
@@ -1116,6 +1119,232 @@
         async function idbClearStore(store) {
             const db = await openIdb();
             return new Promise((res, rej) => { const r = db.transaction(store,'readwrite').objectStore(store).clear(); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
+        }
+
+        // ─── Userscript direct-import bridge ─────────────────────────────────
+        const USER_SCRIPT_BRIDGE = Object.freeze({
+            schema: 'purereader.chapter-bundle',
+            version: 1,
+            hello: 'PURE_READER_BRIDGE_HELLO',
+            ready: 'PURE_READER_BRIDGE_READY',
+            import: 'PURE_READER_BRIDGE_IMPORT',
+            result: 'PURE_READER_BRIDGE_RESULT'
+        });
+        const USER_SCRIPT_BRIDGE_HOSTS = new Set([
+            'm.biquge.tw',
+            'look.thisiscm.com',
+            'look.twword.com'
+        ]);
+        let userScriptBridgeSource = null;
+        let userScriptBridgeOrigin = '';
+        let userScriptBridgeNonce = '';
+
+        function isLocalHostname(hostname) {
+            return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+        }
+
+        function isAllowedUserScriptOrigin(origin) {
+            try {
+                const sender = new URL(origin);
+                if (sender.protocol !== 'https:' && !isLocalHostname(sender.hostname)) return false;
+                if (USER_SCRIPT_BRIDGE_HOSTS.has(sender.hostname)) return true;
+                return isLocalHostname(location.hostname) && isLocalHostname(sender.hostname);
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function normalizeBridgeUrl(value, fieldName) {
+            const url = new URL(value);
+            if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${fieldName} 不是有效網址`);
+            url.hash = '';
+            return url.href;
+        }
+
+        function mergeImportedPageOrder(existingPages, importedChapters) {
+            const current = Array.isArray(existingPages) ? existingPages.filter(Boolean) : [];
+            const incoming = importedChapters.map(chapter => chapter.url);
+            if (current.length === 0) return [...new Set(incoming)];
+
+            const overlap = incoming.findIndex(url => current.includes(url));
+            if (overlap >= 0) {
+                const currentOverlap = current.indexOf(incoming[overlap]);
+                const incomingStart = currentOverlap - overlap;
+                const positioned = new Map();
+                current.forEach((url, index) => positioned.set(index, url));
+                incoming.forEach((url, index) => positioned.set(incomingStart + index, url));
+                return [...new Set([...positioned.entries()]
+                    .sort((left, right) => left[0] - right[0])
+                    .map(([, url]) => url))];
+            }
+
+            const first = importedChapters[0];
+            const last = importedChapters[importedChapters.length - 1];
+            if (first?.previousUrl === current[current.length - 1]) return [...current, ...incoming];
+            if (last?.nextUrl === current[0]) return [...incoming, ...current];
+            return [...current, ...incoming];
+        }
+
+        function validateChapterBundle(bundle) {
+            if (!bundle || bundle.schema !== USER_SCRIPT_BRIDGE.schema || bundle.version !== USER_SCRIPT_BRIDGE.version) {
+                throw new Error('章節封包格式或版本不支援');
+            }
+            if (!bundle.book || typeof bundle.book !== 'object') throw new Error('章節封包缺少書籍資料');
+            if (!Array.isArray(bundle.chapters) || bundle.chapters.length < 1 || bundle.chapters.length > 100) {
+                throw new Error('章節數必須介於 1 到 100');
+            }
+
+            const seen = new Set();
+            const chapters = bundle.chapters.map((chapter, index) => {
+                if (!chapter || typeof chapter.contentHtml !== 'string') throw new Error(`第 ${index + 1} 章缺少正文`);
+                if (chapter.contentHtml.length > 2_000_000) throw new Error(`第 ${index + 1} 章內容超過 2 MB`);
+                const url = normalizeBridgeUrl(chapter.url, `第 ${index + 1} 章網址`);
+                if (seen.has(url)) throw new Error(`章節封包包含重複網址：${url}`);
+                seen.add(url);
+                return {
+                    url,
+                    title: String(chapter.title || `第 ${index + 1} 章`).slice(0, 500),
+                    documentTitle: String(chapter.documentTitle || '').slice(0, 500),
+                    contentHtml: chapter.contentHtml,
+                    previousUrl: chapter.previousUrl ? normalizeBridgeUrl(chapter.previousUrl, '上一章網址') : null,
+                    nextUrl: chapter.nextUrl ? normalizeBridgeUrl(chapter.nextUrl, '下一章網址') : null,
+                    indexUrl: chapter.indexUrl ? normalizeBridgeUrl(chapter.indexUrl, '目錄網址') : null,
+                    savedAt: Number(chapter.savedAt) || Date.now(),
+                    checksum: String(chapter.checksum || '')
+                };
+            });
+
+            const requested = Number(bundle.requestedChapterCount);
+            return {
+                book: {
+                    id: String(bundle.book.id || _cacheKey(bundle.book.indexUrl || chapters[0].url)).slice(0, 200),
+                    title: String(bundle.book.title || chapters[0].documentTitle || chapters[0].title || '未命名小說').slice(0, 500),
+                    indexUrl: bundle.book.indexUrl ? normalizeBridgeUrl(bundle.book.indexUrl, '書籍目錄網址') : (chapters[0].indexUrl || '')
+                },
+                chapters,
+                currentUrl: bundle.currentUrl && seen.has(normalizeBridgeUrl(bundle.currentUrl, '目前章節網址'))
+                    ? normalizeBridgeUrl(bundle.currentUrl, '目前章節網址')
+                    : chapters[0].url,
+                requestedChapterCount: [10, 50, 100].includes(requested) ? requested : chapters.length,
+                isEnded: bundle.stopReason === 'last_chapter'
+            };
+        }
+
+        async function importChapterBundle(rawBundle) {
+            if (!window.DOMPurify) throw new Error('正文清理元件尚未載入，請重新整理後再試');
+            const bundle = validateChapterBundle(rawBundle);
+            const sessions = await idbGetAll('novel-sessions').catch(() => []);
+            let session = sessions.find(item => item.bookId === bundle.book.id)
+                || sessions.find(item => bundle.book.indexUrl && item.indexUrl === bundle.book.indexUrl)
+                || null;
+
+            if (!session) {
+                session = {
+                    id: `import-${_cacheKey(bundle.book.id)}`,
+                    bookId: bundle.book.id,
+                    indexUrl: bundle.book.indexUrl,
+                    startUrl: bundle.chapters[0].url,
+                    currentUrl: bundle.currentUrl,
+                    selector: '下一章',
+                    selectorType: 'keyword',
+                    prefetchCount: bundle.requestedChapterCount,
+                    maxKeep: 0,
+                    endKeywords: '',
+                    pages: [],
+                    currentIdx: 0,
+                    createdAt: Date.now(),
+                    title: bundle.book.title
+                };
+            }
+
+            let inserted = 0;
+            let updated = 0;
+            let unchanged = 0;
+            for (const chapter of bundle.chapters) {
+                const existing = await idbGet('novel-pages', chapter.url).catch(() => null);
+                if (existing && chapter.checksum && existing.checksum === chapter.checksum) {
+                    unchanged++;
+                    continue;
+                }
+                const cleanContent = DOMPurify.sanitize(chapter.contentHtml, {
+                    USE_PROFILES: { html: true },
+                    ADD_TAGS: ['img', 'figure', 'figcaption'],
+                    FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed']
+                });
+                await idbPut('novel-pages', {
+                    url: chapter.url,
+                    title: chapter.title,
+                    content: cleanContent,
+                    documentTitle: chapter.documentTitle,
+                    previousUrl: chapter.previousUrl,
+                    nextUrl: chapter.nextUrl,
+                    indexUrl: chapter.indexUrl,
+                    checksum: chapter.checksum,
+                    fetchedAt: chapter.savedAt,
+                    importedAt: Date.now(),
+                    importSource: 'userscript',
+                    sessionId: session.id
+                });
+                existing ? updated++ : inserted++;
+            }
+
+            session.bookId = bundle.book.id;
+            session.indexUrl = bundle.book.indexUrl;
+            session.title = bundle.book.title || session.title;
+            session.prefetchCount = bundle.requestedChapterCount;
+            session.pages = mergeImportedPageOrder(session.pages, bundle.chapters);
+            session.currentUrl = bundle.currentUrl;
+            session.currentIdx = Math.max(0, session.pages.indexOf(bundle.currentUrl));
+            session.isEnded = bundle.isEnded;
+            // renderArticle() 會觸發 onPageLoaded()；直接匯入完成時先略過一次自動補抓，
+            // 避免「預存 10 章」完成後立刻又向網站要求第 11 章。
+            session.skipNextPrefetch = true;
+            session.lastImportedAt = Date.now();
+            await idbPut('novel-sessions', session);
+
+            await NovelMode.renderBookmarks();
+            await NovelMode.resumeSession(session.id);
+            return { sessionId: session.id, inserted, updated, unchanged, total: bundle.chapters.length };
+        }
+
+        function replyToUserScript(data) {
+            if (!userScriptBridgeSource || !userScriptBridgeOrigin) return;
+            userScriptBridgeSource.postMessage(data, userScriptBridgeOrigin);
+        }
+
+        function initUserScriptBridge() {
+            const params = new URLSearchParams(location.search);
+            userScriptBridgeNonce = params.get('prNonce') || '';
+            if (params.get('prReceive') !== '1' || !/^[a-zA-Z0-9_-]{16,128}$/.test(userScriptBridgeNonce)) return;
+
+            showSyncBar('等待小說網站傳送預存章節…', null, null, 0);
+            window.addEventListener('message', async event => {
+                const data = event.data || {};
+                if (!isAllowedUserScriptOrigin(event.origin)) return;
+                if (window.opener && event.source !== window.opener) return;
+                if (data.nonce !== userScriptBridgeNonce) return;
+
+                if (data.type === USER_SCRIPT_BRIDGE.hello) {
+                    userScriptBridgeSource = event.source;
+                    userScriptBridgeOrigin = event.origin;
+                    replyToUserScript({ type: USER_SCRIPT_BRIDGE.ready, nonce: userScriptBridgeNonce, version: USER_SCRIPT_BRIDGE.version });
+                    showSyncBar('已連接小說網站，等待章節整理完成…', null, null, 0);
+                    return;
+                }
+
+                if (data.type !== USER_SCRIPT_BRIDGE.import || event.source !== userScriptBridgeSource) return;
+                try {
+                    showSyncBar('正在匯入預存章節…', null, null, 0);
+                    const result = await importChapterBundle(data.bundle);
+                    replyToUserScript({ type: USER_SCRIPT_BRIDGE.result, nonce: userScriptBridgeNonce, ok: true, result });
+                    showSyncBar(`✓ 已匯入 ${result.total} 章（新增 ${result.inserted}、更新 ${result.updated}、略過 ${result.unchanged}）`, null, null, 6000);
+                    history.replaceState({}, document.title, location.pathname);
+                } catch (error) {
+                    console.error('[pureReader] Userscript import failed:', error);
+                    replyToUserScript({ type: USER_SCRIPT_BRIDGE.result, nonce: userScriptBridgeNonce, ok: false, error: error.message || '匯入失敗' });
+                    showSyncBar(`⚠ 匯入失敗：${error.message || '未知錯誤'}`, null, null, 0);
+                }
+            });
         }
 
         // ─── PWA Install Prompt ────────────────────────────────────────────────
@@ -4072,8 +4301,15 @@
                     if (NovelTimeLimit.checkLimit()) return;
                     NovelTimeLimit.startTimer();
 
-                    // Trigger prefetch to keep filling the sliding window
-                    prefetch();
+                    // Direct-import already supplied the requested 10/50/100 chapters.
+                    // Skip exactly one automatic refill; normal sliding prefetch resumes
+                    // after the reader moves to another chapter.
+                    if (_session.skipNextPrefetch) {
+                        delete _session.skipNextPrefetch;
+                        await _saveSession();
+                    } else {
+                        prefetch();
+                    }
                     return;
                 }
 
@@ -5165,6 +5401,7 @@
             updateOfflineIndicator();
             NovelMode.triggerAutoUpdates();
             renderSearchSources();
+            initUserScriptBridge();
 
             if (localStorage.getItem('pureReader_hide_labels') === 'true') {
                 document.body.classList.add('hide-toolbar-labels');
