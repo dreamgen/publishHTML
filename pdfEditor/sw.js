@@ -1,9 +1,15 @@
-const SW_VERSION = "v11";
+const SW_VERSION = "v12";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const AUXILIARY_MANIFESTS = [
   "./vendor/pdfjs/offline-assets.json",
   "./vendor/tesseract/offline-assets.json",
+];
+const NETWORK_FIRST_ASSETS = [
+  "/index.html",
+  "/app.js",
+  "/styles.css",
+  "/manifest.webmanifest",
 ];
 const APP_SHELL = [
   "./",
@@ -112,6 +118,22 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
+
+  if (NETWORK_FIRST_ASSETS.some((suffix) => url.pathname.endsWith(suffix))) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response?.ok) {
+            caches
+              .open(CACHE_NAME)
+              .then((cache) => cache.put(request, response.clone()));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
     );
     return;
   }

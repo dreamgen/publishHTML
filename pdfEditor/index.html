@@ -257,6 +257,9 @@
           <section class="document-view" id="documentView" hidden>
             <div class="page-stage" id="pageStage">
               <canvas id="pdfCanvas" aria-label="PDF 頁面預覽"></canvas>
+              <div class="textLayer selection-text-layer" id="textLayer" aria-label="PDF 可選取文字層"></div>
+              <div class="ocr-selection-layer" id="ocrSelectionLayer" aria-label="OCR 可選取文字層"></div>
+              <button class="copy-selection-button" id="copySelectedTextButton" type="button" hidden>複製選取文字</button>
               <div class="annotation-layer" id="annotationLayer" aria-label="文字標註層"></div>
             </div>
           </section>

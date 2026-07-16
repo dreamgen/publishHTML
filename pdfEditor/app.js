@@ -48,6 +48,7 @@ class PdfWorkshop {
     this.currentViewport = null;
     this.currentRenderedPageId = null;
     this.currentRenderTask = null;
+    this.currentTextLayerTask = null;
     this.renderToken = 0;
     this.thumbnailGeneration = 0;
     this.draggedPageId = null;
@@ -73,6 +74,7 @@ class PdfWorkshop {
     this.ocrCancelled = false;
     this.ocrPageNumber = 0;
     this.ocrPageTotal = 0;
+    this.selectedPageText = "";
 
     this.elements = {
       openButton: $("#openButton"),
@@ -136,6 +138,9 @@ class PdfWorkshop {
       documentView: $("#documentView"),
       pageStage: $("#pageStage"),
       pdfCanvas: $("#pdfCanvas"),
+      textLayer: $("#textLayer"),
+      ocrSelectionLayer: $("#ocrSelectionLayer"),
+      copySelectedTextButton: $("#copySelectedTextButton"),
       annotationLayer: $("#annotationLayer"),
       dropOverlay: $("#dropOverlay"),
       documentStatus: $("#documentStatus"),
@@ -194,6 +199,7 @@ class PdfWorkshop {
       return;
     }
 
+    this.ensureRuntimeLayers();
     this.applySavedTheme();
     this.bindEvents();
     this.updateConnectivity();
@@ -215,6 +221,37 @@ class PdfWorkshop {
     const consumedSharedFile = await this.consumeSharedFile();
     if (!consumedSharedFile && !openAction) {
       await this.offerAutosaveRestore();
+    }
+  }
+
+  ensureRuntimeLayers() {
+    const { pageStage, annotationLayer } = this.elements;
+    if (!pageStage || !annotationLayer) return;
+    if (!this.elements.textLayer) {
+      const layer = document.createElement("div");
+      layer.id = "textLayer";
+      layer.className = "textLayer selection-text-layer";
+      layer.setAttribute("aria-label", "PDF 可選取文字層");
+      pageStage.insertBefore(layer, annotationLayer);
+      this.elements.textLayer = layer;
+    }
+    if (!this.elements.ocrSelectionLayer) {
+      const layer = document.createElement("div");
+      layer.id = "ocrSelectionLayer";
+      layer.className = "ocr-selection-layer";
+      layer.setAttribute("aria-label", "OCR 可選取文字層");
+      pageStage.insertBefore(layer, annotationLayer);
+      this.elements.ocrSelectionLayer = layer;
+    }
+    if (!this.elements.copySelectedTextButton) {
+      const button = document.createElement("button");
+      button.id = "copySelectedTextButton";
+      button.className = "copy-selection-button";
+      button.type = "button";
+      button.hidden = true;
+      button.textContent = "複製選取文字";
+      pageStage.insertBefore(button, annotationLayer);
+      this.elements.copySelectedTextButton = button;
     }
   }
 
@@ -267,7 +304,9 @@ class PdfWorkshop {
     openButton.addEventListener("click", () => openFileInput.click());
     emptyOpenButton.addEventListener("click", () => openFileInput.click());
     mergeButton.addEventListener("click", () => mergeFileInput.click());
-    insertButton.addEventListener("click", () => this.elements.insertDialog.showModal());
+    insertButton.addEventListener("click", () =>
+      this.openDialog(this.elements.insertDialog)
+    );
     themeButton.addEventListener("click", () => this.toggleTheme());
     exportButton.addEventListener("click", () =>
       this.exportPages(this.pages.map((page) => page.id), {
@@ -343,7 +382,7 @@ class PdfWorkshop {
     rangeButton.addEventListener("click", () => {
       this.elements.rangeInput.value = "";
       this.elements.rangeError.hidden = true;
-      this.elements.rangeDialog.showModal();
+      this.openDialog(this.elements.rangeDialog);
       setTimeout(() => this.elements.rangeInput.focus(), 50);
     });
     this.elements.rangeAcceptButton.addEventListener("click", (event) => {
@@ -376,8 +415,10 @@ class PdfWorkshop {
     imageToolButton.addEventListener("click", () => annotationImageInput.click());
     signatureToolButton.addEventListener("click", () => this.openSignatureDialog());
     formToolButton.addEventListener("click", () => this.openFormDialog());
-    searchToolButton.addEventListener("click", () => this.toggleSearchControls());
-    ocrToolButton.addEventListener("click", () => this.openOcrDialog());
+    searchToolButton?.addEventListener("click", () =>
+      this.toggleSearchControls()
+    );
+    ocrToolButton?.addEventListener("click", () => this.openOcrDialog());
     armTextButton.addEventListener("click", () => this.toggleTextPlacement());
     cancelTextButton.addEventListener("click", () => this.closeTextControls());
     closeDrawingButton.addEventListener("click", () => this.activateDrawingTool("select"));
@@ -387,15 +428,15 @@ class PdfWorkshop {
     });
 
     this.elements.blankPortraitButton.addEventListener("click", async () => {
-      this.elements.insertDialog.close();
+      this.closeDialog(this.elements.insertDialog);
       await this.insertBlankPage("portrait");
     });
     this.elements.blankLandscapeButton.addEventListener("click", async () => {
-      this.elements.insertDialog.close();
+      this.closeDialog(this.elements.insertDialog);
       await this.insertBlankPage("landscape");
     });
     this.elements.imageToPdfButton.addEventListener("click", () => {
-      this.elements.insertDialog.close();
+      this.closeDialog(this.elements.insertDialog);
       imageToPdfInput.click();
     });
 
@@ -409,11 +450,11 @@ class PdfWorkshop {
     this.elements.applyFormButton.addEventListener("click", () =>
       this.applyFormValues()
     );
-    searchInput.addEventListener("input", () => {
+    searchInput?.addEventListener("input", () => {
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = setTimeout(() => this.performSearch(), 240);
     });
-    searchInput.addEventListener("keydown", (event) => {
+    searchInput?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       if (this.searchMatches.length) {
@@ -422,21 +463,54 @@ class PdfWorkshop {
         this.performSearch();
       }
     });
-    searchPreviousButton.addEventListener("click", () => this.stepSearch(-1));
-    searchNextButton.addEventListener("click", () => this.stepSearch(1));
-    closeSearchButton.addEventListener("click", () => this.closeSearchControls());
-    this.elements.startOcrButton.addEventListener("click", () => this.startOcr());
-    this.elements.cancelOcrButton.addEventListener("click", () =>
+    searchPreviousButton?.addEventListener("click", () => this.stepSearch(-1));
+    searchNextButton?.addEventListener("click", () => this.stepSearch(1));
+    closeSearchButton?.addEventListener("click", () =>
+      this.closeSearchControls()
+    );
+    this.elements.startOcrButton?.addEventListener("click", () =>
+      this.startOcr()
+    );
+    this.elements.cancelOcrButton?.addEventListener("click", () =>
       this.cancelOcr()
     );
-    this.elements.copyOcrButton.addEventListener("click", () =>
+    this.elements.copyOcrButton?.addEventListener("click", () =>
       this.copyOcrText()
     );
-    this.elements.ocrDialog.addEventListener("cancel", (event) => {
+    this.elements.ocrDialog?.addEventListener("cancel", (event) => {
       if (!this.ocrRunning) return;
       event.preventDefault();
       this.cancelOcr();
     });
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest(
+        "dialog.dialog-fallback-open button[value]"
+      );
+      const dialog = button?.closest("dialog");
+      if (!dialog) return;
+      event.preventDefault();
+      this.closeDialog(dialog, button.value);
+    });
+    document.addEventListener("submit", (event) => {
+      const dialog = event.target.closest?.("dialog.dialog-fallback-open");
+      if (!dialog) return;
+      event.preventDefault();
+      if (dialog === this.elements.rangeDialog) {
+        this.applyPageRange();
+        return;
+      }
+      this.closeDialog(dialog, event.submitter?.value || "confirm");
+    });
+    document.addEventListener("selectionchange", () =>
+      this.updateSelectedPageText()
+    );
+    this.elements.copySelectedTextButton?.addEventListener(
+      "pointerdown",
+      (event) => event.preventDefault()
+    );
+    this.elements.copySelectedTextButton?.addEventListener("click", () =>
+      this.copySelectedPageText()
+    );
 
     zoomOutButton.addEventListener("click", () => this.changeZoom(-0.15));
     zoomInButton.addEventListener("click", () => this.changeZoom(0.15));
@@ -456,6 +530,9 @@ class PdfWorkshop {
       this.handleAnnotationPointerMove(event)
     );
     window.addEventListener("pointerup", (event) =>
+      this.handleAnnotationPointerUp(event)
+    );
+    window.addEventListener("pointercancel", (event) =>
       this.handleAnnotationPointerUp(event)
     );
 
@@ -584,6 +661,7 @@ class PdfWorkshop {
       if (remember) this.rememberRecentFiles(files);
       this.scheduleAutosave();
       if (
+        this.elements.searchControls &&
         !this.elements.searchControls.hidden &&
         this.elements.searchInput.value.trim()
       ) {
@@ -719,7 +797,7 @@ class PdfWorkshop {
     this.elements.passwordFileName.textContent = fileName;
     this.elements.passwordError.hidden = !incorrect;
     this.elements.passwordInput.value = "";
-    if (!dialog.open) dialog.showModal();
+    if (!this.isDialogOpen(dialog)) this.openDialog(dialog);
     setTimeout(() => this.elements.passwordInput.focus(), 40);
 
     return new Promise((resolve) => {
@@ -760,12 +838,14 @@ class PdfWorkshop {
       this.searchBuildToken += 1;
       this.searchMatches = [];
       this.searchCursor = -1;
-      this.elements.searchControls.hidden = true;
-      this.elements.searchToolButton.classList.remove("active");
-      this.elements.searchInput.value = "";
-      this.elements.searchPreviousButton.disabled = true;
-      this.elements.searchNextButton.disabled = true;
-      this.elements.searchResultStatus.textContent = "輸入文字開始搜尋";
+      if (this.elements.searchControls) {
+        this.elements.searchControls.hidden = true;
+        this.elements.searchToolButton?.classList.remove("active");
+        this.elements.searchInput.value = "";
+        this.elements.searchPreviousButton.disabled = true;
+        this.elements.searchNextButton.disabled = true;
+        this.elements.searchResultStatus.textContent = "輸入文字開始搜尋";
+      }
     }
   }
 
@@ -795,7 +875,7 @@ class PdfWorkshop {
       this.elements.formToolButton,
       this.elements.searchToolButton,
       this.elements.ocrToolButton,
-    ].forEach((button) => {
+    ].filter(Boolean).forEach((button) => {
       button.disabled = !hasDocument;
     });
     this.elements.zoomOutButton.disabled = !hasDocument || this.zoom <= 0.5;
@@ -1043,10 +1123,15 @@ class PdfWorkshop {
   }
 
   async renderActivePage() {
+    this.hideSelectedPageText({ clearSelection: true });
     const pageRecord = this.pages.find((page) => page.id === this.activePageId);
     if (!pageRecord) {
       this.currentViewport = null;
       this.currentRenderedPageId = null;
+      this.currentTextLayerTask?.cancel?.();
+      this.currentTextLayerTask = null;
+      this.elements.textLayer.replaceChildren();
+      this.elements.ocrSelectionLayer.replaceChildren();
       this.elements.annotationLayer.replaceChildren();
       return;
     }
@@ -1058,6 +1143,10 @@ class PdfWorkshop {
     if (this.currentRenderTask) {
       this.currentRenderTask.cancel();
       this.currentRenderTask = null;
+    }
+    if (this.currentTextLayerTask) {
+      this.currentTextLayerTask.cancel();
+      this.currentTextLayerTask = null;
     }
 
     try {
@@ -1089,10 +1178,21 @@ class PdfWorkshop {
       canvas.style.height = `${viewport.height}px`;
       this.elements.pageStage.style.width = `${viewport.width}px`;
       this.elements.pageStage.style.height = `${viewport.height}px`;
+      this.elements.pageStage.style.setProperty(
+        "--total-scale-factor",
+        viewport.scale
+      );
+      this.elements.textLayer.replaceChildren();
+      this.elements.ocrSelectionLayer.replaceChildren();
+      this.elements.ocrSelectionLayer.classList.remove("active");
 
       this.currentViewport = viewport;
       this.currentRenderedPageId = pageRecord.id;
       this.renderAnnotations();
+      const textContentPromise = page.getTextContent().catch((error) => {
+        console.warn("[PDF Editor] Selectable text layer unavailable", error);
+        return null;
+      });
 
       this.currentRenderTask = page.render({
         canvasContext: context,
@@ -1105,12 +1205,158 @@ class PdfWorkshop {
       await this.currentRenderTask.promise;
       if (token !== this.renderToken) return;
       this.currentRenderTask = null;
+      const textContent = await textContentPromise;
+      if (token !== this.renderToken) return;
+      await this.renderSelectableTextLayers(
+        pageRecord,
+        viewport,
+        textContent,
+        token
+      );
     } catch (error) {
       if (error?.name !== "RenderingCancelledException") {
         console.error("[PDF Editor] Page render failed", error);
         this.toast("頁面預覽失敗，請嘗試重新開啟文件。", "error");
       }
     }
+  }
+
+  async renderSelectableTextLayers(
+    pageRecord,
+    viewport,
+    textContent,
+    token
+  ) {
+    const nativeText = (textContent?.items || [])
+      .map((item) => item?.str || "")
+      .join("");
+    const nativeCharacterCount = nativeText.replace(/\s/g, "").length;
+
+    if (textContent?.items?.length) {
+      this.indexNativeTextContent(pageRecord, textContent);
+      try {
+        const textLayerTask = new pdfjsLib.TextLayer({
+          textContentSource: textContent,
+          container: this.elements.textLayer,
+          viewport,
+        });
+        this.elements.textLayer.style.width =
+          `${viewport.rawDims.pageWidth * viewport.scale}px`;
+        this.elements.textLayer.style.height =
+          `${viewport.rawDims.pageHeight * viewport.scale}px`;
+        this.currentTextLayerTask = textLayerTask;
+        await textLayerTask.render();
+        if (token !== this.renderToken) return;
+        this.currentTextLayerTask = null;
+      } catch (error) {
+        if (error?.name !== "AbortException") {
+          console.warn("[PDF Editor] Text selection layer failed", error);
+        }
+      }
+    }
+
+    const ocr = this.textIndex.get(pageRecord.id)?.ocr;
+    if (!ocr || nativeCharacterCount >= 8 || token !== this.renderToken) return;
+    this.renderOcrSelectionLayer(pageRecord, ocr);
+  }
+
+  renderOcrSelectionLayer(pageRecord, ocr) {
+    const layer = this.elements.ocrSelectionLayer;
+    layer.replaceChildren();
+    const words = ocr.words || [];
+
+    if (!words.length && ocr.rawText) {
+      const fallback = document.createElement("span");
+      fallback.className = "ocr-selection-fallback";
+      fallback.textContent = ocr.rawText;
+      layer.append(fallback);
+      layer.classList.add("active");
+      return;
+    }
+
+    const measureCanvas = document.createElement("canvas");
+    const measureContext = measureCanvas.getContext("2d");
+    for (const word of words) {
+      const adjusted = this.transformOcrBox(
+        { ...word, rotation: ocr.rotation || 0 },
+        this.getPageRotation(pageRecord)
+      );
+      const width = Math.max(
+        4,
+        (adjusted.x1 - adjusted.x0) * this.currentViewport.width
+      );
+      const height = Math.max(
+        6,
+        (adjusted.y1 - adjusted.y0) * this.currentViewport.height
+      );
+      const span = document.createElement("span");
+      span.className = "ocr-selection-word";
+      span.textContent = `${word.text} `;
+      span.style.left = `${adjusted.x0 * this.currentViewport.width}px`;
+      span.style.top = `${adjusted.y0 * this.currentViewport.height}px`;
+      span.style.width = `${width}px`;
+      span.style.height = `${height}px`;
+      span.style.fontSize = `${height}px`;
+      if (measureContext) {
+        measureContext.font = `${height}px sans-serif`;
+        const measuredWidth = measureContext.measureText(span.textContent).width;
+        if (measuredWidth > 0) {
+          span.style.transform = `scaleX(${width / measuredWidth})`;
+        }
+      }
+      layer.append(span);
+    }
+    layer.classList.toggle("active", words.length > 0);
+  }
+
+  updateSelectedPageText() {
+    const selection = document.getSelection();
+    const button = this.elements.copySelectedTextButton;
+    if (!selection || selection.isCollapsed || !selection.rangeCount || !button) {
+      this.selectedPageText = "";
+      if (button) button.hidden = true;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const layers = [
+      this.elements.textLayer,
+      this.elements.ocrSelectionLayer,
+    ].filter(Boolean);
+    const isPageText = layers.some(
+      (layer) =>
+        layer.contains(range.startContainer) && layer.contains(range.endContainer)
+    );
+    const text = isPageText ? selection.toString().trim() : "";
+    this.selectedPageText = text;
+    button.hidden = !text;
+  }
+
+  hideSelectedPageText({ clearSelection = false } = {}) {
+    this.selectedPageText = "";
+    if (this.elements.copySelectedTextButton) {
+      this.elements.copySelectedTextButton.hidden = true;
+    }
+    if (clearSelection) document.getSelection()?.removeAllRanges();
+  }
+
+  async copySelectedPageText() {
+    const text = this.selectedPageText;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    this.toast(`已複製 ${text.length} 個字元。`, "success");
+    this.hideSelectedPageText({ clearSelection: true });
   }
 
   renderAnnotations() {
@@ -1210,7 +1456,13 @@ class PdfWorkshop {
   }
 
   toggleSearchControls() {
-    if (!this.pages.length) return;
+    if (
+      !this.pages.length ||
+      !this.elements.searchControls ||
+      !this.elements.searchToolButton
+    ) {
+      return;
+    }
     const willOpen = this.elements.searchControls.hidden;
     if (!willOpen) {
       this.closeSearchControls();
@@ -1320,6 +1572,11 @@ class PdfWorkshop {
       pageRecord.sourcePageIndex + 1
     );
     const content = await pdfPage.getTextContent();
+    return this.indexNativeTextContent(pageRecord, content);
+  }
+
+  indexNativeTextContent(pageRecord, content) {
+    const current = this.textIndex.get(pageRecord.id) || {};
     let text = "";
     const segments = [];
 
@@ -1550,7 +1807,7 @@ class PdfWorkshop {
   }
 
   openOcrDialog() {
-    if (!this.pages.length) return;
+    if (!this.pages.length || !this.elements.ocrDialog) return;
     const selectedOption = this.elements.ocrScope.querySelector(
       'option[value="selected"]'
     );
@@ -1566,7 +1823,7 @@ class PdfWorkshop {
     this.elements.ocrProgressPanel.hidden = true;
     this.elements.ocrProgressBar.style.width = "0%";
     this.setOcrRunningState(false);
-    this.elements.ocrDialog.showModal();
+    this.openDialog(this.elements.ocrDialog);
   }
 
   getOcrPageRecords() {
@@ -1753,12 +2010,13 @@ class PdfWorkshop {
       this.updateUI();
       this.scheduleAutosave();
       if (
+        this.elements.searchControls &&
         !this.elements.searchControls.hidden &&
         this.elements.searchInput.value.trim()
       ) {
         await this.performSearch();
       } else {
-        this.renderAnnotations();
+        await this.renderActivePage();
       }
     } catch (error) {
       if (!this.ocrCancelled) {
@@ -2050,6 +2308,7 @@ class PdfWorkshop {
       ["pen", "highlight", "rect", "arrow"].includes(this.activeTool)
     ) {
       event.preventDefault();
+      this.elements.annotationLayer.setPointerCapture?.(event.pointerId);
       const point = this.eventToPdfPoint(event);
       if (!point) return;
       this.drawingDraft = {
@@ -2148,7 +2407,13 @@ class PdfWorkshop {
     drag.item.style.top = `${drag.currentTop}px`;
   }
 
-  handleAnnotationPointerUp() {
+  handleAnnotationPointerUp(event) {
+    if (
+      event?.pointerId !== undefined &&
+      this.elements.annotationLayer.hasPointerCapture?.(event.pointerId)
+    ) {
+      this.elements.annotationLayer.releasePointerCapture(event.pointerId);
+    }
     if (this.drawingDraft) {
       const draft = this.drawingDraft;
       this.drawingDraft = null;
@@ -2284,6 +2549,7 @@ class PdfWorkshop {
     });
     this.toast(`${targetIds.length} 頁已旋轉 90 度。`, "success");
     if (
+      this.elements.searchControls &&
       !this.elements.searchControls.hidden &&
       this.elements.searchInput.value.trim()
     ) {
@@ -2319,6 +2585,7 @@ class PdfWorkshop {
     });
     this.toast(`已刪除 ${targetIds.length} 頁。`, "success");
     if (
+      this.elements.searchControls &&
       !this.elements.searchControls.hidden &&
       this.elements.searchInput.value.trim()
     ) {
@@ -2399,7 +2666,14 @@ class PdfWorkshop {
   }
 
   activateDrawingTool(tool) {
-    if (tool !== "select" && !this.elements.searchControls.hidden) {
+    if (tool !== "select") {
+      this.hideSelectedPageText({ clearSelection: true });
+    }
+    if (
+      tool !== "select" &&
+      this.elements.searchControls &&
+      !this.elements.searchControls.hidden
+    ) {
       this.closeSearchControls();
     }
     this.activeTool = tool;
@@ -2439,7 +2713,11 @@ class PdfWorkshop {
 
   toggleTextControls() {
     const willOpen = this.elements.textControls.hidden;
-    if (willOpen && !this.elements.searchControls.hidden) {
+    if (
+      willOpen &&
+      this.elements.searchControls &&
+      !this.elements.searchControls.hidden
+    ) {
       this.closeSearchControls();
     }
     this.elements.textControls.hidden = !willOpen;
@@ -2516,7 +2794,7 @@ class PdfWorkshop {
     );
     this.activePageId =
       this.pages[result.pages[0] - 1]?.id || this.activePageId;
-    this.elements.rangeDialog.close();
+    this.closeDialog(this.elements.rangeDialog);
     this.updateUI();
     this.renderSidebar();
     this.renderActivePage();
@@ -2760,7 +3038,7 @@ class PdfWorkshop {
 
   openSignatureDialog() {
     this.clearSignaturePad();
-    this.elements.signatureDialog.showModal();
+    this.openDialog(this.elements.signatureDialog);
   }
 
   bindSignaturePad() {
@@ -2848,7 +3126,7 @@ class PdfWorkshop {
         width,
         height
       );
-    this.elements.signatureDialog.close();
+    this.closeDialog(this.elements.signatureDialog);
     this.addImageAnnotationData(
       cropped.toDataURL("image/png"),
       width,
@@ -2917,7 +3195,7 @@ class PdfWorkshop {
       this.elements.formFieldList.append(row);
     }
     this.elements.formDialog.dataset.sourceId = source.id;
-    this.elements.formDialog.showModal();
+    this.openDialog(this.elements.formDialog);
   }
 
   async applyFormValues() {
@@ -2961,11 +3239,12 @@ class PdfWorkshop {
           page.baseRotation;
         this.textIndex.delete(page.id);
       }
-      this.elements.formDialog.close();
+      this.closeDialog(this.elements.formDialog);
       this.dirty = true;
       this.renderAll();
       this.scheduleAutosave();
       if (
+        this.elements.searchControls &&
         !this.elements.searchControls.hidden &&
         this.elements.searchInput.value.trim()
       ) {
@@ -3657,7 +3936,12 @@ class PdfWorkshop {
       this.elements.openFileInput.click();
       return;
     }
-    if (command && event.key.toLowerCase() === "f" && this.pages.length) {
+    if (
+      command &&
+      event.key.toLowerCase() === "f" &&
+      this.pages.length &&
+      this.elements.searchControls
+    ) {
       event.preventDefault();
       if (this.elements.searchControls.hidden) this.toggleSearchControls();
       else {
@@ -3712,7 +3996,10 @@ class PdfWorkshop {
       event.preventDefault();
       this.activateDrawingTool("select");
     } else if (event.key === "Escape") {
-      if (!this.elements.searchControls.hidden) {
+      if (
+        this.elements.searchControls &&
+        !this.elements.searchControls.hidden
+      ) {
         this.closeSearchControls();
         return;
       }
@@ -3753,14 +4040,63 @@ class PdfWorkshop {
     }, duration);
   }
 
+  isDialogOpen(dialog) {
+    return Boolean(dialog?.open || dialog?.hasAttribute?.("open"));
+  }
+
+  openDialog(dialog) {
+    if (!dialog || this.isDialogOpen(dialog)) return;
+    dialog.returnValue = "";
+    const useFallback = /Android|\bwv\b/i.test(navigator.userAgent);
+    if (!useFallback && typeof dialog.showModal === "function") {
+      try {
+        dialog.showModal();
+        return;
+      } catch (error) {
+        console.warn("[PDF Editor] Native dialog unavailable", error);
+      }
+    }
+    dialog.setAttribute("open", "");
+    dialog.classList.add("dialog-fallback-open");
+    document.body.classList.add("fallback-dialog-open");
+    requestAnimationFrame(() => {
+      dialog
+        .querySelector(
+          "input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])"
+        )
+        ?.focus();
+    });
+  }
+
+  closeDialog(dialog, returnValue = "") {
+    if (!dialog) return;
+    if (dialog.classList.contains("dialog-fallback-open")) {
+      dialog.returnValue = returnValue;
+      dialog.removeAttribute("open");
+      dialog.classList.remove("dialog-fallback-open");
+      if (!document.querySelector("dialog.dialog-fallback-open")) {
+        document.body.classList.remove("fallback-dialog-open");
+      }
+      dialog.dispatchEvent(new Event("close"));
+      return;
+    }
+    if (typeof dialog.close === "function" && dialog.open) {
+      dialog.close(returnValue);
+      return;
+    }
+    dialog.returnValue = returnValue;
+    dialog.removeAttribute("open");
+    dialog.dispatchEvent(new Event("close"));
+  }
+
   confirmAction({ title, message, acceptLabel = "確認" }) {
     const dialog = this.elements.confirmDialog;
-    if (!dialog?.showModal) return Promise.resolve(window.confirm(message));
+    if (!dialog) return Promise.resolve(window.confirm(message));
     this.elements.confirmTitle.textContent = title;
     this.elements.confirmMessage.textContent = message;
     this.elements.confirmAcceptButton.textContent = acceptLabel;
     dialog.returnValue = "cancel";
-    dialog.showModal();
+    this.openDialog(dialog);
     return new Promise((resolve) => {
       dialog.addEventListener(
         "close",
@@ -3792,7 +4128,15 @@ class PdfWorkshop {
   async registerServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
     try {
-      await navigator.serviceWorker.register("./sw.js");
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!hadController || refreshing) return;
+        refreshing = true;
+        location.reload();
+      });
+      const registration = await navigator.serviceWorker.register("./sw.js");
+      await registration.update();
     } catch (error) {
       console.warn("[PDF Editor] Service worker registration failed", error);
     }
