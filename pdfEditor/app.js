@@ -80,6 +80,8 @@ class PdfWorkshop {
     this.ocrPageNumber = 0;
     this.ocrPageTotal = 0;
     this.selectedPageText = "";
+    this.toolbarItems = [];
+    this.toolbarOverflowFrame = null;
     this.installPrompt = null;
     this.installIntroTimer = null;
     this.installStateReady = false;
@@ -98,6 +100,10 @@ class PdfWorkshop {
       mergeFileInput: $("#mergeFileInput"),
       annotationImageInput: $("#annotationImageInput"),
       imageToPdfInput: $("#imageToPdfInput"),
+      toolbar: $("#toolbar"),
+      toolbarOverflow: $("#toolbarOverflow"),
+      toolbarMoreButton: $("#toolbarMoreButton"),
+      toolbarOverflowMenu: $("#toolbarOverflowMenu"),
       sidebar: $("#sidebar"),
       openSidebarButton: $("#openSidebarButton"),
       closeSidebarButton: $("#closeSidebarButton"),
@@ -639,6 +645,91 @@ class PdfWorkshop {
       clearTimeout(this.resizeTimer);
       this.resizeTimer = setTimeout(() => this.renderActivePage(), 120);
     }).observe(viewerScroll);
+
+    this.setupToolbarOverflow();
+  }
+
+  setupToolbarOverflow() {
+    const { toolbar, toolbarOverflow, toolbarMoreButton, toolbarOverflowMenu } =
+      this.elements;
+    if (!toolbar || !toolbarOverflow || !toolbarMoreButton || !toolbarOverflowMenu) {
+      return;
+    }
+
+    // Buttons inside the toolbar groups that may be collapsed into the
+    // overflow menu, in visual order. Their original parent is remembered
+    // so they can be restored before each measurement.
+    this.toolbarItems = [
+      ...toolbar.querySelectorAll(".toolbar-group .tool-button"),
+    ].map((button) => ({ button, parent: button.parentElement }));
+
+    toolbarMoreButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.toggleToolbarOverflowMenu();
+    });
+    toolbarOverflowMenu.addEventListener("click", (event) => {
+      if (event.target.closest("button")) {
+        this.toggleToolbarOverflowMenu(false);
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (
+        !toolbarOverflowMenu.hidden &&
+        !toolbarOverflow.contains(event.target)
+      ) {
+        this.toggleToolbarOverflowMenu(false);
+      }
+    });
+
+    new ResizeObserver(() => {
+      if (this.toolbarOverflowFrame) return;
+      this.toolbarOverflowFrame = requestAnimationFrame(() => {
+        this.toolbarOverflowFrame = null;
+        this.updateToolbarOverflow();
+      });
+    }).observe(toolbar);
+    this.updateToolbarOverflow();
+  }
+
+  toggleToolbarOverflowMenu(open) {
+    const { toolbarMoreButton, toolbarOverflowMenu } = this.elements;
+    const willOpen = open ?? toolbarOverflowMenu.hidden;
+    toolbarOverflowMenu.hidden = !willOpen;
+    toolbarMoreButton.setAttribute("aria-expanded", String(willOpen));
+    toolbarMoreButton.classList.toggle("active", willOpen);
+  }
+
+  updateToolbarOverflow() {
+    const { toolbar, toolbarOverflow, toolbarOverflowMenu } = this.elements;
+    if (!toolbar || !this.toolbarItems.length) return;
+
+    this.toggleToolbarOverflowMenu(false);
+
+    // Restore every button to its group, then move trailing buttons into
+    // the menu until the toolbar no longer overflows.
+    for (const item of this.toolbarItems) item.parent.append(item.button);
+    toolbarOverflowMenu.replaceChildren();
+    toolbarOverflow.hidden = true;
+
+    const fits = () => toolbar.scrollWidth <= toolbar.clientWidth;
+    if (!fits()) {
+      toolbarOverflow.hidden = false;
+      for (
+        let index = this.toolbarItems.length - 1;
+        index >= 0 && !fits();
+        index -= 1
+      ) {
+        toolbarOverflowMenu.prepend(this.toolbarItems[index].button);
+      }
+    }
+
+    // Hide dividers that end up next to an empty group.
+    for (const divider of toolbar.querySelectorAll(".toolbar-divider")) {
+      const nextGroup = divider.nextElementSibling;
+      divider.hidden =
+        !!nextGroup?.classList.contains("toolbar-group") &&
+        !nextGroup.childElementCount;
+    }
   }
 
   async loadFiles(fileList, { replace = false, remember = true } = {}) {
@@ -4201,6 +4292,14 @@ class PdfWorkshop {
   }
 
   handleKeyboard(event) {
+    if (
+      event.key === "Escape" &&
+      this.elements.toolbarOverflowMenu &&
+      !this.elements.toolbarOverflowMenu.hidden
+    ) {
+      this.toggleToolbarOverflowMenu(false);
+      return;
+    }
     if (document.querySelector("dialog[open]")) return;
     const isTyping =
       event.target instanceof HTMLInputElement ||
