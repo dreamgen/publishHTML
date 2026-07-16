@@ -1130,10 +1130,13 @@
             import: 'PURE_READER_BRIDGE_IMPORT',
             result: 'PURE_READER_BRIDGE_RESULT'
         });
+        const MAX_CHAPTER_BUNDLE_CHAPTERS = 10000;
+        const MAX_CHAPTER_IMPORT_FILE_BYTES = 200 * 1024 * 1024;
         const USER_SCRIPT_BRIDGE_HOSTS = new Set([
             'm.biquge.tw',
             'look.thisiscm.com',
-            'look.twword.com'
+            'look.twword.com',
+            'czbooks.net'
         ]);
         let userScriptBridgeSource = null;
         let userScriptBridgeOrigin = '';
@@ -1190,8 +1193,8 @@
                 throw new Error('章節封包格式或版本不支援');
             }
             if (!bundle.book || typeof bundle.book !== 'object') throw new Error('章節封包缺少書籍資料');
-            if (!Array.isArray(bundle.chapters) || bundle.chapters.length < 1 || bundle.chapters.length > 100) {
-                throw new Error('章節數必須介於 1 到 100');
+            if (!Array.isArray(bundle.chapters) || bundle.chapters.length < 1 || bundle.chapters.length > MAX_CHAPTER_BUNDLE_CHAPTERS) {
+                throw new Error(`章節數必須介於 1 到 ${MAX_CHAPTER_BUNDLE_CHAPTERS}`);
             }
 
             const seen = new Set();
@@ -1743,8 +1746,8 @@
         async function importData(event) {
             const file = event.target.files[0];
             if (!file) return;
-            if (file.size > 50 * 1024 * 1024) {
-                alert('匯入失敗：檔案超過 50 MB。');
+            if (file.size > MAX_CHAPTER_IMPORT_FILE_BYTES) {
+                alert('匯入失敗：檔案超過 200 MB。');
                 event.target.value = '';
                 return;
             }
@@ -3503,6 +3506,93 @@
                 renderBookmarks();
             }
 
+            function _safeChapterFilename(value, fallback) {
+                const cleaned = String(value || '')
+                    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                return (cleaned || fallback).slice(0, 80);
+            }
+
+            async function exportSessionChapters(sessionId) {
+                try {
+                    showSyncBar('正在整理小說章節檔案…', null, null, 0);
+                    const session = await idbGet('novel-sessions', sessionId).catch(() => null);
+                    if (!session) throw new Error('找不到此小說書籤');
+
+                    const pageUrls = [...new Set(Array.isArray(session.pages) ? session.pages.filter(Boolean) : [])];
+                    const storedPages = await Promise.all(pageUrls.map(async (url, index) => ({
+                        url,
+                        index,
+                        page: await idbGet('novel-pages', url).catch(() => null)
+                    })));
+                    const availablePages = storedPages.filter(item => typeof item.page?.content === 'string');
+                    if (availablePages.length === 0) throw new Error('此小說目前沒有可下載的預存正文');
+
+                    const firstPage = availablePages[0].page;
+                    const indexUrl = session.indexUrl || firstPage.indexUrl || '';
+                    const bookId = session.bookId || `pwa-${_cacheKey(indexUrl || session.startUrl || session.id)}`;
+                    if (!session.bookId) {
+                        session.bookId = bookId;
+                        await idbPut('novel-sessions', session);
+                    }
+
+                    const chapters = availablePages.map(({ url, index, page }) => {
+                        const title = page.title || `第 ${index + 1} 章`;
+                        const contentHtml = page.content;
+                        return {
+                            url,
+                            title,
+                            documentTitle: page.documentTitle || title,
+                            contentHtml,
+                            previousUrl: page.previousUrl || pageUrls[index - 1] || null,
+                            nextUrl: page.nextUrl || pageUrls[index + 1] || null,
+                            indexUrl: page.indexUrl || indexUrl || null,
+                            savedAt: Number(page.fetchedAt || page.importedAt) || Date.now(),
+                            checksum: page.checksum || _cacheKey(`${title}\n${contentHtml}`)
+                        };
+                    });
+
+                    const availableUrls = new Set(chapters.map(chapter => chapter.url));
+                    const requestedCount = [10, 50, 100].includes(Number(session.prefetchCount))
+                        ? Number(session.prefetchCount)
+                        : Math.min(100, chapters.length);
+                    const bundle = {
+                        schema: USER_SCRIPT_BRIDGE.schema,
+                        version: USER_SCRIPT_BRIDGE.version,
+                        bundleId: `pwa-${Date.now()}-${_cacheKey(session.id)}`,
+                        createdAt: new Date().toISOString(),
+                        requestedChapterCount: requestedCount,
+                        completedChapterCount: chapters.length,
+                        stopReason: session.isEnded ? 'last_chapter' : '',
+                        currentUrl: availableUrls.has(session.currentUrl) ? session.currentUrl : chapters[0].url,
+                        book: {
+                            id: bookId,
+                            title: session.title || firstPage.documentTitle || firstPage.title || '未命名小說',
+                            indexUrl
+                        },
+                        chapters
+                    };
+
+                    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json;charset=utf-8' });
+                    const objectUrl = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = objectUrl;
+                    link.download = `${_safeChapterFilename(bundle.book.title, 'PureReader小說')}_${chapters.length}章.purereader.json`;
+                    link.style.display = 'none';
+                    document.body.append(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+                    const missingCount = pageUrls.length - chapters.length;
+                    const missingMessage = missingCount > 0 ? `；另有 ${missingCount} 章未快取正文，已略過` : '';
+                    showSyncBar(`✓ 已下載 ${chapters.length} 章${missingMessage}`, null, null, 6000);
+                } catch (error) {
+                    showSyncBar(`⚠ 下載失敗：${error.message || '未知錯誤'}`, null, null, 6000);
+                }
+            }
+
             async function clearAllSessions() {
                 if (!confirm('確定要清空所有小說書籤與預載資料嗎？')) return;
                 // Before clearing, save each session's last read page to history as a rescue entry
@@ -3578,6 +3668,10 @@
                         <button onclick="event.stopPropagation(); NovelMode.checkSessionUpdates('${s.id}', event)" 
                             class="shrink-0 p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="檢查更新">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                        </button>
+                        <button onclick="event.stopPropagation(); NovelMode.exportSessionChapters('${s.id}')"
+                            class="shrink-0 p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors" title="下載全部預存章節">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
                         </button>
                         <button onclick="event.stopPropagation(); NovelMode.deleteSession('${s.id}')" 
                             class="shrink-0 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="刪除書籤">
@@ -4761,7 +4855,7 @@
                 prefetch,
                 checkUpdates,
                 toggleAutoUpdate, toggleContinuousRead, checkSessionUpdates, triggerAutoUpdates,
-                resumeSession, deleteSession, renameSession, clearAllSessions, clearCache,
+                resumeSession, deleteSession, renameSession, exportSessionChapters, clearAllSessions, clearCache,
                 renderBookmarks, onPageLoaded,
                 toggleTOC, jumpToTOC,
                 showBars, hideBars, isBarHidden,

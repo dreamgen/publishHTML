@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         PureReader - 快速小說模式
 // @namespace    https://github.com/pure-reader
-// @version      1.8.0
+// @version      1.9.2
 // @description  多站全螢幕閱讀、背景預抓，並可將 10、50 或 100 章預存到 PWA 或本地檔案。
 // @match        https://m.biquge.tw/book/*/*.html
 // @match        https://look.thisiscm.com/*
 // @match        https://look.twword.com/*
+// @match        https://czbooks.net/n/*/*
 // @run-at       document-end
 // @inject-into  content
 // @noframes
@@ -15,7 +16,7 @@
 (() => {
   'use strict';
 
-  document.documentElement.dataset.pureReaderVersion = '1.8.0';
+  document.documentElement.dataset.pureReaderVersion = '1.9.2';
 
   const SITE_PROFILES = [
     {
@@ -41,6 +42,18 @@
         navigation: '.foot-nav',
       },
       noisePatterns: [/^溫馨提示[:：].*(?:廣告|掃碼|簡訊)/],
+    },
+    {
+      hosts: ['czbooks.net'],
+      selectors: {
+        content: '.chapter-detail > .content',
+        heading: '.chapter-detail > .name',
+        next: '.chapter-nav .next-chapter',
+        previous: '.chapter-nav .prev-chapter',
+        index: '.chapter-detail .position a[href*="/n/"]',
+        navigation: '.chapter-nav',
+      },
+      noisePatterns: [],
     },
   ];
   const SITE_PROFILE = SITE_PROFILES.find((profile) => profile.hosts.includes(location.hostname))
@@ -461,7 +474,7 @@
   function interceptNavigation(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const target = event.target instanceof Element ? event.target : null;
-    const link = target?.closest(`#pure-reader-next, ${SELECTORS.navigation} a[rel="next"], ${SELECTORS.navigation} #next_url, ${SELECTORS.navigation} #prev_url, ${SELECTORS.navigation} > a:first-child`);
+    const link = target?.closest(`#pure-reader-next, ${SELECTORS.next}, ${SELECTORS.previous}, ${SELECTORS.navigation} a[rel="next"], ${SELECTORS.navigation} #next_url, ${SELECTORS.navigation} #prev_url, ${SELECTORS.navigation} > a:first-child`);
     if (!link?.href || link.getAttribute('aria-disabled') === 'true') return;
 
     const destination = canonicalURL(link.href);

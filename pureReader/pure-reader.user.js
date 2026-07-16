@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         PureReader - 快速小說模式
 // @namespace    https://github.com/pure-reader
-// @version      1.8.0
+// @version      1.9.2
 // @description  多站全螢幕閱讀、背景預抓，並可將 10、50 或 100 章預存到 PWA 或本地檔案。
 // @match        https://m.biquge.tw/book/*/*.html
 // @match        https://look.thisiscm.com/*
 // @match        https://look.twword.com/*
+// @match        https://czbooks.net/n/*/*
 // @run-at       document-end
 // @inject-into  content
 // @noframes
@@ -15,7 +16,7 @@
 (() => {
   'use strict';
 
-  document.documentElement.dataset.pureReaderVersion = '1.8.0';
+  document.documentElement.dataset.pureReaderVersion = '1.9.2';
 
   const SITE_PROFILES = [
     {
@@ -41,6 +42,18 @@
         navigation: '.foot-nav',
       },
       noisePatterns: [/^溫馨提示[:：].*(?:廣告|掃碼|簡訊)/],
+    },
+    {
+      hosts: ['czbooks.net'],
+      selectors: {
+        content: '.chapter-detail > .content',
+        heading: '.chapter-detail > .name',
+        next: '.chapter-nav .next-chapter',
+        previous: '.chapter-nav .prev-chapter',
+        index: '.chapter-detail .position a[href*="/n/"]',
+        navigation: '.chapter-nav',
+      },
+      noisePatterns: [],
     },
   ];
   const SITE_PROFILE = SITE_PROFILES.find((profile) => profile.hosts.includes(location.hostname))
@@ -461,7 +474,7 @@
   function interceptNavigation(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const target = event.target instanceof Element ? event.target : null;
-    const link = target?.closest(`#pure-reader-next, ${SELECTORS.navigation} a[rel="next"], ${SELECTORS.navigation} #next_url, ${SELECTORS.navigation} #prev_url, ${SELECTORS.navigation} > a:first-child`);
+    const link = target?.closest(`#pure-reader-next, ${SELECTORS.next}, ${SELECTORS.previous}, ${SELECTORS.navigation} a[rel="next"], ${SELECTORS.navigation} #next_url, ${SELECTORS.navigation} #prev_url, ${SELECTORS.navigation} > a:first-child`);
     if (!link?.href || link.getAttribute('aria-disabled') === 'true') return;
 
     const destination = canonicalURL(link.href);
@@ -799,12 +812,19 @@
 (() => {
   'use strict';
 
-  document.documentElement.dataset.pureReaderBridgeVersion = '0.2.0';
+  document.documentElement.dataset.pureReaderBridgeVersion = '0.5.0';
 
   const DEFAULT_PWA_URL = 'https://dreamgen.github.io/publishHTML/pureReader/';
   const PWA_URL_STORAGE_KEY = 'pureReader.bridgePwaUrl';
   const ALLOWED_COUNTS = new Set([10, 50, 100]);
-  const FETCH_DELAY_MS = 120;
+  const DEFAULT_FETCH_POLICY = Object.freeze({
+    minDelayMs: 120,
+    maxDelayMs: 120,
+    maxRetries: 0,
+    retryBaseMs: 3000,
+    retryMaxMs: 30000,
+    retryJitterMs: 1000,
+  });
   const BRIDGE = Object.freeze({
     schema: 'purereader.chapter-bundle',
     version: 1,
@@ -836,9 +856,31 @@
       },
       noisePatterns: [/^溫馨提示[:：].*(?:廣告|掃碼|簡訊)/],
     },
+    {
+      hosts: ['czbooks.net'],
+      selectors: {
+        content: '.chapter-detail > .content',
+        heading: '.chapter-detail > .name',
+        next: '.chapter-nav .next-chapter',
+        previous: '.chapter-nav .prev-chapter',
+        index: '.chapter-detail .position a[href*="/n/"]',
+        bookTitle: '.chapter-detail .position a[href*="/n/"]',
+      },
+      fetchPolicy: {
+        minDelayMs: 1200,
+        maxDelayMs: 2600,
+        maxRetries: 4,
+        retryBaseMs: 5000,
+        retryMaxMs: 60000,
+        retryJitterMs: 2500,
+      },
+      noisePatterns: [],
+    },
   ];
-  const profile = SITE_PROFILES.find((item) => item.hosts.includes(location.hostname));
+  const profile = SITE_PROFILES.find((item) => item.hosts.includes(location.hostname))
+    || SITE_PROFILES.find((item) => document.querySelector(item.selectors.content));
   if (!profile) return;
+  const fetchPolicy = Object.freeze({ ...DEFAULT_FETCH_POLICY, ...profile.fetchPolicy });
 
   let dialog = null;
   let abortController = null;
@@ -853,6 +895,7 @@
   let timeoutTimer = 0;
   let deliveryMode = 'pwa';
   let pendingLocalFile = null;
+  let operationState = 'idle';
 
   function canonicalURL(value, base = location.href) {
     const url = new URL(value, base);
@@ -955,6 +998,9 @@
 
   function inferBookTitle(chapter) {
     const candidates = [
+      profile.selectors.bookTitle
+        ? document.querySelector(profile.selectors.bookTitle)?.textContent
+        : '',
       document.querySelector('meta[property="og:novel:book_name"]')?.content,
       document.querySelector('meta[property="og:title"]')?.content,
       chapter.documentTitle,
@@ -962,6 +1008,7 @@
     for (const candidate of candidates) {
       const cleaned = candidate
         .replace(chapter.title, '')
+        .replace(/[《〈]目錄[》〉]/g, '')
         .replace(/^[\s|｜_—–\-:：]+|[\s|｜_—–\-:：]+$/g, '')
         .trim();
       if (cleaned && cleaned !== chapter.title) return cleaned.slice(0, 200);
@@ -979,18 +1026,88 @@
     });
   }
 
-  async function fetchChapter(url, signal) {
+  function randomMilliseconds(minimum, maximum) {
+    const lower = Math.max(0, Math.floor(minimum));
+    const upper = Math.max(lower, Math.floor(maximum));
+    return lower + Math.floor(Math.random() * (upper - lower + 1));
+  }
+
+  function retryAfterMilliseconds(value) {
+    if (!value) return 0;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : 0;
+  }
+
+  function isCloudflareChallenge(parsed, html) {
+    if (parsed.querySelector(profile.selectors.content)) return false;
+    const title = parsed.title.trim().toLowerCase();
+    return title === 'just a moment...'
+      || title.includes('attention required')
+      || parsed.querySelector('#challenge-error-text, script[src*="/cdn-cgi/challenge-platform/"]')
+      || /(?:_cf_chl_opt|cf-chl-|challenges\.cloudflare\.com)/i.test(html);
+  }
+
+  class RetryableChapterError extends Error {
+    constructor(message, retryAfterMs = 0) {
+      super(message);
+      this.name = 'RetryableChapterError';
+      this.retryAfterMs = retryAfterMs;
+      this.retryable = true;
+    }
+  }
+
+  async function fetchChapterOnce(url, signal, bypassCache) {
     const response = await fetch(url, {
       method: 'GET',
       credentials: 'same-origin',
-      cache: 'force-cache',
+      cache: bypassCache ? 'reload' : 'force-cache',
       headers: { Accept: 'text/html,application/xhtml+xml' },
       signal,
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const html = await response.text();
     const parsed = new DOMParser().parseFromString(html, 'text/html');
+    if (isCloudflareChallenge(parsed, html)) {
+      throw new RetryableChapterError(
+        'Cloudflare 驗證頁',
+        retryAfterMilliseconds(response.headers.get('Retry-After')),
+      );
+    }
+    if (response.status === 403 || response.status === 429) {
+      throw new RetryableChapterError(
+        `網站流量防護（HTTP ${response.status}）`,
+        retryAfterMilliseconds(response.headers.get('Retry-After')),
+      );
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return parseChapter(parsed, url);
+  }
+
+  async function fetchChapter(url, signal, completed, total) {
+    let retryCount = 0;
+    while (true) {
+      try {
+        return await fetchChapterOnce(url, signal, retryCount > 0);
+      } catch (error) {
+        if (!error.retryable || retryCount >= fetchPolicy.maxRetries) throw error;
+        retryCount += 1;
+        const exponentialDelay = Math.min(
+          fetchPolicy.retryMaxMs,
+          fetchPolicy.retryBaseMs * (2 ** (retryCount - 1)),
+        );
+        const waitMs = Math.max(
+          error.retryAfterMs || 0,
+          exponentialDelay + randomMilliseconds(0, fetchPolicy.retryJitterMs),
+        );
+        setStatus(
+          `${error.message}，${Math.ceil(waitMs / 1000)} 秒後重試（${retryCount}／${fetchPolicy.maxRetries}）`,
+          completed,
+          total,
+        );
+        await delay(waitMs, signal);
+      }
+    }
   }
 
   function setStatus(message, completed = 0, total = 0) {
@@ -1001,18 +1118,50 @@
     progress.style.width = total ? `${Math.min(100, completed / total * 100)}%` : '0%';
   }
 
-  function setBusy(busy) {
+  function applyOperationState() {
     ensureDialog();
-    dialog.querySelectorAll('[data-count]').forEach((button) => { button.disabled = busy; });
-    dialog.querySelectorAll('[data-delivery]').forEach((button) => { button.disabled = busy; });
-    dialog.querySelector('#pure-reader-bridge-close').disabled = busy;
-    dialog.querySelector('#pure-reader-bridge-cancel').hidden = !busy;
-    dialog.querySelector('#pure-reader-pwa-url').disabled = busy;
-    dialog.querySelector('#pure-reader-local-save').disabled = busy;
+    const locked = operationState !== 'idle';
+    dialog.setAttribute('aria-busy', String(operationState === 'running'));
+    dialog.querySelectorAll('[data-count]').forEach((button) => { button.disabled = locked; });
+    dialog.querySelectorAll('[data-delivery]').forEach((button) => { button.disabled = locked; });
+    dialog.querySelector('#pure-reader-bridge-close').disabled = locked;
+    dialog.querySelector('#pure-reader-pwa-url').disabled = locked;
+    dialog.querySelector('#pure-reader-local-save').disabled = operationState !== 'ready_to_save';
+    const cancelButton = dialog.querySelector('#pure-reader-bridge-cancel');
+    cancelButton.hidden = !locked;
+    cancelButton.textContent = operationState === 'ready_to_save' ? '取消預存' : '取消';
+  }
+
+  function beginOperation() {
+    if (operationState !== 'idle') return null;
+    operationState = 'running';
+    abortController = new AbortController();
+    applyOperationState();
+    return abortController;
+  }
+
+  function finishOperation() {
+    abortController = null;
+    operationState = 'idle';
+    applyOperationState();
+  }
+
+  function cancelCurrentOperation() {
+    if (operationState === 'running' && abortController && !abortController.signal.aborted) {
+      setStatus('正在取消預存…');
+      abortController.abort();
+      return;
+    }
+    if (operationState === 'ready_to_save') {
+      pendingLocalFile = null;
+      dialog.querySelector('#pure-reader-local-save').hidden = true;
+      finishOperation();
+      setStatus('已取消；未儲存本地章節檔案');
+    }
   }
 
   function selectDeliveryMode(mode) {
-    if (abortController || !['pwa', 'file'].includes(mode)) return;
+    if (operationState !== 'idle' || !['pwa', 'file'].includes(mode)) return;
     deliveryMode = mode;
     pendingLocalFile = null;
     dialog.querySelectorAll('[data-delivery]').forEach((button) => {
@@ -1059,8 +1208,8 @@
         break;
       }
       try {
-        await delay(FETCH_DELAY_MS, signal);
-        chapter = await fetchChapter(chapter.nextUrl, signal);
+        await delay(randomMilliseconds(fetchPolicy.minDelayMs, fetchPolicy.maxDelayMs), signal);
+        chapter = await fetchChapter(chapter.nextUrl, signal, chapters.length, count);
       } catch (error) {
         if (error.name === 'AbortError') throw error;
         stopReason = 'fetch_error';
@@ -1089,7 +1238,7 @@
     resultRejecter = null;
   }
 
-  function openPwaReceiver() {
+  function openPwaReceiver(signal) {
     const pwaURL = getPwaURL();
     transferNonce = randomNonce();
     pwaURL.searchParams.set('prReceive', '1');
@@ -1099,12 +1248,27 @@
     if (!transferWindow) throw new Error('瀏覽器阻擋了 PWA 視窗，請允許此網站開啟彈出式視窗');
 
     const ready = new Promise((resolve, reject) => {
-      readyResolver = resolve;
-      readyRejecter = reject;
+      const handleAbort = () => {
+        cleanupTransferTimers();
+        reject(new DOMException('已取消', 'AbortError'));
+      };
+      readyResolver = (value) => {
+        signal.removeEventListener('abort', handleAbort);
+        resolve(value);
+      };
+      readyRejecter = (error) => {
+        signal.removeEventListener('abort', handleAbort);
+        reject(error);
+      };
+      if (signal.aborted) {
+        handleAbort();
+        return;
+      }
+      signal.addEventListener('abort', handleAbort, { once: true });
       const sendHello = () => {
         if (transferWindow?.closed) {
           cleanupTransferTimers();
-          reject(new Error('PWA 視窗已關閉'));
+          readyRejecter(new Error('PWA 視窗已關閉'));
           return;
         }
         transferWindow.postMessage({ type: BRIDGE.hello, nonce: transferNonce }, transferOrigin);
@@ -1112,18 +1276,33 @@
       helloTimer = window.setInterval(sendHello, 400);
       timeoutTimer = window.setTimeout(() => {
         cleanupTransferTimers();
-        reject(new Error('PWA 連線逾時，請確認網址與版本是否正確'));
+        readyRejecter(new Error('PWA 連線逾時，請確認網址與版本是否正確'));
       }, 30000);
       sendHello();
     });
     return ready;
   }
 
-  function waitForImportResult() {
+  function waitForImportResult(signal) {
     return new Promise((resolve, reject) => {
-      resultResolver = resolve;
-      resultRejecter = reject;
-      timeoutTimer = window.setTimeout(() => reject(new Error('PWA 匯入逾時')), 120000);
+      const handleAbort = () => {
+        cleanupTransferTimers();
+        reject(new DOMException('已取消', 'AbortError'));
+      };
+      resultResolver = (value) => {
+        signal.removeEventListener('abort', handleAbort);
+        resolve(value);
+      };
+      resultRejecter = (error) => {
+        signal.removeEventListener('abort', handleAbort);
+        reject(error);
+      };
+      if (signal.aborted) {
+        handleAbort();
+        return;
+      }
+      signal.addEventListener('abort', handleAbort, { once: true });
+      timeoutTimer = window.setTimeout(() => resultRejecter(new Error('PWA 匯入逾時')), 120000);
     });
   }
 
@@ -1150,28 +1329,28 @@
   }
 
   async function startTransfer(count) {
-    if (!ALLOWED_COUNTS.has(count) || abortController) return;
-    setBusy(true);
-    abortController = new AbortController();
+    if (!ALLOWED_COUNTS.has(count)) return;
+    const operation = beginOperation();
+    if (!operation) return;
     try {
       setStatus('正在開啟 PureReader PWA…');
-      const ready = openPwaReceiver();
+      const ready = openPwaReceiver(operation.signal);
       const [, bundle] = await Promise.all([
         ready,
-        createChapterBundle(count, abortController.signal),
+        createChapterBundle(count, operation.signal),
       ]);
-      const resultPromise = waitForImportResult();
+      const resultPromise = waitForImportResult(operation.signal);
       setStatus(`正在傳送 ${bundle.chapters.length} 章到 PWA…`, bundle.chapters.length, bundle.chapters.length);
       transferWindow.postMessage({ type: BRIDGE.import, nonce: transferNonce, bundle }, transferOrigin);
       const result = await resultPromise;
       setStatus(`完成：新增 ${result.inserted}、更新 ${result.updated}、略過 ${result.unchanged}，共 ${result.total} 章`, result.total, result.total);
     } catch (error) {
+      if (!operation.signal.aborted) operation.abort();
       if (error.name === 'AbortError') setStatus('已取消；尚未傳送章節');
       else setStatus(`失敗：${error.message || '未知錯誤'}`);
     } finally {
-      abortController = null;
-      cleanupTransferTimers();
-      setBusy(false);
+      resetTransfer();
+      finishOperation();
     }
   }
 
@@ -1184,13 +1363,14 @@
   }
 
   async function prepareLocalFile(count) {
-    if (!ALLOWED_COUNTS.has(count) || abortController) return;
-    setBusy(true);
+    if (!ALLOWED_COUNTS.has(count)) return;
+    const operation = beginOperation();
+    if (!operation) return;
     pendingLocalFile = null;
     dialog.querySelector('#pure-reader-local-save').hidden = true;
-    abortController = new AbortController();
+    let readyToSave = false;
     try {
-      const bundle = await createChapterBundle(count, abortController.signal);
+      const bundle = await createChapterBundle(count, operation.signal);
       const bookName = safeFilenamePart(bundle.book.title, 'PureReader小說');
       const chapterName = safeFilenamePart(bundle.chapters[0].title, '目前章節');
       const filename = `${bookName}_${chapterName}_${bundle.chapters.length}章.purereader.json`;
@@ -1200,13 +1380,16 @@
         { type: 'application/json;charset=utf-8', lastModified: Date.now() },
       );
       dialog.querySelector('#pure-reader-local-save').hidden = false;
+      abortController = null;
+      operationState = 'ready_to_save';
+      applyOperationState();
+      readyToSave = true;
       setStatus(`已整理 ${bundle.chapters.length} 章（${Math.max(1, Math.round(pendingLocalFile.size / 1024))} KB），請按「儲存本地檔案」。`, bundle.chapters.length, bundle.chapters.length);
     } catch (error) {
       if (error.name === 'AbortError') setStatus('已取消；尚未建立本地檔案');
       else setStatus(`建立檔案失敗：${error.message || '未知錯誤'}`);
     } finally {
-      abortController = null;
-      setBusy(false);
+      if (!readyToSave) finishOperation();
     }
   }
 
@@ -1227,6 +1410,7 @@
     if (!file) return;
     const button = dialog.querySelector('#pure-reader-local-save');
     button.disabled = true;
+    let saved = false;
     try {
       if (typeof window.showSaveFilePicker === 'function' && window.isSecureContext) {
         const handle = await window.showSaveFilePicker({
@@ -1237,6 +1421,7 @@
         await writable.write(file);
         await writable.close();
         setStatus(`已儲存：${file.name}`);
+        saved = true;
         return;
       }
 
@@ -1246,16 +1431,24 @@
           && navigator.canShare(shareData)) {
         await navigator.share(shareData);
         setStatus('已交給系統分享面板；請選擇「儲存到檔案」或您慣用的檔案 App。');
+        saved = true;
         return;
       }
 
       downloadLocalFile(file);
       setStatus(`已下載：${file.name}`);
+      saved = true;
     } catch (error) {
       if (error.name === 'AbortError') setStatus('已取消選擇儲存位置，檔案仍可再次儲存。');
       else setStatus(`儲存失敗：${error.message || '未知錯誤'}`);
     } finally {
-      button.disabled = false;
+      if (saved) {
+        pendingLocalFile = null;
+        button.hidden = true;
+        finishOperation();
+      } else {
+        applyOperationState();
+      }
     }
   }
 
@@ -1329,11 +1522,11 @@
       });
     });
     dialog.querySelector('#pure-reader-local-save').addEventListener('click', saveLocalFile);
-    dialog.querySelector('#pure-reader-bridge-cancel').addEventListener('click', () => abortController?.abort());
+    dialog.querySelector('#pure-reader-bridge-cancel').addEventListener('click', cancelCurrentOperation);
     dialog.addEventListener('cancel', (event) => {
-      if (!abortController) return;
+      if (operationState === 'idle') return;
       event.preventDefault();
-      abortController.abort();
+      cancelCurrentOperation();
     });
     dialog.addEventListener('close', () => {
       if (!abortController) {
@@ -1357,6 +1550,7 @@
       .pure-reader-bridge-delivery { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; padding:4px; border-radius:13px; background:#f3f4f6; }
       .pure-reader-bridge-delivery button { min-height:40px; border:0; border-radius:10px; background:transparent; color:#6b7280; font-weight:800; cursor:pointer; }
       .pure-reader-bridge-delivery button[data-active="true"] { background:#fff; color:#4338ca; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+      .pure-reader-bridge-delivery button:disabled, .pure-reader-bridge-head button:disabled, #pure-reader-pwa-url:disabled { opacity:.45; cursor:not-allowed; }
       .pure-reader-bridge-counts { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
       .pure-reader-bridge-counts button, #pure-reader-local-save, #pure-reader-bridge-cancel { min-height:44px; border:1px solid #c7d2fe; border-radius:12px; background:#eef2ff; color:#4338ca; font-weight:800; cursor:pointer; }
       .pure-reader-bridge-counts button:disabled { opacity:.45; cursor:not-allowed; }
