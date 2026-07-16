@@ -22,6 +22,7 @@ const EDITOR_DB_NAME = "pdfEditor-db";
 const EDITOR_DB_VERSION = 1;
 const AUTOSAVE_KEY = "autosave";
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
+const INSTALL_INTRO_KEY = "pdfEditor-install-intro-seen-v1";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -76,6 +77,9 @@ class PdfWorkshop {
     this.ocrPageTotal = 0;
     this.selectedPageText = "";
     this.installPrompt = null;
+    this.installIntroTimer = null;
+    this.installStateReady = false;
+    this.detectedInstalledApp = false;
 
     this.elements = {
       openButton: $("#openButton"),
@@ -157,6 +161,8 @@ class PdfWorkshop {
       confirmTitle: $("#confirmTitle"),
       confirmMessage: $("#confirmMessage"),
       confirmAcceptButton: $("#confirmAcceptButton"),
+      installDialog: $("#installDialog"),
+      installNowButton: $("#installNowButton"),
       recentFiles: $("#recentFiles"),
       recentFileList: $("#recentFileList"),
       passwordDialog: $("#passwordDialog"),
@@ -210,6 +216,7 @@ class PdfWorkshop {
     this.renderRecentFiles();
     this.registerServiceWorker();
     this.registerFileHandler();
+    this.initializeInstallExperience();
 
     if (navigator.storage?.persist) {
       navigator.storage.persist().catch(() => {});
@@ -324,14 +331,28 @@ class PdfWorkshop {
         suffix: "edited",
       })
     );
-    installButton?.addEventListener("click", () => this.installApp());
+    installButton?.addEventListener("click", () =>
+      this.showInstallIntro({ force: true })
+    );
+    this.elements.installNowButton?.addEventListener("click", () =>
+      this.installApp()
+    );
     window.addEventListener("beforeinstallprompt", (event) => {
       event.preventDefault();
       this.installPrompt = event;
+      this.installStateReady = true;
+      this.detectedInstalledApp = false;
       this.updateInstallButton();
+      this.scheduleInstallIntro(250);
     });
     window.addEventListener("appinstalled", () => {
       this.installPrompt = null;
+      this.installStateReady = true;
+      this.detectedInstalledApp = true;
+      clearTimeout(this.installIntroTimer);
+      this.installIntroTimer = null;
+      this.markInstallIntroSeen();
+      this.closeDialog(this.elements.installDialog, "installed");
       this.updateInstallButton();
       this.toast(
         "PDF 工坊已安裝；Android 會將它註冊為 PDF 分享目標。",
@@ -4161,17 +4182,87 @@ class PdfWorkshop {
     text.textContent = online ? "本機模式" : "離線模式";
   }
 
+  isStandaloneApp() {
+    return (
+      matchMedia("(display-mode: standalone)").matches ||
+      navigator.standalone === true
+    );
+  }
+
+  hasSeenInstallIntro() {
+    try {
+      return localStorage.getItem(INSTALL_INTRO_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  markInstallIntroSeen() {
+    try {
+      localStorage.setItem(INSTALL_INTRO_KEY, "1");
+    } catch {
+      // Storage restrictions should not prevent the install flow.
+    }
+  }
+
+  shouldOfferInstall() {
+    return (
+      !this.isStandaloneApp() &&
+      !this.detectedInstalledApp &&
+      (this.installStateReady || Boolean(this.installPrompt)) &&
+      (/Android/i.test(navigator.userAgent) || Boolean(this.installPrompt))
+    );
+  }
+
+  async initializeInstallExperience() {
+    if (this.isStandaloneApp()) {
+      this.installStateReady = true;
+      this.detectedInstalledApp = true;
+      this.updateInstallButton();
+      return;
+    }
+    try {
+      const relatedApps =
+        (await navigator.getInstalledRelatedApps?.()) || [];
+      this.detectedInstalledApp = relatedApps.some(
+        (app) => app.platform === "webapp"
+      );
+    } catch (error) {
+      console.warn("[PDF Editor] Installed app detection failed", error);
+    } finally {
+      this.installStateReady = true;
+      this.updateInstallButton();
+      this.scheduleInstallIntro();
+    }
+  }
+
+  scheduleInstallIntro(delay = 2200) {
+    clearTimeout(this.installIntroTimer);
+    this.installIntroTimer = null;
+    if (!this.shouldOfferInstall() || this.hasSeenInstallIntro()) return;
+    this.installIntroTimer = setTimeout(() => {
+      this.installIntroTimer = null;
+      this.showInstallIntro();
+    }, delay);
+  }
+
+  showInstallIntro({ force = false } = {}) {
+    if (!this.shouldOfferInstall()) return;
+    if (!force && this.hasSeenInstallIntro()) return;
+    clearTimeout(this.installIntroTimer);
+    this.installIntroTimer = null;
+    this.markInstallIntroSeen();
+    this.openDialog(this.elements.installDialog);
+  }
+
   updateInstallButton() {
     const button = this.elements.installButton;
     if (!button) return;
-    const standalone =
-      matchMedia("(display-mode: standalone)").matches ||
-      navigator.standalone === true;
-    const android = /Android/i.test(navigator.userAgent);
-    button.hidden = standalone || (!android && !this.installPrompt);
+    button.hidden = !this.shouldOfferInstall();
   }
 
   async installApp() {
+    this.closeDialog(this.elements.installDialog, "install");
     if (!this.installPrompt) {
       this.toast(
         "請使用 Android Chrome 開啟本頁，再從右上選單選擇「安裝應用程式」。只有完整安裝的 PWA 才會出現在 PDF 分享清單。",
@@ -4186,11 +4277,14 @@ class PdfWorkshop {
       await promptEvent.prompt();
       const choice = await promptEvent.userChoice;
       if (choice?.outcome !== "accepted") {
-        this.installPrompt = promptEvent;
+        this.toast(
+          "已暫緩安裝，之後可使用最上方工具列的「安裝 APP」按鈕。",
+          "default",
+          6000
+        );
       }
     } catch (error) {
       console.warn("[PDF Editor] Install prompt failed", error);
-      this.installPrompt = promptEvent;
       this.toast(
         "無法開啟安裝視窗，請使用 Android Chrome 右上選單的「安裝應用程式」。",
         "error",

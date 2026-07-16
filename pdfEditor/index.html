@@ -49,7 +49,7 @@
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></svg>
           <span>分享</span>
         </button>
-        <button class="button button-ghost" id="installButton" type="button" hidden title="安裝 PDF 工坊到裝置">
+        <button class="button button-ghost install-header-button" id="installButton" type="button" hidden aria-label="安裝 PDF 工坊 APP" title="安裝 PDF 工坊到裝置">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v11M8 10l4 4 4-4"/><path d="M5 17v3h14v-3"/></svg>
           <span>安裝 APP</span>
         </button>
@@ -315,6 +315,31 @@
       <div class="dialog-actions">
         <button class="button button-ghost" value="cancel">取消</button>
         <button class="button button-danger" id="confirmAcceptButton" value="confirm">確認</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog install-dialog" id="installDialog">
+    <form method="dialog">
+      <div class="install-dialog-hero">
+        <span class="install-dialog-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 2.75h8.2L19 7.55V21.25H6z"/><path d="M14 2.75v5h5"/><path d="M12 10v7M9 14l3 3 3-3"/></svg>
+        </span>
+        <div>
+          <span class="eyebrow">安裝到裝置</span>
+          <h2>安裝 PDF 工坊</h2>
+        </div>
+      </div>
+      <p>安裝後可離線使用，並能直接從 Android 的 PDF 分享清單開啟文件。所有 PDF 仍只在您的裝置上處理。</p>
+      <ul class="install-benefits">
+        <li>從檔案管理器直接分享至 PDF 工坊</li>
+        <li>像一般 APP 一樣從主畫面快速開啟</li>
+        <li>核心編輯功能可在離線狀態使用</li>
+      </ul>
+      <p class="dialog-note">建議使用 Chrome 開啟。若點選「立即安裝」後沒有出現系統視窗，請從 Chrome 右上角選單選擇「安裝應用程式」。</p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">稍後</button>
+        <button class="button button-primary" id="installNowButton" type="button">立即安裝</button>
       </div>
     </form>
   </dialog>

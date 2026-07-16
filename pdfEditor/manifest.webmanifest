@@ -13,6 +13,13 @@
   "lang": "zh-TW",
   "categories": ["productivity", "utilities"],
   "prefer_related_applications": false,
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "./manifest.webmanifest",
+      "id": "pdfEditor"
+    }
+  ],
   "share_target": {
     "action": "./share-target",
     "method": "POST",

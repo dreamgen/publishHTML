@@ -1,4 +1,4 @@
-const SW_VERSION = "v13";
+const SW_VERSION = "v14";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const AUXILIARY_MANIFESTS = [

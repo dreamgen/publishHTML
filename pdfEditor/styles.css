@@ -231,6 +231,18 @@ svg {
   background: var(--surface-muted);
 }
 
+.install-header-button {
+  border-color: rgba(239, 90, 82, .32);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.install-header-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 5px 14px rgba(226, 71, 69, .14);
+}
+
 .button-danger {
   color: #fff;
   background: var(--danger);
@@ -1563,6 +1575,79 @@ dialog.dialog-fallback-open {
 
 .password-dialog {
   width: min(430px, calc(100% - 28px));
+}
+
+.install-dialog {
+  width: min(480px, calc(100% - 28px));
+}
+
+.install-dialog-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.install-dialog-hero h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  letter-spacing: -.02em;
+}
+
+.install-dialog-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  color: #fff;
+  background: linear-gradient(145deg, #ff7767, #e94c4e);
+  box-shadow: 0 9px 20px rgba(222, 70, 69, .23);
+}
+
+.install-dialog-icon svg {
+  width: 30px;
+  height: 30px;
+  fill: rgba(255, 255, 255, .14);
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.install-benefits {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-benefits li {
+  position: relative;
+  padding: 10px 12px 10px 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.install-benefits li::before {
+  content: "✓";
+  position: absolute;
+  left: 13px;
+  top: 9px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--success);
+  font-size: 11px;
 }
 
 .insert-options {
