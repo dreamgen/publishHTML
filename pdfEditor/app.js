@@ -165,8 +165,11 @@ class PdfWorkshop {
       confirmTitle: $("#confirmTitle"),
       confirmMessage: $("#confirmMessage"),
       confirmAcceptButton: $("#confirmAcceptButton"),
+      confirmExtraButton: $("#confirmExtraButton"),
       installDialog: $("#installDialog"),
       installNowButton: $("#installNowButton"),
+      installStepsList: $("#installStepsList"),
+      installDialogNote: $("#installDialogNote"),
       recentFiles: $("#recentFiles"),
       recentFileList: $("#recentFileList"),
       passwordDialog: $("#passwordDialog"),
@@ -4038,16 +4041,35 @@ class PdfWorkshop {
         store.get(AUTOSAVE_KEY)
       );
       if (!project?.pages?.length) return;
-      const confirmed = await this.confirmAction({
+      const choice = await this.confirmAction({
         title: "還原上次草稿？",
         message: `找到 ${new Date(project.savedAt).toLocaleString(
           "zh-TW"
         )} 自動儲存的 ${project.pages.length} 頁文件。`,
         acceptLabel: "還原草稿",
+        extraLabel: "取消並刪除草稿",
       });
-      if (confirmed) await this.restoreAutosave(project);
+      if (choice === "confirm") {
+        await this.restoreAutosave(project);
+      } else if (choice === "extra") {
+        await this.deleteAutosaveDraft();
+      }
     } catch (error) {
       console.warn("[PDF Editor] Autosave restore check failed", error);
+    }
+  }
+
+  async deleteAutosaveDraft() {
+    try {
+      await this.projectDbOperation("readwrite", (store) =>
+        store.delete(AUTOSAVE_KEY)
+      );
+      await this.dbOperation("sources", "readwrite", (store) => store.clear());
+      this.persistedSourceIds.clear();
+      this.toast("已刪除上次草稿。", "success");
+    } catch (error) {
+      console.warn("[PDF Editor] Draft deletion failed", error);
+      this.toast("草稿刪除失敗，請稍後再試。", "error");
     }
   }
 
@@ -4344,18 +4366,30 @@ class PdfWorkshop {
     dialog.dispatchEvent(new Event("close"));
   }
 
-  confirmAction({ title, message, acceptLabel = "確認" }) {
+  // Without extraLabel resolves to a boolean (confirm / not). With
+  // extraLabel resolves to "confirm" | "extra" | "cancel".
+  confirmAction({ title, message, acceptLabel = "確認", extraLabel = "" }) {
     const dialog = this.elements.confirmDialog;
-    if (!dialog) return Promise.resolve(window.confirm(message));
+    if (!dialog) {
+      const accepted = window.confirm(message);
+      return Promise.resolve(extraLabel ? (accepted ? "confirm" : "cancel") : accepted);
+    }
     this.elements.confirmTitle.textContent = title;
     this.elements.confirmMessage.textContent = message;
     this.elements.confirmAcceptButton.textContent = acceptLabel;
+    if (this.elements.confirmExtraButton) {
+      this.elements.confirmExtraButton.textContent = extraLabel;
+      this.elements.confirmExtraButton.hidden = !extraLabel;
+    }
     dialog.returnValue = "cancel";
     this.openDialog(dialog);
     return new Promise((resolve) => {
       dialog.addEventListener(
         "close",
-        () => resolve(dialog.returnValue === "confirm"),
+        () =>
+          resolve(
+            extraLabel ? dialog.returnValue : dialog.returnValue === "confirm"
+          ),
         { once: true }
       );
     });
@@ -4403,13 +4437,106 @@ class PdfWorkshop {
     }
   }
 
+  // The install button and guide are available in every browser; the
+  // native install prompt is only used when the browser provides one.
   shouldOfferInstall() {
     return (
       !this.isStandaloneApp() &&
       !this.detectedInstalledApp &&
-      (this.installStateReady || Boolean(this.installPrompt)) &&
-      (/Android/i.test(navigator.userAgent) || Boolean(this.installPrompt))
+      (this.installStateReady || Boolean(this.installPrompt))
     );
+  }
+
+  getInstallGuide() {
+    const ua = navigator.userAgent;
+    const isIos =
+      /iPhone|iPad|iPod/i.test(ua) ||
+      (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/i.test(ua);
+
+    if (isIos) {
+      return {
+        name: "iOS / iPadOS",
+        steps: [
+          "使用 Safari 開啟本頁",
+          "點選網址列旁的「分享」按鈕",
+          "選擇「加入主畫面」並確認",
+        ],
+        note: "iPhone 與 iPad 請透過 Safari 的分享選單安裝；安裝後可離線使用。",
+      };
+    }
+    if (isAndroid && /Firefox/i.test(ua)) {
+      return {
+        name: "Android Firefox",
+        steps: ["點選右上角「⋮」選單", "選擇「安裝」或「加入主畫面」"],
+        note: "若需要從 Android 的 PDF 分享清單開啟文件，建議改用 Chrome 完整安裝。",
+      };
+    }
+    if (isAndroid) {
+      return {
+        name: "Android",
+        steps: [
+          "點選 Chrome 右上角「⋮」選單",
+          "選擇「安裝應用程式」",
+          "安裝完成後即可從 PDF 分享清單選擇 PDF 工坊",
+        ],
+        note: "只有完整安裝的 PWA 才會出現在 Android 的 PDF 分享清單。",
+      };
+    }
+    if (/Firefox/i.test(ua)) {
+      return {
+        name: "Firefox（桌面版）",
+        steps: [
+          "Firefox 桌面版目前不支援安裝 PWA",
+          "可將本頁加入書籤，離線快取仍然有效",
+          "若要安裝為 APP，請改用 Chrome、Edge 或 Safari 開啟本頁",
+        ],
+        note: "所有編輯功能在 Firefox 中仍可正常使用，僅無法安裝成獨立 APP。",
+      };
+    }
+    if (/Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR/i.test(ua)) {
+      return {
+        name: "macOS Safari",
+        steps: [
+          "點選 Safari 工具列的「分享」按鈕",
+          "選擇「加入 Dock」",
+          "之後可從 Dock 直接開啟 PDF 工坊",
+        ],
+        note: "需要 macOS Sonoma（Safari 17）以上版本。",
+      };
+    }
+    // Chromium family: Chrome, Edge, Brave, Arc, Dia, Opera, Vivaldi…
+    return {
+      name: "Chromium 系瀏覽器",
+      steps: [
+        "點選網址列右側的「安裝」圖示（若有顯示）",
+        "或開啟瀏覽器選單，選擇「安裝應用程式」／「加入 Dock／桌面」",
+      ],
+      note: "Chrome、Edge、Brave、Arc、Dia 等 Chromium 系瀏覽器多數支援；若選單沒有安裝選項，代表該瀏覽器暫不支援 PWA 安裝。",
+    };
+  }
+
+  populateInstallDialog() {
+    const guide = this.getInstallGuide();
+    const hasNativePrompt = Boolean(this.installPrompt);
+    if (this.elements.installStepsList) {
+      this.elements.installStepsList.replaceChildren(
+        ...guide.steps.map((step) => {
+          const item = document.createElement("li");
+          item.textContent = step;
+          return item;
+        })
+      );
+      this.elements.installStepsList.hidden = hasNativePrompt;
+    }
+    if (this.elements.installDialogNote) {
+      this.elements.installDialogNote.textContent = hasNativePrompt
+        ? "點選「立即安裝」後，依系統視窗完成安裝。"
+        : guide.note;
+    }
+    if (this.elements.installNowButton) {
+      this.elements.installNowButton.hidden = !hasNativePrompt;
+    }
   }
 
   async initializeInstallExperience() {
@@ -4438,6 +4565,10 @@ class PdfWorkshop {
     clearTimeout(this.installIntroTimer);
     this.installIntroTimer = null;
     if (!this.shouldOfferInstall() || this.hasSeenInstallIntro()) return;
+    // Only auto-show the intro where installation is most valuable
+    // (Android share target) or a native prompt exists; other browsers
+    // can open the guide from the header button.
+    if (!/Android/i.test(navigator.userAgent) && !this.installPrompt) return;
     this.installIntroTimer = setTimeout(() => {
       this.installIntroTimer = null;
       this.showInstallIntro();
@@ -4450,6 +4581,7 @@ class PdfWorkshop {
     clearTimeout(this.installIntroTimer);
     this.installIntroTimer = null;
     this.markInstallIntroSeen();
+    this.populateInstallDialog();
     this.openDialog(this.elements.installDialog);
   }
 
@@ -4462,11 +4594,8 @@ class PdfWorkshop {
   async installApp() {
     this.closeDialog(this.elements.installDialog, "install");
     if (!this.installPrompt) {
-      this.toast(
-        "請使用 Android Chrome 開啟本頁，再從右上選單選擇「安裝應用程式」。只有完整安裝的 PWA 才會出現在 PDF 分享清單。",
-        "default",
-        9000
-      );
+      const guide = this.getInstallGuide();
+      this.toast(`安裝方式：${guide.steps.join("；")}。`, "default", 9000);
       return;
     }
     const promptEvent = this.installPrompt;

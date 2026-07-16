@@ -313,6 +313,7 @@
       <h2 id="confirmTitle">確認操作</h2>
       <p id="confirmMessage"></p>
       <div class="dialog-actions">
+        <button class="button button-ghost" id="confirmExtraButton" value="extra" hidden></button>
         <button class="button button-ghost" value="cancel">取消</button>
         <button class="button button-danger" id="confirmAcceptButton" value="confirm">確認</button>
       </div>
@@ -336,7 +337,8 @@
         <li>像一般 APP 一樣從主畫面快速開啟</li>
         <li>核心編輯功能可在離線狀態使用</li>
       </ul>
-      <p class="dialog-note">建議使用 Chrome 開啟。若點選「立即安裝」後沒有出現系統視窗，請從 Chrome 右上角選單選擇「安裝應用程式」。</p>
+      <ol class="install-steps" id="installStepsList" hidden></ol>
+      <p class="dialog-note" id="installDialogNote">建議使用 Chrome 開啟。若點選「立即安裝」後沒有出現系統視窗，請從 Chrome 右上角選單選擇「安裝應用程式」。</p>
       <div class="dialog-actions">
         <button class="button button-ghost" value="cancel">稍後</button>
         <button class="button button-primary" id="installNowButton" type="button">立即安裝</button>
