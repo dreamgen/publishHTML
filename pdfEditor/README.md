@@ -50,4 +50,4 @@ python3 -m http.server 8765
 
 接著開啟 `http://localhost:8765/publishHTML/pdfEditor/`，或直接在本目錄啟動伺服器後開啟 `http://localhost:8765/`。
 
-首次安裝離線版本時會快取 PDF.js、字型、OCR 核心與繁中／英文模型。
+首次安裝離線版本時會快取 PDF.js、字型與 PDF 編輯核心；OCR 核心與繁中／英文模型（約 15MB）改為背景與首次使用時快取，讓安裝更快、更不易失敗。

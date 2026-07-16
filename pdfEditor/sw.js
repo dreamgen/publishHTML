@@ -1,10 +1,11 @@
-const SW_VERSION = "v14";
+const SW_VERSION = "v15";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
-const AUXILIARY_MANIFESTS = [
-  "./vendor/pdfjs/offline-assets.json",
-  "./vendor/tesseract/offline-assets.json",
-];
+// Cached during install (required for the core editor to work offline).
+const CORE_MANIFESTS = ["./vendor/pdfjs/offline-assets.json"];
+// Cached lazily (best-effort warm-up + runtime caching); OCR still works
+// online without them and install stays fast and robust.
+const LAZY_MANIFESTS = ["./vendor/tesseract/offline-assets.json"];
 const NETWORK_FIRST_ASSETS = [
   "/index.html",
   "/app.js",
@@ -24,7 +25,8 @@ const APP_SHELL = [
   "./icons/pdfEditor-512-maskable.png",
   "./vendor/pdfjs/pdf.mjs",
   "./vendor/pdfjs/pdf.worker.mjs",
-  ...AUXILIARY_MANIFESTS,
+  ...CORE_MANIFESTS,
+  ...LAZY_MANIFESTS,
   "./vendor/pdfjs/standard_fonts/FoxitDingbats.pfb",
   "./vendor/pdfjs/standard_fonts/FoxitFixed.pfb",
   "./vendor/pdfjs/standard_fonts/FoxitFixedBold.pfb",
@@ -44,17 +46,44 @@ const APP_SHELL = [
   "./vendor/pdf-lib/NotoSansCJKtc-Regular.otf"
 ];
 
+async function readAssetManifest(cache, manifestUrl) {
+  const response =
+    (await cache.match(manifestUrl)) || (await fetch(manifestUrl));
+  if (!response.ok) {
+    throw new Error(`Unable to load offline asset manifest: ${manifestUrl}`);
+  }
+  return response.json();
+}
+
+// Best-effort, per-asset caching for the large OCR payload. Failures are
+// tolerated; already-cached assets are skipped so progress is incremental.
+async function warmLazyAssets() {
+  const cache = await caches.open(CACHE_NAME);
+  for (const manifestUrl of LAZY_MANIFESTS) {
+    try {
+      const assets = await readAssetManifest(cache, manifestUrl);
+      for (const asset of assets) {
+        if (await cache.match(asset)) continue;
+        try {
+          const response = await fetch(asset);
+          if (response.ok) await cache.put(asset, response);
+        } catch {
+          // Ignore; runtime caching will retry when OCR is used.
+        }
+      }
+    } catch {
+      // Ignore; OCR assets remain lazily cached.
+    }
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
       await cache.addAll(APP_SHELL);
-      for (const manifestUrl of AUXILIARY_MANIFESTS) {
-        const manifestResponse = await fetch(manifestUrl);
-        if (!manifestResponse.ok) {
-          throw new Error(`Unable to load offline asset manifest: ${manifestUrl}`);
-        }
-        const auxiliaryAssets = await manifestResponse.json();
+      for (const manifestUrl of CORE_MANIFESTS) {
+        const auxiliaryAssets = await readAssetManifest(cache, manifestUrl);
         await cache.addAll(auxiliaryAssets);
       }
       await self.skipWaiting();
@@ -75,6 +104,12 @@ self.addEventListener("activate", (event) => {
       )
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "warm-ocr-cache") {
+    event.waitUntil(warmLazyAssets().catch(() => {}));
+  }
 });
 
 self.addEventListener("fetch", (event) => {
@@ -145,8 +180,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+          if (response.ok) {
+            const copy = response.clone();
+            caches
+              .open(CACHE_NAME)
+              .then((cache) => cache.put("./index.html", copy));
+          }
           return response;
         })
         .catch(() => caches.match("./index.html"))

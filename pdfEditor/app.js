@@ -19,7 +19,7 @@ const PDFJS_WASM_URL = new URL(
 
 const { PDFDocument, degrees } = window.PDFLib || {};
 const EDITOR_DB_NAME = "pdfEditor-db";
-const EDITOR_DB_VERSION = 1;
+const EDITOR_DB_VERSION = 2;
 const AUTOSAVE_KEY = "autosave";
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const INSTALL_INTRO_KEY = "pdfEditor-install-intro-seen-v1";
@@ -66,11 +66,15 @@ class PdfWorkshop {
     this.signatureDrawing = false;
     this.signatureHasInk = false;
     this.textIndex = new Map();
+    this.thumbnailCache = new Map();
+    this.annotationImages = new Map();
+    this.persistedSourceIds = new Set();
     this.searchMatches = [];
     this.searchCursor = -1;
     this.searchBuildToken = 0;
     this.searchDebounceTimer = null;
     this.ocrWorker = null;
+    this.ocrIdleTimer = null;
     this.ocrRunning = false;
     this.ocrCancelled = false;
     this.ocrPageNumber = 0;
@@ -416,7 +420,7 @@ class PdfWorkshop {
         ? new Set(this.pages.map((page) => page.id))
         : new Set();
       this.updateUI();
-      this.renderSidebar();
+      this.refreshSidebarSelection();
     });
 
     rangeButton.addEventListener("click", () => {
@@ -674,6 +678,9 @@ class PdfWorkshop {
         this.sources.clear();
         this.pages = [];
         this.textIndex.clear();
+        this.thumbnailCache.clear();
+        this.annotationImages.clear();
+        this.persistedSourceIds.clear();
         this.undoStack = [];
         this.redoStack = [];
       } else {
@@ -1139,8 +1146,19 @@ class PdfWorkshop {
   async renderThumbnail(canvas, pageRecord) {
     const source = this.sources.get(pageRecord.sourceId);
     if (!source) return;
-    const page = await source.pdfjsDoc.getPage(pageRecord.sourcePageIndex + 1);
     const rotation = this.getPageRotation(pageRecord);
+
+    const cached = this.thumbnailCache.get(pageRecord.id);
+    if (cached && cached.rotation === rotation) {
+      canvas.width = cached.canvas.width;
+      canvas.height = cached.canvas.height;
+      canvas.style.width = cached.styleWidth;
+      canvas.style.height = cached.styleHeight;
+      canvas.getContext("2d", { alpha: false }).drawImage(cached.canvas, 0, 0);
+      return;
+    }
+
+    const page = await source.pdfjsDoc.getPage(pageRecord.sourcePageIndex + 1);
     const baseViewport = page.getViewport({ scale: 1, rotation });
     const scale = 122 / baseViewport.width;
     const viewport = page.getViewport({ scale, rotation });
@@ -1160,6 +1178,30 @@ class PdfWorkshop {
           ? null
           : [outputScale, 0, 0, outputScale, 0, 0],
     }).promise;
+
+    const copy = document.createElement("canvas");
+    copy.width = canvas.width;
+    copy.height = canvas.height;
+    copy.getContext("2d", { alpha: false }).drawImage(canvas, 0, 0);
+    this.thumbnailCache.set(pageRecord.id, {
+      rotation,
+      canvas: copy,
+      styleWidth: canvas.style.width,
+      styleHeight: canvas.style.height,
+    });
+    while (this.thumbnailCache.size > 200) {
+      this.thumbnailCache.delete(this.thumbnailCache.keys().next().value);
+    }
+  }
+
+  refreshSidebarSelection() {
+    const cards = this.elements.pageList.querySelectorAll(".page-card");
+    for (const card of cards) {
+      const pageId = card.dataset.pageId;
+      card.classList.toggle("active", pageId === this.activePageId);
+      const checkbox = card.querySelector('input[type="checkbox"]');
+      if (checkbox) checkbox.checked = this.selectedPageIds.has(pageId);
+    }
   }
 
   async renderActivePage() {
@@ -1471,7 +1513,7 @@ class PdfWorkshop {
         item.tabIndex = 0;
         item.draggable = false;
         item.alt = annotation.label || "圖片標註";
-        item.src = annotation.dataUrl;
+        item.src = this.getAnnotationImageData(annotation);
         item.style.left = `${left}px`;
         item.style.top = `${
           bottom - annotation.height * this.currentViewport.scale
@@ -1743,12 +1785,11 @@ class PdfWorkshop {
     const match = this.searchMatches[index];
     if (!match) return;
     this.searchCursor = index;
-    const pageChanged = this.activePageId !== match.pageId;
     this.activePageId = match.pageId;
     this.selectedPageIds = new Set([match.pageId]);
     this.selectedAnnotationId = null;
     this.updateUI();
-    if (pageChanged) this.renderSidebar();
+    this.refreshSidebarSelection();
     await this.renderActivePage();
     this.elements.viewerScroll.scrollTo({
       top: 0,
@@ -1887,6 +1928,8 @@ class PdfWorkshop {
   }
 
   async ensureOcrWorker() {
+    clearTimeout(this.ocrIdleTimer);
+    this.ocrIdleTimer = null;
     if (this.ocrWorker) return this.ocrWorker;
     if (!window.Tesseract?.createWorker) {
       throw new Error("Tesseract.js is unavailable");
@@ -2070,7 +2113,23 @@ class PdfWorkshop {
       this.setOcrRunningState(false);
       this.ocrPageNumber = 0;
       this.ocrPageTotal = 0;
+      this.scheduleOcrWorkerShutdown();
     }
+  }
+
+  scheduleOcrWorkerShutdown() {
+    clearTimeout(this.ocrIdleTimer);
+    this.ocrIdleTimer = null;
+    if (!this.ocrWorker) return;
+    // Release the Tesseract WASM memory (~100MB) after a few idle minutes;
+    // the worker is recreated transparently on the next OCR run.
+    this.ocrIdleTimer = setTimeout(async () => {
+      this.ocrIdleTimer = null;
+      if (this.ocrRunning || !this.ocrWorker) return;
+      const worker = this.ocrWorker;
+      this.ocrWorker = null;
+      await worker.terminate().catch(() => {});
+    }, 3 * 60 * 1000);
   }
 
   async cancelOcr() {
@@ -2536,13 +2595,13 @@ class PdfWorkshop {
   selectPage(pageId) {
     if (this.activePageId === pageId) {
       this.updateUI();
-      this.renderSidebar();
+      this.refreshSidebarSelection();
       return;
     }
     this.activePageId = pageId;
     this.selectedAnnotationId = null;
     this.updateUI();
-    this.renderSidebar();
+    this.refreshSidebarSelection();
     this.renderActivePage();
     this.elements.viewerScroll.scrollTo({ top: 0, left: 0, behavior: "smooth" });
     if (matchMedia("(max-width: 720px)").matches) {
@@ -2666,10 +2725,41 @@ class PdfWorkshop {
     this.redoStack = [];
     this.dirty = true;
     this.normalizeState();
+    this.collectGarbage();
     this.updateUI();
     if (sidebar) this.renderSidebar();
     this.renderActivePage();
     this.scheduleAutosave();
+  }
+
+  collectGarbage() {
+    const referencedSourceIds = new Set();
+    const referencedImageIds = new Set();
+    const visit = (pages) => {
+      for (const page of pages) {
+        referencedSourceIds.add(page.sourceId);
+        for (const annotation of page.annotations || []) {
+          if (annotation.imageId) referencedImageIds.add(annotation.imageId);
+        }
+      }
+    };
+    visit(this.pages);
+    this.undoStack.forEach(visit);
+    this.redoStack.forEach(visit);
+
+    for (const [id, source] of this.sources) {
+      if (referencedSourceIds.has(id)) continue;
+      source.loadingTask?.destroy?.().catch?.(() => {});
+      this.sources.delete(id);
+      this.persistedSourceIds.delete(id);
+    }
+    for (const id of [...this.annotationImages.keys()]) {
+      if (!referencedImageIds.has(id)) this.annotationImages.delete(id);
+    }
+    const pageIds = new Set(this.pages.map((page) => page.id));
+    for (const id of [...this.thumbnailCache.keys()]) {
+      if (!pageIds.has(id)) this.thumbnailCache.delete(id);
+    }
   }
 
   pushHistory() {
@@ -2684,6 +2774,7 @@ class PdfWorkshop {
     this.dirty = true;
     this.selectedAnnotationId = null;
     this.normalizeState();
+    this.collectGarbage();
     this.renderAll();
     this.scheduleAutosave();
   }
@@ -2695,6 +2786,7 @@ class PdfWorkshop {
     this.dirty = true;
     this.selectedAnnotationId = null;
     this.normalizeState();
+    this.collectGarbage();
     this.renderAll();
     this.scheduleAutosave();
   }
@@ -2836,7 +2928,7 @@ class PdfWorkshop {
       this.pages[result.pages[0] - 1]?.id || this.activePageId;
     this.closeDialog(this.elements.rangeDialog);
     this.updateUI();
-    this.renderSidebar();
+    this.refreshSidebarSelection();
     this.renderActivePage();
     this.toast(`已選取 ${result.pages.length} 頁。`, "success");
   }
@@ -3037,10 +3129,14 @@ class PdfWorkshop {
       screenLeft,
       screenBottom
     );
+    // Store the heavy dataUrl once in a shared map; annotations (and the
+    // undo/redo snapshots cloned from them) only carry a lightweight id.
+    const imageId = makeId("image");
+    this.annotationImages.set(imageId, dataUrl);
     const annotation = {
       id: makeId("annotation"),
       type: "image",
-      dataUrl,
+      imageId,
       label,
       x,
       y,
@@ -3056,6 +3152,12 @@ class PdfWorkshop {
       { sidebar: false }
     );
     this.toast("圖片已加入，可拖曳調整位置。", "success");
+  }
+
+  getAnnotationImageData(annotation) {
+    return annotation.imageId
+      ? this.annotationImages.get(annotation.imageId) || ""
+      : annotation.dataUrl || "";
   }
 
   fileToDataUrl(file) {
@@ -3271,6 +3373,7 @@ class PdfWorkshop {
       });
       await source.loadingTask?.destroy?.().catch?.(() => {});
       this.sources.set(source.id, replacement.source);
+      this.persistedSourceIds.delete(source.id);
       for (const page of this.pages.filter(
         (item) => item.sourceId === source.id
       )) {
@@ -3278,6 +3381,7 @@ class PdfWorkshop {
           replacement.pages[page.sourcePageIndex]?.baseRotation ||
           page.baseRotation;
         this.textIndex.delete(page.id);
+        this.thumbnailCache.delete(page.id);
       }
       this.closeDialog(this.elements.formDialog);
       this.dirty = true;
@@ -3523,9 +3627,10 @@ class PdfWorkshop {
           });
         }
       } else if (annotation.type === "image") {
-        const embedded = annotation.dataUrl.startsWith("data:image/png")
-          ? await outputDocument.embedPng(annotation.dataUrl)
-          : await outputDocument.embedJpg(annotation.dataUrl);
+        const dataUrl = this.getAnnotationImageData(annotation);
+        const embedded = dataUrl.startsWith("data:image/png")
+          ? await outputDocument.embedPng(dataUrl)
+          : await outputDocument.embedJpg(dataUrl);
         page.drawImage(embedded, {
           x: annotation.x,
           y: annotation.y,
@@ -3547,9 +3652,10 @@ class PdfWorkshop {
       annotations
         .filter((annotation) => annotation.type === "image")
         .forEach((annotation) => {
+          const dataUrl = this.getAnnotationImageData(annotation);
           if (
-            !annotation.dataUrl.startsWith("data:image/png") &&
-            !annotation.dataUrl.startsWith("data:image/jpeg")
+            !dataUrl.startsWith("data:image/png") &&
+            !dataUrl.startsWith("data:image/jpeg")
           ) {
             throw new Error("Image needs raster fallback");
           }
@@ -3675,7 +3781,9 @@ class PdfWorkshop {
         context.closePath();
         context.fill();
       } else if (annotation.type === "image") {
-        const image = await this.loadHtmlImage(annotation.dataUrl);
+        const image = await this.loadHtmlImage(
+          this.getAnnotationImageData(annotation)
+        );
         const [left, bottom] = viewport.convertToViewportPoint(
           annotation.x,
           annotation.y
@@ -3818,6 +3926,9 @@ class PdfWorkshop {
         if (!db.objectStoreNames.contains("projects")) {
           db.createObjectStore("projects", { keyPath: "id" });
         }
+        if (!db.objectStoreNames.contains("sources")) {
+          db.createObjectStore("sources", { keyPath: "id" });
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -3825,15 +3936,19 @@ class PdfWorkshop {
     return this.dbPromise;
   }
 
-  async projectDbOperation(mode, operation) {
+  async dbOperation(storeName, mode, operation) {
     const db = await this.openEditorDb();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction("projects", mode);
-      const store = transaction.objectStore("projects");
+      const transaction = db.transaction(storeName, mode);
+      const store = transaction.objectStore(storeName);
       const request = operation(store);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
+  }
+
+  projectDbOperation(mode, operation) {
+    return this.dbOperation("projects", mode, operation);
   }
 
   scheduleAutosave() {
@@ -3845,27 +3960,67 @@ class PdfWorkshop {
   async saveAutosave() {
     if (!this.pages.length) return;
     try {
-      const sources = [...this.sources.values()].map((source) => ({
-        id: source.id,
-        name: source.name,
-        size: source.size,
-        encrypted: source.encrypted,
-        bytes: source.bytes.slice(),
-      }));
+      const activeSourceIds = new Set(this.pages.map((page) => page.sourceId));
+
+      // Heavy source bytes are written once per source, not on every edit.
+      for (const source of this.sources.values()) {
+        if (!activeSourceIds.has(source.id)) continue;
+        if (this.persistedSourceIds.has(source.id)) continue;
+        await this.dbOperation("sources", "readwrite", (store) =>
+          store.put({
+            id: source.id,
+            name: source.name,
+            size: source.size,
+            encrypted: source.encrypted,
+            bytes: source.bytes.slice(),
+          })
+        );
+        this.persistedSourceIds.add(source.id);
+      }
+
+      // Drop stored sources no longer referenced by the current document.
+      const storedIds =
+        (await this.dbOperation("sources", "readonly", (store) =>
+          store.getAllKeys()
+        )) || [];
+      for (const id of storedIds) {
+        if (activeSourceIds.has(id)) continue;
+        await this.dbOperation("sources", "readwrite", (store) =>
+          store.delete(id)
+        );
+        this.persistedSourceIds.delete(id);
+      }
+
       const activePageIds = new Set(this.pages.map((page) => page.id));
       const textIndex = [...this.textIndex.entries()]
         .filter(
           ([pageId, entry]) => activePageIds.has(pageId) && entry?.ocr
         )
         .map(([pageId, entry]) => [pageId, { ocr: entry.ocr }]);
+
+      const annotationImages = [];
+      const seenImageIds = new Set();
+      for (const page of this.pages) {
+        for (const annotation of page.annotations || []) {
+          if (!annotation.imageId || seenImageIds.has(annotation.imageId)) {
+            continue;
+          }
+          seenImageIds.add(annotation.imageId);
+          const dataUrl = this.annotationImages.get(annotation.imageId);
+          if (dataUrl) annotationImages.push([annotation.imageId, dataUrl]);
+        }
+      }
+
       await this.projectDbOperation("readwrite", (store) =>
         store.put({
           id: AUTOSAVE_KEY,
+          version: 2,
           savedAt: Date.now(),
           pages: clonePages(this.pages),
           activePageId: this.activePageId,
-          sources,
+          sourceIds: [...activeSourceIds],
           textIndex,
+          annotationImages,
         })
       );
     } catch (error) {
@@ -3896,18 +4051,35 @@ class PdfWorkshop {
     }
   }
 
+  async loadSavedSources(sourceIds) {
+    const records = [];
+    for (const id of sourceIds) {
+      const record = await this.dbOperation("sources", "readonly", (store) =>
+        store.get(id)
+      );
+      if (!record) throw new Error(`Missing saved source: ${id}`);
+      records.push(record);
+    }
+    return records;
+  }
+
   async restoreAutosave(project) {
     this.restoringAutosave = true;
     this.setBusy(true, "正在還原草稿", "重新載入文件來源", 5);
     const restoredSources = new Map();
     try {
-      for (let index = 0; index < project.sources.length; index += 1) {
-        const saved = project.sources[index];
+      // v1 drafts embed source bytes inline; v2 keeps them in the
+      // dedicated "sources" store.
+      const savedSources = Array.isArray(project.sources)
+        ? project.sources
+        : await this.loadSavedSources(project.sourceIds || []);
+      for (let index = 0; index < savedSources.length; index += 1) {
+        const saved = savedSources[index];
         this.setBusy(
           true,
           "正在還原草稿",
-          `${saved.name}（${index + 1}/${project.sources.length}）`,
-          10 + Math.round((index / project.sources.length) * 70)
+          `${saved.name}（${index + 1}/${savedSources.length}）`,
+          10 + Math.round((index / savedSources.length) * 70)
         );
         const loaded = await this.loadSourceFromBytes({
           bytes: new Uint8Array(saved.bytes),
@@ -3918,7 +4090,29 @@ class PdfWorkshop {
         restoredSources.set(saved.id, loaded.source);
       }
       this.sources = restoredSources;
+      this.persistedSourceIds = Array.isArray(project.sources)
+        ? new Set()
+        : new Set(restoredSources.keys());
       this.pages = clonePages(project.pages);
+      this.thumbnailCache.clear();
+      this.annotationImages = new Map(
+        Array.isArray(project.annotationImages) ? project.annotationImages : []
+      );
+      // Migrate v1 inline image annotations to the shared image store so
+      // undo snapshots stay lightweight.
+      for (const page of this.pages) {
+        for (const annotation of page.annotations || []) {
+          if (
+            annotation.type === "image" &&
+            annotation.dataUrl &&
+            !annotation.imageId
+          ) {
+            annotation.imageId = makeId("image");
+            this.annotationImages.set(annotation.imageId, annotation.dataUrl);
+            delete annotation.dataUrl;
+          }
+        }
+      }
       this.textIndex = new Map(
         Array.isArray(project.textIndex) ? project.textIndex : []
       );
@@ -3945,9 +4139,12 @@ class PdfWorkshop {
     if (!("caches" in window)) return false;
     try {
       const cache = await caches.open(SHARE_CACHE_NAME);
-      const requestedCount = Math.max(
-        1,
-        Number(new URLSearchParams(location.search).get("count")) || 1
+      const requestedCount = Math.min(
+        20,
+        Math.max(
+          1,
+          Number(new URLSearchParams(location.search).get("count")) || 1
+        )
       );
       const files = [];
       for (let index = 0; index < requestedCount; index += 1) {
@@ -3982,6 +4179,7 @@ class PdfWorkshop {
   }
 
   handleKeyboard(event) {
+    if (document.querySelector("dialog[open]")) return;
     const isTyping =
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLTextAreaElement ||
@@ -4306,6 +4504,14 @@ class PdfWorkshop {
       });
       const registration = await navigator.serviceWorker.register("./sw.js");
       await registration.update();
+      // Ask the worker to warm the large OCR assets in the background so
+      // install stays fast while offline OCR still becomes available.
+      navigator.serviceWorker.ready.then((ready) => {
+        setTimeout(
+          () => ready.active?.postMessage({ type: "warm-ocr-cache" }),
+          4000
+        );
+      });
     } catch (error) {
       console.warn("[PDF Editor] Service worker registration failed", error);
     }
