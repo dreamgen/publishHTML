@@ -575,7 +575,7 @@
                     </h3>
                 </div>
                 <div class="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">本備份僅儲存個人設定及小說最後閱讀位置 (不含預載快取內容，還原時若無快取需重新載入)。匯入時將與現有紀錄合併。</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">可匯入 PureReader 設定備份，或由 Userscript 儲存的章節檔案；內容會與現有紀錄合併。</p>
                     <div class="flex gap-3">
                         <button onclick="exportData()" class="flex-1 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 font-medium rounded-xl transition-colors text-sm border border-indigo-100 dark:border-indigo-800/50 flex items-center justify-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -583,9 +583,9 @@
                         </button>
                         <button onclick="document.getElementById('import-file-input').click()" class="flex-1 py-2 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-xl transition-colors text-sm border border-gray-200 dark:border-gray-600 shadow-sm flex items-center justify-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                            匯入還原
+                            匯入備份／章節
                         </button>
-                        <input type="file" id="import-file-input" class="hidden" accept=".json" onchange="importData(event)">
+                        <input type="file" id="import-file-input" class="hidden" accept=".json,.purereader.json,application/json" onchange="importData(event)">
                     </div>
                 </div>
             </div>
@@ -1743,10 +1743,28 @@
         async function importData(event) {
             const file = event.target.files[0];
             if (!file) return;
+            if (file.size > 50 * 1024 * 1024) {
+                alert('匯入失敗：檔案超過 50 MB。');
+                event.target.value = '';
+                return;
+            }
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
                     const data = JSON.parse(e.target.result);
+
+                    if (data?.schema === USER_SCRIPT_BRIDGE.schema) {
+                        const result = await importChapterBundle(data);
+                        showSyncBar(
+                            `✓ 已從本地檔案匯入 ${result.total} 章（新增 ${result.inserted}、更新 ${result.updated}、略過 ${result.unchanged}）`,
+                            null,
+                            null,
+                            6000
+                        );
+                        event.target.value = '';
+                        return;
+                    }
+
                     let importedCount = 0;
                     
                     if (data._schemaVersion === 2) {
@@ -1796,7 +1814,7 @@
                         alert('備份檔中找不到有效的淨讀器資料。');
                     }
                 } catch(err) {
-                    alert('匯入失敗：備份檔格式不正確。');
+                    alert(`匯入失敗：${err.message || '檔案格式不正確。'}`);
                 }
                 event.target.value = ''; // Reset input
             };

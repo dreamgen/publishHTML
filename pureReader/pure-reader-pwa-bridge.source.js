@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PureReader - 直接預存到 PWA
 // @namespace    https://github.com/dreamgen/publishHTML
-// @version      0.1.1
+// @version      0.2.0
 // @description  將目前章節起算的 10、50 或 100 章直接傳送到 PureReader PWA，供離線閱讀。
 // @match        https://m.biquge.tw/book/*/*.html
 // @match        https://look.thisiscm.com/*
@@ -14,6 +14,8 @@
 
 (() => {
   'use strict';
+
+  document.documentElement.dataset.pureReaderBridgeVersion = '0.2.0';
 
   const DEFAULT_PWA_URL = 'https://dreamgen.github.io/publishHTML/pureReader/';
   const PWA_URL_STORAGE_KEY = 'pureReader.bridgePwaUrl';
@@ -65,6 +67,8 @@
   let resultRejecter = null;
   let helloTimer = 0;
   let timeoutTimer = 0;
+  let deliveryMode = 'pwa';
+  let pendingLocalFile = null;
 
   function canonicalURL(value, base = location.href) {
     const url = new URL(value, base);
@@ -216,9 +220,27 @@
   function setBusy(busy) {
     ensureDialog();
     dialog.querySelectorAll('[data-count]').forEach((button) => { button.disabled = busy; });
+    dialog.querySelectorAll('[data-delivery]').forEach((button) => { button.disabled = busy; });
     dialog.querySelector('#pure-reader-bridge-close').disabled = busy;
     dialog.querySelector('#pure-reader-bridge-cancel').hidden = !busy;
     dialog.querySelector('#pure-reader-pwa-url').disabled = busy;
+    dialog.querySelector('#pure-reader-local-save').disabled = busy;
+  }
+
+  function selectDeliveryMode(mode) {
+    if (abortController || !['pwa', 'file'].includes(mode)) return;
+    deliveryMode = mode;
+    pendingLocalFile = null;
+    dialog.querySelectorAll('[data-delivery]').forEach((button) => {
+      const selected = button.dataset.delivery === mode;
+      button.dataset.active = selected ? 'true' : 'false';
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    dialog.querySelector('#pure-reader-pwa-url-group').hidden = mode !== 'pwa';
+    dialog.querySelector('#pure-reader-local-save').hidden = true;
+    setStatus(mode === 'pwa'
+      ? '請選擇章節數，完成後會直接開啟 PWA。'
+      : '請選擇章節數；整理完成後再指定檔案位置或使用手機分享儲存。');
   }
 
   function getPwaURL() {
@@ -258,7 +280,7 @@
       } catch (error) {
         if (error.name === 'AbortError') throw error;
         stopReason = 'fetch_error';
-        setStatus(`第 ${chapters.length + 1} 章讀取失敗，將傳送已完成的 ${chapters.length} 章`, chapters.length, count);
+        setStatus(`第 ${chapters.length + 1} 章讀取失敗，將使用已完成的 ${chapters.length} 章`, chapters.length, count);
         break;
       }
     }
@@ -321,6 +343,28 @@
     });
   }
 
+  async function createChapterBundle(count, signal) {
+    const { chapters, stopReason } = await collectChapters(count, signal);
+    const current = chapters[0];
+    const indexUrl = current.indexUrl || new URL('.', current.url).href;
+    return {
+      schema: BRIDGE.schema,
+      version: BRIDGE.version,
+      bundleId: `${Date.now()}-${fnv1a(current.url)}`,
+      createdAt: new Date().toISOString(),
+      requestedChapterCount: count,
+      completedChapterCount: chapters.length,
+      stopReason,
+      currentUrl: current.url,
+      book: {
+        id: `userscript-${fnv1a(indexUrl)}`,
+        title: inferBookTitle(current),
+        indexUrl,
+      },
+      chapters,
+    };
+  }
+
   async function startTransfer(count) {
     if (!ALLOWED_COUNTS.has(count) || abortController) return;
     setBusy(true);
@@ -328,28 +372,12 @@
     try {
       setStatus('正在開啟 PureReader PWA…');
       const ready = openPwaReceiver();
-      const collected = collectChapters(count, abortController.signal);
-      const [, { chapters, stopReason }] = await Promise.all([ready, collected]);
-      const current = chapters[0];
-      const indexUrl = current.indexUrl || new URL('.', current.url).href;
+      const [, bundle] = await Promise.all([
+        ready,
+        createChapterBundle(count, abortController.signal),
+      ]);
       const resultPromise = waitForImportResult();
-      const bundle = {
-        schema: BRIDGE.schema,
-        version: BRIDGE.version,
-        bundleId: `${Date.now()}-${fnv1a(current.url)}`,
-        createdAt: new Date().toISOString(),
-        requestedChapterCount: count,
-        completedChapterCount: chapters.length,
-        stopReason,
-        currentUrl: current.url,
-        book: {
-          id: `userscript-${fnv1a(indexUrl)}`,
-          title: inferBookTitle(current),
-          indexUrl,
-        },
-        chapters,
-      };
-      setStatus(`正在傳送 ${chapters.length} 章到 PWA…`, chapters.length, chapters.length);
+      setStatus(`正在傳送 ${bundle.chapters.length} 章到 PWA…`, bundle.chapters.length, bundle.chapters.length);
       transferWindow.postMessage({ type: BRIDGE.import, nonce: transferNonce, bundle }, transferOrigin);
       const result = await resultPromise;
       setStatus(`完成：新增 ${result.inserted}、更新 ${result.updated}、略過 ${result.unchanged}，共 ${result.total} 章`, result.total, result.total);
@@ -360,6 +388,90 @@
       abortController = null;
       cleanupTransferTimers();
       setBusy(false);
+    }
+  }
+
+  function safeFilenamePart(value, fallback) {
+    const cleaned = String(value || '')
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return (cleaned || fallback).slice(0, 80);
+  }
+
+  async function prepareLocalFile(count) {
+    if (!ALLOWED_COUNTS.has(count) || abortController) return;
+    setBusy(true);
+    pendingLocalFile = null;
+    dialog.querySelector('#pure-reader-local-save').hidden = true;
+    abortController = new AbortController();
+    try {
+      const bundle = await createChapterBundle(count, abortController.signal);
+      const bookName = safeFilenamePart(bundle.book.title, 'PureReader小說');
+      const chapterName = safeFilenamePart(bundle.chapters[0].title, '目前章節');
+      const filename = `${bookName}_${chapterName}_${bundle.chapters.length}章.purereader.json`;
+      pendingLocalFile = new File(
+        [JSON.stringify(bundle, null, 2)],
+        filename,
+        { type: 'application/json;charset=utf-8', lastModified: Date.now() },
+      );
+      dialog.querySelector('#pure-reader-local-save').hidden = false;
+      setStatus(`已整理 ${bundle.chapters.length} 章（${Math.max(1, Math.round(pendingLocalFile.size / 1024))} KB），請按「儲存本地檔案」。`, bundle.chapters.length, bundle.chapters.length);
+    } catch (error) {
+      if (error.name === 'AbortError') setStatus('已取消；尚未建立本地檔案');
+      else setStatus(`建立檔案失敗：${error.message || '未知錯誤'}`);
+    } finally {
+      abortController = null;
+      setBusy(false);
+    }
+  }
+
+  function downloadLocalFile(file) {
+    const objectURL = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = objectURL;
+    link.download = file.name;
+    link.style.display = 'none';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectURL), 1000);
+  }
+
+  async function saveLocalFile() {
+    const file = pendingLocalFile;
+    if (!file) return;
+    const button = dialog.querySelector('#pure-reader-local-save');
+    button.disabled = true;
+    try {
+      if (typeof window.showSaveFilePicker === 'function' && window.isSecureContext) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: file.name,
+          types: [{ description: 'PureReader 章節檔案', accept: { 'application/json': ['.json'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(file);
+        await writable.close();
+        setStatus(`已儲存：${file.name}`);
+        return;
+      }
+
+      const shareData = { title: 'PureReader 預存章節', files: [file] };
+      if (typeof navigator.share === 'function'
+          && typeof navigator.canShare === 'function'
+          && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        setStatus('已交給系統分享面板；請選擇「儲存到檔案」或您慣用的檔案 App。');
+        return;
+      }
+
+      downloadLocalFile(file);
+      setStatus(`已下載：${file.name}`);
+    } catch (error) {
+      if (error.name === 'AbortError') setStatus('已取消選擇儲存位置，檔案仍可再次儲存。');
+      else setStatus(`儲存失敗：${error.message || '未知錯誤'}`);
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -398,26 +510,41 @@
     dialog.innerHTML = `
       <form method="dialog" class="pure-reader-bridge-card">
         <div class="pure-reader-bridge-head">
-          <strong>預存到 PureReader PWA</strong>
+          <strong>預存 PureReader 章節</strong>
           <button type="submit" id="pure-reader-bridge-close" aria-label="關閉">✕</button>
         </div>
         <p>從目前章節開始，包含目前章節。</p>
+        <div class="pure-reader-bridge-delivery" aria-label="儲存方式">
+          <button type="button" data-delivery="pwa" data-active="true" aria-pressed="true">直接送 PWA</button>
+          <button type="button" data-delivery="file" data-active="false" aria-pressed="false">本地檔案</button>
+        </div>
         <div class="pure-reader-bridge-counts" aria-label="預存章節數">
           <button type="button" data-count="10">10 章</button>
           <button type="button" data-count="50">50 章</button>
           <button type="button" data-count="100">100 章</button>
         </div>
-        <label class="pure-reader-bridge-url-label" for="pure-reader-pwa-url">PWA 網址</label>
-        <input id="pure-reader-pwa-url" type="url" spellcheck="false">
+        <div id="pure-reader-pwa-url-group">
+          <label class="pure-reader-bridge-url-label" for="pure-reader-pwa-url">PWA 網址</label>
+          <input id="pure-reader-pwa-url" type="url" spellcheck="false">
+        </div>
         <div class="pure-reader-bridge-track"><span id="pure-reader-bridge-progress"></span></div>
-        <div id="pure-reader-bridge-status" role="status">請選擇預存章節數。</div>
+        <div id="pure-reader-bridge-status" role="status">請選擇章節數，完成後會直接開啟 PWA。</div>
+        <button type="button" id="pure-reader-local-save" hidden>儲存本地檔案</button>
         <button type="button" id="pure-reader-bridge-cancel" hidden>取消</button>
       </form>`;
     (readerShell || document.body).append(dialog);
     dialog.querySelector('#pure-reader-pwa-url').value = localStorage.getItem(PWA_URL_STORAGE_KEY) || DEFAULT_PWA_URL;
-    dialog.querySelectorAll('[data-count]').forEach((button) => {
-      button.addEventListener('click', () => startTransfer(Number(button.dataset.count)));
+    dialog.querySelectorAll('[data-delivery]').forEach((button) => {
+      button.addEventListener('click', () => selectDeliveryMode(button.dataset.delivery));
     });
+    dialog.querySelectorAll('[data-count]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const count = Number(button.dataset.count);
+        if (deliveryMode === 'file') prepareLocalFile(count);
+        else startTransfer(count);
+      });
+    });
+    dialog.querySelector('#pure-reader-local-save').addEventListener('click', saveLocalFile);
     dialog.querySelector('#pure-reader-bridge-cancel').addEventListener('click', () => abortController?.abort());
     dialog.addEventListener('cancel', (event) => {
       if (!abortController) return;
@@ -425,7 +552,10 @@
       abortController.abort();
     });
     dialog.addEventListener('close', () => {
-      if (!abortController) resetTransfer();
+      if (!abortController) {
+        resetTransfer();
+        pendingLocalFile = null;
+      }
     });
     return dialog;
   }
@@ -440,19 +570,27 @@
       .pure-reader-bridge-head { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:18px; }
       .pure-reader-bridge-head button { border:0; background:transparent; color:#6b7280; font-size:18px; cursor:pointer; }
       .pure-reader-bridge-card p { margin:0; color:#6b7280; font-size:14px; }
+      .pure-reader-bridge-delivery { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; padding:4px; border-radius:13px; background:#f3f4f6; }
+      .pure-reader-bridge-delivery button { min-height:40px; border:0; border-radius:10px; background:transparent; color:#6b7280; font-weight:800; cursor:pointer; }
+      .pure-reader-bridge-delivery button[data-active="true"] { background:#fff; color:#4338ca; box-shadow:0 2px 8px rgba(0,0,0,.1); }
       .pure-reader-bridge-counts { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-      .pure-reader-bridge-counts button, #pure-reader-bridge-cancel { min-height:44px; border:1px solid #c7d2fe; border-radius:12px; background:#eef2ff; color:#4338ca; font-weight:800; cursor:pointer; }
+      .pure-reader-bridge-counts button, #pure-reader-local-save, #pure-reader-bridge-cancel { min-height:44px; border:1px solid #c7d2fe; border-radius:12px; background:#eef2ff; color:#4338ca; font-weight:800; cursor:pointer; }
       .pure-reader-bridge-counts button:disabled { opacity:.45; cursor:not-allowed; }
       .pure-reader-bridge-url-label { color:#4b5563; font-size:12px; font-weight:700; }
+      #pure-reader-pwa-url-group { display:flex; flex-direction:column; gap:6px; }
+      #pure-reader-pwa-url-group[hidden] { display:none; }
       #pure-reader-pwa-url { box-sizing:border-box; width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:10px; font-size:13px; }
       .pure-reader-bridge-track { height:7px; overflow:hidden; border-radius:999px; background:#e5e7eb; }
       #pure-reader-bridge-progress { display:block; width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,#4f46e5,#8b5cf6); transition:width .2s ease; }
       #pure-reader-bridge-status { min-height:42px; color:#374151; font-size:13px; line-height:1.55; overflow-wrap:anywhere; }
       #pure-reader-bridge-cancel { border-color:#fecaca; background:#fef2f2; color:#dc2626; }
+      #pure-reader-local-save { border-color:#a7f3d0; background:#ecfdf5; color:#047857; }
       #pure-reader-save-pwa.pure-reader-bridge-floating { position:fixed; z-index:2147483646; right:12px; bottom:78px; min-height:42px; padding:9px 13px; border:0; border-radius:12px; background:#4f46e5; color:#fff; font:700 14px/1 ui-sans-serif,system-ui,sans-serif; box-shadow:0 8px 28px rgba(0,0,0,.25); }
       @media (prefers-color-scheme:dark) {
         #pure-reader-bridge-dialog { color:#f3f4f6; }
         .pure-reader-bridge-card { background:#1f2937; }
+        .pure-reader-bridge-delivery { background:#111827; }
+        .pure-reader-bridge-delivery button[data-active="true"] { background:#374151; color:#c7d2fe; }
         .pure-reader-bridge-card p, .pure-reader-bridge-url-label { color:#9ca3af; }
         #pure-reader-pwa-url { border-color:#4b5563; background:#111827; color:#f3f4f6; }
         .pure-reader-bridge-track { background:#374151; }
@@ -466,8 +604,8 @@
     const button = document.createElement('button');
     button.type = 'button';
     button.id = 'pure-reader-save-pwa';
-    button.textContent = '存到 PWA';
-    button.title = '預存 10、50 或 100 章到 PureReader PWA';
+    button.textContent = '預存';
+    button.title = '預存 10、50 或 100 章到 PWA 或本地檔案';
     button.addEventListener('click', () => {
       const modal = ensureDialog();
       if (!modal.open) modal.showModal();

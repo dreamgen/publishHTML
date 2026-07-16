@@ -80,7 +80,7 @@
 - 貼上任意網址，自動提取乾淨正文與圖片（Mozilla Readability）
 - DOMPurify 二次消毒，移除殘餘廣告與惡意指令碼
 - 支援 **Web Share Target**：安裝後可從瀏覽器分享選單直接傳送網址閱讀
-- 支援 PureReader Userscript 直接預存目前章節起算的 **10／50／100 章**，寫入 PWA 離線書庫
+- 支援 PureReader Userscript 預存目前章節起算的 **10／50／100 章**，可直接送到 PWA 或儲存為本地章節檔案
 - 深色 / 淺色模式切換（跟隨系統偏好，可手動覆蓋）
 - **字體大小調整**（5 級，閱讀時顯示）
 - 一鍵**複製全文**為純文字（含標題與來源網址）
@@ -89,7 +89,7 @@
 
 **安裝：** 開啟 `/pureReader/` 後，點選「加入主畫面」即可安裝為獨立 App。
 
-**Userscript 直接預存：** 同時安裝 [PureReader PWA 橋接腳本](./pureReader/pure-reader-pwa-bridge.user.js) 與原有 PureReader 快速小說模式。於小說閱讀工具列點選「存到 PWA」，選擇 10、50 或 100 章；PWA 會開啟接收頁、再次清理正文，並將章節合併到離線小說書籤。預設接收網址為 `https://dreamgen.github.io/publishHTML/pureReader/`，也可在傳送視窗中調整。
+**Userscript 預存：** 只需安裝單一檔案 [PureReader 完整 Userscript](./pureReader/pure-reader.user.js)。它同時包含快速小說閱讀模式與預存功能；於工具列點選「預存」，選擇 10、50 或 100 章，再選擇「直接送 PWA」或「本地檔案」。桌面支援時可指定檔名與位置；手機會開啟系統分享面板，可選擇「儲存到檔案」。之後在 PWA 首頁的「資料備份與還原」選擇「匯入備份／章節」，即可將本地章節檔案合併到離線書庫。舊版快速小說腳本及獨立橋接腳本應先停用或移除，避免重複執行。
 
 ---
 
