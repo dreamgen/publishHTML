@@ -1,4 +1,4 @@
-const SW_VERSION = "v12";
+const SW_VERSION = "v13";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const AUXILIARY_MANIFESTS = [
@@ -19,6 +19,9 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./icons/pdfEditor-192.svg",
   "./icons/pdfEditor-512.svg",
+  "./icons/pdfEditor-192.png",
+  "./icons/pdfEditor-512.png",
+  "./icons/pdfEditor-512-maskable.png",
   "./vendor/pdfjs/pdf.mjs",
   "./vendor/pdfjs/pdf.worker.mjs",
   ...AUXILIARY_MANIFESTS,
@@ -82,23 +85,52 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         const formData = await request.formData();
-        const file = formData.get("pdf");
-        if (!(file instanceof File)) {
+        const files = formData
+          .getAll("pdf")
+          .filter((value) => value instanceof Blob)
+          .filter((file) => {
+            const name = String(file.name || "");
+            return (
+              name.toLowerCase().endsWith(".pdf") ||
+              /pdf|octet-stream/i.test(file.type || "")
+            );
+          });
+        if (!files.length) {
           return Response.redirect(new URL("./", request.url).href, 303);
         }
         const cache = await caches.open(SHARE_CACHE_NAME);
-        const key = new URL("./shared-pdf", self.registration.scope).href;
-        await cache.put(
-          key,
-          new Response(file, {
-            headers: {
-              "Content-Type": "application/pdf",
-              "X-PDF-File-Name": encodeURIComponent(file.name || "分享的文件.pdf"),
-            },
+        const existingKeys = await cache.keys();
+        await Promise.all(
+          existingKeys
+            .filter((cachedRequest) =>
+              cachedRequest.url.includes("/shared-pdf")
+            )
+            .map((cachedRequest) => cache.delete(cachedRequest))
+        );
+        await Promise.all(
+          files.map((file, index) => {
+            const key = new URL(
+              `./shared-pdf-${index}`,
+              self.registration.scope
+            ).href;
+            return cache.put(
+              key,
+              new Response(file, {
+                headers: {
+                  "Content-Type": "application/pdf",
+                  "X-PDF-File-Name": encodeURIComponent(
+                    file.name || `分享的文件-${index + 1}.pdf`
+                  ),
+                },
+              })
+            );
           })
         );
         return Response.redirect(
-          new URL("./?shared=1", self.registration.scope).href,
+          new URL(
+            `./?shared=1&count=${files.length}`,
+            self.registration.scope
+          ).href,
           303
         );
       })()

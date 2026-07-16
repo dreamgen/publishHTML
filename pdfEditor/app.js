@@ -75,6 +75,7 @@ class PdfWorkshop {
     this.ocrPageNumber = 0;
     this.ocrPageTotal = 0;
     this.selectedPageText = "";
+    this.installPrompt = null;
 
     this.elements = {
       openButton: $("#openButton"),
@@ -82,6 +83,7 @@ class PdfWorkshop {
       mergeButton: $("#mergeButton"),
       insertButton: $("#insertButton"),
       shareButton: $("#shareButton"),
+      installButton: $("#installButton"),
       themeButton: $("#themeButton"),
       exportButton: $("#exportButton"),
       openFileInput: $("#openFileInput"),
@@ -204,6 +206,7 @@ class PdfWorkshop {
     this.bindEvents();
     this.updateConnectivity();
     this.updateUI();
+    this.updateInstallButton();
     this.renderRecentFiles();
     this.registerServiceWorker();
     this.registerFileHandler();
@@ -262,6 +265,7 @@ class PdfWorkshop {
       mergeButton,
       insertButton,
       shareButton,
+      installButton,
       themeButton,
       exportButton,
       openFileInput,
@@ -320,6 +324,21 @@ class PdfWorkshop {
         suffix: "edited",
       })
     );
+    installButton?.addEventListener("click", () => this.installApp());
+    window.addEventListener("beforeinstallprompt", (event) => {
+      event.preventDefault();
+      this.installPrompt = event;
+      this.updateInstallButton();
+    });
+    window.addEventListener("appinstalled", () => {
+      this.installPrompt = null;
+      this.updateInstallButton();
+      this.toast(
+        "PDF 工坊已安裝；Android 會將它註冊為 PDF 分享目標。",
+        "success",
+        7000
+      );
+    });
 
     openFileInput.addEventListener("change", async (event) => {
       const files = [...event.target.files];
@@ -3905,17 +3924,34 @@ class PdfWorkshop {
     if (!("caches" in window)) return false;
     try {
       const cache = await caches.open(SHARE_CACHE_NAME);
-      const key = new URL("./shared-pdf", location.href).href;
-      const response = await cache.match(key);
-      if (!response) return false;
-      await cache.delete(key);
-      const blob = await response.blob();
-      const encodedName = response.headers.get("X-PDF-File-Name");
-      const fileName = encodedName
-        ? decodeURIComponent(encodedName)
-        : "分享的文件.pdf";
-      const file = new File([blob], fileName, { type: "application/pdf" });
-      await this.loadFiles([file], { replace: true });
+      const requestedCount = Math.max(
+        1,
+        Number(new URLSearchParams(location.search).get("count")) || 1
+      );
+      const files = [];
+      for (let index = 0; index < requestedCount; index += 1) {
+        const key = new URL(`./shared-pdf-${index}`, location.href).href;
+        let response = await cache.match(key);
+        let matchedKey = key;
+        if (!response && index === 0) {
+          matchedKey = new URL("./shared-pdf", location.href).href;
+          response = await cache.match(matchedKey);
+        }
+        if (!response) continue;
+        await cache.delete(matchedKey);
+        const blob = await response.blob();
+        const encodedName = response.headers.get("X-PDF-File-Name");
+        const fileName = encodedName
+          ? decodeURIComponent(encodedName)
+          : `分享的文件-${index + 1}.pdf`;
+        files.push(
+          new File([blob], fileName, {
+            type: "application/pdf",
+          })
+        );
+      }
+      if (!files.length) return false;
+      await this.loadFiles(files, { replace: true });
       history.replaceState(null, "", "./");
       return true;
     } catch (error) {
@@ -4123,6 +4159,45 @@ class PdfWorkshop {
     const online = navigator.onLine;
     dot.classList.toggle("offline", !online);
     text.textContent = online ? "本機模式" : "離線模式";
+  }
+
+  updateInstallButton() {
+    const button = this.elements.installButton;
+    if (!button) return;
+    const standalone =
+      matchMedia("(display-mode: standalone)").matches ||
+      navigator.standalone === true;
+    const android = /Android/i.test(navigator.userAgent);
+    button.hidden = standalone || (!android && !this.installPrompt);
+  }
+
+  async installApp() {
+    if (!this.installPrompt) {
+      this.toast(
+        "請使用 Android Chrome 開啟本頁，再從右上選單選擇「安裝應用程式」。只有完整安裝的 PWA 才會出現在 PDF 分享清單。",
+        "default",
+        9000
+      );
+      return;
+    }
+    const promptEvent = this.installPrompt;
+    this.installPrompt = null;
+    try {
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      if (choice?.outcome !== "accepted") {
+        this.installPrompt = promptEvent;
+      }
+    } catch (error) {
+      console.warn("[PDF Editor] Install prompt failed", error);
+      this.installPrompt = promptEvent;
+      this.toast(
+        "無法開啟安裝視窗，請使用 Android Chrome 右上選單的「安裝應用程式」。",
+        "error",
+        7000
+      );
+    }
+    this.updateInstallButton();
   }
 
   async registerServiceWorker() {

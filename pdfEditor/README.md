@@ -24,6 +24,20 @@ OCR 結果會保存到本機草稿並加入編輯器搜尋索引，也可以在 
 
 在 Android 上會使用相容性對話框開啟插入頁面、簽名、表單與 OCR 功能，並以 Pointer Events 處理畫筆、螢光筆、矩形與箭頭。PWA 核心檔案採網路優先更新，版本更新完成後會自動重新載入，避免 HTML 與 JavaScript 快取版本不一致。
 
+## Android 接收 PDF 分享
+
+PDF 工坊必須由 Android Chrome 完整安裝成 PWA，作業系統才會將它註冊到 PDF 分享清單。一般的瀏覽器書籤或舊版「加入主畫面」捷徑不具備這項能力。
+
+如果分享清單沒有顯示 PDF 工坊：
+
+1. 從 Android 主畫面或「設定 → 應用程式」移除舊的 PDF 工坊。
+2. 使用 Chrome 開啟 PDF 工坊網址。
+3. 點選頁首的「安裝 APP」，或 Chrome 選單中的「安裝應用程式」。
+4. 等待安裝完成後重新開啟 PDF 工坊。
+5. 從檔案管理器或其他 APP 分享 PDF，即可選擇 PDF 工坊。
+
+Manifest 同時接受標準 PDF MIME、常見舊式 PDF MIME、`.pdf` 副檔名與 Android 有時使用的 `application/octet-stream`，並可接收一次分享的多個 PDF。
+
 ## 本機啟動
 
 請透過 HTTP 伺服器開啟，Service Worker 與 Web Worker 不支援直接使用 `file://`：
