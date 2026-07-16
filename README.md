@@ -98,15 +98,38 @@
 
 ---
 
+### 🧰 PDF 工坊 (`pdfEditor/`)
+
+> 完全在裝置本機處理的 PDF 頁面整理與文字標註工具，文件不會上傳伺服器
+
+**功能：**
+- 開啟或拖放一份／多份 PDF，直接合併成同一份文件
+- PDF 頁面預覽、縮圖導覽、縮放與頁碼顯示
+- 拖曳排序，並提供手機可用的逐頁上移／下移按鈕
+- 單頁或多頁選取、順時針旋轉與刪除
+- 將選取頁面擷取成獨立 PDF
+- 加入多行文字標註，支援繁體中文、字級與顏色設定
+- 文字標註可直接拖曳位置或使用 Delete 鍵刪除
+- 最多 40 步復原／重做
+- 匯出下載、File System Access 另存新檔及系統分享
+- 支援 PWA File Handling API，可從作業系統以 PDF 工坊開啟 `.pdf`
+- PDF.js 與 pdf-lib 固定版本隨 App 快取，安裝後可完整離線使用
+
+**隱私：** 所有 PDF 解析、編輯和輸出都在瀏覽器內完成，不會將文件傳送到後端。
+
+**安裝：** 開啟 `/pdfEditor/` 後，點選「加入主畫面」即可安裝為獨立 App。
+
+---
+
 ## 技術架構
 
 | 項目 | 說明 |
 |------|------|
 | 語言 | HTML / CSS / JavaScript |
-| UI 框架 | React 18（UMD CDN，無需建置步驟） |
-| JSX 編譯 | Babel Standalone（瀏覽器端即時編譯） |
+| UI 框架 | 多數工具使用 React 18 UMD；PDF 工坊使用原生 ES Modules |
+| JSX 編譯 | React 工具使用 Babel Standalone；PDF 工坊不需要編譯 |
 | 圖示 | 內嵌 SVG 元件（仿 lucide-react 風格） |
-| 樣式 | Tailwind CSS Play CDN（支援任意值語法） |
+| 樣式 | 多數工具使用 Tailwind CSS Play CDN；PDF 工坊使用獨立響應式 CSS |
 | PWA  | Web App Manifest + Service Worker |
 | 快取策略 | Stale-While-Revalidate（支援離線） |
 | 介面語言 | 繁體中文（zh-TW） |
@@ -147,6 +170,16 @@ publishHTML/
 │   └── icons/
 │       ├── pureReader-192.svg
 │       └── pureReader-512.svg
+├── pdfEditor/                   # PDF 工坊 PWA（scope: ./，解析為 …/pdfEditor/）
+│   ├── index.html
+│   ├── styles.css
+│   ├── app.js
+│   ├── manifest.webmanifest
+│   ├── sw.js
+│   ├── vendor/                  # 固定版本 PDF.js 與 pdf-lib
+│   └── icons/
+│       ├── pdfEditor-192.svg
+│       └── pdfEditor-512.svg
 └── README.md
 ```
 

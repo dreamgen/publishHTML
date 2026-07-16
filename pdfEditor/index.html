@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PDF 工坊</title>
+  <meta name="description" content="完全在裝置本機處理的 PDF 頁面整理、合併、拆分與文字標註工具。">
+  <meta name="theme-color" content="#f8fafc">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="PDF 工坊">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/pdfEditor-192.svg">
+  <link rel="apple-touch-icon" href="./icons/pdfEditor-192.svg">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="./" aria-label="PDF 工坊首頁">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M6 2.75h8.2L19 7.55V21.25H6z"/>
+            <path d="M14 2.75v5h5"/>
+            <path d="M8.6 15.9h6.8M8.6 12.7h6.8"/>
+          </svg>
+        </span>
+        <span>
+          <strong>PDF 工坊</strong>
+          <small>檔案只在此裝置處理</small>
+        </span>
+      </a>
+
+      <nav class="header-actions" aria-label="檔案操作">
+        <button class="button button-ghost" id="openButton" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/><path d="m3.5 10 2 8.5h13l2-8.5z"/></svg>
+          <span>開啟</span>
+        </button>
+        <button class="button button-ghost requires-document" id="mergeButton" type="button" disabled>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>合併</span>
+        </button>
+        <button class="button button-ghost requires-document compact-hide" id="shareButton" type="button" disabled>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></svg>
+          <span>分享</span>
+        </button>
+        <button class="button button-primary requires-document" id="exportButton" type="button" disabled>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>
+          <span>匯出 PDF</span>
+        </button>
+      </nav>
+    </header>
+
+    <main class="app-main">
+      <aside class="sidebar" id="sidebar" aria-label="頁面縮圖">
+        <div class="sidebar-heading">
+          <div>
+            <span class="eyebrow">頁面</span>
+            <strong id="pageCount">尚未開啟文件</strong>
+          </div>
+          <button class="icon-button sidebar-close" id="closeSidebarButton" type="button" aria-label="關閉頁面清單">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <div class="selection-bar">
+          <label class="check-label">
+            <input id="selectAllCheckbox" type="checkbox">
+            <span>全選</span>
+          </label>
+          <button class="text-button" id="extractButton" type="button" disabled>擷取所選</button>
+        </div>
+        <div class="page-list" id="pageList">
+          <div class="sidebar-placeholder">
+            開啟 PDF 後，可在這裡拖曳頁面調整順序。
+          </div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <div class="toolbar" id="toolbar">
+          <div class="toolbar-group">
+            <button class="icon-button sidebar-open" id="openSidebarButton" type="button" aria-label="開啟頁面清單">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+            </button>
+            <button class="tool-button requires-document" id="undoButton" type="button" disabled title="復原（Ctrl/⌘ + Z）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 8-5 4 5 4"/><path d="M5 12h8a6 6 0 0 1 6 6"/></svg>
+              <span>復原</span>
+            </button>
+            <button class="tool-button requires-document" id="redoButton" type="button" disabled title="重做（Ctrl/⌘ + Shift + Z）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 8 5 4-5 4"/><path d="M19 12h-8a6 6 0 0 0-6 6"/></svg>
+              <span>重做</span>
+            </button>
+          </div>
+
+          <span class="toolbar-divider" aria-hidden="true"></span>
+
+          <div class="toolbar-group">
+            <button class="tool-button requires-document" id="rotateButton" type="button" disabled title="將所選頁面順時針旋轉 90 度">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.35 5.65"/><path d="M20 4v7h-7"/></svg>
+              <span>旋轉</span>
+            </button>
+            <button class="tool-button danger requires-document" id="deleteButton" type="button" disabled title="刪除所選頁面">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+              <span>刪除</span>
+            </button>
+            <button class="tool-button requires-document" id="textToolButton" type="button" disabled title="加入文字標註">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8.5 19h7"/></svg>
+              <span>文字</span>
+            </button>
+          </div>
+
+          <div class="toolbar-spacer"></div>
+
+          <div class="zoom-controls requires-document" aria-label="縮放控制">
+            <button class="icon-button" id="zoomOutButton" type="button" disabled aria-label="縮小">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+            </button>
+            <button class="zoom-value" id="zoomResetButton" type="button" disabled title="回到適合寬度">100%</button>
+            <button class="icon-button" id="zoomInButton" type="button" disabled aria-label="放大">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="text-controls" id="textControls" hidden>
+          <div class="text-controls-copy">
+            <strong>加入文字</strong>
+            <span id="textToolHint">輸入內容後，點選「準備放置」，再點頁面位置。</span>
+          </div>
+          <label class="field grow">
+            <span>文字內容</span>
+            <textarea id="annotationText" rows="2" maxlength="300" placeholder="輸入要放到 PDF 的文字"></textarea>
+          </label>
+          <label class="field size-field">
+            <span>大小</span>
+            <input id="annotationSize" type="number" min="6" max="72" step="1" value="16">
+          </label>
+          <label class="field color-field">
+            <span>顏色</span>
+            <input id="annotationColor" type="color" value="#172033">
+          </label>
+          <button class="button button-primary" id="armTextButton" type="button">準備放置</button>
+          <button class="button button-ghost" id="cancelTextButton" type="button">關閉</button>
+        </div>
+
+        <div class="viewer-scroll" id="viewerScroll">
+          <section class="empty-state" id="emptyState">
+            <div class="empty-illustration" aria-hidden="true">
+              <svg viewBox="0 0 180 150">
+                <rect x="43" y="17" width="94" height="116" rx="10"/>
+                <path d="M106 17v28h31"/>
+                <path d="M62 72h56M62 89h44M62 106h35"/>
+                <circle cx="139" cy="112" r="25"/>
+                <path d="M139 100v24M127 112h24"/>
+              </svg>
+            </div>
+            <span class="privacy-badge">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 2.9 8.8 7 10 4.1-1.2 7-5.4 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>
+              本機處理，不會上傳
+            </span>
+            <h1>整理 PDF，不必交出文件</h1>
+            <p>拖放 PDF 到這裡，或從裝置選擇檔案。支援合併、拆分、排序、旋轉、刪除與文字標註。</p>
+            <button class="button button-primary button-large" id="emptyOpenButton" type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/><path d="m3.5 10 2 8.5h13l2-8.5z"/></svg>
+              選擇 PDF
+            </button>
+            <small>也可以一次選取多個檔案直接合併</small>
+          </section>
+
+          <section class="document-view" id="documentView" hidden>
+            <div class="page-stage" id="pageStage">
+              <canvas id="pdfCanvas" aria-label="PDF 頁面預覽"></canvas>
+              <div class="annotation-layer" id="annotationLayer" aria-label="文字標註層"></div>
+            </div>
+          </section>
+
+          <div class="drop-overlay" id="dropOverlay" hidden>
+            <div>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v5h16v-5"/></svg>
+              <strong>放開以加入 PDF</strong>
+              <span>已有文件時會將新頁面合併到末尾</span>
+            </div>
+          </div>
+        </div>
+
+        <footer class="statusbar">
+          <span id="documentStatus">準備就緒</span>
+          <span class="statusbar-center" id="activePageStatus"></span>
+          <span id="offlineStatus">
+            <span class="status-dot"></span>
+            <span>本機模式</span>
+          </span>
+        </footer>
+      </section>
+    </main>
+  </div>
+
+  <input id="openFileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+  <input id="mergeFileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+
+  <div class="busy-overlay" id="busyOverlay" hidden aria-live="polite" aria-busy="true">
+    <div class="busy-card">
+      <span class="spinner" aria-hidden="true"></span>
+      <strong id="busyTitle">正在處理 PDF</strong>
+      <span id="busyDetail">請稍候…</span>
+      <div class="progress-track"><span id="busyProgress"></span></div>
+    </div>
+  </div>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <dialog class="confirm-dialog" id="confirmDialog">
+    <form method="dialog">
+      <div class="dialog-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v5M12 17.5h.01"/></svg>
+      </div>
+      <h2 id="confirmTitle">確認操作</h2>
+      <p id="confirmMessage"></p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">取消</button>
+        <button class="button button-danger" id="confirmAcceptButton" value="confirm">確認</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./vendor/pdf-lib/pdf-lib.min.js"></script>
+  <script src="./vendor/pdf-lib/fontkit.umd.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

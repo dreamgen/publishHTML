@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="pdfEditor512Bg" x1="55" y1="32" x2="454" y2="485" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF775F"/>
+      <stop offset="1" stop-color="#E94848"/>
+    </linearGradient>
+    <filter id="pdfEditor512Shadow" x="80" y="56" width="368" height="408" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#8F1F2A" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#pdfEditor512Bg)"/>
+  <g filter="url(#pdfEditor512Shadow)">
+    <path d="M144 84h154l78 78v266H144z" fill="#fff"/>
+    <path d="M298 84v80h78" fill="#FFD9D3"/>
+    <path d="m298 84 78 80h-78z" fill="#FFF0ED"/>
+    <path d="M194 235h138M194 283h112M194 331h82" stroke="#E95B5B" stroke-width="21" stroke-linecap="round"/>
+  </g>
+  <circle cx="359" cy="365" r="78" fill="#26344A"/>
+  <path d="M359 319v92M313 365h92" stroke="#fff" stroke-width="21" stroke-linecap="round"/>
+</svg>
