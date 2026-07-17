@@ -636,10 +636,32 @@ function drawText(page, value, options) {
   }
 }
 
-function sanitizeTextForFont(font, value, size) {
+function sanitizeTextForFont(
+  font,
+  value,
+  size,
+  { preserveLineBreaks = false } = {}
+) {
+  const missingGlyph = fontSupportsCharacter(font, "□", size) ? "□" : "?";
   let result = "";
   for (const character of [...String(value || "")]) {
-    result += fontSupportsCharacter(font, character, size) ? character : "□";
+    if (character === "\r") continue;
+    if (character === "\n") {
+      result += preserveLineBreaks ? "\n" : " ";
+      continue;
+    }
+    if (character === "\t") {
+      result += "    ";
+      continue;
+    }
+    const codePoint = character.codePointAt(0);
+    if (codePoint < 32 || codePoint === 127) {
+      result += " ";
+      continue;
+    }
+    result += fontSupportsCharacter(font, character, size)
+      ? character
+      : missingGlyph;
   }
   return result;
 }
@@ -1084,7 +1106,9 @@ function drawCell(page, cell, box, fonts, scale, options) {
   }
 
   const fontSize = clamp(Number(cell.font?.size) || 11, 5, 72) * scale;
-  const safeValue = sanitizeTextForFont(font, value, fontSize);
+  const safeValue = sanitizeTextForFont(font, value, fontSize, {
+    preserveLineBreaks: true,
+  });
   const padding = Math.max(1.5, 2.5 * scale);
   const maxWidth = Math.max(1, box.width - padding * 2);
   const maxHeight = Math.max(1, box.height - padding * 2);

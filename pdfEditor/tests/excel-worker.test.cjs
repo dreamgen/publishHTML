@@ -115,6 +115,12 @@ async function buildWorkbook() {
     text: "OpenAI",
     hyperlink: "https://openai.com/",
   };
+  // ASCII-only cells can still contain line breaks that WinAnsi fonts cannot
+  // encode directly. The worker must preserve the break without replacing it
+  // with a Unicode fallback glyph while still using Helvetica.
+  summary.getCell("B5").value = "7:00~\n15:30";
+  summary.getCell("B5").alignment = { wrapText: true };
+  summary.getCell("B6").value = "□";
 
   // 框線繪製路徑（drawRectangle 細矩形）至少被執行一次。
   summary.getCell("B1").border = {
@@ -440,6 +446,46 @@ async function createWorkerHarness() {
   assert.ok(firstPage.width > firstPage.height);
   if (process.env.PDF_EDITOR_TEST_OUTPUT) {
     fs.writeFileSync(process.env.PDF_EDITOR_TEST_OUTPUT, pdfBytes);
+  }
+
+  if (process.env.PDF_EDITOR_REAL_XLSX) {
+    const realHarness = await createWorkerHarness();
+    const realBytes = fs.readFileSync(process.env.PDF_EDITOR_REAL_XLSX);
+    const realInput = realBytes.buffer.slice(
+      realBytes.byteOffset,
+      realBytes.byteOffset + realBytes.byteLength
+    );
+    const realParsed = await realHarness.send({
+      type: "parse",
+      name: path.basename(process.env.PDF_EDITOR_REAL_XLSX),
+      buffer: realInput,
+    });
+    const target = realParsed.sheets.find(
+      (sheet) => sheet.name === "忠恕交通2026"
+    );
+    assert.ok(target, "Real workbook regression sheet was not found");
+    const realTargets = process.env.PDF_EDITOR_REAL_ALL === "1"
+      ? realParsed.sheets.filter((sheet) => sheet.state === "visible")
+      : [target];
+    const realConverted = await realHarness.send({
+      type: "convert",
+      sheets: realTargets.map((sheet) => ({
+        id: sheet.id,
+        options: {
+          ...sheet.printSettings,
+          rangeMode: "print-area",
+        },
+      })),
+    });
+    const realPdfBytes = new Uint8Array(realConverted.bytes);
+    const realPdf = await PDFLib.PDFDocument.load(realPdfBytes);
+    assert.equal(realPdf.getPageCount(), realConverted.pageCount);
+    if (process.env.PDF_EDITOR_REAL_TEST_OUTPUT) {
+      fs.writeFileSync(process.env.PDF_EDITOR_REAL_TEST_OUTPUT, realPdfBytes);
+    }
+    process.stdout.write(
+      `Real workbook regression passed: ${realTargets.length} sheets, ${realConverted.pageCount} PDF pages, ${realPdfBytes.byteLength} bytes\n`
+    );
   }
 
   // 字型回歸測試：曾發生 fontkit 子集化產生損壞字型導致中文缺字（poppler
