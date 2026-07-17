@@ -82,21 +82,21 @@
           </label>
           <button class="text-button" id="rangeButton" type="button" disabled>頁碼範圍</button>
           <button class="text-button" id="extractButton" type="button" disabled>擷取所選</button>
-          <div class="browse-zoom" role="group" aria-label="縮圖縮放控制">
-            <button class="statusbar-zoom-button" id="browseZoomOutButton" type="button" disabled aria-label="縮小縮圖">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
-            </button>
-            <input id="browseZoomSlider" class="zoom-range" type="range" min="60" max="240" step="1" value="100" disabled aria-label="縮圖縮放比例">
-            <button class="statusbar-zoom-button" id="browseZoomInButton" type="button" disabled aria-label="放大縮圖">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
-            </button>
-            <button class="statusbar-zoom-value" id="browseZoomValue" type="button" disabled title="重設縮圖大小">100%</button>
-          </div>
         </div>
         <div class="page-list" id="pageList">
           <div class="sidebar-placeholder">
             開啟 PDF 後，可在這裡拖曳頁面調整順序。
           </div>
+        </div>
+        <div class="browse-zoom" role="group" aria-label="縮圖縮放控制">
+          <button class="statusbar-zoom-button" id="browseZoomOutButton" type="button" disabled aria-label="縮小縮圖">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+          </button>
+          <input id="browseZoomSlider" class="zoom-range" type="range" min="60" max="240" step="1" value="100" disabled aria-label="縮圖縮放比例">
+          <button class="statusbar-zoom-button" id="browseZoomInButton" type="button" disabled aria-label="放大縮圖">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
+          </button>
+          <button class="statusbar-zoom-value" id="browseZoomValue" type="button" disabled title="重設縮圖大小">100%</button>
         </div>
       </aside>
 

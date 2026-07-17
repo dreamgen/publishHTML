@@ -310,22 +310,34 @@ check("瀏覽模式下滑桿未被覆蓋", sliderState.hitIsSlider);
 const stripState = await page.evaluate(() => {
   const strip = document.querySelector(".browse-zoom");
   const slider = document.querySelector("#browseZoomSlider");
+  const rect = strip.getBoundingClientRect();
+  const centerHit = document.elementFromPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2
+  );
   return {
     display: getComputedStyle(strip).display,
     min: slider.min,
     max: slider.max,
     value: slider.value,
     label: document.querySelector("#browseZoomValue").textContent,
+    inBottomArea: rect.top > innerHeight * 0.75 && rect.bottom < innerHeight,
+    horizontallyCentered: Math.abs(rect.left + rect.width / 2 - innerWidth / 2) < 40,
+    notCovered: strip.contains(centerHit),
   };
 });
 check(
-  "瀏覽網格頂部縮放列顯示且同步",
+  "瀏覽底部懸浮縮放列顯示且同步",
   stripState.display === "flex" &&
     stripState.min === "60" &&
     stripState.max === "240" &&
     stripState.value === "130" &&
     stripState.label === "130%",
   JSON.stringify(stripState)
+);
+check(
+  "縮放列位於下方置中且未被遮擋",
+  stripState.inBottomArea && stripState.horizontallyCentered && stripState.notCovered
 );
 await page.evaluate(() => {
   const slider = document.querySelector("#browseZoomSlider");
@@ -339,7 +351,7 @@ state = await page.evaluate(() => ({
   stripLabel: document.querySelector("#browseZoomValue").textContent,
 }));
 check(
-  "頂部縮放列拖曳並與底部滑桿同步",
+  "懸浮縮放列拖曳並與狀態列滑桿同步",
   state.browseZoom === 1.6 && state.statusValue === "160" && state.stripLabel === "160%",
   JSON.stringify(state)
 );

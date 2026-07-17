@@ -1351,17 +1351,28 @@ input[type="checkbox"] {
 .browse-zoom {
   display: none;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
+/* 瀏覽模式：懸浮在網格底部中央的縮放列 */
 body.view-browse .browse-zoom {
+  position: absolute;
+  z-index: 3;
+  bottom: 14px;
+  left: 50%;
   display: flex;
-  margin-left: auto;
+  padding: 7px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 8px 28px rgba(21, 31, 47, .18);
+  transform: translateX(-50%);
 }
 
 body.view-browse .browse-zoom .zoom-range {
-  width: 150px;
+  width: 170px;
 }
+
 
 .status-dot {
   width: 7px;
@@ -3052,7 +3063,8 @@ body.view-browse .page-list {
   );
   gap: 14px;
   align-content: start;
-  padding: 18px 22px 40px;
+  /* 底部留空間給懸浮縮放列 */
+  padding: 18px 22px 72px;
 }
 
 body.view-browse .page-card + .page-card {
