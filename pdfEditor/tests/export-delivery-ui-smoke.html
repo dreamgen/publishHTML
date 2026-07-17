@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Export Delivery UI Smoke Test</title>
+  <style>
+    html, body { height: 100%; margin: 0; font: 14px/1.4 system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #172033; }
+    button { padding: 7px 11px; border: 0; border-radius: 7px; font-weight: 700; cursor: pointer; }
+    #status { margin-left: auto; color: #fff; }
+    iframe { width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="showShareReady" type="button" disabled>顯示待分享對話框</button>
+    <button id="showIosGuidance" type="button" disabled>顯示 iOS 指引</button>
+    <span id="status">載入中…</span>
+  </header>
+  <iframe id="editor" src="../?testHarness=1&amp;exportSmoke=1" title="PdfEditor 匯出測試"></iframe>
+  <script>
+    const frame = document.querySelector("#editor");
+    const status = document.querySelector("#status");
+    const shareButton = document.querySelector("#showShareReady");
+    const iosButton = document.querySelector("#showIosGuidance");
+    let app;
+
+    frame.addEventListener("load", async () => {
+      const harness = frame.contentWindow.__PDF_WORKSHOP_TEST__;
+      if (!harness) {
+        status.textContent = "FAIL：測試介面未啟用";
+        return;
+      }
+      try {
+        await harness.ready;
+      } catch (error) {
+        console.error("Editor initialization failed in iframe smoke test", error);
+        status.textContent = `FAIL：${error.message}`;
+        return;
+      }
+      app = harness.app;
+      shareButton.disabled = false;
+      iosButton.disabled = false;
+      status.textContent = "READY";
+    }, { once: true });
+
+    shareButton.addEventListener("click", () => {
+      const file = new frame.contentWindow.File(
+        ["%PDF-1.7\nexport delivery smoke test"],
+        "行動裝置匯出測試.pdf",
+        { type: "application/pdf" }
+      );
+      app.queuePreparedExportShare(file);
+      status.textContent = "SHARE_READY";
+    });
+
+    iosButton.addEventListener("click", () => {
+      const file = new frame.contentWindow.File(
+        ["%PDF-1.7\niOS standalone guidance"],
+        "iPhone-匯出測試.pdf",
+        { type: "application/pdf" }
+      );
+      app.showExportDeliveryGuidance({
+        file,
+        title: "請改用 Safari 儲存",
+        message: "已阻止主畫面 APP 直接導向 blob PDF。",
+        note: "請從 Safari 開啟 PDF 工坊後重新匯出。",
+      });
+      status.textContent = "IOS_GUIDANCE";
+    });
+  </script>
+</body>
+</html>

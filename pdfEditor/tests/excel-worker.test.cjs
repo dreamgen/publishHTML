@@ -65,6 +65,32 @@ async function buildWorkbook() {
   ];
   report.pageSetup.printArea = "A1:D26";
   report.pageSetup.printTitlesRow = "1:2";
+  report.pageSetup.printTitlesColumn = "A:A";
+  report.pageSetup.horizontalCentered = true;
+  report.headerFooter = {
+    oddHeader: "&L測試活頁簿&C&A&R第 &P / &N 頁",
+    oddFooter: "&C&D &T",
+  };
+  report.getCell("E2").value = "公式檢查";
+  report.getCell("E3").value = { formula: "C3*200" };
+  report.getCell("B3").alignment = { textRotation: 45 };
+  report.addConditionalFormatting({
+    ref: "C3:C26",
+    rules: [
+      {
+        type: "cellIs",
+        operator: "greaterThan",
+        formulae: ["20"],
+        style: { font: { color: { argb: "FFFF0000" } } },
+      },
+    ],
+  });
+  const imageId = workbook.addImage({
+    base64:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    extension: "png",
+  });
+  report.addImage(imageId, "D2:D2");
 
   const summary = workbook.addWorksheet("摘要");
   summary.addRows([
@@ -75,6 +101,16 @@ async function buildWorkbook() {
   ]);
   summary.columns = [{ width: 20 }, { width: 18 }];
   summary.getRow(1).font = { bold: true };
+  summary.getCell("A5").value = {
+    richText: [
+      { text: "重要", font: { bold: true } },
+      { text: "提示", font: { color: { argb: "FF18794E" } } },
+    ],
+  };
+  summary.getCell("A6").value = {
+    text: "OpenAI",
+    hyperlink: "https://openai.com/",
+  };
 
   const hidden = workbook.addWorksheet("內部設定");
   hidden.state = "hidden";
@@ -87,7 +123,7 @@ async function createWorkerHarness() {
   const listeners = {};
   const fontPath = path.join(
     editorRoot,
-    "vendor/pdf-lib/NotoSansCJKtc-Regular.otf"
+    "vendor/pdf-lib/NotoSansTC-Regular.ttf"
   );
   const context = {
     ExcelJS,
@@ -138,12 +174,18 @@ async function createWorkerHarness() {
   );
   return {
     messages,
+    requestSequence: 0,
     async send(data) {
-      await listeners.message({ data });
-      const terminal = [...messages]
+      const requestId = data.requestId || ++this.requestSequence;
+      const startIndex = messages.length;
+      await listeners.message({ data: { ...data, requestId } });
+      const terminal = messages
+        .slice(startIndex)
         .reverse()
         .find((message) =>
-          ["parsed", "converted", "error"].includes(message.type)
+          ["parsed", "estimated", "previewed", "converted", "error"].includes(
+            message.type
+          ) && message.requestId === requestId
         );
       if (terminal?.type === "error") throw new Error(terminal.message);
       return terminal;
@@ -164,16 +206,109 @@ async function createWorkerHarness() {
   assert.equal(parsed.sheets.length, 3);
   assert.equal(parsed.sheets[0].name, "銷售報表");
   assert.equal(parsed.sheets[2].state, "hidden");
+  assert.ok(parsed.compatibility.summary.error >= 1);
+  assert.ok(parsed.compatibility.summary.warning >= 2);
+  assert.ok(parsed.compatibility.summary.info >= 2);
+  assert.equal(parsed.sheets[0].printSettings.repeatColumns, "A:A");
+
+  const estimated = await harness.send({
+    type: "estimate",
+    sheets: [
+      {
+        id: parsed.sheets[1].id,
+        options: {
+          ...parsed.sheets[1].printSettings,
+          rangeMode: "custom",
+          customRange: "A1:B6",
+          paperSize: "a5",
+          orientation: "landscape",
+          addPageNumbers: true,
+        },
+      },
+      {
+        id: parsed.sheets[0].id,
+        options: {
+          ...parsed.sheets[0].printSettings,
+          rangeMode: "custom",
+          customRange: "A1:D26",
+          paperSize: "a4",
+          orientation: "portrait",
+          repeatRows: "1:2",
+          repeatColumns: "A:A",
+          rowBreaks: "12",
+          columnBreaks: "C",
+          addPageNumbers: true,
+        },
+      },
+    ],
+  });
+  assert.equal(estimated.type, "estimated");
+  assert.equal(estimated.sheets[0].id, parsed.sheets[1].id);
+  assert.ok(estimated.totalPages >= 3);
+
+  const previewed = await harness.send({
+    type: "preview",
+    sheet: {
+      id: parsed.sheets[1].id,
+      options: {
+        ...parsed.sheets[1].printSettings,
+        rangeMode: "custom",
+        customRange: "A1:B6",
+        paperSize: "a5",
+        orientation: "landscape",
+        addPageNumbers: true,
+      },
+    },
+    pageIndex: 0,
+  });
+  assert.equal(previewed.type, "previewed");
+  assert.ok(previewed.bytes.byteLength > 1000);
+  assert.ok(previewed.pageWidth > previewed.pageHeight);
+  const previewPdf = await PDFLib.PDFDocument.load(
+    new Uint8Array(previewed.bytes)
+  );
+  assert.equal(previewPdf.getPageCount(), 1);
+  assert.ok(previewed.bytes.byteLength < 500000);
+  if (process.env.PDF_EDITOR_PREVIEW_TEST_OUTPUT) {
+    fs.writeFileSync(
+      process.env.PDF_EDITOR_PREVIEW_TEST_OUTPUT,
+      new Uint8Array(previewed.bytes)
+    );
+  }
 
   const converted = await harness.send({
     type: "convert",
-    sheetIds: [parsed.sheets[0].id, parsed.sheets[1].id],
-    options: {
-      paperSize: "source",
-      orientation: "source",
-      scaling: "fit-width",
-      usePrintArea: true,
-    },
+    sheets: [
+      {
+        id: parsed.sheets[1].id,
+        options: {
+          ...parsed.sheets[1].printSettings,
+          rangeMode: "custom",
+          customRange: "A1:B6",
+          paperSize: "a5",
+          orientation: "landscape",
+          addPageNumbers: true,
+        },
+      },
+      {
+        id: parsed.sheets[0].id,
+        options: {
+          ...parsed.sheets[0].printSettings,
+          rangeMode: "custom",
+          customRange: "A1:D26",
+          paperSize: "a4",
+          orientation: "portrait",
+          repeatRows: "1:2",
+          repeatColumns: "A:A",
+          rowBreaks: "12",
+          columnBreaks: "C",
+          centerHorizontal: true,
+          includeHeaderFooter: true,
+          addPageNumbers: true,
+          gridLines: true,
+        },
+      },
+    ],
   });
   assert.equal(converted.type, "converted");
   assert.ok(converted.pageCount >= 2);
@@ -181,6 +316,8 @@ async function createWorkerHarness() {
   assert.ok(pdfBytes.byteLength > 1000);
   const pdf = await PDFLib.PDFDocument.load(pdfBytes);
   assert.equal(pdf.getPageCount(), converted.pageCount);
+  const firstPage = pdf.getPage(0).getSize();
+  assert.ok(firstPage.width > firstPage.height);
   if (process.env.PDF_EDITOR_TEST_OUTPUT) {
     fs.writeFileSync(process.env.PDF_EDITOR_TEST_OUTPUT, pdfBytes);
   }

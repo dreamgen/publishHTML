@@ -328,6 +328,30 @@
     </form>
   </dialog>
 
+  <dialog class="panel-dialog export-ready-dialog" id="exportReadyDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow" id="exportReadyEyebrow">安全儲存</span>
+          <h2 id="exportReadyTitle">PDF 已建立</h2>
+        </div>
+      </div>
+      <p id="exportReadyMessage">請開啟系統分享，並選擇「儲存到檔案」或其他儲存位置。</p>
+      <div class="export-ready-file" aria-label="已建立的 PDF 檔案">
+        <span class="export-ready-file-mark" aria-hidden="true">PDF</span>
+        <div>
+          <strong id="exportReadyFileName">document.pdf</strong>
+          <small id="exportReadyFileMeta"></small>
+        </div>
+      </div>
+      <p class="dialog-note" id="exportReadyNote">使用系統分享可避開部分行動瀏覽器無法讀取 blob 下載的問題。</p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" id="exportReadyCancelButton" value="cancel">取消</button>
+        <button class="button button-primary" id="exportReadyShareButton" type="button">開啟系統分享</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="panel-dialog install-dialog" id="installDialog">
     <form method="dialog">
       <div class="install-dialog-hero">
@@ -416,76 +440,178 @@
     <form method="dialog">
       <div class="dialog-heading">
         <div>
-          <span class="eyebrow">本機轉換</span>
-          <h2>選擇 Excel Sheet</h2>
+          <span class="eyebrow">本機轉換與即時預覽</span>
+          <h2>Excel 轉 PDF</h2>
         </div>
         <button class="icon-button" id="excelCloseButton" type="button" aria-label="關閉"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
 
-      <div class="excel-file-summary">
-        <span class="excel-file-mark" aria-hidden="true">X</span>
-        <div>
-          <strong id="excelFileName">活頁簿.xlsx</strong>
-          <small id="excelWorkbookMeta">正在讀取工作表…</small>
+      <div class="excel-workspace">
+        <div class="excel-control-pane">
+          <div class="excel-file-summary">
+            <span class="excel-file-mark" aria-hidden="true">X</span>
+            <div>
+              <strong id="excelFileName">活頁簿.xlsx</strong>
+              <small id="excelWorkbookMeta">正在讀取工作表…</small>
+            </div>
+          </div>
+
+          <div class="excel-sheet-toolbar">
+            <div>
+              <strong>選擇與排列 Sheet</strong>
+              <span id="excelSelectionSummary" aria-live="polite">尚未選取</span>
+            </div>
+            <div>
+              <button class="text-button" id="excelSelectVisibleButton" type="button">選取可見</button>
+              <button class="text-button" id="excelClearSelectionButton" type="button">清除</button>
+            </div>
+          </div>
+          <div class="excel-sheet-list" id="excelSheetList" role="listbox" aria-label="Excel Sheet 清單"></div>
+
+          <section class="excel-sheet-settings" id="excelSettingsPanel" aria-labelledby="excelActiveSheetName">
+            <div class="excel-settings-heading">
+              <div>
+                <span>目前 Sheet</span>
+                <strong id="excelActiveSheetName">—</strong>
+              </div>
+              <button class="text-button" id="excelApplyLayoutButton" type="button">版面套用到已選 Sheet</button>
+            </div>
+
+            <div class="excel-options-grid">
+              <label class="field">
+                <span>轉換範圍</span>
+                <select id="excelRangeMode">
+                  <option value="print-area">Excel 列印範圍</option>
+                  <option value="used">已使用範圍</option>
+                  <option value="custom">自訂儲存格範圍</option>
+                </select>
+              </label>
+              <label class="field excel-wide-field" id="excelCustomRangeField" hidden>
+                <span>自訂範圍（可用逗號分隔）</span>
+                <input id="excelCustomRange" type="text" spellcheck="false" placeholder="例如 A1:H40 或 A1:H20,J1:M20">
+              </label>
+              <label class="field">
+                <span>紙張</span>
+                <select id="excelPaperSize">
+                  <option value="source">依 Excel 設定</option>
+                  <option value="a3">A3</option>
+                  <option value="a4">A4</option>
+                  <option value="a5">A5</option>
+                  <option value="letter">Letter</option>
+                  <option value="legal">Legal</option>
+                  <option value="tabloid">Tabloid</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>方向</span>
+                <select id="excelOrientation">
+                  <option value="source">依 Excel 設定</option>
+                  <option value="auto">依內容自動判斷</option>
+                  <option value="portrait">直向</option>
+                  <option value="landscape">橫向</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>縮放</span>
+                <select id="excelScaling">
+                  <option value="source">依 Excel 設定</option>
+                  <option value="fit-width">符合一頁寬度</option>
+                  <option value="fit-page">整個範圍縮成一頁</option>
+                  <option value="actual">100%</option>
+                  <option value="custom">自訂比例</option>
+                </select>
+              </label>
+              <label class="field" id="excelScalePercentField" hidden>
+                <span>縮放百分比</span>
+                <input id="excelScalePercent" type="number" min="10" max="400" step="5" value="100">
+              </label>
+              <label class="field">
+                <span>邊界</span>
+                <select id="excelMargins">
+                  <option value="source">依 Excel 設定</option>
+                  <option value="normal">標準</option>
+                  <option value="narrow">窄</option>
+                  <option value="wide">寬</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>頁面順序</span>
+                <select id="excelPageOrder">
+                  <option value="source">依 Excel 設定</option>
+                  <option value="downThenOver">先向下，再向右</option>
+                  <option value="overThenDown">先向右，再向下</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>每頁重複標題列</span>
+                <input id="excelRepeatRows" type="text" spellcheck="false" placeholder="例如 1:2">
+              </label>
+              <label class="field">
+                <span>每頁重複標題欄</span>
+                <input id="excelRepeatColumns" type="text" spellcheck="false" placeholder="例如 A:B">
+              </label>
+              <label class="field">
+                <span>手動分頁列（在列後分頁）</span>
+                <input id="excelRowBreaks" type="text" inputmode="numeric" spellcheck="false" placeholder="例如 20,40">
+              </label>
+              <label class="field">
+                <span>手動分頁欄（在欄後分頁）</span>
+                <input id="excelColumnBreaks" type="text" spellcheck="false" placeholder="例如 D,H">
+              </label>
+            </div>
+
+            <div class="excel-check-options">
+              <label class="check-label"><input id="excelCenterHorizontal" type="checkbox"><span>水平置中</span></label>
+              <label class="check-label"><input id="excelCenterVertical" type="checkbox"><span>垂直置中</span></label>
+              <label class="check-label"><input id="excelIncludeHeaderFooter" type="checkbox" checked><span>使用 Excel 頁首頁尾</span></label>
+              <label class="check-label"><input id="excelAddPageNumbers" type="checkbox"><span>加入頁碼</span></label>
+              <label class="check-label"><input id="excelGridLines" type="checkbox"><span>列印格線</span></label>
+            </div>
+          </section>
+
+          <details class="excel-compatibility" id="excelCompatibilityDetails" open>
+            <summary>
+              <span>轉換相容性報告</span>
+              <span id="excelCompatibilitySummary">檢查中…</span>
+            </summary>
+            <div class="excel-compatibility-list" id="excelCompatibilityReport"></div>
+          </details>
         </div>
+
+        <aside class="excel-preview-pane" aria-label="PDF 單頁預覽">
+          <div class="excel-preview-heading">
+            <div>
+              <strong>PDF 預覽</strong>
+              <span id="excelPreviewStatus" aria-live="polite">等待設定</span>
+            </div>
+            <div class="excel-preview-navigation">
+              <button class="icon-button" id="excelPreviewPrevious" type="button" aria-label="上一頁">‹</button>
+              <span id="excelPreviewPage">— / —</span>
+              <button class="icon-button" id="excelPreviewNext" type="button" aria-label="下一頁">›</button>
+            </div>
+          </div>
+          <div class="excel-preview-stage" id="excelPreviewStage">
+            <canvas id="excelPreviewCanvas" hidden></canvas>
+            <div class="excel-preview-placeholder" id="excelPreviewPlaceholder">
+              <span aria-hidden="true">▤</span>
+              <strong>正在準備預覽</strong>
+              <small>變更範圍或版面後會自動更新</small>
+            </div>
+          </div>
+          <p>預覽與正式輸出使用相同的分頁及繪製流程。</p>
+        </aside>
       </div>
 
-      <div class="excel-sheet-toolbar">
-        <div>
-          <strong>要轉換的 Sheet</strong>
-          <span id="excelSelectionSummary">尚未選取</span>
-        </div>
-        <div>
-          <button class="text-button" id="excelSelectVisibleButton" type="button">選取可見</button>
-          <button class="text-button" id="excelClearSelectionButton" type="button">清除</button>
-        </div>
-      </div>
-      <div class="excel-sheet-list" id="excelSheetList" role="group" aria-label="Excel Sheet 清單"></div>
-
-      <details class="excel-options">
-        <summary>版面設定</summary>
-        <div class="excel-options-grid">
-          <label class="field">
-            <span>紙張</span>
-            <select id="excelPaperSize">
-              <option value="source">依 Excel 設定</option>
-              <option value="a4">A4</option>
-              <option value="letter">Letter</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>方向</span>
-            <select id="excelOrientation">
-              <option value="source">依 Sheet 設定</option>
-              <option value="auto">自動判斷</option>
-              <option value="portrait">直向</option>
-              <option value="landscape">橫向</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>縮放</span>
-            <select id="excelScaling">
-              <option value="fit-width">符合一頁寬度</option>
-              <option value="actual">原始比例</option>
-            </select>
-          </label>
-          <label class="check-label excel-print-area-option">
-            <input id="excelUsePrintArea" type="checkbox" checked>
-            <span>優先使用 Excel 列印範圍</span>
-          </label>
-          <label class="field" id="excelInsertPositionField">
-            <span>插入位置</span>
-            <select id="excelInsertPosition">
-              <option value="after">目前頁面之後</option>
-              <option value="end">文件最後</option>
-            </select>
-          </label>
-        </div>
-      </details>
-
-      <div class="excel-warning" id="excelWarning" hidden></div>
-      <p class="dialog-note">檔案只在這個裝置解析。公式使用 Excel 檔案中已儲存的結果；圖表、SmartArt、巨集及部分條件格式不會轉換。</p>
-      <div class="dialog-actions">
+      <p class="dialog-note">檔案只在這個裝置解析。公式使用 Excel 檔案中已儲存的結果；請先查看相容性報告確認可能略過或變更的內容。</p>
+      <div class="dialog-actions excel-dialog-actions">
+        <label class="field" id="excelInsertPositionField">
+          <span>插入位置</span>
+          <select id="excelInsertPosition">
+            <option value="after">目前頁面之後</option>
+            <option value="end">文件最後</option>
+          </select>
+        </label>
+        <span class="excel-action-spacer"></span>
         <button class="button button-ghost" id="excelCancelButton" type="button">取消</button>
         <button class="button button-primary" id="excelConvertButton" type="button" disabled>轉換並插入</button>
       </div>

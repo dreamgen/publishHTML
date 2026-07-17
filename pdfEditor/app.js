@@ -1,4 +1,8 @@
 import * as pdfjsLib from "./vendor/pdfjs/pdf.mjs";
+import {
+  chooseExportDelivery,
+  detectExportEnvironment,
+} from "./export-delivery.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "./vendor/pdfjs/pdf.worker.mjs",
@@ -23,6 +27,7 @@ const EDITOR_DB_VERSION = 2;
 const AUTOSAVE_KEY = "autosave";
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const INSTALL_INTRO_KEY = "pdfEditor-install-intro-seen-v1";
+const BLOB_URL_LIFETIME_MS = 10 * 60 * 1000;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -87,10 +92,21 @@ class PdfWorkshop {
     this.installStateReady = false;
     this.detectedInstalledApp = false;
     this.excelWorker = null;
-    this.excelWorkerPending = null;
+    this.excelWorkerRequests = new Map();
+    this.excelWorkerRequestSequence = 0;
     this.excelWorkbookInfo = null;
+    this.excelSheetConfigs = [];
+    this.excelActiveSheetId = null;
+    this.excelEstimateTimer = null;
+    this.excelEstimateToken = 0;
+    this.excelPreviewToken = 0;
+    this.excelPreviewPageIndex = 0;
+    this.excelPreviewDocument = null;
+    this.excelPreviewRenderTask = null;
     this.excelImportMode = "insert";
     this.excelPreviousActiveId = null;
+    this.pendingExportShare = null;
+    this.pendingDownloadUrls = new Map();
 
     this.elements = {
       openButton: $("#openButton"),
@@ -178,6 +194,15 @@ class PdfWorkshop {
       confirmMessage: $("#confirmMessage"),
       confirmAcceptButton: $("#confirmAcceptButton"),
       confirmExtraButton: $("#confirmExtraButton"),
+      exportReadyDialog: $("#exportReadyDialog"),
+      exportReadyEyebrow: $("#exportReadyEyebrow"),
+      exportReadyTitle: $("#exportReadyTitle"),
+      exportReadyMessage: $("#exportReadyMessage"),
+      exportReadyFileName: $("#exportReadyFileName"),
+      exportReadyFileMeta: $("#exportReadyFileMeta"),
+      exportReadyNote: $("#exportReadyNote"),
+      exportReadyCancelButton: $("#exportReadyCancelButton"),
+      exportReadyShareButton: $("#exportReadyShareButton"),
       installDialog: $("#installDialog"),
       installNowButton: $("#installNowButton"),
       installStepsList: $("#installStepsList"),
@@ -203,13 +228,40 @@ class PdfWorkshop {
       excelSelectionSummary: $("#excelSelectionSummary"),
       excelSelectVisibleButton: $("#excelSelectVisibleButton"),
       excelClearSelectionButton: $("#excelClearSelectionButton"),
+      excelSettingsPanel: $("#excelSettingsPanel"),
+      excelActiveSheetName: $("#excelActiveSheetName"),
+      excelApplyLayoutButton: $("#excelApplyLayoutButton"),
+      excelRangeMode: $("#excelRangeMode"),
+      excelCustomRangeField: $("#excelCustomRangeField"),
+      excelCustomRange: $("#excelCustomRange"),
       excelPaperSize: $("#excelPaperSize"),
       excelOrientation: $("#excelOrientation"),
       excelScaling: $("#excelScaling"),
-      excelUsePrintArea: $("#excelUsePrintArea"),
+      excelScalePercentField: $("#excelScalePercentField"),
+      excelScalePercent: $("#excelScalePercent"),
+      excelMargins: $("#excelMargins"),
+      excelPageOrder: $("#excelPageOrder"),
+      excelRepeatRows: $("#excelRepeatRows"),
+      excelRepeatColumns: $("#excelRepeatColumns"),
+      excelRowBreaks: $("#excelRowBreaks"),
+      excelColumnBreaks: $("#excelColumnBreaks"),
+      excelCenterHorizontal: $("#excelCenterHorizontal"),
+      excelCenterVertical: $("#excelCenterVertical"),
+      excelIncludeHeaderFooter: $("#excelIncludeHeaderFooter"),
+      excelAddPageNumbers: $("#excelAddPageNumbers"),
+      excelGridLines: $("#excelGridLines"),
+      excelCompatibilityDetails: $("#excelCompatibilityDetails"),
+      excelCompatibilitySummary: $("#excelCompatibilitySummary"),
+      excelCompatibilityReport: $("#excelCompatibilityReport"),
+      excelPreviewStage: $("#excelPreviewStage"),
+      excelPreviewCanvas: $("#excelPreviewCanvas"),
+      excelPreviewPlaceholder: $("#excelPreviewPlaceholder"),
+      excelPreviewStatus: $("#excelPreviewStatus"),
+      excelPreviewPage: $("#excelPreviewPage"),
+      excelPreviewPrevious: $("#excelPreviewPrevious"),
+      excelPreviewNext: $("#excelPreviewNext"),
       excelInsertPositionField: $("#excelInsertPositionField"),
       excelInsertPosition: $("#excelInsertPosition"),
-      excelWarning: $("#excelWarning"),
       rangeDialog: $("#rangeDialog"),
       rangeInput: $("#rangeInput"),
       rangeError: $("#rangeError"),
@@ -259,14 +311,18 @@ class PdfWorkshop {
       navigator.storage.persist().catch(() => {});
     }
 
-    const openAction =
-      new URLSearchParams(location.search).get("action") === "open";
+    const searchParams = new URLSearchParams(location.search);
+    const openAction = searchParams.get("action") === "open";
     if (openAction) {
       setTimeout(() => this.elements.openFileInput.click(), 350);
     }
 
     const consumedSharedFile = await this.consumeSharedFile();
-    if (!consumedSharedFile && !openAction) {
+    if (
+      !consumedSharedFile &&
+      !openAction &&
+      searchParams.get("testHarness") !== "1"
+    ) {
       await this.offerAutosaveRestore();
     }
   }
@@ -368,6 +424,12 @@ class PdfWorkshop {
         mode: "share",
         suffix: "edited",
       })
+    );
+    this.elements.exportReadyShareButton?.addEventListener("click", () =>
+      this.sharePreparedExport()
+    );
+    this.elements.exportReadyDialog?.addEventListener("close", () =>
+      this.cancelPreparedExportShare()
     );
     installButton?.addEventListener("click", () =>
       this.showInstallIntro({ force: true })
@@ -537,27 +599,56 @@ class PdfWorkshop {
       this.convertSelectedExcelSheets()
     );
     this.elements.excelSelectVisibleButton.addEventListener("click", () => {
-      for (const checkbox of this.elements.excelSheetList.querySelectorAll(
-        'input[type="checkbox"]'
-      )) {
-        checkbox.checked = checkbox.dataset.state === "visible";
+      for (const config of this.excelSheetConfigs) {
+        config.selected = config.state === "visible";
       }
+      this.renderExcelSheetList();
       this.updateExcelSelection();
     });
     this.elements.excelClearSelectionButton.addEventListener("click", () => {
-      for (const checkbox of this.elements.excelSheetList.querySelectorAll(
-        'input[type="checkbox"]'
-      )) {
-        checkbox.checked = false;
-      }
+      for (const config of this.excelSheetConfigs) config.selected = false;
+      this.renderExcelSheetList();
       this.updateExcelSelection();
     });
-    this.elements.excelSheetList.addEventListener("change", () =>
-      this.updateExcelSelection()
+    this.elements.excelSheetList.addEventListener("change", (event) => {
+      const checkbox = event.target.closest('input[type="checkbox"][data-sheet-id]');
+      if (!checkbox) return;
+      const config = this.getExcelSheetConfig(checkbox.dataset.sheetId);
+      if (!config) return;
+      config.selected = checkbox.checked;
+      checkbox.closest(".excel-sheet-row")?.classList.toggle("is-selected", checkbox.checked);
+      this.updateExcelSelection();
+    });
+    this.elements.excelSheetList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-sheet-action]");
+      if (!button) return;
+      const sheetId = Number(button.dataset.sheetId);
+      if (button.dataset.sheetAction === "select") {
+        this.setExcelActiveSheet(sheetId);
+      } else if (button.dataset.sheetAction === "up") {
+        this.moveExcelSheet(sheetId, -1);
+      } else if (button.dataset.sheetAction === "down") {
+        this.moveExcelSheet(sheetId, 1);
+      }
+    });
+    this.elements.excelSettingsPanel.addEventListener("input", (event) =>
+      this.handleExcelSettingsInput(event)
+    );
+    this.elements.excelApplyLayoutButton.addEventListener("click", () =>
+      this.applyExcelLayoutToSelectedSheets()
+    );
+    this.elements.excelPreviewPrevious.addEventListener("click", () =>
+      this.changeExcelPreviewPage(-1)
+    );
+    this.elements.excelPreviewNext.addEventListener("click", () =>
+      this.changeExcelPreviewPage(1)
     );
     this.elements.excelDialog.addEventListener("cancel", (event) => {
       event.preventDefault();
       this.cancelExcelImport();
+    });
+    this.elements.excelDialog.addEventListener("submit", (event) => {
+      event.preventDefault();
     });
 
     this.bindSignaturePad();
@@ -664,6 +755,7 @@ class PdfWorkshop {
       event.preventDefault();
       event.returnValue = "";
     });
+    window.addEventListener("pagehide", () => this.releaseDownloadUrls());
 
     const hasFileDrag = (event) =>
       [...(event.dataTransfer?.types || [])].includes("Files");
@@ -839,71 +931,97 @@ class PdfWorkshop {
     const worker = new Worker("./excel-worker.js");
     worker.addEventListener("message", (event) => {
       const message = event.data || {};
+      const pending = this.excelWorkerRequests.get(message.requestId);
       if (message.type === "progress") {
-        this.setBusy(
-          true,
-          message.title || "正在處理 Excel",
-          message.detail || "請稍候…",
-          message.progress || 0
-        );
+        if (pending?.showProgress) {
+          this.setBusy(
+            true,
+            message.title || "正在處理 Excel",
+            message.detail || "請稍候…",
+            message.progress || 0
+          );
+        }
         return;
       }
-      if (!this.excelWorkerPending) return;
+      if (!pending) return;
+      this.excelWorkerRequests.delete(message.requestId);
       if (message.type === "error") {
-        const { reject } = this.excelWorkerPending;
-        this.excelWorkerPending = null;
-        reject(new Error(message.message || "Excel 轉換失敗。"));
+        pending.reject(new Error(message.message || "Excel 轉換失敗。"));
         return;
       }
-      if (message.type === "parsed" || message.type === "converted") {
-        const { resolve } = this.excelWorkerPending;
-        this.excelWorkerPending = null;
-        resolve(message);
-      }
+      pending.resolve(message);
     });
     worker.addEventListener("error", (event) => {
       console.error("[PDF Editor] Excel worker failed", event);
-      if (!this.excelWorkerPending) return;
-      const { reject } = this.excelWorkerPending;
-      this.excelWorkerPending = null;
-      reject(new Error("Excel 轉換元件載入失敗。"));
+      for (const pending of this.excelWorkerRequests.values()) {
+        pending.reject(new Error("Excel 轉換元件載入失敗。"));
+      }
+      this.excelWorkerRequests.clear();
     });
     this.excelWorker = worker;
   }
 
-  requestExcelWorker(type, payload = {}, transfer = []) {
+  requestExcelWorker(
+    type,
+    payload = {},
+    transfer = [],
+    { showProgress = false } = {}
+  ) {
     if (!this.excelWorker) {
       return Promise.reject(new Error("Excel 轉換元件尚未啟動。"));
     }
-    if (this.excelWorkerPending) {
-      return Promise.reject(new Error("上一個 Excel 操作仍在進行中。"));
-    }
+    const requestId = ++this.excelWorkerRequestSequence;
     return new Promise((resolve, reject) => {
-      this.excelWorkerPending = { resolve, reject };
+      this.excelWorkerRequests.set(requestId, {
+        type,
+        resolve,
+        reject,
+        showProgress,
+      });
       try {
-        this.excelWorker.postMessage({ type, ...payload }, transfer);
+        this.excelWorker.postMessage({ type, requestId, ...payload }, transfer);
       } catch (error) {
-        this.excelWorkerPending = null;
+        this.excelWorkerRequests.delete(requestId);
         reject(error);
       }
     });
   }
 
   disposeExcelWorker() {
-    if (this.excelWorkerPending) {
-      const { reject } = this.excelWorkerPending;
-      this.excelWorkerPending = null;
-      reject(new DOMException("Excel import cancelled", "AbortError"));
+    for (const pending of this.excelWorkerRequests.values()) {
+      pending.reject(new DOMException("Excel import cancelled", "AbortError"));
     }
+    this.excelWorkerRequests.clear();
     this.excelWorker?.terminate();
     this.excelWorker = null;
   }
 
   cancelExcelImport() {
+    clearTimeout(this.excelEstimateTimer);
+    this.excelEstimateTimer = null;
+    this.excelEstimateToken += 1;
+    this.excelPreviewToken += 1;
     this.closeDialog(this.elements.excelDialog, "cancel");
     this.disposeExcelWorker();
+    this.destroyExcelPreview();
     this.excelWorkbookInfo = null;
+    this.excelSheetConfigs = [];
+    this.excelActiveSheetId = null;
     this.setBusy(false);
+  }
+
+  destroyExcelPreview() {
+    try {
+      this.excelPreviewRenderTask?.cancel?.();
+    } catch {}
+    this.excelPreviewRenderTask = null;
+    this.excelPreviewDocument?.destroy?.().catch?.(() => {});
+    this.excelPreviewDocument = null;
+    if (this.elements.excelPreviewCanvas) {
+      this.elements.excelPreviewCanvas.hidden = true;
+      this.elements.excelPreviewCanvas.width = 0;
+      this.elements.excelPreviewCanvas.height = 0;
+    }
   }
 
   async openExcelImport(file, { mode = "insert" } = {}) {
@@ -921,10 +1039,17 @@ class PdfWorkshop {
     this.excelPreviousActiveId = this.activePageId;
     this.excelSourceFile = file;
     this.excelWorkbookInfo = null;
+    this.excelSheetConfigs = [];
+    this.excelActiveSheetId = null;
+    this.excelEstimateError = null;
+    this.excelPreviewPageIndex = 0;
+    this.destroyExcelPreview();
     this.elements.excelFileName.textContent = file.name;
     this.elements.excelWorkbookMeta.textContent = "正在讀取工作表…";
     this.elements.excelSheetList.replaceChildren();
-    this.elements.excelWarning.hidden = true;
+    this.elements.excelCompatibilitySummary.textContent = "檢查中…";
+    this.elements.excelCompatibilityReport.replaceChildren();
+    this.showExcelPreviewPlaceholder("正在準備預覽", "變更範圍或版面後會自動更新");
     this.setBusy(true, "正在讀取 Excel", file.name, 2);
 
     try {
@@ -933,7 +1058,8 @@ class PdfWorkshop {
       const result = await this.requestExcelWorker(
         "parse",
         { name: file.name, buffer },
-        [buffer]
+        [buffer],
+        { showProgress: true }
       );
       this.excelWorkbookInfo = result;
       this.renderExcelSheetSelection(result);
@@ -956,41 +1082,45 @@ class PdfWorkshop {
 
   renderExcelSheetSelection(result) {
     const sheets = Array.isArray(result.sheets) ? result.sheets : [];
-    this.elements.excelSheetList.replaceChildren();
-    const warnings = [];
-    for (const sheet of sheets) {
-      const row = document.createElement("label");
-      row.className = "excel-sheet-row";
-
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.value = String(sheet.id);
-      checkbox.dataset.state = sheet.state || "visible";
-      checkbox.checked = (sheet.state || "visible") === "visible";
-
-      const name = document.createElement("span");
-      name.className = "excel-sheet-name";
-      const title = document.createElement("strong");
-      title.textContent = sheet.name;
-      const meta = document.createElement("small");
-      meta.textContent = `${sheet.range || sheet.usedRange || "A1:A1"}・${
-        sheet.rowCount || 0
-      } 列 × ${sheet.columnCount || 0} 欄`;
-      name.append(title, meta);
-      if ((sheet.state || "visible") !== "visible") {
-        const state = document.createElement("span");
-        state.className = "excel-sheet-state";
-        state.textContent = sheet.state === "veryHidden" ? "深度隱藏" : "隱藏";
-        name.append(state);
-      }
-
-      const pages = document.createElement("span");
-      pages.className = "excel-sheet-pages";
-      pages.textContent = `約 ${Math.max(1, sheet.estimatedPages || 1)} 頁`;
-      row.append(checkbox, name, pages);
-      this.elements.excelSheetList.append(row);
-      warnings.push(...(sheet.warnings || []));
-    }
+    this.excelSheetConfigs = sheets.map((sheet) => ({
+      id: Number(sheet.id),
+      name: sheet.name,
+      state: sheet.state || "visible",
+      selected: (sheet.state || "visible") === "visible",
+      pageCount: Math.max(1, sheet.estimatedPages || 1),
+      range: sheet.range || sheet.usedRange || "A1:A1",
+      usedRange: sheet.usedRange || "A1:A1",
+      rowCount: sheet.rowCount || 0,
+      columnCount: sheet.columnCount || 0,
+      compatibility: sheet.compatibility || { error: 0, warning: 0, info: 0 },
+      options: {
+        rangeMode: "used",
+        customRange: sheet.usedRange || "A1:A1",
+        paperSize: "source",
+        orientation: "source",
+        scaling: "source",
+        scalePercent: 100,
+        margins: "source",
+        repeatRows: "",
+        repeatColumns: "",
+        rowBreaks: "",
+        columnBreaks: "",
+        pageOrder: "source",
+        centerHorizontal: false,
+        centerVertical: false,
+        includeHeaderFooter: true,
+        addPageNumbers: false,
+        gridLines: false,
+        ...(sheet.printSettings || {}),
+      },
+    }));
+    this.excelActiveSheetId =
+      this.excelSheetConfigs.find((config) => config.selected)?.id ||
+      this.excelSheetConfigs[0]?.id ||
+      null;
+    this.renderExcelSheetList();
+    this.renderExcelSheetSettings();
+    this.renderExcelCompatibilityReport(result.compatibility);
 
     const visibleCount = sheets.filter(
       (sheet) => (sheet.state || "visible") === "visible"
@@ -1000,54 +1130,463 @@ class PdfWorkshop {
       this.excelImportMode !== "insert" || !this.pages.length;
     this.elements.excelConvertButton.textContent =
       this.excelImportMode === "open" ? "建立 PDF 文件" : "轉換並插入";
-    this.elements.excelWarning.hidden = !warnings.length;
-    this.elements.excelWarning.textContent = [...new Set(warnings)].join("；");
+    this.updateExcelSelection();
+    this.scheduleExcelEstimate(0);
+  }
+
+  getExcelSheetConfig(sheetId = this.excelActiveSheetId) {
+    return this.excelSheetConfigs.find(
+      (config) => config.id === Number(sheetId)
+    );
+  }
+
+  renderExcelSheetList() {
+    const list = this.elements.excelSheetList;
+    list.replaceChildren();
+    this.excelSheetConfigs.forEach((config, index) => {
+      const row = document.createElement("div");
+      row.className = "excel-sheet-row";
+      row.classList.toggle("is-selected", config.selected);
+      row.classList.toggle("is-active", config.id === this.excelActiveSheetId);
+      row.dataset.sheetId = String(config.id);
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(config.id === this.excelActiveSheetId));
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.sheetId = String(config.id);
+      checkbox.checked = config.selected;
+      checkbox.setAttribute("aria-label", `轉換 ${config.name}`);
+
+      const main = document.createElement("button");
+      main.className = "excel-sheet-main";
+      main.type = "button";
+      main.dataset.sheetAction = "select";
+      main.dataset.sheetId = String(config.id);
+      const name = document.createElement("span");
+      name.className = "excel-sheet-name";
+      const title = document.createElement("strong");
+      title.textContent = config.name;
+      name.append(title);
+      if (config.state !== "visible") {
+        const state = document.createElement("span");
+        state.className = "excel-sheet-state";
+        state.textContent = config.state === "veryHidden" ? "深度隱藏" : "隱藏";
+        name.append(state);
+      }
+      const meta = document.createElement("small");
+      meta.textContent = `${config.range}・${config.rowCount} 列 × ${config.columnCount} 欄`;
+      main.append(name, meta);
+
+      const badges = document.createElement("span");
+      badges.className = "excel-sheet-badges";
+      for (const severity of ["error", "warning", "info"]) {
+        const count = Number(config.compatibility?.[severity]) || 0;
+        if (!count) continue;
+        const badge = document.createElement("span");
+        badge.className = `excel-sheet-badge ${severity}`;
+        badge.textContent = String(count);
+        badge.title = `${config.name}：${count} 項${
+          severity === "error" ? "需處理" : severity === "warning" ? "警告" : "提示"
+        }`;
+        badges.append(badge);
+      }
+      name.append(badges);
+
+      const pages = document.createElement("span");
+      pages.className = "excel-sheet-pages";
+      pages.dataset.sheetPages = String(config.id);
+      pages.textContent = `${Math.max(1, config.pageCount || 1)} 頁`;
+
+      const move = document.createElement("span");
+      move.className = "excel-sheet-move";
+      const up = document.createElement("button");
+      up.type = "button";
+      up.dataset.sheetAction = "up";
+      up.dataset.sheetId = String(config.id);
+      up.disabled = index === 0;
+      up.textContent = "↑";
+      up.setAttribute("aria-label", `將 ${config.name} 往前移`);
+      const down = document.createElement("button");
+      down.type = "button";
+      down.dataset.sheetAction = "down";
+      down.dataset.sheetId = String(config.id);
+      down.disabled = index === this.excelSheetConfigs.length - 1;
+      down.textContent = "↓";
+      down.setAttribute("aria-label", `將 ${config.name} 往後移`);
+      move.append(up, down);
+
+      row.append(checkbox, main, pages, move);
+      list.append(row);
+    });
+  }
+
+  setExcelActiveSheet(sheetId) {
+    if (!this.getExcelSheetConfig(sheetId)) return;
+    this.excelActiveSheetId = Number(sheetId);
+    this.excelPreviewPageIndex = 0;
+    for (const row of this.elements.excelSheetList.querySelectorAll(".excel-sheet-row")) {
+      const active = Number(row.dataset.sheetId) === this.excelActiveSheetId;
+      row.classList.toggle("is-active", active);
+      row.setAttribute("aria-selected", String(active));
+    }
+    this.renderExcelSheetSettings();
+    this.requestExcelPreview();
+  }
+
+  moveExcelSheet(sheetId, direction) {
+    const index = this.excelSheetConfigs.findIndex(
+      (config) => config.id === Number(sheetId)
+    );
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= this.excelSheetConfigs.length) return;
+    const [config] = this.excelSheetConfigs.splice(index, 1);
+    this.excelSheetConfigs.splice(nextIndex, 0, config);
+    this.renderExcelSheetList();
     this.updateExcelSelection();
   }
 
-  updateExcelSelection() {
-    const checked = [
-      ...this.elements.excelSheetList.querySelectorAll(
-        'input[type="checkbox"]:checked'
-      ),
+  renderExcelSheetSettings() {
+    const config = this.getExcelSheetConfig();
+    const panel = this.elements.excelSettingsPanel;
+    panel.toggleAttribute("inert", !config);
+    this.elements.excelActiveSheetName.textContent = config?.name || "—";
+    if (!config) return;
+    const options = config.options;
+    this.elements.excelRangeMode.value = options.rangeMode;
+    this.elements.excelCustomRange.value = options.customRange || "";
+    this.elements.excelPaperSize.value = options.paperSize;
+    this.elements.excelOrientation.value = options.orientation;
+    this.elements.excelScaling.value = options.scaling;
+    this.elements.excelScalePercent.value = options.scalePercent || 100;
+    this.elements.excelMargins.value = options.margins;
+    this.elements.excelPageOrder.value = options.pageOrder;
+    this.elements.excelRepeatRows.value = options.repeatRows || "";
+    this.elements.excelRepeatColumns.value = options.repeatColumns || "";
+    this.elements.excelRowBreaks.value = options.rowBreaks || "";
+    this.elements.excelColumnBreaks.value = options.columnBreaks || "";
+    this.elements.excelCenterHorizontal.checked = !!options.centerHorizontal;
+    this.elements.excelCenterVertical.checked = !!options.centerVertical;
+    this.elements.excelIncludeHeaderFooter.checked = !!options.includeHeaderFooter;
+    this.elements.excelAddPageNumbers.checked = !!options.addPageNumbers;
+    this.elements.excelGridLines.checked = !!options.gridLines;
+    this.updateExcelConditionalFields();
+  }
+
+  updateExcelConditionalFields() {
+    this.elements.excelCustomRangeField.hidden =
+      this.elements.excelRangeMode.value !== "custom";
+    this.elements.excelScalePercentField.hidden =
+      this.elements.excelScaling.value !== "custom";
+  }
+
+  handleExcelSettingsInput(event) {
+    const config = this.getExcelSheetConfig();
+    if (!config) return;
+    const optionById = {
+      excelRangeMode: "rangeMode",
+      excelCustomRange: "customRange",
+      excelPaperSize: "paperSize",
+      excelOrientation: "orientation",
+      excelScaling: "scaling",
+      excelScalePercent: "scalePercent",
+      excelMargins: "margins",
+      excelPageOrder: "pageOrder",
+      excelRepeatRows: "repeatRows",
+      excelRepeatColumns: "repeatColumns",
+      excelRowBreaks: "rowBreaks",
+      excelColumnBreaks: "columnBreaks",
+      excelCenterHorizontal: "centerHorizontal",
+      excelCenterVertical: "centerVertical",
+      excelIncludeHeaderFooter: "includeHeaderFooter",
+      excelAddPageNumbers: "addPageNumbers",
+      excelGridLines: "gridLines",
+    };
+    const option = optionById[event.target.id];
+    if (!option) return;
+    let value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    if (option === "scalePercent") {
+      value = Math.min(400, Math.max(10, Number(value) || 100));
+    }
+    config.options[option] = value;
+    this.excelPreviewPageIndex = 0;
+    this.updateExcelConditionalFields();
+    this.scheduleExcelEstimate();
+  }
+
+  applyExcelLayoutToSelectedSheets() {
+    const source = this.getExcelSheetConfig();
+    if (!source) return;
+    const layoutKeys = [
+      "paperSize",
+      "orientation",
+      "scaling",
+      "scalePercent",
+      "margins",
+      "pageOrder",
+      "centerHorizontal",
+      "centerVertical",
+      "includeHeaderFooter",
+      "addPageNumbers",
+      "gridLines",
     ];
-    const estimatedPages = checked.reduce((sum, checkbox) => {
-      const sheet = this.excelWorkbookInfo?.sheets?.find(
-        (item) => String(item.id) === checkbox.value
-      );
-      return sum + Math.max(1, sheet?.estimatedPages || 1);
-    }, 0);
-    this.elements.excelSelectionSummary.textContent = checked.length
-      ? `已選 ${checked.length} 個，預估 ${estimatedPages} 頁`
+    let applied = 0;
+    for (const config of this.excelSheetConfigs) {
+      if (!config.selected || config.id === source.id) continue;
+      for (const key of layoutKeys) config.options[key] = source.options[key];
+      applied += 1;
+    }
+    this.toast(
+      applied ? `已將版面設定套用到另外 ${applied} 個 Sheet。` : "沒有其他已選取的 Sheet。",
+      applied ? "success" : "error",
+      3600
+    );
+    if (applied) this.scheduleExcelEstimate(0);
+  }
+
+  renderExcelCompatibilityReport(report = {}) {
+    const summary = report.summary || { error: 0, warning: 0, info: 0 };
+    const summaryElement = this.elements.excelCompatibilitySummary;
+    summaryElement.replaceChildren();
+    const labels = { error: "需處理", warning: "警告", info: "提示" };
+    for (const severity of ["error", "warning", "info"]) {
+      const badge = document.createElement("span");
+      badge.className = `excel-compatibility-count ${severity}`;
+      badge.textContent = `${labels[severity]} ${summary[severity] || 0}`;
+      summaryElement.append(badge);
+    }
+
+    const list = this.elements.excelCompatibilityReport;
+    list.replaceChildren();
+    const items = Array.isArray(report.items) ? report.items : [];
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "excel-compatibility-empty";
+      empty.textContent = "未發現目前已知的轉換相容性問題。";
+      list.append(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = `excel-compatibility-item ${item.severity}`;
+      const icon = document.createElement("span");
+      icon.className = "excel-compatibility-icon";
+      icon.textContent = item.severity === "error" ? "!" : item.severity === "warning" ? "△" : "i";
+      const copy = document.createElement("span");
+      copy.className = "excel-compatibility-copy";
+      const title = document.createElement("strong");
+      title.textContent = item.message;
+      const sheet = document.createElement("span");
+      sheet.textContent = item.sheetName;
+      copy.append(title, sheet);
+      if (item.detail) {
+        const detail = document.createElement("small");
+        detail.textContent = item.detail;
+        copy.append(detail);
+      }
+      row.append(icon, copy);
+      list.append(row);
+    }
+  }
+
+  getExcelSheetPayload({ selectedOnly = false } = {}) {
+    return this.excelSheetConfigs
+      .filter((config) => !selectedOnly || config.selected)
+      .map((config) => ({ id: config.id, options: { ...config.options } }));
+  }
+
+  updateExcelSelection() {
+    const selected = this.excelSheetConfigs.filter((config) => config.selected);
+    const estimatedPages = selected.reduce(
+      (sum, config) => sum + Math.max(1, config.pageCount || 1),
+      0
+    );
+    this.elements.excelSelectionSummary.textContent = selected.length
+      ? `已選 ${selected.length} 個，預估 ${estimatedPages} 頁${
+          this.excelEstimatePending ? "（重新計算中）" : ""
+        }`
       : "尚未選取";
-    this.elements.excelConvertButton.disabled = !checked.length;
+    this.elements.excelConvertButton.disabled =
+      !selected.length || !!this.excelEstimateError;
+  }
+
+  scheduleExcelEstimate(delay = 260) {
+    clearTimeout(this.excelEstimateTimer);
+    const token = ++this.excelEstimateToken;
+    this.excelEstimatePending = true;
+    this.excelEstimateError = null;
+    this.updateExcelSelection();
+    this.elements.excelPreviewStatus.textContent = "正在重新計算頁數…";
+    this.excelEstimateTimer = setTimeout(async () => {
+      try {
+        const result = await this.requestExcelWorker("estimate", {
+          sheets: this.getExcelSheetPayload(),
+        });
+        if (token !== this.excelEstimateToken) return;
+        for (const item of result.sheets || []) {
+          const config = this.getExcelSheetConfig(item.id);
+          if (!config) continue;
+          config.pageCount = Math.max(1, item.pageCount || 1);
+          if (item.ranges?.length) config.range = item.ranges.join("、");
+          const pages = this.elements.excelSheetList.querySelector(
+            `[data-sheet-pages="${config.id}"]`
+          );
+          if (pages) pages.textContent = `${config.pageCount} 頁`;
+          const rowMeta = this.elements.excelSheetList.querySelector(
+            `.excel-sheet-row[data-sheet-id="${config.id}"] .excel-sheet-main small`
+          );
+          if (rowMeta) {
+            rowMeta.textContent = `${config.range}・${config.rowCount} 列 × ${config.columnCount} 欄`;
+          }
+        }
+        this.excelEstimatePending = false;
+        this.excelEstimateError = null;
+        const active = this.getExcelSheetConfig();
+        this.excelPreviewPageIndex = Math.min(
+          this.excelPreviewPageIndex,
+          Math.max(0, (active?.pageCount || 1) - 1)
+        );
+        this.updateExcelSelection();
+        this.requestExcelPreview();
+      } catch (error) {
+        if (token !== this.excelEstimateToken || error?.name === "AbortError") return;
+        this.excelEstimatePending = false;
+        this.excelEstimateError = error;
+        this.elements.excelPreviewStatus.textContent = "設定無法產生預覽";
+        this.showExcelPreviewPlaceholder("請檢查 Sheet 設定", error.message);
+        this.updateExcelSelection();
+      }
+    }, delay);
+  }
+
+  showExcelPreviewPlaceholder(title, detail = "") {
+    const placeholder = this.elements.excelPreviewPlaceholder;
+    placeholder.hidden = false;
+    const strong = placeholder.querySelector("strong");
+    const small = placeholder.querySelector("small");
+    if (strong) strong.textContent = title;
+    if (small) small.textContent = detail;
+    this.elements.excelPreviewCanvas.hidden = true;
+  }
+
+  async requestExcelPreview() {
+    const config = this.getExcelSheetConfig();
+    if (!config || !this.excelWorker || this.excelEstimateError) return;
+    const pageCount = Math.max(1, config.pageCount || 1);
+    this.excelPreviewPageIndex = Math.min(
+      Math.max(0, this.excelPreviewPageIndex),
+      pageCount - 1
+    );
+    const token = ++this.excelPreviewToken;
+    this.elements.excelPreviewStatus.textContent = `${config.name}・正在產生預覽`;
+    this.elements.excelPreviewPage.textContent = `${this.excelPreviewPageIndex + 1} / ${pageCount}`;
+    this.elements.excelPreviewPrevious.disabled = this.excelPreviewPageIndex === 0;
+    this.elements.excelPreviewNext.disabled = this.excelPreviewPageIndex >= pageCount - 1;
+    this.showExcelPreviewPlaceholder("正在產生單頁預覽", config.name);
+    try {
+      const result = await this.requestExcelWorker("preview", {
+        sheet: { id: config.id, options: { ...config.options } },
+        pageIndex: this.excelPreviewPageIndex,
+      });
+      if (token !== this.excelPreviewToken) return;
+      config.pageCount = Math.max(1, result.pageCount || 1);
+      this.excelPreviewPageIndex = result.pageIndex || 0;
+      await this.renderExcelPreviewPdf(result.bytes, token);
+      if (token !== this.excelPreviewToken) return;
+      this.elements.excelPreviewStatus.textContent = `${config.name}・${Math.round(
+        result.pageWidth
+      )} × ${Math.round(result.pageHeight)} pt`;
+      this.elements.excelPreviewPage.textContent = `${this.excelPreviewPageIndex + 1} / ${config.pageCount}`;
+      this.elements.excelPreviewPrevious.disabled = this.excelPreviewPageIndex === 0;
+      this.elements.excelPreviewNext.disabled =
+        this.excelPreviewPageIndex >= config.pageCount - 1;
+    } catch (error) {
+      if (token !== this.excelPreviewToken || error?.name === "AbortError") return;
+      console.error("[PDF Editor] Excel preview failed", error);
+      this.elements.excelPreviewStatus.textContent = "預覽失敗";
+      this.showExcelPreviewPlaceholder("無法顯示預覽", error.message);
+    }
+  }
+
+  async renderExcelPreviewPdf(bytes, token) {
+    try {
+      this.excelPreviewRenderTask?.cancel?.();
+    } catch {}
+    this.excelPreviewDocument?.destroy?.().catch?.(() => {});
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(bytes),
+      isEvalSupported: false,
+      useWorkerFetch: false,
+      standardFontDataUrl: PDFJS_STANDARD_FONT_URL,
+      cMapUrl: PDFJS_CMAP_URL,
+      cMapPacked: true,
+      wasmUrl: PDFJS_WASM_URL,
+      useSystemFonts: true,
+    });
+    const document = await loadingTask.promise;
+    if (token !== this.excelPreviewToken) {
+      await document.destroy();
+      return;
+    }
+    this.excelPreviewDocument = document;
+    const page = await document.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const stage = this.elements.excelPreviewStage;
+    const availableWidth = Math.max(180, stage.clientWidth - 34);
+    const availableHeight = Math.max(240, stage.clientHeight - 34);
+    const scale = Math.min(
+      1.25,
+      availableWidth / baseViewport.width,
+      availableHeight / baseViewport.height
+    );
+    const viewport = page.getViewport({ scale: Math.max(0.2, scale) });
+    const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+    const canvas = this.elements.excelPreviewCanvas;
+    canvas.width = Math.ceil(viewport.width * pixelRatio);
+    canvas.height = Math.ceil(viewport.height * pixelRatio);
+    canvas.style.width = `${Math.ceil(viewport.width)}px`;
+    canvas.style.height = `${Math.ceil(viewport.height)}px`;
+    const context = canvas.getContext("2d", { alpha: false });
+    this.excelPreviewRenderTask = page.render({
+      canvasContext: context,
+      viewport,
+      transform: pixelRatio === 1 ? null : [pixelRatio, 0, 0, pixelRatio, 0, 0],
+      background: "#ffffff",
+    });
+    await this.excelPreviewRenderTask.promise;
+    if (token !== this.excelPreviewToken) return;
+    this.elements.excelPreviewPlaceholder.hidden = true;
+    canvas.hidden = false;
+  }
+
+  changeExcelPreviewPage(direction) {
+    const config = this.getExcelSheetConfig();
+    if (!config) return;
+    const next = Math.min(
+      Math.max(0, this.excelPreviewPageIndex + direction),
+      Math.max(0, config.pageCount - 1)
+    );
+    if (next === this.excelPreviewPageIndex) return;
+    this.excelPreviewPageIndex = next;
+    this.requestExcelPreview();
   }
 
   async convertSelectedExcelSheets() {
-    const selectedSheetIds = [
-      ...this.elements.excelSheetList.querySelectorAll(
-        'input[type="checkbox"]:checked'
-      ),
-    ].map((checkbox) => Number(checkbox.value));
-    if (!selectedSheetIds.length) {
+    const selectedSheets = this.getExcelSheetPayload({ selectedOnly: true });
+    if (!selectedSheets.length) {
       this.toast("請至少選取一個 Sheet。", "error");
       return;
     }
-
-    const options = {
-      paperSize: this.elements.excelPaperSize.value,
-      orientation: this.elements.excelOrientation.value,
-      scaling: this.elements.excelScaling.value,
-      usePrintArea: this.elements.excelUsePrintArea.checked,
-    };
     this.elements.excelConvertButton.disabled = true;
     this.setBusy(true, "正在將 Excel 轉成 PDF", "準備工作表版面", 1);
 
     try {
-      const result = await this.requestExcelWorker("convert", {
-        sheetIds: selectedSheetIds,
-        options,
-      });
+      const result = await this.requestExcelWorker(
+        "convert",
+        { sheets: selectedSheets },
+        [],
+        { showProgress: true }
+      );
       const sourceBase = (this.excelSourceFile?.name || "Excel")
         .replace(/\.xlsx$/i, "")
         .trim();
@@ -1077,10 +1616,12 @@ class PdfWorkshop {
       if (this.excelSourceFile) this.rememberRecentFiles([this.excelSourceFile]);
       this.closeDialog(this.elements.excelDialog, "converted");
       this.disposeExcelWorker();
+      this.destroyExcelPreview();
       this.excelWorkbookInfo = null;
+      this.excelSheetConfigs = [];
       this.setBusy(false);
       this.toast(
-        `已將 ${selectedSheetIds.length} 個 Sheet 轉成 ${result.pageCount} 頁 PDF。`,
+        `已將 ${selectedSheets.length} 個 Sheet 轉成 ${result.pageCount} 頁 PDF。`,
         "success",
         6500
       );
@@ -1364,7 +1905,7 @@ class PdfWorkshop {
     this.elements.mergeButton.disabled = !hasDocument;
     this.elements.exportButton.disabled = !hasDocument;
     this.elements.shareButton.disabled =
-      !hasDocument || typeof navigator.share !== "function";
+      !hasDocument || !this.supportsPdfFileShare();
     this.elements.undoButton.disabled = !hasDocument || !this.undoStack.length;
     this.elements.redoButton.disabled = !hasDocument || !this.redoStack.length;
     this.elements.rotateButton.disabled = !hasDocument;
@@ -3872,7 +4413,10 @@ class PdfWorkshop {
     const fileName = this.buildOutputFileName(suffix);
     let fileHandle = null;
 
-    if (mode === "download" && "showSaveFilePicker" in window) {
+    if (
+      mode === "download" &&
+      typeof window.showSaveFilePicker === "function"
+    ) {
       try {
         fileHandle = await window.showSaveFilePicker({
           suggestedName: fileName,
@@ -3885,6 +4429,7 @@ class PdfWorkshop {
         });
       } catch (error) {
         if (error?.name === "AbortError") return;
+        console.warn("[PDF Editor] File picker unavailable", error);
         fileHandle = null;
       }
     }
@@ -3953,33 +4498,24 @@ class PdfWorkshop {
       });
       const blob = new Blob([bytes], { type: "application/pdf" });
 
-      if (mode === "share") {
-        const file = new File([blob], fileName, { type: "application/pdf" });
-        if (!navigator.canShare?.({ files: [file] })) {
-          throw new Error("此瀏覽器不支援分享 PDF 檔案");
-        }
-        this.setBusy(false);
-        await navigator.share({
-          title: fileName,
-          text: "由 PDF 工坊匯出的文件",
-          files: [file],
-        });
-      } else if (fileHandle) {
-        this.setBusy(true, "正在儲存 PDF", fileName, 96);
-        const writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        this.setBusy(false);
-      } else {
-        this.downloadBlob(blob, fileName);
-        this.setBusy(false);
+      const deliveryResult = await this.deliverExportedPdf({
+        blob,
+        fileName,
+        fileHandle,
+        requestedMode: mode,
+      });
+      this.setBusy(false);
+      if (!["file-picker", "file-share", "blob-download"].includes(deliveryResult)) {
+        return;
       }
 
       this.dirty = false;
       this.updateUI();
       this.scheduleAutosave();
       this.toast(
-        mode === "share" ? "PDF 已交由系統分享。" : `已輸出 ${records.length} 頁 PDF。`,
+        deliveryResult === "file-share"
+          ? "PDF 已交由系統分享。"
+          : `已輸出 ${records.length} 頁 PDF。`,
         "success"
       );
     } catch (error) {
@@ -3987,13 +4523,208 @@ class PdfWorkshop {
       if (error?.name === "AbortError") return;
       console.error("[PDF Editor] Export failed", error);
       this.toast(
-        error?.message === "此瀏覽器不支援分享 PDF 檔案"
+        error?.code === "FILE_SHARE_UNSUPPORTED"
           ? error.message
           : "PDF 輸出失敗；請確認文件未損壞並再試一次。",
         "error",
         8000
       );
     }
+  }
+
+  getExportEnvironment() {
+    return detectExportEnvironment({
+      navigatorLike: navigator,
+      standalone: this.isStandaloneApp(),
+    });
+  }
+
+  canSharePdfFile(file) {
+    if (
+      typeof navigator.share !== "function" ||
+      typeof navigator.canShare !== "function"
+    ) {
+      return false;
+    }
+    try {
+      return navigator.canShare({ files: [file] });
+    } catch {
+      return false;
+    }
+  }
+
+  supportsPdfFileShare() {
+    if (typeof File !== "function") return false;
+    const probe = new File(["%PDF-1.7\n"], "pdf-workshop-share-test.pdf", {
+      type: "application/pdf",
+    });
+    return this.canSharePdfFile(probe);
+  }
+
+  async deliverExportedPdf({
+    blob,
+    fileName,
+    fileHandle = null,
+    requestedMode = "download",
+  }) {
+    const file = new File([blob], fileName, { type: "application/pdf" });
+    const environment = this.getExportEnvironment();
+    const delivery = chooseExportDelivery({
+      requestedMode,
+      hasFileHandle: Boolean(fileHandle),
+      canShareFile: this.canSharePdfFile(file),
+      environment,
+    });
+
+    if (delivery === "file-picker") {
+      this.setBusy(true, "正在儲存 PDF", fileName, 96);
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return delivery;
+    }
+
+    if (delivery === "file-share") {
+      this.setBusy(false);
+      return this.sharePdfFile(file);
+    }
+
+    if (delivery === "share-unsupported") {
+      const error = new Error("此瀏覽器不支援分享 PDF 檔案");
+      error.code = "FILE_SHARE_UNSUPPORTED";
+      throw error;
+    }
+
+    if (delivery === "ios-standalone-unsupported") {
+      this.setBusy(false);
+      this.showExportDeliveryGuidance({
+        file,
+        title: "請改用 Safari 儲存",
+        message:
+          "目前的 iPhone／iPad 主畫面 APP 無法分享檔案。為避免畫面被導向 PDF 後無法返回，這次不會啟動 blob 下載。",
+        note:
+          "請從 Safari 開啟 PDF 工坊後重新匯出，或將 iOS 更新至支援檔案分享的版本。",
+      });
+      return delivery;
+    }
+
+    if (delivery === "standalone-unsupported") {
+      this.setBusy(false);
+      this.showExportDeliveryGuidance({
+        file,
+        title: "請改用瀏覽器儲存",
+        message:
+          "目前安裝的 APP 無法使用系統檔案分享；直接下載 blob 檔案可能被系統下載管理員判定為損壞。",
+        note: "請使用 Chrome 或裝置原生瀏覽器開啟 PDF 工坊後重新匯出。",
+      });
+      return delivery;
+    }
+
+    this.downloadBlob(blob, fileName);
+    return delivery;
+  }
+
+  async sharePdfFile(file) {
+    const shareData = {
+      title: file.name,
+      text: "由 PDF 工坊匯出的文件",
+      files: [file],
+    };
+    if (navigator.userActivation?.isActive === false) {
+      return this.queuePreparedExportShare(file);
+    }
+    try {
+      await navigator.share(shareData);
+      return "file-share";
+    } catch (error) {
+      if (error?.name === "AbortError") return "cancelled";
+      if (error?.name === "NotAllowedError") {
+        return this.queuePreparedExportShare(file);
+      }
+      throw error;
+    }
+  }
+
+  queuePreparedExportShare(file) {
+    const dialog = this.elements.exportReadyDialog;
+    if (!dialog) {
+      const error = new Error("無法開啟系統分享確認視窗");
+      error.code = "FILE_SHARE_UNSUPPORTED";
+      return Promise.reject(error);
+    }
+    this.cancelPreparedExportShare();
+    this.elements.exportReadyEyebrow.textContent = "安全儲存";
+    this.elements.exportReadyTitle.textContent = "PDF 已建立";
+    this.elements.exportReadyMessage.textContent =
+      "請點選下方按鈕開啟系統分享，再選擇「儲存到檔案」或其他儲存位置。";
+    this.elements.exportReadyFileName.textContent = file.name;
+    this.elements.exportReadyFileMeta.textContent = `${this.formatBytes(file.size)} · PDF`;
+    this.elements.exportReadyNote.textContent =
+      "PDF 已在本機準備完成；再次點擊可提供分享功能需要的使用者操作權限。";
+    this.elements.exportReadyCancelButton.textContent = "取消";
+    this.elements.exportReadyShareButton.hidden = false;
+    this.elements.exportReadyShareButton.disabled = false;
+    this.elements.exportReadyShareButton.textContent = "開啟系統分享";
+
+    return new Promise((resolve) => {
+      this.pendingExportShare = { file, resolve };
+      this.openDialog(dialog);
+    });
+  }
+
+  async sharePreparedExport() {
+    const pending = this.pendingExportShare;
+    if (!pending) return;
+    const button = this.elements.exportReadyShareButton;
+    button.disabled = true;
+    button.textContent = "正在開啟…";
+    try {
+      await navigator.share({
+        title: pending.file.name,
+        text: "由 PDF 工坊匯出的文件",
+        files: [pending.file],
+      });
+      this.pendingExportShare = null;
+      pending.resolve("file-share");
+      this.closeDialog(this.elements.exportReadyDialog, "shared");
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        this.pendingExportShare = null;
+        pending.resolve("cancelled");
+        this.closeDialog(this.elements.exportReadyDialog, "cancel");
+        return;
+      }
+      console.error("[PDF Editor] Prepared file share failed", error);
+      button.disabled = false;
+      button.textContent = "再試一次";
+      this.elements.exportReadyNote.textContent =
+        "系統分享沒有開啟。請再點一次；若仍失敗，請改用瀏覽器開啟後匯出。";
+    }
+  }
+
+  cancelPreparedExportShare() {
+    const pending = this.pendingExportShare;
+    if (!pending) return;
+    this.pendingExportShare = null;
+    pending.resolve("cancelled");
+  }
+
+  showExportDeliveryGuidance({ file, title, message, note }) {
+    const dialog = this.elements.exportReadyDialog;
+    if (!dialog) {
+      this.toast(message, "error", 9000);
+      return;
+    }
+    this.cancelPreparedExportShare();
+    this.elements.exportReadyEyebrow.textContent = "此裝置需要其他方式";
+    this.elements.exportReadyTitle.textContent = title;
+    this.elements.exportReadyMessage.textContent = message;
+    this.elements.exportReadyFileName.textContent = file.name;
+    this.elements.exportReadyFileMeta.textContent = `${this.formatBytes(file.size)} · 尚未儲存`;
+    this.elements.exportReadyNote.textContent = note;
+    this.elements.exportReadyCancelButton.textContent = "我知道了";
+    this.elements.exportReadyShareButton.hidden = true;
+    this.openDialog(dialog);
   }
 
   async loadAnnotationFont(outputDocument) {
@@ -4003,7 +4734,7 @@ class PdfWorkshop {
     outputDocument.registerFontkit(window.fontkit);
     if (!this.annotationFontBytesPromise) {
       this.annotationFontBytesPromise = fetch(
-        "./vendor/pdf-lib/NotoSansCJKtc-Regular.otf"
+        "./vendor/pdf-lib/NotoSansTC-Regular.ttf"
       ).then((response) => {
         if (!response.ok) throw new Error("中文字型檔案讀取失敗");
         return response.arrayBuffer();
@@ -4011,7 +4742,7 @@ class PdfWorkshop {
     }
     const fontBytes = await this.annotationFontBytesPromise;
     return outputDocument.embedFont(fontBytes.slice(0), {
-      subset: true,
+      subset: false,
       features: { liga: false },
     });
   }
@@ -4284,6 +5015,18 @@ class PdfWorkshop {
   }
 
   downloadBlob(blob, fileName) {
+    const environment = this.getExportEnvironment();
+    if (environment.ios && environment.standalone) {
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      this.showExportDeliveryGuidance({
+        file,
+        title: "請改用 Safari 儲存",
+        message:
+          "主畫面 APP 無法安全啟動這個下載，因此已阻止頁面直接導向 PDF。",
+        note: "請從 Safari 開啟 PDF 工坊後重新匯出。",
+      });
+      return false;
+    }
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -4292,7 +5035,25 @@ class PdfWorkshop {
     document.body.append(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    const timer = setTimeout(
+      () => this.releaseDownloadUrl(url),
+      BLOB_URL_LIFETIME_MS
+    );
+    this.pendingDownloadUrls.set(url, timer);
+    return true;
+  }
+
+  releaseDownloadUrl(url) {
+    const timer = this.pendingDownloadUrls.get(url);
+    if (timer) clearTimeout(timer);
+    this.pendingDownloadUrls.delete(url);
+    URL.revokeObjectURL(url);
+  }
+
+  releaseDownloadUrls() {
+    for (const url of [...this.pendingDownloadUrls.keys()]) {
+      this.releaseDownloadUrl(url);
+    }
   }
 
   applySavedTheme() {
@@ -5135,4 +5896,7 @@ class PdfWorkshop {
 }
 
 const app = new PdfWorkshop();
-app.init();
+const appReady = app.init();
+if (new URLSearchParams(location.search).get("testHarness") === "1") {
+  window.__PDF_WORKSHOP_TEST__ = { app, ready: appReady };
+}

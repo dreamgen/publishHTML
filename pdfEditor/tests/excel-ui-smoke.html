@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Excel UI Smoke Test</title>
+  <style>
+    html, body, iframe { width: 100%; height: 100%; margin: 0; border: 0; }
+    #status {
+      position: fixed;
+      z-index: 100;
+      right: 12px;
+      bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      color: #fff;
+      background: #315b7d;
+      font: 700 12px/1.2 system-ui, sans-serif;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .2);
+    }
+    #status.pass { background: #18794e; }
+    #status.fail { background: #b42318; }
+  </style>
+</head>
+<body>
+  <iframe id="editor" src="../?testHarness=1" title="PdfEditor Excel 測試"></iframe>
+  <div id="status" aria-live="polite">準備測試資料…</div>
+  <script src="../vendor/exceljs/exceljs.min.js"></script>
+  <script>
+    const status = document.querySelector("#status");
+    const frame = document.querySelector("#editor");
+
+    async function buildFixture() {
+      const workbook = new ExcelJS.Workbook();
+      const report = workbook.addWorksheet("年度報表", {
+        pageSetup: {
+          paperSize: 9,
+          orientation: "portrait",
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          horizontalCentered: true,
+        },
+      });
+      report.mergeCells("A1:E1");
+      report.getCell("A1").value = "2026 年度銷售報表";
+      report.getCell("A1").font = { bold: true, size: 18, color: { argb: "FFFFFFFF" } };
+      report.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF18794E" } };
+      report.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
+      report.getRow(1).height = 30;
+      report.addRow(["月份", "北區", "中區", "南區", "合計"]);
+      for (let month = 1; month <= 36; month += 1) {
+        const row = month + 2;
+        report.addRow([
+          `第 ${month} 月`,
+          month * 1200,
+          month * 980,
+          month * 1080,
+          { formula: `SUM(B${row}:D${row})`, result: month * 3260 },
+        ]);
+      }
+      report.columns = [
+        { width: 16 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 20 },
+      ];
+      report.pageSetup.printArea = "A1:E38";
+      report.pageSetup.printTitlesRow = "1:2";
+      report.pageSetup.printTitlesColumn = "A:A";
+      report.headerFooter = {
+        oddHeader: "&L2026 報表&C&A&R第 &P / &N 頁",
+        oddFooter: "&C&D &T",
+      };
+      report.getCell("F3").value = { formula: "B3*2" };
+      report.getCell("B3").alignment = { textRotation: 35 };
+      report.addConditionalFormatting({
+        ref: "E3:E38",
+        rules: [{
+          type: "cellIs",
+          operator: "greaterThan",
+          formulae: ["50000"],
+          style: { font: { color: { argb: "FFC43D32" } } },
+        }],
+      });
+
+      const summary = workbook.addWorksheet("摘要");
+      summary.addRows([
+        ["區域", "年度營收"],
+        ["北區", 1200000],
+        ["中區", 980000],
+        ["南區", 1080000],
+      ]);
+      summary.columns = [{ width: 20 }, { width: 22 }];
+      summary.getRow(1).font = { bold: true };
+      summary.getCell("A6").value = {
+        richText: [{ text: "重要", font: { bold: true } }, { text: "提示" }],
+      };
+
+      const hidden = workbook.addWorksheet("內部設定");
+      hidden.state = "hidden";
+      hidden.addRow(["不預設選取", 123]);
+      return workbook.xlsx.writeBuffer();
+    }
+
+    frame.addEventListener("load", async () => {
+      try {
+        const harness = frame.contentWindow.__PDF_WORKSHOP_TEST__;
+        if (!harness) throw new Error("測試介面未啟用");
+        await harness.ready;
+        const bytes = await buildFixture();
+        const file = new frame.contentWindow.File([bytes], "excel-ui-fixture.xlsx", {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+        await harness.app.openExcelImport(file, { mode: "open" });
+        status.className = "pass";
+        status.textContent = "PASS：Excel 對話框已載入";
+      } catch (error) {
+        console.error(error);
+        status.className = "fail";
+        status.textContent = `FAIL：${error.message}`;
+      }
+    }, { once: true });
+  </script>
+</body>
+</html>
