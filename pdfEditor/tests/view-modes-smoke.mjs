@@ -69,6 +69,41 @@ check("預設單頁模式", state.viewMode === "single");
 check("模式按鈕啟用且單頁為 active", !state.singleDisabled && state.singlePressed === "true");
 check("單頁 canvas 已渲染", state.canvasW > 0, `w=${state.canvasW}`);
 
+// ---------- 底部縮放滑桿（單頁模式） ----------
+const beforeSliderCanvasW = await page.evaluate(
+  () => document.querySelector("#pdfCanvas").width
+);
+await page.evaluate(() => {
+  const slider = document.querySelector("#zoomSlider");
+  slider.value = "150";
+  slider.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(600);
+state = await page.evaluate(() => ({
+  zoom: window.__PDF_WORKSHOP_TEST__.app.zoom,
+  label: document.querySelector("#zoomSliderValue").textContent,
+  toolbarLabel: document.querySelector("#zoomResetButton").textContent,
+  canvasW: document.querySelector("#pdfCanvas").width,
+  sliderVisible: (() => {
+    const rect = document.querySelector("#zoomSlider").getBoundingClientRect();
+    return rect.width > 0 && rect.bottom <= innerHeight;
+  })(),
+}));
+check("底部滑桿存在且可見", state.sliderVisible);
+check(
+  "滑桿拖至 150% 同步縮放",
+  state.zoom === 1.5 && state.label === "150%" && state.toolbarLabel === "150%",
+  `zoom=${state.zoom} label=${state.label}`
+);
+check("滑桿縮放後重新渲染", state.canvasW > beforeSliderCanvasW, `${beforeSliderCanvasW}→${state.canvasW}`);
+await page.evaluate(() => document.querySelector("#zoomSliderValue").click());
+await page.waitForTimeout(500);
+state = await page.evaluate(() => ({
+  zoom: window.__PDF_WORKSHOP_TEST__.app.zoom,
+  slider: document.querySelector("#zoomSlider").value,
+}));
+check("點百分比重設 100%", state.zoom === 1 && state.slider === "100", `slider=${state.slider}`);
+
 // ---------- 連續模式 ----------
 await page.click("#viewContinuousButton");
 await page.waitForTimeout(800);
@@ -219,6 +254,90 @@ check("頁面清單為網格", state.display === "grid");
 check("6 張頁卡", state.cardCount === 6);
 check("側欄展開至全寬", state.sidebarW >= 1200, `w=${state.sidebarW}`);
 check("縮圖高解析（230px）", state.canvasW >= 220, `canvasW=${state.canvasW}`);
+
+// ---------- 瀏覽模式縮放 ----------
+await page.click("#zoomInButton");
+await page.click("#zoomInButton");
+await page.waitForTimeout(1000);
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const list = document.querySelector("#pageList");
+  const firstCanvas = list.querySelector(".page-card canvas");
+  return {
+    browseZoom: app.browseZoom,
+    label: document.querySelector("#zoomResetButton").textContent,
+    cardVar: list.style.getPropertyValue("--browse-card-width"),
+    canvasW: firstCanvas?.width || 0,
+    pageZoomUntouched: app.zoom,
+    saved: parseFloat(localStorage.getItem("pdfEditor-browse-zoom-v1")),
+  };
+});
+check(
+  "瀏覽縮放放大兩級",
+  Math.abs(state.browseZoom - 1.3) < 0.001 && state.label === "130%",
+  `zoom=${state.browseZoom} label=${state.label}`
+);
+check("網格卡片寬度變大", state.cardVar === "234px", state.cardVar);
+check("縮圖解析度升級（330px）", state.canvasW >= 320, `canvasW=${state.canvasW}`);
+check("不影響頁面縮放", state.pageZoomUntouched === 1, `zoom=${state.pageZoomUntouched}`);
+check("瀏覽縮放已持久化", Math.abs(state.saved - 1.3) < 0.001, `saved=${state.saved}`);
+
+// ---------- 瀏覽模式底部滑桿 ----------
+const sliderState = await page.evaluate(() => {
+  const slider = document.querySelector("#zoomSlider");
+  const rect = slider.getBoundingClientRect();
+  const hit = document.elementFromPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2
+  );
+  return {
+    min: slider.min,
+    max: slider.max,
+    value: slider.value,
+    hitIsSlider: hit === slider,
+  };
+});
+check(
+  "瀏覽模式滑桿改為 60–240 範圍且同步",
+  sliderState.min === "60" && sliderState.max === "240" && sliderState.value === "130",
+  JSON.stringify(sliderState)
+);
+check("瀏覽模式下滑桿未被覆蓋", sliderState.hitIsSlider);
+await page.evaluate(() => {
+  const slider = document.querySelector("#zoomSlider");
+  slider.value = "200";
+  slider.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(900);
+state = await page.evaluate(() => ({
+  browseZoom: window.__PDF_WORKSHOP_TEST__.app.browseZoom,
+  cardVar: document
+    .querySelector("#pageList")
+    .style.getPropertyValue("--browse-card-width"),
+  canvasW:
+    document.querySelector("#pageList .page-card canvas")?.width || 0,
+}));
+check(
+  "滑桿拖至 200% 更新網格與縮圖",
+  state.browseZoom === 2 && state.cardVar === "360px" && state.canvasW >= 420,
+  `zoom=${state.browseZoom} var=${state.cardVar} canvasW=${state.canvasW}`
+);
+
+await page.click("#zoomResetButton");
+await page.waitForTimeout(1000);
+state = await page.evaluate(() => {
+  const list = document.querySelector("#pageList");
+  return {
+    label: document.querySelector("#zoomResetButton").textContent,
+    cardVar: list.style.getPropertyValue("--browse-card-width"),
+    canvasW: list.querySelector(".page-card canvas")?.width || 0,
+  };
+});
+check(
+  "瀏覽縮放重設 100%",
+  state.label === "100%" && state.cardVar === "180px" && state.canvasW <= 240,
+  `label=${state.label} var=${state.cardVar} canvasW=${state.canvasW}`
+);
 
 // ---------- 瀏覽模式雙擊回到前一種頁面模式 ----------
 await page.evaluate(() => {

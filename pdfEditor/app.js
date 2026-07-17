@@ -28,8 +28,11 @@ const AUTOSAVE_KEY = "autosave";
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const INSTALL_INTRO_KEY = "pdfEditor-install-intro-seen-v1";
 const VIEW_MODE_KEY = "pdfEditor-view-mode-v1";
+const BROWSE_ZOOM_KEY = "pdfEditor-browse-zoom-v1";
 const THUMBNAIL_WIDTH_SIDEBAR = 122;
-const THUMBNAIL_WIDTH_BROWSE = 230;
+const BROWSE_CARD_BASE_WIDTH = 180;
+const BROWSE_ZOOM_MIN = 0.6;
+const BROWSE_ZOOM_MAX = 2.4;
 const PREVIEW_RENDER_CONCURRENCY = 2;
 const SKIM_SETTLE_DELAY_MS = 160;
 const BLOB_URL_LIFETIME_MS = 10 * 60 * 1000;
@@ -121,6 +124,17 @@ class PdfWorkshop {
     }
     this.viewMode = savedViewMode === "continuous" ? "continuous" : "single";
     this.lastPageViewMode = this.viewMode;
+    let savedBrowseZoom = NaN;
+    try {
+      savedBrowseZoom = parseFloat(localStorage.getItem(BROWSE_ZOOM_KEY));
+    } catch {
+      savedBrowseZoom = NaN;
+    }
+    this.browseZoom = Number.isFinite(savedBrowseZoom)
+      ? Math.min(BROWSE_ZOOM_MAX, Math.max(BROWSE_ZOOM_MIN, savedBrowseZoom))
+      : 1;
+    this.browseThumbBucket = null;
+    this.zoomSliderTimer = null;
     this.pageDimsCache = new Map();
     this.previewSlots = [];
     this.previewObserver = null;
@@ -172,6 +186,10 @@ class PdfWorkshop {
       zoomOutButton: $("#zoomOutButton"),
       zoomInButton: $("#zoomInButton"),
       zoomResetButton: $("#zoomResetButton"),
+      statusZoomOutButton: $("#statusZoomOutButton"),
+      statusZoomInButton: $("#statusZoomInButton"),
+      zoomSlider: $("#zoomSlider"),
+      zoomSliderValue: $("#zoomSliderValue"),
       textControls: $("#textControls"),
       annotationText: $("#annotationText"),
       annotationSize: $("#annotationSize"),
@@ -324,6 +342,7 @@ class PdfWorkshop {
     this.ensureRuntimeLayers();
     this.applySavedTheme();
     this.applyViewModeClasses();
+    this.applyBrowseZoom();
     this.bindEvents();
     this.updateConnectivity();
     this.updateUI();
@@ -755,10 +774,28 @@ class PdfWorkshop {
 
     zoomOutButton.addEventListener("click", () => this.changeZoom(-0.15));
     zoomInButton.addEventListener("click", () => this.changeZoom(0.15));
-    zoomResetButton.addEventListener("click", () => {
+    const resetZoom = () => {
+      if (this.viewMode === "browse") {
+        this.browseZoom = 1;
+        this.applyBrowseZoom();
+        return;
+      }
       this.zoom = 1;
       this.applyZoomChange();
-    });
+    };
+    zoomResetButton.addEventListener("click", resetZoom);
+    this.elements.zoomSliderValue?.addEventListener("click", resetZoom);
+    this.elements.statusZoomOutButton?.addEventListener("click", () =>
+      this.changeZoom(-0.15)
+    );
+    this.elements.statusZoomInButton?.addEventListener("click", () =>
+      this.changeZoom(0.15)
+    );
+    this.elements.zoomSlider?.addEventListener("input", () =>
+      this.handleZoomSliderInput(
+        parseInt(this.elements.zoomSlider.value, 10) / 100
+      )
+    );
 
     this.elements.viewSingleButton?.addEventListener("click", () =>
       this.setViewMode("single")
@@ -1978,14 +2015,37 @@ class PdfWorkshop {
     ].filter(Boolean).forEach((button) => {
       button.disabled = !hasDocument;
     });
-    this.elements.zoomOutButton.disabled = !hasDocument || this.zoom <= 0.5;
-    this.elements.zoomInButton.disabled = !hasDocument || this.zoom >= 2.5;
+    const usingBrowseZoom = this.viewMode === "browse";
+    const zoomValue = usingBrowseZoom ? this.browseZoom : this.zoom;
+    const zoomMin = usingBrowseZoom ? BROWSE_ZOOM_MIN : 0.5;
+    const zoomMax = usingBrowseZoom ? BROWSE_ZOOM_MAX : 2.5;
+    const zoomPercent = Math.round(zoomValue * 100);
+    const zoomAtMin = !hasDocument || zoomValue <= zoomMin;
+    const zoomAtMax = !hasDocument || zoomValue >= zoomMax;
+    this.elements.zoomOutButton.disabled = zoomAtMin;
+    this.elements.zoomInButton.disabled = zoomAtMax;
     this.elements.zoomResetButton.disabled = !hasDocument;
+    if (this.elements.statusZoomOutButton) {
+      this.elements.statusZoomOutButton.disabled = zoomAtMin;
+    }
+    if (this.elements.statusZoomInButton) {
+      this.elements.statusZoomInButton.disabled = zoomAtMax;
+    }
+    if (this.elements.zoomSlider) {
+      this.elements.zoomSlider.min = Math.round(zoomMin * 100);
+      this.elements.zoomSlider.max = Math.round(zoomMax * 100);
+      this.elements.zoomSlider.value = zoomPercent;
+      this.elements.zoomSlider.disabled = !hasDocument;
+    }
+    if (this.elements.zoomSliderValue) {
+      this.elements.zoomSliderValue.disabled = !hasDocument;
+      this.elements.zoomSliderValue.textContent = `${zoomPercent}%`;
+    }
     this.elements.extractButton.disabled = !selectedCount;
     this.elements.rangeButton.disabled = !hasDocument;
     this.elements.selectAllCheckbox.disabled = !hasDocument;
 
-    this.elements.zoomResetButton.textContent = `${Math.round(this.zoom * 100)}%`;
+    this.elements.zoomResetButton.textContent = `${zoomPercent}%`;
 
     const viewModeButtons = [
       [this.elements.viewSingleButton, "single"],
@@ -2225,7 +2285,7 @@ class PdfWorkshop {
     const rotation = this.getPageRotation(pageRecord);
     const targetWidth =
       this.viewMode === "browse"
-        ? THUMBNAIL_WIDTH_BROWSE
+        ? this.getBrowseThumbWidth()
         : THUMBNAIL_WIDTH_SIDEBAR;
 
     const cached = this.thumbnailCache.get(pageRecord.id);
@@ -3890,8 +3950,61 @@ class PdfWorkshop {
   }
 
   changeZoom(delta) {
+    if (this.viewMode === "browse") {
+      this.browseZoom = Math.min(
+        BROWSE_ZOOM_MAX,
+        Math.max(BROWSE_ZOOM_MIN, this.browseZoom + delta)
+      );
+      this.applyBrowseZoom();
+      return;
+    }
     this.zoom = Math.min(2.5, Math.max(0.5, this.zoom + delta));
     this.applyZoomChange();
+  }
+
+  handleZoomSliderInput(ratio) {
+    if (!Number.isFinite(ratio)) return;
+    if (this.viewMode === "browse") {
+      this.browseZoom = Math.min(
+        BROWSE_ZOOM_MAX,
+        Math.max(BROWSE_ZOOM_MIN, ratio)
+      );
+      // CSS 變數即時生效，跨解析度級距時 applyBrowseZoom 才重建縮圖
+      this.applyBrowseZoom();
+      return;
+    }
+    this.zoom = Math.min(2.5, Math.max(0.5, ratio));
+    this.updateUI();
+    // 拖曳期間僅更新數值顯示，停頓後才重新渲染頁面
+    clearTimeout(this.zoomSliderTimer);
+    this.zoomSliderTimer = setTimeout(() => this.applyZoomChange(), 120);
+  }
+
+  getBrowseThumbWidth() {
+    if (this.browseZoom < 0.85) return 170;
+    if (this.browseZoom <= 1.2) return 230;
+    if (this.browseZoom <= 1.7) return 330;
+    return 440;
+  }
+
+  applyBrowseZoom() {
+    try {
+      localStorage.setItem(BROWSE_ZOOM_KEY, String(this.browseZoom));
+    } catch {
+      /* localStorage 不可用時忽略 */
+    }
+    this.elements.pageList?.style.setProperty(
+      "--browse-card-width",
+      `${Math.round(BROWSE_CARD_BASE_WIDTH * this.browseZoom)}px`
+    );
+    const bucket = this.getBrowseThumbWidth();
+    const bucketChanged = bucket !== this.browseThumbBucket;
+    this.browseThumbBucket = bucket;
+    this.updateUI();
+    if (this.viewMode === "browse" && bucketChanged) {
+      // 縮圖解析度跨級距時重建側欄，維持清晰度
+      this.renderSidebar();
+    }
   }
 
   applyZoomChange() {

@@ -300,10 +300,22 @@
         <footer class="statusbar">
           <span id="documentStatus">準備就緒</span>
           <span class="statusbar-center" id="activePageStatus"></span>
-          <span id="offlineStatus">
-            <span class="status-dot"></span>
-            <span>本機模式</span>
-          </span>
+          <div class="statusbar-right">
+            <div class="statusbar-zoom requires-document" role="group" aria-label="縮放控制">
+              <button class="statusbar-zoom-button" id="statusZoomOutButton" type="button" disabled aria-label="縮小">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+              </button>
+              <input id="zoomSlider" type="range" min="50" max="250" step="1" value="100" disabled aria-label="縮放比例">
+              <button class="statusbar-zoom-button" id="statusZoomInButton" type="button" disabled aria-label="放大">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
+              </button>
+              <button class="statusbar-zoom-value" id="zoomSliderValue" type="button" disabled title="重設縮放">100%</button>
+            </div>
+            <span id="offlineStatus">
+              <span class="status-dot"></span>
+              <span>本機模式</span>
+            </span>
+          </div>
         </footer>
       </section>
     </main>
