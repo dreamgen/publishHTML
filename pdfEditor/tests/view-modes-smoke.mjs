@@ -90,6 +90,10 @@ state = await page.evaluate(() => ({
   })(),
 }));
 check("底部滑桿存在且可見", state.sliderVisible);
+const stripHidden = await page.evaluate(
+  () => getComputedStyle(document.querySelector(".browse-zoom")).display
+);
+check("單頁模式隱藏瀏覽縮放列", stripHidden === "none", stripHidden);
 check(
   "滑桿拖至 150% 同步縮放",
   state.zoom === 1.5 && state.label === "150%" && state.toolbarLabel === "150%",
@@ -303,6 +307,42 @@ check(
   JSON.stringify(sliderState)
 );
 check("瀏覽模式下滑桿未被覆蓋", sliderState.hitIsSlider);
+const stripState = await page.evaluate(() => {
+  const strip = document.querySelector(".browse-zoom");
+  const slider = document.querySelector("#browseZoomSlider");
+  return {
+    display: getComputedStyle(strip).display,
+    min: slider.min,
+    max: slider.max,
+    value: slider.value,
+    label: document.querySelector("#browseZoomValue").textContent,
+  };
+});
+check(
+  "瀏覽網格頂部縮放列顯示且同步",
+  stripState.display === "flex" &&
+    stripState.min === "60" &&
+    stripState.max === "240" &&
+    stripState.value === "130" &&
+    stripState.label === "130%",
+  JSON.stringify(stripState)
+);
+await page.evaluate(() => {
+  const slider = document.querySelector("#browseZoomSlider");
+  slider.value = "160";
+  slider.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(600);
+state = await page.evaluate(() => ({
+  browseZoom: window.__PDF_WORKSHOP_TEST__.app.browseZoom,
+  statusValue: document.querySelector("#zoomSlider").value,
+  stripLabel: document.querySelector("#browseZoomValue").textContent,
+}));
+check(
+  "頂部縮放列拖曳並與底部滑桿同步",
+  state.browseZoom === 1.6 && state.statusValue === "160" && state.stripLabel === "160%",
+  JSON.stringify(state)
+);
 await page.evaluate(() => {
   const slider = document.querySelector("#zoomSlider");
   slider.value = "200";

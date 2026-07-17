@@ -190,6 +190,10 @@ class PdfWorkshop {
       statusZoomInButton: $("#statusZoomInButton"),
       zoomSlider: $("#zoomSlider"),
       zoomSliderValue: $("#zoomSliderValue"),
+      browseZoomOutButton: $("#browseZoomOutButton"),
+      browseZoomInButton: $("#browseZoomInButton"),
+      browseZoomSlider: $("#browseZoomSlider"),
+      browseZoomValue: $("#browseZoomValue"),
       textControls: $("#textControls"),
       annotationText: $("#annotationText"),
       annotationSize: $("#annotationSize"),
@@ -784,18 +788,32 @@ class PdfWorkshop {
       this.applyZoomChange();
     };
     zoomResetButton.addEventListener("click", resetZoom);
-    this.elements.zoomSliderValue?.addEventListener("click", resetZoom);
-    this.elements.statusZoomOutButton?.addEventListener("click", () =>
-      this.changeZoom(-0.15)
-    );
-    this.elements.statusZoomInButton?.addEventListener("click", () =>
-      this.changeZoom(0.15)
-    );
-    this.elements.zoomSlider?.addEventListener("input", () =>
-      this.handleZoomSliderInput(
-        parseInt(this.elements.zoomSlider.value, 10) / 100
-      )
-    );
+    for (const button of [
+      this.elements.zoomSliderValue,
+      this.elements.browseZoomValue,
+    ]) {
+      button?.addEventListener("click", resetZoom);
+    }
+    for (const button of [
+      this.elements.statusZoomOutButton,
+      this.elements.browseZoomOutButton,
+    ]) {
+      button?.addEventListener("click", () => this.changeZoom(-0.15));
+    }
+    for (const button of [
+      this.elements.statusZoomInButton,
+      this.elements.browseZoomInButton,
+    ]) {
+      button?.addEventListener("click", () => this.changeZoom(0.15));
+    }
+    for (const slider of [
+      this.elements.zoomSlider,
+      this.elements.browseZoomSlider,
+    ]) {
+      slider?.addEventListener("input", () =>
+        this.handleZoomSliderInput(parseInt(slider.value, 10) / 100)
+      );
+    }
 
     this.elements.viewSingleButton?.addEventListener("click", () =>
       this.setViewMode("single")
@@ -2025,21 +2043,35 @@ class PdfWorkshop {
     this.elements.zoomOutButton.disabled = zoomAtMin;
     this.elements.zoomInButton.disabled = zoomAtMax;
     this.elements.zoomResetButton.disabled = !hasDocument;
-    if (this.elements.statusZoomOutButton) {
-      this.elements.statusZoomOutButton.disabled = zoomAtMin;
+    for (const button of [
+      this.elements.statusZoomOutButton,
+      this.elements.browseZoomOutButton,
+    ]) {
+      if (button) button.disabled = zoomAtMin;
     }
-    if (this.elements.statusZoomInButton) {
-      this.elements.statusZoomInButton.disabled = zoomAtMax;
+    for (const button of [
+      this.elements.statusZoomInButton,
+      this.elements.browseZoomInButton,
+    ]) {
+      if (button) button.disabled = zoomAtMax;
     }
-    if (this.elements.zoomSlider) {
-      this.elements.zoomSlider.min = Math.round(zoomMin * 100);
-      this.elements.zoomSlider.max = Math.round(zoomMax * 100);
-      this.elements.zoomSlider.value = zoomPercent;
-      this.elements.zoomSlider.disabled = !hasDocument;
+    for (const slider of [
+      this.elements.zoomSlider,
+      this.elements.browseZoomSlider,
+    ]) {
+      if (!slider) continue;
+      slider.min = Math.round(zoomMin * 100);
+      slider.max = Math.round(zoomMax * 100);
+      slider.value = zoomPercent;
+      slider.disabled = !hasDocument;
     }
-    if (this.elements.zoomSliderValue) {
-      this.elements.zoomSliderValue.disabled = !hasDocument;
-      this.elements.zoomSliderValue.textContent = `${zoomPercent}%`;
+    for (const value of [
+      this.elements.zoomSliderValue,
+      this.elements.browseZoomValue,
+    ]) {
+      if (!value) continue;
+      value.disabled = !hasDocument;
+      value.textContent = `${zoomPercent}%`;
     }
     this.elements.extractButton.disabled = !selectedCount;
     this.elements.rangeButton.disabled = !hasDocument;

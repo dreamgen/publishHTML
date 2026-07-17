@@ -1284,7 +1284,7 @@ input[type="checkbox"] {
   opacity: .4;
 }
 
-#zoomSlider {
+.zoom-range {
   width: 130px;
   height: 4px;
   margin: 0;
@@ -1295,12 +1295,12 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 
-#zoomSlider:disabled {
+.zoom-range:disabled {
   opacity: .4;
   cursor: default;
 }
 
-#zoomSlider::-webkit-slider-thumb {
+.zoom-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 16px;
@@ -1312,7 +1312,7 @@ input[type="checkbox"] {
   cursor: grab;
 }
 
-#zoomSlider::-moz-range-thumb {
+.zoom-range::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border: 1px solid rgba(21, 31, 47, .18);
@@ -1322,7 +1322,7 @@ input[type="checkbox"] {
   cursor: grab;
 }
 
-#zoomSlider::-moz-range-track {
+.zoom-range::-moz-range-track {
   height: 4px;
   border-radius: 999px;
   background: #b9c1cd;
@@ -1346,6 +1346,21 @@ input[type="checkbox"] {
 
 .statusbar-zoom-value:disabled {
   opacity: .5;
+}
+
+.browse-zoom {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+body.view-browse .browse-zoom {
+  display: flex;
+  margin-left: auto;
+}
+
+body.view-browse .browse-zoom .zoom-range {
+  width: 150px;
 }
 
 .status-dot {
@@ -3147,32 +3162,32 @@ body.view-browse .thumbnail-wrap canvas {
   box-shadow: 0 20px 48px rgba(0, 0, 0, .42), 0 3px 12px rgba(0, 0, 0, .3);
 }
 
-[data-theme="dark"] #zoomSlider {
+[data-theme="dark"] .zoom-range {
   background: #3a4a61;
 }
 
-[data-theme="dark"] #zoomSlider::-webkit-slider-thumb {
+[data-theme="dark"] .zoom-range::-webkit-slider-thumb {
   border-color: rgba(0, 0, 0, .4);
   background: #d7dee9;
 }
 
-[data-theme="dark"] #zoomSlider::-moz-range-thumb {
+[data-theme="dark"] .zoom-range::-moz-range-thumb {
   border-color: rgba(0, 0, 0, .4);
   background: #d7dee9;
 }
 
-[data-theme="dark"] #zoomSlider::-moz-range-track {
+[data-theme="dark"] .zoom-range::-moz-range-track {
   background: #3a4a61;
 }
 
 @media (max-width: 600px) {
-  #zoomSlider {
+  .zoom-range {
     width: 84px;
   }
 }
 
 @media (max-width: 470px) {
-  #zoomSlider {
+  .zoom-range {
     display: none;
   }
 }
