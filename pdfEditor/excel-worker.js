@@ -1139,6 +1139,241 @@ function cellText(cell) {
   return String(value);
 }
 
+// ---------------------------------------------------------------------------
+// Rich text（同一儲存格內顏色／粗細逐段變化）
+//
+// 只支援顏色與粗細（bold）逐段變化；同一儲存格內若出現不同字級，一律
+// 統一套用儲存格層級的 cell.font.size（不支援混合字級）。多數 rich text
+// 儲存格其實每個片段的樣式都相同，這種情況完全交由既有的 cellText()／
+// drawCell() 單一樣式流程處理，不受任何影響；只有偵測到真正的顏色或
+// 粗細差異時，才會走下面新增的多樣式繪製路徑。
+// ---------------------------------------------------------------------------
+
+function richRunEffectiveStyle(cell, run) {
+  const font = run?.font || {};
+  return {
+    color: font.color || cell.font?.color,
+    bold: font.bold != null ? !!font.bold : !!cell.font?.bold,
+  };
+}
+
+function richStyleKey(style) {
+  const color = style.color;
+  const colorKey =
+    color?.argb || (color?.indexed != null ? `idx${color.indexed}` : "default");
+  return `${colorKey}|${style.bold ? 1 : 0}`;
+}
+
+// 回傳 null 代表這個儲存格應繼續走原本的單一樣式流程：不是 rich text，
+// 或 rich text 內每個片段的有效顏色／粗細其實都相同（沒有可見差異）。
+function cellStyledRuns(cell) {
+  const richText = cell.value?.richText;
+  if (!Array.isArray(richText) || richText.length < 2) return null;
+  const runs = richText
+    .map((run) => ({
+      text: String(run?.text || ""),
+      style: richRunEffectiveStyle(cell, run),
+    }))
+    .filter((run) => run.text);
+  if (runs.length < 2) return null;
+  const firstKey = richStyleKey(runs[0].style);
+  const hasVariation = runs.some((run) => richStyleKey(run.style) !== firstKey);
+  return hasVariation ? runs : null;
+}
+
+// 與 drawCell() 的字型挑選邏輯一致（以「每個片段」而非整格為單位判斷
+// 是否為純 ASCII）：中文字型（NotoSansTC）目前只有 Regular 一種字重，
+// 無法切換至真正的 Bold 字型檔，因此中文粗體改用偽粗體（多次疊繪）。
+function pickRunFont(fonts, run) {
+  const asciiOnly = /^[\x00-\x7F]*$/.test(run.text);
+  if (!asciiOnly) return { font: fonts.unicode, fauxBold: !!run.style.bold };
+  return { font: run.style.bold ? fonts.asciiBold : fonts.ascii, fauxBold: false };
+}
+
+// 把 rich text runs 拆成帶樣式的字元陣列，供換行與繪製共用。
+function buildStyledCharacters(fonts, runs, fontSize) {
+  const characters = [];
+  for (const run of runs) {
+    const { font, fauxBold } = pickRunFont(fonts, run);
+    const color = argbToRgb(run.style.color, rgb(0.08, 0.1, 0.16));
+    const sanitized = sanitizeTextForFont(font, run.text, fontSize, {
+      preserveLineBreaks: true,
+    });
+    for (const ch of [...sanitized]) {
+      characters.push({ ch, font, color, bold: fauxBold });
+    }
+  }
+  return characters;
+}
+
+function styledCharacterWidth(character, size) {
+  return characterWidth(character.font, character.ch, size);
+}
+
+function splitStyledLines(characters) {
+  const lines = [[]];
+  for (const character of characters) {
+    if (character.ch === "\n") lines.push([]);
+    else lines[lines.length - 1].push(character);
+  }
+  return lines;
+}
+
+function wrapStyledCharacters(characters, size, maxWidth, shouldWrap) {
+  const sourceLines = splitStyledLines(characters);
+  if (!shouldWrap) return sourceLines;
+
+  const lines = [];
+  for (const sourceLine of sourceLines) {
+    if (!sourceLine.length) {
+      lines.push([]);
+      continue;
+    }
+    let current = [];
+    let currentWidth = 0;
+    for (const character of sourceLine) {
+      const width = styledCharacterWidth(character, size);
+      if (current.length && currentWidth + width > maxWidth) {
+        lines.push(current);
+        current = [character];
+        currentWidth = width;
+      } else {
+        current.push(character);
+        currentWidth += width;
+      }
+    }
+    if (current.length) lines.push(current);
+  }
+  return lines;
+}
+
+function styledLineWidth(line, size) {
+  return line.reduce((sum, character) => sum + styledCharacterWidth(character, size), 0);
+}
+
+// 把一行內連續、樣式相同（同字型／同粗細／同顏色物件）的字元合併成一
+// 段，減少 drawText 呼叫次數；寬度以逐字元寬度加總，與換行計算一致。
+function groupStyledLine(line, size) {
+  const groups = [];
+  for (const character of line) {
+    const width = styledCharacterWidth(character, size);
+    const last = groups[groups.length - 1];
+    if (
+      last &&
+      last.font === character.font &&
+      last.bold === character.bold &&
+      last.color === character.color
+    ) {
+      last.text += character.ch;
+      last.width += width;
+    } else {
+      groups.push({
+        text: character.ch,
+        font: character.font,
+        bold: character.bold,
+        color: character.color,
+        width,
+      });
+    }
+  }
+  return groups;
+}
+
+// 以極小位移多次疊繪達到「偽粗體」效果。
+const FAUX_BOLD_OFFSETS = [
+  [0, 0],
+  [0.3, 0],
+  [0, 0.3],
+  [0.3, 0.3],
+];
+
+function drawStyledRun(page, group, x, y, size) {
+  const offsets = group.bold ? FAUX_BOLD_OFFSETS : [[0, 0]];
+  for (const [dx, dy] of offsets) {
+    drawText(page, group.text, { x: x + dx, y: y + dy, size, font: group.font, color: group.color });
+  }
+}
+
+// drawCell() 單一樣式流程的多樣式版本：換行／對齊／垂直置中／裁切的
+// 公式與 drawCell() 完全相同，差別只在每一行由多個帶樣式片段組成。
+function drawStyledCellText(page, runs, fonts, scale, textBox, cell, fontSize) {
+  const padding = Math.max(1.5, 2.5 * scale);
+  const verticalPadding = Math.max(0.2, Math.min(0.5, 0.5 * scale));
+  const maxWidth = Math.max(1, textBox.width - padding * 2);
+  const maxHeight = Math.max(1, textBox.height - verticalPadding * 2);
+  const shouldWrap = !!cell.alignment?.wrapText;
+
+  const characters = buildStyledCharacters(fonts, runs, fontSize);
+  let size = fontSize;
+  let lines = wrapStyledCharacters(characters, size, maxWidth, shouldWrap);
+
+  if (cell.alignment?.shrinkToFit) {
+    const minimumSize = Math.max(4, 5 * scale);
+    for (let iteration = 0; iteration < 120 && size > minimumSize; iteration += 1) {
+      const widest = Math.max(0, ...lines.map((line) => styledLineWidth(line, size)));
+      const requiredHeight = lines.length * size * 1.18;
+      if (widest <= maxWidth + 0.1 && requiredHeight <= maxHeight + 0.1) break;
+      size = Math.max(minimumSize, size - Math.max(0.2, 0.25 * scale));
+      lines = wrapStyledCharacters(characters, size, maxWidth, shouldWrap);
+    }
+  }
+
+  let lineHeight = size * 1.18;
+  if (lines.length > 1 && lines.length * lineHeight > maxHeight) {
+    lineHeight = Math.max(size * 1.02, maxHeight / lines.length);
+  }
+  const maxLines = Math.max(1, Math.floor((maxHeight + lineHeight * 0.25) / lineHeight));
+  if (lines.length > maxLines) lines = lines.slice(0, maxLines);
+
+  const blockHeight = lines.length * lineHeight;
+  const vertical = cell.alignment?.vertical || "middle";
+  let firstBaseline;
+  if (vertical === "top") {
+    firstBaseline = textBox.y + textBox.height - verticalPadding - size;
+  } else if (vertical === "bottom") {
+    firstBaseline = textBox.y + verticalPadding + blockHeight - lineHeight;
+  } else {
+    firstBaseline =
+      textBox.y + (textBox.height + blockHeight) / 2 - lineHeight + (lineHeight - size) / 2;
+  }
+
+  const needsClip =
+    blockHeight > maxHeight + 0.1 ||
+    lines.some((line) => styledLineWidth(line, size) > maxWidth + 0.1);
+  if (needsClip) {
+    page.pushOperators(
+      pushGraphicsState(),
+      moveTo(textBox.x + padding, textBox.y + verticalPadding),
+      lineTo(textBox.x + textBox.width - padding, textBox.y + verticalPadding),
+      lineTo(textBox.x + textBox.width - padding, textBox.y + textBox.height - verticalPadding),
+      lineTo(textBox.x + padding, textBox.y + textBox.height - verticalPadding),
+      closePath(),
+      clip(),
+      endPath()
+    );
+  }
+
+  lines.forEach((line, lineIndex) => {
+    const width = styledLineWidth(line, size);
+    const horizontal = cell.alignment?.horizontal || "left";
+    let x = textBox.x + padding;
+    if (horizontal === "center" || horizontal === "centerContinuous") {
+      x = textBox.x + (textBox.width - width) / 2;
+    } else if (horizontal === "right") {
+      x = textBox.x + textBox.width - padding - width;
+    }
+    const y = firstBaseline - lineIndex * lineHeight;
+    if (y < textBox.y - 1 || y + size > textBox.y + textBox.height + 1) return;
+    let cursorX = Math.max(textBox.x + 0.5, x);
+    for (const group of groupStyledLine(line, size)) {
+      drawStyledRun(page, group, cursorX, y, size);
+      cursorX += group.width;
+    }
+  });
+
+  if (needsClip) page.pushOperators(popGraphicsState());
+}
+
 function drawBorders(page, border, x, y, width, height, scale) {
   for (const side of ["top", "right", "bottom", "left"]) {
     const style = border?.[side];
@@ -1505,6 +1740,13 @@ function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
   }
 
   let fontSize = clamp(Number(cell.font?.size) || 11, 5, 72) * scale;
+
+  const styledRuns = cellStyledRuns(cell);
+  if (styledRuns) {
+    drawStyledCellText(page, styledRuns, fonts, scale, textBox, cell, fontSize);
+    return;
+  }
+
   const safeValue = sanitizeTextForFont(font, value, fontSize, {
     preserveLineBreaks: true,
   });
@@ -1980,6 +2222,7 @@ function auditWorksheet(worksheet) {
     missingFormulaResults: 0,
     externalFormulas: 0,
     richText: 0,
+    richTextStyled: 0,
     hyperlinks: 0,
     rotatedText: 0,
     gradientFills: 0,
@@ -1996,7 +2239,10 @@ function auditWorksheet(worksheet) {
       const formula = value?.formula || value?.sharedFormula;
       if (formula && value?.result == null) record("missingFormulaResults", cell);
       if (formula && /\[[^\]]+\]/.test(formula)) record("externalFormulas", cell);
-      if (value?.richText) record("richText", cell);
+      if (value?.richText) {
+        if (cellStyledRuns(cell)) record("richTextStyled", cell);
+        else record("richText", cell);
+      }
       if (value?.hyperlink) record("hyperlinks", cell);
       if (cell.alignment?.textRotation) record("rotatedText", cell);
       if (cell.fill?.type === "gradient") record("gradientFills", cell);
@@ -2035,6 +2281,17 @@ function auditWorksheet(worksheet) {
         "rich-text",
         `${counters.richText} 個 Rich Text 儲存格會合併成單一樣式`,
         exampleText("richText")
+      )
+    );
+  }
+  if (counters.richTextStyled) {
+    issues.push(
+      createCompatibilityIssue(
+        worksheet,
+        "info",
+        "rich-text-styled",
+        `${counters.richTextStyled} 個 Rich Text 儲存格已還原顏色／粗細變化`,
+        `${exampleText("richTextStyled")}；同一儲存格內若有不同字級，仍會統一套用儲存格設定的字級。`
       )
     );
   }

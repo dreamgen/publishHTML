@@ -361,6 +361,88 @@ async function createWorkerHarness() {
     ["完整內容"],
     "未換行文字應交由裁切區域處理，不應自行加入省略號"
   );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const cell = {
+          font: {},
+          value: {
+            richText: [
+              { text: "重要", font: { bold: true } },
+              { text: "提示", font: { color: { argb: "FF18794E" } } },
+            ],
+          },
+        };
+        const runs = cellStyledRuns(cell);
+        return JSON.stringify(
+          runs.map((run) => ({
+            text: run.text,
+            bold: run.style.bold,
+            color: run.style.color?.argb || null,
+          }))
+        );
+      })()`)
+    ),
+    [
+      { text: "重要", bold: true, color: null },
+      { text: "提示", bold: false, color: "FF18794E" },
+    ],
+    "cellStyledRuns 應保留每個片段各自的有效顏色與粗細"
+  );
+  assert.equal(
+    harness.evaluate(`(() => {
+      const cell = {
+        font: { bold: true, color: { argb: "FF000000" } },
+        value: { richText: [{ text: "A" }, { text: "B" }] },
+      };
+      return cellStyledRuns(cell);
+    })()`),
+    null,
+    "Rich text 片段樣式其實相同時，應回傳 null 交由既有單一樣式流程處理"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const font = { widthOfTextAtSize: () => 1000 };
+        const characters = [..."ABCDEF"].map((ch) => ({
+          ch,
+          font,
+          color: null,
+          bold: false,
+        }));
+        const lines = wrapStyledCharacters(characters, 10, 25, true);
+        return JSON.stringify(lines.map((line) => line.map((c) => c.ch).join("")));
+      })()`)
+    ),
+    ["AB", "CD", "EF"],
+    "wrapStyledCharacters 應依逐字元寬度換行，與 wrapText 邏輯一致"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const font = { widthOfTextAtSize: () => 1000 };
+        const colorA = { tag: "A" };
+        const colorB = { tag: "B" };
+        const line = [
+          { ch: "A", font, color: colorA, bold: false },
+          { ch: "B", font, color: colorA, bold: false },
+          { ch: "C", font, color: colorB, bold: true },
+          { ch: "D", font, color: colorB, bold: true },
+          { ch: "E", font, color: colorA, bold: false },
+        ];
+        const groups = groupStyledLine(line, 10);
+        return JSON.stringify(
+          groups.map((group) => ({ text: group.text, bold: group.bold, width: group.width }))
+        );
+      })()`)
+    ),
+    [
+      { text: "AB", bold: false, width: 20 },
+      { text: "CD", bold: true, width: 20 },
+      { text: "E", bold: false, width: 10 },
+    ],
+    "groupStyledLine 應把連續同樣式字元合併成一段並正確加總寬度"
+  );
   assert.ok(
     harness.evaluate('borderWidth("thick") > borderWidth("medium")') &&
       harness.evaluate('borderWidth("medium") > borderWidth("thin")'),
@@ -450,6 +532,10 @@ async function createWorkerHarness() {
   assert.ok(
     compatibilityCodes.includes("images-unsupported"),
     "GIF 應回報為不支援格式"
+  );
+  assert.ok(
+    compatibilityCodes.includes("rich-text-styled"),
+    "「摘要」A5 的顏色/粗細差異 Rich Text 應標示為已還原樣式，而非合併成單一樣式"
   );
   assert.equal(parsed.sheets[0].printSettings.repeatColumns, "A:A");
 
