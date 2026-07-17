@@ -112,6 +112,30 @@ async function buildWorkbook() {
     hyperlink: "https://openai.com/",
   };
 
+  // 圖片轉換案例：PNG（oneCell 與 twoCell 錨點）應轉入 PDF，GIF 應略過。
+  const TEST_PNG_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const pngImageId = workbook.addImage({
+    buffer: Buffer.from(TEST_PNG_BASE64, "base64"),
+    extension: "png",
+  });
+  summary.addImage(pngImageId, {
+    tl: { col: 0.2, row: 3.2 },
+    ext: { width: 64, height: 32 },
+  });
+  report.addImage(pngImageId, {
+    tl: { col: 1, row: 13 },
+    br: { col: 3, row: 17 },
+  });
+  const gifImageId = workbook.addImage({
+    buffer: Buffer.from([0x47, 0x49, 0x46, 0x38]),
+    extension: "gif",
+  });
+  report.addImage(gifImageId, {
+    tl: { col: 3, row: 2 },
+    ext: { width: 20, height: 20 },
+  });
+
   const hidden = workbook.addWorksheet("內部設定");
   hidden.state = "hidden";
   hidden.addRow(["不應預設選取", 123]);
@@ -125,6 +149,7 @@ async function createWorkerHarness() {
     editorRoot,
     "vendor/pdf-lib/NotoSansTC-Regular.ttf"
   );
+  const hbWasmPath = path.join(editorRoot, "vendor/hb-subset/hb-subset.wasm");
   const context = {
     ExcelJS,
     PDFLib,
@@ -147,8 +172,12 @@ async function createWorkerHarness() {
     postMessage(message) {
       messages.push(message);
     },
-    async fetch() {
-      const bytes = fs.readFileSync(fontPath);
+    WebAssembly,
+    async fetch(resource) {
+      const url = String(resource);
+      const bytes = fs.readFileSync(
+        url.includes("hb-subset.wasm") ? hbWasmPath : fontPath
+      );
       return {
         ok: true,
         async arrayBuffer() {
@@ -167,6 +196,13 @@ async function createWorkerHarness() {
     },
   };
   vm.createContext(context);
+  // hb-subset 包裝器會掛在 context.self 上；worker 端以全域 HBSubset 取用。
+  vm.runInContext(
+    fs.readFileSync(path.join(editorRoot, "vendor/hb-subset/hb-subset.js"), "utf8"),
+    context,
+    { filename: "hb-subset.js" }
+  );
+  context.HBSubset = context.self.HBSubset;
   vm.runInContext(
     fs.readFileSync(path.join(editorRoot, "excel-worker.js"), "utf8"),
     context,
@@ -209,6 +245,12 @@ async function createWorkerHarness() {
   assert.ok(parsed.compatibility.summary.error >= 1);
   assert.ok(parsed.compatibility.summary.warning >= 2);
   assert.ok(parsed.compatibility.summary.info >= 2);
+  const compatibilityCodes = parsed.compatibility.items.map((item) => item.code);
+  assert.ok(compatibilityCodes.includes("images"), "PNG/JPEG 圖片應回報將轉入");
+  assert.ok(
+    compatibilityCodes.includes("images-unsupported"),
+    "GIF 應回報為不支援格式"
+  );
   assert.equal(parsed.sheets[0].printSettings.repeatColumns, "A:A");
 
   const estimated = await harness.send({
@@ -321,6 +363,60 @@ async function createWorkerHarness() {
   if (process.env.PDF_EDITOR_TEST_OUTPUT) {
     fs.writeFileSync(process.env.PDF_EDITOR_TEST_OUTPUT, pdfBytes);
   }
+
+  // 字型回歸測試：曾發生 fontkit 子集化產生損壞字型導致中文缺字（poppler
+  // 報 "Embedded font file may be invalid"）。此處抽出內嵌的 FontFile2，
+  // 斷言 fontkit 可重新解析、實際用到的字有 glyph、未用到的字已被裁掉，
+  // 防止未來升級 pdf-lib / fontkit / harfbuzzjs 時無聲退化。
+  const embeddedFontFiles = [];
+  for (const [, object] of pdf.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFLib.PDFDict)) continue;
+    const fontFileRef = object.get(PDFLib.PDFName.of("FontFile2"));
+    if (!fontFileRef) continue;
+    const stream = pdf.context.lookup(fontFileRef, PDFLib.PDFRawStream);
+    embeddedFontFiles.push(PDFLib.decodePDFRawStream(stream).decode());
+  }
+  assert.equal(embeddedFontFiles.length, 1, "應恰好內嵌一份中文字型");
+  const embeddedFont = fontkit.create(Buffer.from(embeddedFontFiles[0]));
+  for (const character of "銷售報表南區重要提示第頁□…09") {
+    assert.ok(
+      embeddedFont.hasGlyphForCodePoint(character.codePointAt(0)),
+      `內嵌字型缺少 glyph：${character}`
+    );
+  }
+  assert.ok(
+    !embeddedFont.hasGlyphForCodePoint("龜".codePointAt(0)),
+    "內嵌字型未經子集化（包含未使用的 glyph）"
+  );
+  assert.ok(
+    embeddedFontFiles[0].byteLength < 200000,
+    `內嵌字型子集過大：${embeddedFontFiles[0].byteLength} bytes`
+  );
+  assert.ok(
+    pdfBytes.byteLength < 500000,
+    `輸出 PDF 過大（子集化可能失效）：${pdfBytes.byteLength} bytes`
+  );
+
+  // 圖片轉換：workbook 有兩張 PNG 媒體（D2 標題列 logo 與 B14 圖片，後者
+  // 跨工作表重複使用但只嵌一份）與一張應略過的 GIF。排除 alpha 通道的
+  // SMask 後，主圖 XObject 應恰好兩份。
+  const imageStreams = new Map();
+  const smaskRefs = new Set();
+  for (const [ref, object] of pdf.context.enumerateIndirectObjects()) {
+    if (
+      object instanceof PDFLib.PDFRawStream &&
+      object.dict.get(PDFLib.PDFName.of("Subtype")) ===
+        PDFLib.PDFName.of("Image")
+    ) {
+      imageStreams.set(String(ref), object);
+      const smask = object.dict.get(PDFLib.PDFName.of("SMask"));
+      if (smask) smaskRefs.add(String(smask));
+    }
+  }
+  const mainImageCount = [...imageStreams.keys()].filter(
+    (ref) => !smaskRefs.has(ref)
+  ).length;
+  assert.equal(mainImageCount, 2, "應嵌入兩份主圖（GIF 略過、共用媒體不重複嵌入）");
 
   process.stdout.write(
     `Excel worker test passed: ${parsed.sheets.length} sheets, ${converted.pageCount} PDF pages, ${pdfBytes.byteLength} bytes\n`

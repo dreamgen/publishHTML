@@ -1,12 +1,24 @@
-/* global ExcelJS, PDFLib, fontkit */
+/* global ExcelJS, PDFLib, fontkit, HBSubset */
 
 importScripts(
   "./vendor/exceljs/exceljs.min.js",
   "./vendor/pdf-lib/pdf-lib.min.js",
-  "./vendor/pdf-lib/fontkit.umd.min.js"
+  "./vendor/pdf-lib/fontkit.umd.min.js",
+  "./vendor/hb-subset/hb-subset.js"
 );
 
-const { PDFDocument, StandardFonts, rgb } = PDFLib;
+const {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  pushGraphicsState,
+  popGraphicsState,
+  moveTo,
+  lineTo,
+  closePath,
+  clip,
+  endPath,
+} = PDFLib;
 const DEFAULT_OPTIONS = {
   paperSize: "source",
   orientation: "source",
@@ -30,6 +42,10 @@ const MAX_CELLS_PER_SHEET = 300000;
 const MAX_TOTAL_CELLS = 750000;
 const MAX_OUTPUT_PAGES = 250;
 const MIN_FIT_SCALE = 0.35;
+const EMU_PER_POINT = 12700;
+const PIXEL_TO_POINT = 0.75;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const SUPPORTED_IMAGE_EXTENSIONS = new Set(["png", "jpeg", "jpg"]);
 const PAPER_SIZES = {
   a3: [841.89, 1190.55],
   a4: [595.28, 841.89],
@@ -51,6 +67,7 @@ let workbook = null;
 let workbookName = "活頁簿.xlsx";
 let fontBytesPromise = null;
 let outlineFontPromise = null;
+let sourceFontPromise = null;
 let compatibilityReport = { summary: { error: 0, warning: 0, info: 0 }, items: [] };
 
 const postProgress = (requestId, title, detail, progress) =>
@@ -483,6 +500,40 @@ function lineWidth(font, value, size) {
   }
 }
 
+// 每個字型一份「字元 → 1000 單位寬度」快取，讓 wrapText/truncateText 以 O(n)
+// 增量累計，避免對每個候選字串整串重新排版（外框字型時尤其昂貴）。
+const fontWidthCaches = new WeakMap();
+
+function characterWidth(font, character, size) {
+  let cache = fontWidthCaches.get(font);
+  if (!cache) {
+    cache = new Map();
+    fontWidthCaches.set(font, cache);
+  }
+  let unitWidth = cache.get(character);
+  if (unitWidth === undefined) {
+    try {
+      unitWidth = font.widthOfTextAtSize(character, 1000) / 1000;
+    } catch {
+      unitWidth = 0.55;
+    }
+    cache.set(character, unitWidth);
+  }
+  return unitWidth * size;
+}
+
+function fontSupportsCharacter(font, character, size) {
+  if (typeof font.hasGlyph === "function") {
+    return font.hasGlyph(character.codePointAt(0));
+  }
+  try {
+    font.widthOfTextAtSize(character, size);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function drawText(page, value, options) {
   const { font } = options;
   if (!font?.outlineSource) {
@@ -518,24 +569,24 @@ function drawText(page, value, options) {
 function sanitizeTextForFont(font, value, size) {
   let result = "";
   for (const character of [...String(value || "")]) {
-    try {
-      font.widthOfTextAtSize(character, size);
-      result += character;
-    } catch {
-      result += "□";
-    }
+    result += fontSupportsCharacter(font, character, size) ? character : "□";
   }
   return result;
 }
 
 function truncateText(font, value, size, maxWidth) {
-  if (lineWidth(font, value, size) <= maxWidth) return value;
-  const suffix = "…";
-  let result = value;
-  while (result.length && lineWidth(font, result + suffix, size) > maxWidth) {
-    result = result.slice(0, -1);
+  const characters = [...String(value || "")];
+  const widths = characters.map((character) =>
+    characterWidth(font, character, size)
+  );
+  let total = widths.reduce((sum, width) => sum + width, 0);
+  if (total <= maxWidth) return value;
+  const suffixWidth = characterWidth(font, "…", size);
+  while (characters.length && total + suffixWidth > maxWidth) {
+    total -= widths.pop();
+    characters.pop();
   }
-  return result ? result + suffix : "";
+  return characters.length ? `${characters.join("")}…` : "";
 }
 
 function wrapText(font, value, size, maxWidth, shouldWrap) {
@@ -551,13 +602,16 @@ function wrapText(font, value, size, maxWidth, shouldWrap) {
       continue;
     }
     let current = "";
+    let currentWidth = 0;
     for (const character of [...sourceLine]) {
-      const candidate = current + character;
-      if (current && lineWidth(font, candidate, size) > maxWidth) {
+      const width = characterWidth(font, character, size);
+      if (current && currentWidth + width > maxWidth) {
         lines.push(current);
         current = character;
+        currentWidth = width;
       } else {
-        current = candidate;
+        current += character;
+        currentWidth += width;
       }
     }
     if (current) lines.push(current);
@@ -712,6 +766,156 @@ function calculateCellBox(layout, rowIndex, columnIndex, mergeRange) {
     width: width * scale,
     height: height * scale,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Excel 圖片（PNG/JPEG、儲存格錨點）
+//
+// ExcelJS 的錨點使用 0-based nativeCol/nativeRow 加上 EMU 位移（1pt = 12700
+// EMU）。先把錨點換算成「工作表絕對座標（點）」，再映射到各頁的內容區。
+// oneCell 錨（tl + ext，ext 單位為 px）與 twoCell 錨（tl + br）都支援。
+// ---------------------------------------------------------------------------
+
+function sheetOffsetX(worksheet, nativeCol, nativeColOff) {
+  let x = 0;
+  for (let column = 1; column <= nativeCol; column += 1) {
+    x += getColumnWidth(worksheet, column);
+  }
+  return x + (Number(nativeColOff) || 0) / EMU_PER_POINT;
+}
+
+function sheetOffsetY(worksheet, nativeRow, nativeRowOff) {
+  let y = 0;
+  for (let row = 1; row <= nativeRow; row += 1) {
+    y += getRowHeight(worksheet, row);
+  }
+  return y + (Number(nativeRowOff) || 0) / EMU_PER_POINT;
+}
+
+function imageSheetBox(worksheet, range) {
+  const tl = range?.tl;
+  if (!tl) return null;
+  const left = sheetOffsetX(worksheet, tl.nativeCol || 0, tl.nativeColOff);
+  const top = sheetOffsetY(worksheet, tl.nativeRow || 0, tl.nativeRowOff);
+  let width = 0;
+  let height = 0;
+  if (range.br) {
+    width =
+      sheetOffsetX(worksheet, range.br.nativeCol || 0, range.br.nativeColOff) -
+      left;
+    height =
+      sheetOffsetY(worksheet, range.br.nativeRow || 0, range.br.nativeRowOff) -
+      top;
+  } else if (range.ext) {
+    width = (Number(range.ext.width) || 0) * PIXEL_TO_POINT;
+    height = (Number(range.ext.height) || 0) * PIXEL_TO_POINT;
+  }
+  if (!(width > 0) || !(height > 0)) return null;
+  return {
+    left,
+    top,
+    width,
+    height,
+    anchorColumn: (tl.nativeCol || 0) + 1,
+    anchorRow: (tl.nativeRow || 0) + 1,
+  };
+}
+
+// 每個 PDF 文件嵌入同一張媒體一次（embedCache 以 imageId 為鍵、跨工作表共用）。
+async function prepareWorksheetImages(pdf, worksheet, embedCache) {
+  const placements = [];
+  for (const item of worksheet.getImages?.() || []) {
+    const media = workbook?.model?.media?.[item.imageId];
+    const extension = String(media?.extension || "").toLowerCase();
+    if (!media?.buffer || !SUPPORTED_IMAGE_EXTENSIONS.has(extension)) continue;
+    const bytes =
+      media.buffer instanceof Uint8Array
+        ? media.buffer
+        : new Uint8Array(media.buffer);
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      console.warn("[Excel PDF] 圖片超過大小上限，已略過。");
+      continue;
+    }
+    const box = imageSheetBox(worksheet, item.range);
+    if (!box) continue;
+    let embeddedPromise = embedCache.get(item.imageId);
+    if (!embeddedPromise) {
+      embeddedPromise =
+        extension === "png" ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
+      embedCache.set(item.imageId, embeddedPromise);
+    }
+    try {
+      placements.push({ box, embedded: await embeddedPromise });
+    } catch (error) {
+      console.warn("[Excel PDF] 圖片嵌入失敗，已略過。", error);
+    }
+  }
+  return placements;
+}
+
+// 把工作表絕對座標映射為「本頁內容區內的未縮放位移」。頁面欄列可能不連續
+// （重複標題欄列、隱藏欄列被剔除），逐段累計取得正確位置。
+function pageContentOffset(entries, startOf, sizeOf, absolute) {
+  let accumulated = 0;
+  for (const entry of entries) {
+    const start = startOf(entry);
+    if (absolute < start) break;
+    if (absolute < start + sizeOf(entry)) {
+      return accumulated + (absolute - start);
+    }
+    accumulated += sizeOf(entry);
+  }
+  return accumulated;
+}
+
+function drawPageImages(page, worksheet, layout, images) {
+  if (!images?.length) return;
+  const visible = images.filter(
+    (image) =>
+      layout.columns.some((column) => column.number === image.box.anchorColumn) &&
+      layout.rows.some((row) => row.number === image.box.anchorRow)
+  );
+  if (!visible.length) return;
+
+  const contentLeft = layout.margins.left + (layout.contentOffsetX || 0);
+  const contentTop =
+    layout.pageHeight - layout.margins.top - (layout.contentOffsetY || 0);
+  const clipLeft = layout.margins.left;
+  const clipRight = layout.pageWidth - layout.margins.right;
+  const clipBottom = layout.margins.bottom;
+  const clipTop = layout.pageHeight - layout.margins.top;
+
+  // 以內容區為剪裁範圍，避免跨分頁的圖片蓋到邊界與頁首頁尾。
+  page.pushOperators(
+    pushGraphicsState(),
+    moveTo(clipLeft, clipBottom),
+    lineTo(clipRight, clipBottom),
+    lineTo(clipRight, clipTop),
+    lineTo(clipLeft, clipTop),
+    closePath(),
+    clip(),
+    endPath()
+  );
+  for (const image of visible) {
+    const offsetX = pageContentOffset(
+      layout.columns,
+      (column) => sheetOffsetX(worksheet, column.number - 1, 0),
+      (column) => column.width,
+      image.box.left
+    );
+    const offsetY = pageContentOffset(
+      layout.rows,
+      (row) => sheetOffsetY(worksheet, row.number - 1, 0),
+      (row) => row.height,
+      image.box.top
+    );
+    const x = contentLeft + offsetX * layout.scale;
+    const yTop = contentTop - offsetY * layout.scale;
+    const width = image.box.width * layout.scale;
+    const height = image.box.height * layout.scale;
+    page.drawImage(image.embedded, { x, y: yTop - height, width, height });
+  }
+  page.pushOperators(popGraphicsState());
 }
 
 function drawCell(page, cell, box, fonts, scale, options) {
@@ -929,7 +1133,15 @@ function drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCoun
   }
 }
 
-function renderWorksheetPage(pdf, worksheet, layout, fonts, pageIndex, pageCount) {
+function renderWorksheetPage(
+  pdf,
+  worksheet,
+  layout,
+  fonts,
+  pageIndex,
+  pageCount,
+  images = []
+) {
   const merges = buildMergeMaps(worksheet);
   const page = pdf.addPage();
   page.setSize(layout.pageWidth, layout.pageHeight);
@@ -953,6 +1165,7 @@ function renderWorksheetPage(pdf, worksheet, layout, fonts, pageIndex, pageCount
       drawCell(page, cell, box, fonts, layout.scale, layout.options);
     }
   }
+  drawPageImages(page, worksheet, layout, images);
   drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCount);
   return page;
 }
@@ -963,10 +1176,19 @@ async function renderWorksheet(
   layouts,
   fonts,
   progressState,
-  requestId
+  requestId,
+  images = []
 ) {
   for (let pageIndex = 0; pageIndex < layouts.length; pageIndex += 1) {
-    renderWorksheetPage(pdf, worksheet, layouts[pageIndex], fonts, pageIndex, layouts.length);
+    renderWorksheetPage(
+      pdf,
+      worksheet,
+      layouts[pageIndex],
+      fonts,
+      pageIndex,
+      layouts.length,
+      images
+    );
     progressState.completed += 1;
     postProgress(
       requestId,
@@ -990,17 +1212,39 @@ function createCompatibilityIssue(worksheet, severity, code, message, detail = "
 
 function auditWorksheet(worksheet) {
   const issues = [];
-  const imageCount = worksheet.getImages?.().length || 0;
-  if (imageCount) {
-    issues.push(
-      createCompatibilityIssue(
-        worksheet,
-        "warning",
-        "images",
-        `${imageCount} 張圖片不會轉入 PDF`,
-        "目前保留儲存格內容與版面，嵌入圖片將略過。"
-      )
-    );
+  const imageItems = worksheet.getImages?.() || [];
+  if (imageItems.length) {
+    let supportedCount = 0;
+    let unsupportedCount = 0;
+    for (const item of imageItems) {
+      const extension = String(
+        workbook?.model?.media?.[item.imageId]?.extension || ""
+      ).toLowerCase();
+      if (SUPPORTED_IMAGE_EXTENSIONS.has(extension)) supportedCount += 1;
+      else unsupportedCount += 1;
+    }
+    if (supportedCount) {
+      issues.push(
+        createCompatibilityIssue(
+          worksheet,
+          "info",
+          "images",
+          `${supportedCount} 張 PNG/JPEG 圖片將依儲存格錨點轉入 PDF`,
+          "依錨定位置與大小繪製，並剪裁至頁面內容區；跨分頁圖片以錨點所在頁為準。"
+        )
+      );
+    }
+    if (unsupportedCount) {
+      issues.push(
+        createCompatibilityIssue(
+          worksheet,
+          "warning",
+          "images-unsupported",
+          `${unsupportedCount} 張非 PNG/JPEG 圖片不會轉入 PDF`,
+          "僅支援 PNG 與 JPEG，GIF、EMF、WMF 等格式將略過。"
+        )
+      );
+    }
   }
 
   const conditionalCount = worksheet.conditionalFormattings?.length || 0;
@@ -1280,41 +1524,94 @@ function estimateWorkbook(message) {
   });
 }
 
-async function getPdfFonts(pdf, { outlineUnicode = false } = {}) {
-  pdf.registerFontkit(fontkit);
+function getFontBytes() {
   if (!fontBytesPromise) {
     fontBytesPromise = fetch(
       new URL("./vendor/pdf-lib/NotoSansTC-Regular.ttf", self.location.href)
-    ).then(async (response) => {
-      if (!response.ok) throw new Error("中文字型載入失敗。");
-      return response.arrayBuffer();
-    });
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("中文字型載入失敗。");
+        return response.arrayBuffer();
+      })
+      .catch((error) => {
+        // 失敗時清掉快取，避免 rejected promise 讓後續轉換永遠失敗。
+        fontBytesPromise = null;
+        throw error;
+      });
   }
+  return fontBytesPromise;
+}
+
+// 完整字型的 fontkit 解析結果，做為缺字偵測（hasGlyphForCodePoint）與
+// 預覽外框繪製的共同來源。
+function getSourceFont() {
+  if (!sourceFontPromise) {
+    sourceFontPromise = getFontBytes()
+      .then((bytes) => fontkit.create(new Uint8Array(bytes)))
+      .catch((error) => {
+        sourceFontPromise = null;
+        throw error;
+      });
+  }
+  return sourceFontPromise;
+}
+
+// 以 HarfBuzz WASM 依實際用到的文字裁切子集；失敗時回傳 null 讓呼叫端
+// 退回完整內嵌。fontkit 自身的 subset 對大型 Unicode 字型會掉 glyph（CFF 與
+// 大型 TTF 皆有案例），因此一律先裁好子集、再以 subset:false 內嵌。
+async function subsetFontBytes(bytes, subsetText) {
+  if (typeof HBSubset === "undefined" || !HBSubset?.subsetFont) return null;
+  try {
+    const subsetBytes = await HBSubset.subsetFont(
+      new Uint8Array(bytes),
+      subsetText,
+      {
+        wasmUrl: new URL(
+          "./vendor/hb-subset/hb-subset.wasm",
+          self.location.href
+        ).href,
+      }
+    );
+    // 子集必須能被 fontkit 重新解析，否則視為失敗退回完整內嵌。
+    fontkit.create(subsetBytes);
+    return subsetBytes;
+  } catch (error) {
+    console.warn("[Excel PDF] 字型子集化失敗，改用完整內嵌。", error);
+    return null;
+  }
+}
+
+async function getPdfFonts(pdf, { outlineUnicode = false, subsetText = "" } = {}) {
+  pdf.registerFontkit(fontkit);
+  const sourceFont = await getSourceFont();
+  const hasGlyph = (codePoint) => sourceFont.hasGlyphForCodePoint(codePoint);
   let unicode;
   if (outlineUnicode) {
     if (!outlineFontPromise) {
-      outlineFontPromise = fontBytesPromise.then((bytes) => {
-        const outlineSource = fontkit.create(new Uint8Array(bytes));
-        return {
-          outlineSource,
-          pathCache: new Map(),
-          widthOfTextAtSize(value, size) {
-            const run = outlineSource.layout(String(value || ""));
-            const units = run.positions.reduce(
-              (sum, position) => sum + position.xAdvance,
-              0
-            );
-            return (units * size) / outlineSource.unitsPerEm;
-          },
-        };
-      });
+      outlineFontPromise = Promise.resolve(sourceFont).then((outlineSource) => ({
+        outlineSource,
+        pathCache: new Map(),
+        hasGlyph,
+        widthOfTextAtSize(value, size) {
+          const run = outlineSource.layout(String(value || ""));
+          const units = run.positions.reduce(
+            (sum, position) => sum + position.xAdvance,
+            0
+          );
+          return (units * size) / outlineSource.unitsPerEm;
+        },
+      }));
     }
     unicode = await outlineFontPromise;
   } else {
-    // fontkit can omit CJK glyphs when subsetting large Unicode fonts. Embed the
-    // static TrueType font intact so exported PDFs render consistently across
-    // PDF.js, Preview/Acrobat and Poppler-based viewers.
-    unicode = await pdf.embedFont(await fontBytesPromise, { subset: false });
+    const bytes = await getFontBytes();
+    const subsetBytes = subsetText
+      ? await subsetFontBytes(bytes, subsetText)
+      : null;
+    unicode = await pdf.embedFont(subsetBytes || bytes, { subset: false });
+    // 缺字偵測一律以「完整字型」為準：子集涵蓋的字元集合是從完整字型
+    // 通過 sanitize 的文字收集而來，兩者結果一致。
+    unicode.hasGlyph = hasGlyph;
   }
   return {
     unicode,
@@ -1323,6 +1620,42 @@ async function getPdfFonts(pdf, { outlineUnicode = false } = {}) {
     asciiItalic: await pdf.embedFont(StandardFonts.HelveticaOblique),
     asciiBoldItalic: await pdf.embedFont(StandardFonts.HelveticaBoldOblique),
   };
+}
+
+// 走訪所有將輸出的頁面，收集會以中文字型繪製的文字（儲存格、頁首頁尾、
+// 頁碼、日期時間），做為子集化的字元來源。□ 與 … 為 sanitize/truncate
+// 產生的字元，必須固定保留。
+const SUBSET_SAFETY_TEXT = "□…0123456789 第頁，共/：:-－()（）";
+
+function collectSubsetText(jobs) {
+  const chunks = [SUBSET_SAFETY_TEXT, workbookName];
+  const now = new Date();
+  chunks.push(now.toLocaleDateString("zh-TW"));
+  chunks.push(now.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }));
+  for (const job of jobs) {
+    const worksheet = job.worksheet;
+    chunks.push(String(worksheet.name || ""));
+    const headerFooter = worksheet.headerFooter || {};
+    for (const key of [
+      "oddHeader",
+      "oddFooter",
+      "evenHeader",
+      "evenFooter",
+      "firstHeader",
+      "firstFooter",
+    ]) {
+      if (headerFooter[key]) chunks.push(String(headerFooter[key]));
+    }
+    for (const page of job.pages) {
+      for (const row of page.rows) {
+        for (const column of page.columns) {
+          const value = cellText(worksheet.getCell(row.number, column.number));
+          if (value) chunks.push(value);
+        }
+      }
+    }
+  }
+  return chunks.join("");
 }
 
 function setPdfMetadata(pdf) {
@@ -1342,13 +1675,15 @@ async function previewWorkbook(message) {
   // embeds the intact font so its text remains selectable and searchable.
   const fonts = await getPdfFonts(pdf, { outlineUnicode: true });
   setPdfMetadata(pdf);
+  const images = await prepareWorksheetImages(pdf, job.worksheet, new Map());
   renderWorksheetPage(
     pdf,
     job.worksheet,
     layout,
     fonts,
     pageIndex,
-    job.pages.length
+    job.pages.length,
+    images
   );
   const bytes = await pdf.save({ useObjectStreams: true, addDefaultPage: false });
   postMessage(
@@ -1397,16 +1732,24 @@ async function convertWorkbook(message) {
 
   postProgress(message.requestId, "正在準備 Excel PDF", `共 ${totalPages} 頁`, 2);
   const pdf = await PDFDocument.create();
-  const fonts = await getPdfFonts(pdf);
+  const fonts = await getPdfFonts(pdf, {
+    subsetText: collectSubsetText(layouts),
+  });
   setPdfMetadata(pdf);
 
   const progressState = { completed: 0, total: totalPages };
   const warnings = [];
+  const imageEmbedCache = new Map();
   for (const item of layouts) {
     warnings.push(
       ...issuesForSheet(item.worksheet.id)
         .filter((issue) => issue.severity !== "info")
         .map((issue) => `${item.worksheet.name}：${issue.message}`)
+    );
+    const images = await prepareWorksheetImages(
+      pdf,
+      item.worksheet,
+      imageEmbedCache
     );
     await renderWorksheet(
       pdf,
@@ -1414,7 +1757,8 @@ async function convertWorkbook(message) {
       item.pages,
       fonts,
       progressState,
-      message.requestId
+      message.requestId,
+      images
     );
   }
 

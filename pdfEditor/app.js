@@ -4449,8 +4449,15 @@ class PdfWorkshop {
           this.getPageRotation(record) === 0 &&
           !this.sources.get(record.sourceId)?.encrypted
       );
+      const annotationText = records
+        .flatMap((record) =>
+          record.annotations
+            .filter((annotation) => annotation.type === "text")
+            .map((annotation) => String(annotation.text || ""))
+        )
+        .join("");
       const annotationFont = needsVectorFont
-        ? await this.loadAnnotationFont(output)
+        ? await this.loadAnnotationFont(output, annotationText)
         : null;
 
       for (let index = 0; index < records.length; index += 1) {
@@ -4727,7 +4734,7 @@ class PdfWorkshop {
     this.openDialog(dialog);
   }
 
-  async loadAnnotationFont(outputDocument) {
+  async loadAnnotationFont(outputDocument, subsetText = "") {
     if (!window.fontkit) {
       throw new Error("中文字型元件載入失敗");
     }
@@ -4735,13 +4742,36 @@ class PdfWorkshop {
     if (!this.annotationFontBytesPromise) {
       this.annotationFontBytesPromise = fetch(
         "./vendor/pdf-lib/NotoSansTC-Regular.ttf"
-      ).then((response) => {
-        if (!response.ok) throw new Error("中文字型檔案讀取失敗");
-        return response.arrayBuffer();
-      });
+      )
+        .then((response) => {
+          if (!response.ok) throw new Error("中文字型檔案讀取失敗");
+          return response.arrayBuffer();
+        })
+        .catch((error) => {
+          // 失敗不快取，讓下一次匯出可重試。
+          this.annotationFontBytesPromise = null;
+          throw error;
+        });
     }
     const fontBytes = await this.annotationFontBytesPromise;
-    return outputDocument.embedFont(fontBytes.slice(0), {
+    let embedBytes = fontBytes;
+    if (subsetText && window.HBSubset) {
+      // 以 HarfBuzz WASM 依實際使用的字元裁切子集，將內嵌字型從數 MB 降到
+      // 數十 KB；失敗時退回完整內嵌。表單流程（updateFieldAppearances）需
+      // 渲染任意欄位內容，呼叫端不傳 subsetText 即維持完整內嵌。
+      try {
+        const subsetBytes = await window.HBSubset.subsetFont(
+          new Uint8Array(fontBytes),
+          `${subsetText} □…`,
+          { wasmUrl: "./vendor/hb-subset/hb-subset.wasm" }
+        );
+        window.fontkit.create(subsetBytes);
+        embedBytes = subsetBytes;
+      } catch (error) {
+        console.warn("[PDF Editor] 註解字型子集化失敗，改用完整內嵌。", error);
+      }
+    }
+    return outputDocument.embedFont(embedBytes, {
       subset: false,
       features: { liga: false },
     });
