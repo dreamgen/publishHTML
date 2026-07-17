@@ -295,6 +295,9 @@ async function createWorkerHarness() {
   return {
     messages,
     requestSequence: 0,
+    evaluate(expression) {
+      return vm.runInContext(expression, context);
+    },
     async send(data) {
       const requestId = data.requestId || ++this.requestSequence;
       const startIndex = messages.length;
@@ -316,6 +319,85 @@ async function createWorkerHarness() {
 (async () => {
   const xlsx = await buildWorkbook();
   const harness = await createWorkerHarness();
+  assert.equal(
+    harness.evaluate(
+      'resolvedScaling({pageSetup:{fitToPage:false,fitToWidth:1,scale:80}},{scaling:"source",scalePercent:100},500,900,500,800)'
+    ),
+    0.8,
+    "未啟用 fitToPage 時應尊重 Excel scale，不得被 fitToWidth 預設值覆蓋"
+  );
+  assert.equal(
+    harness.evaluate(
+      'resolvedScaling({pageSetup:{fitToPage:true,fitToWidth:1,fitToHeight:2}},{scaling:"source",scalePercent:100},1000,2400,500,800)'
+    ),
+    0.5,
+    "fitToWidth/fitToHeight 應共同決定縮放比例"
+  );
+  assert.equal(
+    harness.evaluate('formatDateValue(new Date(1899,11,30,12,10,0),"h:mm")'),
+    "12:10",
+    "時間格式不得顯示成 1899/12/30"
+  );
+  assert.equal(
+    harness.evaluate(
+      'formatDateValue(new Date(2026,6,17,12,10,0),"yyyy/mm/dd hh:mm")'
+    ),
+    "2026/07/17 12:10",
+    "日期時間混合格式應區分月份與分鐘"
+  );
+  assert.equal(
+    harness.evaluate(
+      'expandHeaderFooter("&P/&N",{name:"測試",pageSetup:{useFirstPageNumber:true,firstPageNumber:4294967295}},1,3,{documentPageOffset:5,documentPageCount:10})'
+    ),
+    "7/10",
+    "Excel 自動頁碼 sentinel 不得輸出為 4294967295"
+  );
+  assert.deepEqual(
+    Array.from(
+      harness.evaluate(
+        'wrapText({widthOfTextAtSize:(value)=>value.length*10},"完整內容",10,5,false)'
+      )
+    ),
+    ["完整內容"],
+    "未換行文字應交由裁切區域處理，不應自行加入省略號"
+  );
+  assert.equal(
+    harness.evaluate(`(() => {
+      const testWorkbook = new ExcelJS.Workbook();
+      const sheet = testWorkbook.addWorksheet("可見範圍");
+      sheet.getCell("A1").value = "列印內容";
+      sheet.getColumn(8).hidden = true;
+      sheet.getCell("H50").value = "隱藏輔助資料";
+      return encodeRange(visibleUsedRange(sheet, {
+        top: 1, left: 1, bottom: 50, right: 8
+      }));
+    })()`),
+    "A1:A1",
+    "隱藏輔助欄不得擴大列印範圍"
+  );
+  assert.ok(
+    harness.evaluate(`(() => {
+      const testWorkbook = new ExcelJS.Workbook();
+      const sheet = testWorkbook.addWorksheet("文字延伸");
+      sheet.getCell("A1").value = "可延伸到空白儲存格的說明";
+      const layout = {
+        columns: [
+          { number: 1, width: 40 },
+          { number: 2, width: 50 },
+          { number: 3, width: 60 },
+        ],
+        rows: [{ number: 1, height: 20 }],
+        scale: 1,
+        scaleX: 1,
+      };
+      const box = { x: 0, y: 0, width: 40, height: 20 };
+      return calculateOverflowTextBox(
+        sheet, layout, 0, 0, sheet.getCell("A1"), box,
+        buildMergeMaps(sheet), new Map()
+      ).width;
+    })()`) > 140,
+    "未換行文字應延伸到右側連續空白儲存格"
+  );
   const input = xlsx.buffer.slice(xlsx.byteOffset, xlsx.byteOffset + xlsx.byteLength);
   const parsed = await harness.send({
     type: "parse",
@@ -460,13 +542,88 @@ async function createWorkerHarness() {
       name: path.basename(process.env.PDF_EDITOR_REAL_XLSX),
       buffer: realInput,
     });
-    const target = realParsed.sheets.find(
-      (sheet) => sheet.name === "忠恕交通2026"
-    );
-    assert.ok(target, "Real workbook regression sheet was not found");
     const realTargets = process.env.PDF_EDITOR_REAL_ALL === "1"
       ? realParsed.sheets.filter((sheet) => sheet.state === "visible")
-      : [target];
+      : [
+          realParsed.sheets.find(
+            (sheet) =>
+              sheet.name ===
+              (process.env.PDF_EDITOR_REAL_SHEET || "忠恕交通2026")
+          ),
+        ].filter(Boolean);
+    assert.ok(realTargets.length, "Real workbook regression sheet was not found");
+    if (process.env.PDF_EDITOR_REAL_DEBUG === "1") {
+      const debugSheetNames = (process.env.PDF_EDITOR_REAL_DEBUG_SHEETS || "")
+        .split("|")
+        .map((name) => name.trim())
+        .filter(Boolean);
+      const layoutDetails = JSON.parse(
+        realHarness.evaluate(`JSON.stringify(workbook.worksheets
+          .filter((worksheet) => worksheet.state === "visible")
+          .map((worksheet) => {
+            const settings = sourceSheetSettings(worksheet);
+            const layouts = createSheetLayout(worksheet, settings);
+            const range = worksheetRange(
+              worksheet,
+              settings.rangeMode,
+              settings.customRange
+            )[0];
+            let unscaledHeight = 0;
+            for (let row = range.top; row <= range.bottom; row += 1) {
+              unscaledHeight += getRowHeight(worksheet, row);
+            }
+            let unscaledWidth = 0;
+            for (let column = range.left; column <= range.right; column += 1) {
+              unscaledWidth += getColumnWidth(worksheet, column);
+            }
+            return {
+              name: worksheet.name,
+              range: encodeRange(range),
+              pageSetup: {
+                fitToPage: worksheet.pageSetup?.fitToPage,
+                fitToWidth: worksheet.pageSetup?.fitToWidth,
+                fitToHeight: worksheet.pageSetup?.fitToHeight,
+                scale: worksheet.pageSetup?.scale,
+                orientation: worksheet.pageSetup?.orientation,
+                paperSize: worksheet.pageSetup?.paperSize,
+                printArea: worksheet.pageSetup?.printArea,
+                printTitlesRow: worksheet.pageSetup?.printTitlesRow,
+              },
+              rowBreaks: worksheet.rowBreaks,
+              pages: layouts.length,
+              scale: layouts[0]?.scale,
+              scaleX: layouts[0]?.scaleX,
+              unscaledWidth,
+              unscaledHeight,
+              availableWidth: layouts[0]
+                ? layouts[0].pageWidth - layouts[0].margins.left - layouts[0].margins.right
+                : 0,
+              availableHeight: layouts[0]
+                ? layouts[0].pageHeight - layouts[0].margins.top - layouts[0].margins.bottom
+                : 0,
+              rowPages: layouts.map((layout) => ({
+                first: layout.rows[0]?.number,
+                last: layout.rows[layout.rows.length - 1]?.number,
+                rows: layout.rows.length,
+              })),
+            };
+          }))`)
+      );
+      const debugTargets = debugSheetNames.length
+        ? realTargets.filter((sheet) => debugSheetNames.includes(sheet.name))
+        : realTargets;
+      process.stdout.write(
+        `${JSON.stringify(
+          debugTargets.map((sheet) => ({
+            name: sheet.name,
+            estimatedPages: sheet.estimatedPages,
+            layout: layoutDetails.find((item) => item.name === sheet.name),
+          })),
+          null,
+          2
+        )}\n`
+      );
+    }
     const realConverted = await realHarness.send({
       type: "convert",
       sheets: realTargets.map((sheet) => ({
@@ -480,6 +637,13 @@ async function createWorkerHarness() {
     const realPdfBytes = new Uint8Array(realConverted.bytes);
     const realPdf = await PDFLib.PDFDocument.load(realPdfBytes);
     assert.equal(realPdf.getPageCount(), realConverted.pageCount);
+    if (process.env.PDF_EDITOR_REAL_EXPECTED_PAGES) {
+      assert.equal(
+        realConverted.pageCount,
+        Number(process.env.PDF_EDITOR_REAL_EXPECTED_PAGES),
+        "Real workbook page count differs from the reference PDF"
+      );
+    }
     if (process.env.PDF_EDITOR_REAL_TEST_OUTPUT) {
       fs.writeFileSync(process.env.PDF_EDITOR_REAL_TEST_OUTPUT, realPdfBytes);
     }

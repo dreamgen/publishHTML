@@ -1,4 +1,4 @@
-const SW_VERSION = "v21";
+const SW_VERSION = "v22";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 // Cached during install (required for the core editor to work offline).
@@ -10,6 +10,7 @@ const NETWORK_FIRST_ASSETS = [
   "/index.html",
   "/app.js",
   "/export-delivery.mjs",
+  "/pdf-page-copy.mjs",
   "/excel-worker.js",
   "/styles.css",
   "/manifest.webmanifest",
@@ -20,6 +21,7 @@ const APP_SHELL = [
   "./styles.css",
   "./app.js",
   "./export-delivery.mjs",
+  "./pdf-page-copy.mjs",
   "./excel-worker.js",
   "./manifest.webmanifest",
   "./icons/pdfEditor-192.svg",

@@ -3,6 +3,7 @@ import {
   chooseExportDelivery,
   detectExportEnvironment,
 } from "./export-delivery.mjs";
+import { copyPagesBySource } from "./pdf-page-copy.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "./vendor/pdfjs/pdf.worker.mjs",
@@ -5074,6 +5075,28 @@ class PdfWorkshop {
         ? await this.loadAnnotationFont(output, annotationText)
         : null;
 
+      const copyEntries = [];
+      const copyableRecordIds = new Set();
+      for (const record of records) {
+        const source = this.sources.get(record.sourceId);
+        if (!source) throw new Error("找不到頁面來源");
+        const rotation = this.getPageRotation(record);
+        const annotationsCanStayVector =
+          !record.annotations.length ||
+          (rotation === 0 &&
+            this.canEncodeAnnotations(record.annotations, annotationFont));
+        if (!source.encrypted && source.pdfLibDoc && annotationsCanStayVector) {
+          copyableRecordIds.add(record.id);
+          copyEntries.push({
+            key: record.id,
+            sourceDocument: source.pdfLibDoc,
+            sourcePageIndex: record.sourcePageIndex,
+          });
+        }
+      }
+      this.setBusy(true, "正在建立 PDF", "整理共用字型與頁面資源", 4);
+      const copiedPages = await copyPagesBySource(output, copyEntries);
+
       for (let index = 0; index < records.length; index += 1) {
         const record = records[index];
         const source = this.sources.get(record.sourceId);
@@ -5087,18 +5110,11 @@ class PdfWorkshop {
         );
 
         const rotation = this.getPageRotation(record);
-        const canDrawAsVector =
-          record.annotations.length > 0 &&
-          rotation === 0 &&
-          !source.encrypted &&
-          this.canEncodeAnnotations(record.annotations, annotationFont);
-
-        if (source.encrypted || (record.annotations.length && !canDrawAsVector)) {
+        if (!copyableRecordIds.has(record.id)) {
           await this.addRasterizedAnnotatedPage(output, record);
         } else {
-          const [copiedPage] = await output.copyPages(source.pdfLibDoc, [
-            record.sourcePageIndex,
-          ]);
+          const copiedPage = copiedPages.get(record.id);
+          if (!copiedPage) throw new Error("複製 PDF 頁面失敗");
           output.addPage(copiedPage);
           copiedPage.setRotation(degrees(rotation));
           if (record.annotations.length) {

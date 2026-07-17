@@ -132,6 +132,49 @@ function parseRanges(value) {
     .filter(Boolean);
 }
 
+function cellHasVisibleFormatting(cell) {
+  const fill = cell.fill;
+  if (
+    (fill?.type === "pattern" && fill.pattern && fill.pattern !== "none") ||
+    fill?.type === "gradient"
+  ) {
+    return true;
+  }
+  return ["top", "right", "bottom", "left", "diagonal"].some(
+    (side) => !!cell.border?.[side]?.style
+  );
+}
+
+// Excel 的 dimensions 會把隱藏的輔助欄、查表資料與曾經編輯過的尾端儲存格
+// 一併算入。這些內容不會出現在 Excel 的列印結果，若直接拿 dimensions
+// 分頁，便會產生只有頁尾或完全空白的額外頁面。未設定明確 Print_Area 時，
+// 以可見且實際能顯示的儲存格重新收斂範圍；合併儲存格的從屬格會自然把標題
+// 或表格邊界擴展到完整寬度。
+function visibleUsedRange(worksheet, fallback) {
+  let top = Infinity;
+  let left = Infinity;
+  let bottom = 0;
+  let right = 0;
+
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    if (row.hidden) return;
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      const columnNumber = Number(cell.col);
+      if (!Number.isFinite(columnNumber) || worksheet.getColumn(columnNumber)?.hidden) {
+        return;
+      }
+      if (!cellText(cell) && !cellHasVisibleFormatting(cell)) return;
+      top = Math.min(top, row.number);
+      left = Math.min(left, columnNumber);
+      bottom = Math.max(bottom, row.number);
+      right = Math.max(right, columnNumber);
+    });
+  });
+
+  if (!Number.isFinite(top) || !bottom || !right) return fallback;
+  return { top, left, bottom, right };
+}
+
 function worksheetRange(worksheet, rangeMode = "print-area", customRange = "") {
   if (rangeMode === "custom") {
     const parsed = parseRanges(customRange);
@@ -158,12 +201,15 @@ function worksheetRange(worksheet, rangeMode = "print-area", customRange = "") {
     Number.isFinite(dimensions.right)
   ) {
     return [
-      expandRangeForDrawings(worksheet, {
-        top: Math.max(1, dimensions.top),
-        left: Math.max(1, dimensions.left),
-        bottom: Math.max(1, dimensions.bottom),
-        right: Math.max(1, dimensions.right),
-      }),
+      expandRangeForDrawings(
+        worksheet,
+        visibleUsedRange(worksheet, {
+          top: Math.max(1, dimensions.top),
+          left: Math.max(1, dimensions.left),
+          bottom: Math.max(1, dimensions.bottom),
+          right: Math.max(1, dimensions.right),
+        })
+      ),
     ];
   }
 
@@ -289,7 +335,9 @@ function parseColumnBreaks(value) {
 
 function excelColumnWidthToPoints(width) {
   const resolved = Number.isFinite(width) && width > 0 ? width : 8.43;
-  return Math.max(5, Math.floor(resolved * 7 + 5) * 0.75);
+  // 活頁簿的 Normal 樣式多為 Calibri 12；其最大數字寬約 7.75px。
+  // 舊值 7px 是 Calibri 11 的近似值，會讓中文表格整體窄約一成。
+  return Math.max(5, Math.floor(resolved * 7.75 + 5) * 0.75);
 }
 
 function getColumnWidth(worksheet, columnNumber) {
@@ -386,14 +434,126 @@ function chunkBySize(items, availableSize, sizeOf, breaksAfter = new Set()) {
   return chunks.length ? chunks : [[]];
 }
 
-function resolvedScaling(worksheet, options, totalWidth, totalHeight, availableWidth, availableHeight) {
+function chunksAtScale(
+  items,
+  scale,
+  availableSize,
+  repeatedTitleSize,
+  sizeOf,
+  breaksAfter
+) {
+  return chunkBySize(
+    items,
+    Math.max(20, availableSize / scale - repeatedTitleSize),
+    sizeOf,
+    breaksAfter
+  );
+}
+
+// 連續尺寸的比例公式可能因「整列不可拆分」而多出一頁。二分搜尋仍可
+// 保持最大的可用比例，同時確實符合指定的頁數上限。
+function scaleForChunkTarget(
+  items,
+  upperScale,
+  lowerScale,
+  targetChunks,
+  availableSize,
+  repeatedTitleSize,
+  sizeOf,
+  breaksAfter
+) {
+  if (!items.length || targetChunks <= 0) return upperScale;
+  const countAt = (scale) =>
+    chunksAtScale(
+      items,
+      scale,
+      availableSize,
+      repeatedTitleSize,
+      sizeOf,
+      breaksAfter
+    ).length;
+  if (countAt(upperScale) <= targetChunks) return upperScale;
+  if (countAt(lowerScale) > targetChunks) return lowerScale;
+
+  let low = lowerScale;
+  let high = upperScale;
+  for (let iteration = 0; iteration < 36; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (countAt(middle) <= targetChunks) low = middle;
+    else high = middle;
+  }
+  return Math.max(MIN_FIT_SCALE, low * (1 - 1e-7));
+}
+
+function compactTrailingChunk(
+  items,
+  scale,
+  availableSize,
+  repeatedTitleSize,
+  sizeOf,
+  breaksAfter,
+  maximumTrailingItems,
+  maximumReduction
+) {
+  const chunks = chunksAtScale(
+    items,
+    scale,
+    availableSize,
+    repeatedTitleSize,
+    sizeOf,
+    breaksAfter
+  );
+  const trailingChunk = chunks[chunks.length - 1];
+  if (
+    chunks.length <= 1 ||
+    !trailingChunk?.length ||
+    trailingChunk.length > maximumTrailingItems
+  ) {
+    return scale;
+  }
+  const lowerScale = Math.max(MIN_FIT_SCALE, scale * (1 - maximumReduction));
+  return scaleForChunkTarget(
+    items,
+    scale,
+    lowerScale,
+    chunks.length - 1,
+    availableSize,
+    repeatedTitleSize,
+    sizeOf,
+    breaksAfter
+  );
+}
+
+function resolvedScaling(
+  worksheet,
+  options,
+  totalWidth,
+  totalHeight,
+  availableWidth,
+  availableHeight,
+  repeatedTitleWidth = 0,
+  repeatedTitleHeight = 0
+) {
   let mode = options.scaling;
   let percent = clamp(Number(options.scalePercent) || 100, 10, 400) / 100;
+  let fitWidth = 1;
+  let fitHeight = 1;
+  let maximumFitScale = 1;
   if (mode === "source") {
     const source = worksheet.pageSetup || {};
-    if (source.fitToPage && Number(source.fitToHeight) === 1) mode = "fit-page";
-    else if (source.fitToPage || Number(source.fitToWidth) === 1) mode = "fit-width";
-    else {
+    // OOXML 常會保留 fitToWidth=1 的預設值；只有 fitToPage 啟用時
+    // 才能採用 fitToWidth/fitToHeight，否則必須尊重 scale。
+    if (source.fitToPage) {
+      mode = "fit-target";
+      fitWidth = Math.max(0, Number(source.fitToWidth) || 0);
+      fitHeight = Math.max(0, Number(source.fitToHeight) || 0);
+      const savedScale = Number(source.scale);
+      if (Number.isFinite(savedScale) && savedScale > 0) {
+        // Excel 仍會在部分 fitToPage 活頁簿保存最近一次實際列印比例。
+        // 以它作為上限，可避免用近似欄寬重新計算後反而放大內容。
+        maximumFitScale = Math.min(1, clamp(savedScale, 10, 400) / 100);
+      }
+    } else {
       mode = "custom";
       percent = clamp(Number(source.scale) || 100, 10, 400) / 100;
     }
@@ -401,15 +561,37 @@ function resolvedScaling(worksheet, options, totalWidth, totalHeight, availableW
   if (mode === "actual") return 1;
   if (mode === "custom") return percent;
   if (mode === "fit-page") {
-    return Math.max(
-      MIN_FIT_SCALE,
-      Math.min(availableWidth / Math.max(1, totalWidth), availableHeight / Math.max(1, totalHeight))
+    mode = "fit-target";
+    fitWidth = 1;
+    fitHeight = 1;
+  } else if (mode === "fit-width") {
+    mode = "fit-target";
+    fitWidth = 1;
+    fitHeight = 0;
+  }
+  if (mode !== "fit-target") return 1;
+
+  const candidates = [];
+  if (fitWidth > 0) {
+    const repeatedWidth = repeatedTitleWidth * Math.max(0, fitWidth - 1);
+    candidates.push(
+      (availableWidth * fitWidth) /
+        Math.max(1, totalWidth + repeatedWidth)
     );
   }
-  if (mode === "fit-width" && totalWidth > availableWidth) {
-    return Math.max(MIN_FIT_SCALE, availableWidth / totalWidth);
+  if (fitHeight > 0) {
+    const repeatedHeight = repeatedTitleHeight * Math.max(0, fitHeight - 1);
+    candidates.push(
+      (availableHeight * fitHeight) /
+        Math.max(1, totalHeight + repeatedHeight)
+    );
   }
-  return 1;
+  if (!candidates.length) return maximumFitScale;
+  return clamp(
+    Math.min(maximumFitScale, ...candidates),
+    MIN_FIT_SCALE,
+    1
+  );
 }
 
 function createRangeLayout(worksheet, range, options) {
@@ -431,37 +613,131 @@ function createRangeLayout(worksheet, range, options) {
 
   const totalWidth = columns.reduce((sum, column) => sum + column.width, 0);
   const totalHeight = rows.reduce((sum, row) => sum + row.height, 0);
-  const scale = resolvedScaling(
+  const titleColumnNumbers = parseTitleColumns(options.repeatColumns, range);
+  const titleColumns = columns.filter((column) =>
+    titleColumnNumbers.includes(column.number)
+  );
+  const titleWidth = titleColumns.reduce((sum, column) => sum + column.width, 0);
+  const titleRowNumbers = parseTitleRows(options.repeatRows, range);
+  const titleRows = rows.filter((row) => titleRowNumbers.includes(row.number));
+  const titleHeight = titleRows.reduce((sum, row) => sum + row.height, 0);
+  let scaleX = resolvedScaling(
     worksheet,
     options,
     totalWidth,
-    totalHeight,
+    0,
     availableWidth,
-    availableHeight
+    Number.MAX_SAFE_INTEGER,
+    titleWidth,
+    0
+  );
+  let scaleY = resolvedScaling(
+    worksheet,
+    options,
+    0,
+    totalHeight,
+    Number.MAX_SAFE_INTEGER,
+    availableHeight,
+    0,
+    titleHeight
   );
 
-  const titleColumnNumbers = parseTitleColumns(options.repeatColumns, range);
-  const titleColumns = columns.filter((column) => titleColumnNumbers.includes(column.number));
-  const titleWidth = titleColumns.reduce((sum, column) => sum + column.width, 0);
   const bodyColumns = columns.filter((column) => !titleColumnNumbers.includes(column.number));
+  const columnBreaks = parseColumnBreaks(options.columnBreaks);
+  const bodyRows = rows.filter((row) => !titleRowNumbers.includes(row.number));
+  const rowBreaks = parseRowBreaks(options.rowBreaks);
+  if (options.scaling === "source" && worksheet.pageSetup?.fitToPage) {
+    const targetColumnPages = Math.max(
+      0,
+      Number(worksheet.pageSetup.fitToWidth) || 0
+    );
+    const targetRowPages = Math.max(
+      0,
+      Number(worksheet.pageSetup.fitToHeight) || 0
+    );
+    if (targetColumnPages > 0) {
+      scaleX = scaleForChunkTarget(
+        bodyColumns,
+        scaleX,
+        MIN_FIT_SCALE,
+        targetColumnPages,
+        availableWidth,
+        titleWidth,
+        (column) => column.width,
+        columnBreaks
+      );
+    } else {
+      scaleX = compactTrailingChunk(
+        bodyColumns,
+        scaleX,
+        availableWidth,
+        titleWidth,
+        (column) => column.width,
+        columnBreaks,
+        2,
+        0.12
+      );
+    }
+    if (targetRowPages > 0) {
+      scaleY = scaleForChunkTarget(
+        bodyRows,
+        scaleY,
+        MIN_FIT_SCALE,
+        targetRowPages,
+        availableHeight,
+        titleHeight,
+        (row) => row.height,
+        rowBreaks
+      );
+    }
+    // Fit-to-page 活頁簿常由 Excel 保留「自動高度」(fitToHeight=0)。若
+    // 最後一頁只有極少數列，Excel 的列印引擎會以稍低比例消化尾頁；用
+    // 12% 上限避免把真正的多頁表格過度縮小。
+    scaleY = compactTrailingChunk(
+      bodyRows,
+      scaleY,
+      availableHeight,
+      titleHeight,
+      (row) => row.height,
+      rowBreaks,
+      4,
+      0.12
+    );
+  } else if (options.scaling === "source") {
+    // 固定百分比只容許小幅修正，用來吸收 Excel、瀏覽器與 PDF 點數換算
+    // 的四捨五入差異，不改變使用者原本的列印比例意圖。
+    scaleX = compactTrailingChunk(
+      bodyColumns,
+      scaleX,
+      availableWidth,
+      titleWidth,
+      (column) => column.width,
+      columnBreaks,
+      2,
+      0.015
+    );
+    scaleY = compactTrailingChunk(
+      bodyRows,
+      scaleY,
+      availableHeight,
+      titleHeight,
+      (row) => row.height,
+      rowBreaks,
+      2,
+      0.015
+    );
+  }
   const columnChunks = chunkBySize(
     bodyColumns,
-    Math.max(20, availableWidth / scale - titleWidth),
+    Math.max(20, availableWidth / scaleX - titleWidth),
     (column) => column.width,
-    parseColumnBreaks(options.columnBreaks)
+    columnBreaks
   ).map((chunk) => [...titleColumns, ...chunk]);
-  const titleRowNumbers = parseTitleRows(
-    options.repeatRows,
-    range
-  );
-  const titleRows = rows.filter((row) => titleRowNumbers.includes(row.number));
-  const titleHeight = titleRows.reduce((sum, row) => sum + row.height, 0);
-  const bodyRows = rows.filter((row) => !titleRowNumbers.includes(row.number));
   const rowChunks = chunkBySize(
     bodyRows,
-    Math.max(20, availableHeight / scale - titleHeight),
+    Math.max(20, availableHeight / scaleY - titleHeight),
     (row) => row.height,
-    parseRowBreaks(options.rowBreaks)
+    rowBreaks
   );
 
   const pages = [];
@@ -473,13 +749,18 @@ function createRangeLayout(worksheet, range, options) {
     const repeatedTitles = rowChunkIndex > 0 ? titleRows : [];
     const firstPageTitles = rowChunkIndex === 0 ? titleRows : [];
     const pageRows = [...firstPageTitles, ...repeatedTitles, ...rowChunk];
-    const contentWidth = columnChunk.reduce((sum, column) => sum + column.width, 0) * scale;
-    const contentHeight = pageRows.reduce((sum, row) => sum + row.height, 0) * scale;
+    const contentWidth =
+      columnChunk.reduce((sum, column) => sum + column.width, 0) * scaleX;
+    const contentHeight =
+      pageRows.reduce((sum, row) => sum + row.height, 0) * scaleY;
     pages.push({
       range,
       columns: columnChunk,
       rows: pageRows,
-      scale,
+      scale: scaleY,
+      scaleX,
+      scaleY,
+      fontScale: scaleX,
       contentOffsetX: options.centerHorizontal
         ? Math.max(0, (availableWidth - contentWidth) / 2)
         : 0,
@@ -570,8 +851,8 @@ function lineWidth(font, value, size) {
   }
 }
 
-// 每個字型一份「字元 → 1000 單位寬度」快取，讓 wrapText/truncateText 以 O(n)
-// 增量累計，避免對每個候選字串整串重新排版（外框字型時尤其昂貴）。
+// 每個字型一份「字元 → 1000 單位寬度」快取，讓 wrapText 以 O(n) 增量
+// 累計，避免對每個候選字串整串重新排版（外框字型時尤其昂貴）。
 const fontWidthCaches = new WeakMap();
 
 function characterWidth(font, character, size) {
@@ -666,26 +947,9 @@ function sanitizeTextForFont(
   return result;
 }
 
-function truncateText(font, value, size, maxWidth) {
-  const characters = [...String(value || "")];
-  const widths = characters.map((character) =>
-    characterWidth(font, character, size)
-  );
-  let total = widths.reduce((sum, width) => sum + width, 0);
-  if (total <= maxWidth) return value;
-  const suffixWidth = characterWidth(font, "…", size);
-  while (characters.length && total + suffixWidth > maxWidth) {
-    total -= widths.pop();
-    characters.pop();
-  }
-  return characters.length ? `${characters.join("")}…` : "";
-}
-
 function wrapText(font, value, size, maxWidth, shouldWrap) {
   const sourceLines = String(value || "").replace(/\r/g, "").split("\n");
-  if (!shouldWrap) {
-    return sourceLines.map((line) => truncateText(font, line, size, maxWidth));
-  }
+  if (!shouldWrap) return sourceLines;
 
   const lines = [];
   for (const sourceLine of sourceLines) {
@@ -740,31 +1004,59 @@ function formatDateValue(value, numFmt) {
     .split(";")[0]
     .replace(/\[\$-[^\]]+\]/g, "")
     .replace(/"([^"]*)"/g, "$1")
+    .replace(/\\(.)/g, "$1")
+    .replace(/_(.)/g, " ")
+    .replace(/\*(.)/g, "")
     .toLowerCase();
 
-  if (!/[yd]/.test(format)) format = "yyyy/mm/dd";
-  const replacements = {
-    yyyy: String(year).padStart(4, "0"),
-    yy: String(year % 100).padStart(2, "0"),
-    mm: String(month).padStart(2, "0"),
-    m: String(month),
-    dd: String(day).padStart(2, "0"),
-    d: String(day),
-    hh: String(hours).padStart(2, "0"),
-    h: String(hours),
-    ss: String(seconds).padStart(2, "0"),
-    s: String(seconds),
-  };
-  format = format.replace(
-    /yyyy|yy|mm|dd|hh|ss|m|d|h|s/g,
-    (token) => replacements[token]
-  );
-  if (/[h]/i.test(String(numFmt || ""))) {
-    format = format.replace(/(^|[^0-9])mm([^0-9]|$)/, (_, before, after) =>
-      `${before}${String(minutes).padStart(2, "0")}${after}`
-    );
-  }
-  return format;
+  const hasDateTokens = /[yd]/.test(format);
+  const hasTimeTokens = /(?:\[h+\]|\[m+\]|\[s+\]|h|s|am\/pm|a\/p)/.test(format);
+  if (!hasDateTokens && !hasTimeTokens) format = "yyyy/mm/dd";
+
+  const usesMeridiem = /am\/pm|a\/p/i.test(format);
+  const displayHours = usesMeridiem ? hours % 12 || 12 : hours;
+  const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+  const tokenValues = [];
+  const tokenPattern =
+    /\[h+\]|\[m+\]|\[s+\]|am\/pm|a\/p|yyyy|yy|mmmm|mmm|mm|m|dddd|ddd|dd|d|hh|h|ss|s/gi;
+  const timeOnly = hasTimeTokens && !hasDateTokens;
+  const marked = format.replace(tokenPattern, (token, offset, source) => {
+    const normalized = token.toLowerCase();
+    const before = source.slice(0, offset);
+    const after = source.slice(offset + token.length);
+    const isMinute =
+      /^\[m+\]$/.test(normalized) ||
+      ((normalized === "m" || normalized === "mm") &&
+        (timeOnly ||
+          /h{1,2}[^a-z0-9]*$/i.test(before) ||
+          /^[^a-z0-9]*s{1,2}/i.test(after)));
+    let replacement;
+    if (normalized === "yyyy") replacement = String(year).padStart(4, "0");
+    else if (normalized === "yy") replacement = String(year % 100).padStart(2, "0");
+    else if (normalized === "mmmm" || normalized === "mmm") replacement = `${month}月`;
+    else if (normalized === "mm" && !isMinute) replacement = String(month).padStart(2, "0");
+    else if (normalized === "m" && !isMinute) replacement = String(month);
+    else if (isMinute) {
+      replacement = normalized.length > 1
+        ? String(minutes).padStart(2, "0")
+        : String(minutes);
+    } else if (normalized === "dddd") replacement = `星期${weekdays[value.getDay()]}`;
+    else if (normalized === "ddd") replacement = `週${weekdays[value.getDay()]}`;
+    else if (normalized === "dd") replacement = String(day).padStart(2, "0");
+    else if (normalized === "d") replacement = String(day);
+    else if (normalized === "hh") replacement = String(displayHours).padStart(2, "0");
+    else if (normalized === "h" || /^\[h+\]$/.test(normalized)) replacement = String(displayHours);
+    else if (normalized === "ss" || /^\[s+\]$/.test(normalized)) {
+      replacement = String(seconds).padStart(2, "0");
+    } else if (normalized === "s") replacement = String(seconds);
+    else if (normalized === "am/pm") replacement = hours < 12 ? "AM" : "PM";
+    else if (normalized === "a/p") replacement = hours < 12 ? "A" : "P";
+    else replacement = token;
+    const marker = `\u0001${tokenValues.length}\u0002`;
+    tokenValues.push(replacement);
+    return marker;
+  });
+  return marked.replace(/\u0001(\d+)\u0002/g, (_, index) => tokenValues[Number(index)]);
 }
 
 function formatNumberValue(value, numFmt) {
@@ -823,7 +1115,8 @@ function drawBorders(page, border, x, y, width, height, scale) {
 }
 
 function calculateCellBox(layout, rowIndex, columnIndex, mergeRange) {
-  const scale = layout.scale;
+  const scaleX = layout.scaleX || layout.scale;
+  const scaleY = layout.scaleY || layout.scale;
   const columns = layout.columns;
   const rows = layout.rows;
   const column = columns[columnIndex];
@@ -849,19 +1142,74 @@ function calculateCellBox(layout, rowIndex, columnIndex, mergeRange) {
     layout.margins.left +
     (layout.contentOffsetX || 0) +
     columns.slice(0, columnIndex).reduce((sum, item) => sum + item.width, 0) *
-      scale;
+      scaleX;
   const top =
     layout.pageHeight -
     layout.margins.top -
     (layout.contentOffsetY || 0) -
     rows.slice(0, rowIndex).reduce((sum, item) => sum + item.height, 0) *
-      scale;
+      scaleY;
   return {
     x,
-    y: top - height * scale,
-    width: width * scale,
-    height: height * scale,
+    y: top - height * scaleY,
+    width: width * scaleX,
+    height: height * scaleY,
   };
+}
+
+function cellCanOverflow(cell) {
+  if (cell.alignment?.wrapText || cell.alignment?.shrinkToFit) return false;
+  const horizontal = cell.alignment?.horizontal || "left";
+  if (!["left", "right", "general"].includes(horizontal)) return false;
+  const rawValue = cell.value?.formula ? cell.value.result : cell.value;
+  return (
+    typeof rawValue === "string" ||
+    !!rawValue?.richText ||
+    typeof rawValue?.text === "string"
+  );
+}
+
+// Excel 的未換行文字可延伸到相鄰空白儲存格；網址、備註與說明文字經常
+// 仰賴此行為。只擴大文字的裁切盒，原儲存格的填色與框線仍維持原尺寸。
+function calculateOverflowTextBox(
+  worksheet,
+  layout,
+  rowIndex,
+  columnIndex,
+  cell,
+  box,
+  merges,
+  cellImages
+) {
+  if (!cellCanOverflow(cell)) return box;
+  const horizontal = cell.alignment?.horizontal || "left";
+  const direction = horizontal === "right" ? -1 : 1;
+  let edgeIndex = columnIndex;
+  let width = box.width;
+  let x = box.x;
+  for (
+    let nextIndex = columnIndex + direction;
+    nextIndex >= 0 && nextIndex < layout.columns.length;
+    nextIndex += direction
+  ) {
+    const previousColumn = layout.columns[edgeIndex];
+    const nextColumn = layout.columns[nextIndex];
+    if (Math.abs(nextColumn.number - previousColumn.number) !== 1) break;
+    const nextKey = `${layout.rows[rowIndex].number}:${nextColumn.number}`;
+    if (
+      merges.masters.has(nextKey) ||
+      merges.children.has(nextKey) ||
+      cellImages?.has(nextKey) ||
+      cellText(worksheet.getCell(layout.rows[rowIndex].number, nextColumn.number))
+    ) {
+      break;
+    }
+    const addedWidth = nextColumn.width * (layout.scaleX || layout.scale);
+    width += addedWidth;
+    if (direction < 0) x -= addedWidth;
+    edgeIndex = nextIndex;
+  }
+  return { ...box, x, width };
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,16 +1407,16 @@ function drawPageImages(page, worksheet, layout, images) {
       (row) => row.height,
       image.box.top
     );
-    const x = contentLeft + offsetX * layout.scale;
-    const yTop = contentTop - offsetY * layout.scale;
-    const width = image.box.width * layout.scale;
-    const height = image.box.height * layout.scale;
+    const x = contentLeft + offsetX * (layout.scaleX || layout.scale);
+    const yTop = contentTop - offsetY * (layout.scaleY || layout.scale);
+    const width = image.box.width * (layout.scaleX || layout.scale);
+    const height = image.box.height * (layout.scaleY || layout.scale);
     page.drawImage(image.embedded, { x, y: yTop - height, width, height });
   }
   page.pushOperators(popGraphicsState());
 }
 
-function drawCell(page, cell, box, fonts, scale, options) {
+function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
   const fill = cell.fill;
   if (fill?.type === "pattern" && fill.pattern === "solid") {
     page.drawRectangle({
@@ -1105,64 +1453,106 @@ function drawCell(page, cell, box, fonts, scale, options) {
     else font = fonts.ascii;
   }
 
-  const fontSize = clamp(Number(cell.font?.size) || 11, 5, 72) * scale;
+  let fontSize = clamp(Number(cell.font?.size) || 11, 5, 72) * scale;
   const safeValue = sanitizeTextForFont(font, value, fontSize, {
     preserveLineBreaks: true,
   });
   const padding = Math.max(1.5, 2.5 * scale);
-  const maxWidth = Math.max(1, box.width - padding * 2);
-  const maxHeight = Math.max(1, box.height - padding * 2);
-  const lineHeight = fontSize * 1.18;
+  const verticalPadding = Math.max(0.2, Math.min(0.5, 0.5 * scale));
+  const maxWidth = Math.max(1, textBox.width - padding * 2);
+  const maxHeight = Math.max(1, textBox.height - verticalPadding * 2);
+  const shouldWrap = !!cell.alignment?.wrapText;
   let lines = wrapText(
     font,
     safeValue,
     fontSize,
     maxWidth,
-    !!cell.alignment?.wrapText
+    shouldWrap
   );
+  if (cell.alignment?.shrinkToFit) {
+    const minimumSize = Math.max(4, 5 * scale);
+    for (let iteration = 0; iteration < 120 && fontSize > minimumSize; iteration += 1) {
+      const widest = Math.max(0, ...lines.map((line) => lineWidth(font, line, fontSize)));
+      const requiredHeight = lines.length * fontSize * 1.18;
+      if (widest <= maxWidth + 0.1 && requiredHeight <= maxHeight + 0.1) break;
+      fontSize = Math.max(
+        minimumSize,
+        fontSize - Math.max(0.2, 0.25 * scale)
+      );
+      lines = wrapText(font, safeValue, fontSize, maxWidth, shouldWrap);
+    }
+  }
+  const lineHeight = fontSize * 1.18;
   const maxLines = Math.max(1, Math.floor(maxHeight / lineHeight));
   if (lines.length > maxLines) {
     lines = lines.slice(0, maxLines);
-    lines[maxLines - 1] = truncateText(
-      font,
-      lines[maxLines - 1] + "…",
-      fontSize,
-      maxWidth
-    );
   }
 
   const blockHeight = lines.length * lineHeight;
   const vertical = cell.alignment?.vertical || "middle";
   let firstBaseline;
   if (vertical === "top") {
-    firstBaseline = box.y + box.height - padding - fontSize;
+    firstBaseline = textBox.y + textBox.height - verticalPadding - fontSize;
   } else if (vertical === "bottom") {
-    firstBaseline = box.y + padding + blockHeight - lineHeight;
+    firstBaseline = textBox.y + verticalPadding + blockHeight - lineHeight;
   } else {
     firstBaseline =
-      box.y + (box.height + blockHeight) / 2 - lineHeight + (lineHeight - fontSize) / 2;
+      textBox.y +
+      (textBox.height + blockHeight) / 2 -
+      lineHeight +
+      (lineHeight - fontSize) / 2;
   }
 
   const textColor = argbToRgb(cell.font?.color, rgb(0.08, 0.1, 0.16));
+  const needsClip =
+    blockHeight > maxHeight + 0.1 ||
+    lines.some((line) => lineWidth(font, line, fontSize) > maxWidth + 0.1);
+  if (needsClip) {
+    page.pushOperators(
+      pushGraphicsState(),
+      moveTo(textBox.x + padding, textBox.y + verticalPadding),
+      lineTo(
+        textBox.x + textBox.width - padding,
+        textBox.y + verticalPadding
+      ),
+      lineTo(
+        textBox.x + textBox.width - padding,
+        textBox.y + textBox.height - verticalPadding
+      ),
+      lineTo(
+        textBox.x + padding,
+        textBox.y + textBox.height - verticalPadding
+      ),
+      closePath(),
+      clip(),
+      endPath()
+    );
+  }
   lines.forEach((line, lineIndex) => {
     const width = lineWidth(font, line, fontSize);
     const horizontal = cell.alignment?.horizontal || "left";
-    let x = box.x + padding;
+    let x = textBox.x + padding;
     if (horizontal === "center" || horizontal === "centerContinuous") {
-      x = box.x + (box.width - width) / 2;
+      x = textBox.x + (textBox.width - width) / 2;
     } else if (horizontal === "right") {
-      x = box.x + box.width - padding - width;
+      x = textBox.x + textBox.width - padding - width;
     }
     const y = firstBaseline - lineIndex * lineHeight;
-    if (y < box.y - 0.1 || y + fontSize > box.y + box.height + 0.1) return;
+    if (
+      y < textBox.y - 0.1 ||
+      y + fontSize > textBox.y + textBox.height + 0.1
+    ) {
+      return;
+    }
     drawText(page, line, {
-      x: Math.max(box.x + 0.5, x),
+      x: Math.max(textBox.x + 0.5, x),
       y,
       size: fontSize,
       font,
       color: textColor,
     });
   });
+  if (needsClip) page.pushOperators(popGraphicsState());
 }
 
 function splitHeaderFooterSections(value) {
@@ -1178,15 +1568,28 @@ function splitHeaderFooterSections(value) {
   return sections;
 }
 
-function expandHeaderFooter(value, worksheet, pageIndex, pageCount) {
+function expandHeaderFooter(value, worksheet, pageIndex, pageCount, pagination = {}) {
   const now = new Date();
+  const configuredFirstPage = Number(worksheet.pageSetup?.firstPageNumber);
+  const hasConfiguredFirstPage =
+    worksheet.pageSetup?.useFirstPageNumber &&
+    Number.isInteger(configuredFirstPage) &&
+    configuredFirstPage > 0 &&
+    configuredFirstPage < 0xffffffff;
+  const documentPageOffset = Math.max(
+    0,
+    Number(pagination.documentPageOffset) || 0
+  );
+  const documentPageCount = Math.max(
+    pageCount,
+    Number(pagination.documentPageCount) || pageCount
+  );
   const pageNumber =
-    (worksheet.pageSetup?.useFirstPageNumber
-      ? Number(worksheet.pageSetup?.firstPageNumber) || 1
-      : 1) + pageIndex;
+    (hasConfiguredFirstPage ? configuredFirstPage : documentPageOffset + 1) +
+    pageIndex;
   const replacements = {
     P: String(pageNumber),
-    N: String(pageCount),
+    N: String(documentPageCount),
     A: worksheet.name,
     F: workbookName,
     D: now.toLocaleDateString("zh-TW"),
@@ -1217,23 +1620,42 @@ function sourceHeaderFooterValue(worksheet, kind, pageIndex) {
   return headerFooter[isHeader ? "oddHeader" : "oddFooter"] || "";
 }
 
-function drawHeaderFooterLine(page, rawValue, worksheet, fonts, layout, pageIndex, pageCount, kind) {
+function drawHeaderFooterLine(
+  page,
+  rawValue,
+  worksheet,
+  fonts,
+  layout,
+  pageIndex,
+  pageCount,
+  kind,
+  pagination
+) {
   if (!rawValue) return;
   const sections = splitHeaderFooterSections(rawValue);
   const font = fonts.unicode;
-  const size = 8;
+  const baseSize = 8;
   const y =
     kind === "header"
-      ? layout.pageHeight - layout.margins.header - size
+      ? layout.pageHeight - layout.margins.header - baseSize
       : layout.margins.footer;
   const left = layout.margins.left;
   const right = layout.pageWidth - layout.margins.right;
   const maxWidth = Math.max(24, (right - left) * 0.32);
   for (const [alignment, rawText] of Object.entries(sections)) {
-    let value = expandHeaderFooter(rawText, worksheet, pageIndex, pageCount);
+    let value = expandHeaderFooter(
+      rawText,
+      worksheet,
+      pageIndex,
+      pageCount,
+      pagination
+    );
     if (!value) continue;
-    value = sanitizeTextForFont(font, value, size);
-    value = truncateText(font, value, size, maxWidth);
+    value = sanitizeTextForFont(font, value, baseSize);
+    const naturalWidth = lineWidth(font, value, baseSize);
+    const size = naturalWidth > maxWidth
+      ? Math.max(5, baseSize * (maxWidth / naturalWidth))
+      : baseSize;
     const width = lineWidth(font, value, size);
     let x = left;
     if (alignment === "center") x = (layout.pageWidth - width) / 2;
@@ -1248,7 +1670,15 @@ function drawHeaderFooterLine(page, rawValue, worksheet, fonts, layout, pageInde
   }
 }
 
-function drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCount) {
+function drawPageDecorations(
+  page,
+  worksheet,
+  fonts,
+  layout,
+  pageIndex,
+  pageCount,
+  pagination
+) {
   if (layout.options?.includeHeaderFooter) {
     drawHeaderFooterLine(
       page,
@@ -1258,7 +1688,8 @@ function drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCoun
       layout,
       pageIndex,
       pageCount,
-      "header"
+      "header",
+      pagination
     );
     drawHeaderFooterLine(
       page,
@@ -1268,7 +1699,8 @@ function drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCoun
       layout,
       pageIndex,
       pageCount,
-      "footer"
+      "footer",
+      pagination
     );
   }
   if (layout.options?.addPageNumbers) {
@@ -1280,7 +1712,8 @@ function drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCoun
       layout,
       pageIndex,
       pageCount,
-      "footer"
+      "footer",
+      pagination
     );
   }
 }
@@ -1292,7 +1725,8 @@ function renderWorksheetPage(
   fonts,
   pageIndex,
   pageCount,
-  images = null
+  images = null,
+  pagination = null
 ) {
   const merges = buildMergeMaps(worksheet);
   const page = pdf.addPage();
@@ -1314,13 +1748,39 @@ function renderWorksheetPage(
         columnIndex,
         merges.masters.get(key)
       );
-      drawCell(page, cell, box, fonts, layout.scale, layout.options);
+      const textBox = calculateOverflowTextBox(
+        worksheet,
+        layout,
+        rowIndex,
+        columnIndex,
+        cell,
+        box,
+        merges,
+        images?.cellImages
+      );
+      drawCell(
+        page,
+        cell,
+        box,
+        fonts,
+        layout.fontScale || layout.scaleX || layout.scale,
+        layout.options,
+        textBox
+      );
       const cellImage = images?.cellImages?.get(key);
       if (cellImage) drawCellImage(page, cellImage, box);
     }
   }
   drawPageImages(page, worksheet, layout, images);
-  drawPageDecorations(page, worksheet, fonts, layout, pageIndex, pageCount);
+  drawPageDecorations(
+    page,
+    worksheet,
+    fonts,
+    layout,
+    pageIndex,
+    pageCount,
+    pagination || { documentPageOffset: 0, documentPageCount: pageCount }
+  );
   return page;
 }
 
@@ -1331,7 +1791,8 @@ async function renderWorksheet(
   fonts,
   progressState,
   requestId,
-  images = null
+  images = null,
+  pagination = null
 ) {
   for (let pageIndex = 0; pageIndex < layouts.length; pageIndex += 1) {
     renderWorksheetPage(
@@ -1341,7 +1802,8 @@ async function renderWorksheet(
       fonts,
       pageIndex,
       layouts.length,
-      images
+      images,
+      pagination
     );
     progressState.completed += 1;
     postProgress(
@@ -2094,6 +2556,7 @@ async function convertWorkbook(message) {
   const progressState = { completed: 0, total: totalPages };
   const warnings = [];
   const imageEmbedCache = new Map();
+  let documentPageOffset = 0;
   for (const item of layouts) {
     warnings.push(
       ...issuesForSheet(item.worksheet.id)
@@ -2112,8 +2575,13 @@ async function convertWorkbook(message) {
       fonts,
       progressState,
       message.requestId,
-      images
+      images,
+      {
+        documentPageOffset,
+        documentPageCount: totalPages,
+      }
     );
+    documentPageOffset += item.pages.length;
   }
 
   postProgress(message.requestId, "正在完成 Excel PDF", "寫入檔案資料", 96);
