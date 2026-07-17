@@ -161,6 +161,18 @@
 
           <div class="toolbar-spacer"></div>
 
+          <div class="view-mode-controls requires-document" role="group" aria-label="頁面顯示模式">
+            <button class="icon-button view-mode-button" id="viewSingleButton" type="button" disabled aria-pressed="true" title="單頁檢視">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="7" y="4" width="10" height="16" rx="1"/></svg>
+            </button>
+            <button class="icon-button view-mode-button" id="viewContinuousButton" type="button" disabled aria-pressed="false" title="連續頁面（捲動瀏覽並換頁）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="8" rx="1"/><rect x="7" y="13.5" width="10" height="8" rx="1"/></svg>
+            </button>
+            <button class="icon-button view-mode-button" id="viewBrowseButton" type="button" disabled aria-pressed="false" title="瀏覽頁面（縮圖網格）">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
+            </button>
+          </div>
+
           <div class="zoom-controls requires-document" aria-label="縮放控制">
             <button class="icon-button" id="zoomOutButton" type="button" disabled aria-label="縮小">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
@@ -266,6 +278,7 @@
           </section>
 
           <section class="document-view" id="documentView" hidden>
+            <div class="preview-flow" id="previewFlow" hidden aria-label="頁面連續預覽"></div>
             <div class="page-stage" id="pageStage">
               <canvas id="pdfCanvas" aria-label="PDF 頁面預覽"></canvas>
               <div class="textLayer selection-text-layer" id="textLayer" aria-label="PDF 可選取文字層"></div>

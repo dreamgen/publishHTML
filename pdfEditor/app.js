@@ -27,6 +27,11 @@ const EDITOR_DB_VERSION = 2;
 const AUTOSAVE_KEY = "autosave";
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const INSTALL_INTRO_KEY = "pdfEditor-install-intro-seen-v1";
+const VIEW_MODE_KEY = "pdfEditor-view-mode-v1";
+const THUMBNAIL_WIDTH_SIDEBAR = 122;
+const THUMBNAIL_WIDTH_BROWSE = 230;
+const PREVIEW_RENDER_CONCURRENCY = 2;
+const SKIM_SETTLE_DELAY_MS = 160;
 const BLOB_URL_LIFETIME_MS = 10 * 60 * 1000;
 
 const $ = (selector) => document.querySelector(selector);
@@ -108,6 +113,22 @@ class PdfWorkshop {
     this.pendingExportShare = null;
     this.pendingDownloadUrls = new Map();
 
+    let savedViewMode = null;
+    try {
+      savedViewMode = localStorage.getItem(VIEW_MODE_KEY);
+    } catch {
+      savedViewMode = null;
+    }
+    this.viewMode = savedViewMode === "continuous" ? "continuous" : "single";
+    this.lastPageViewMode = this.viewMode;
+    this.pageDimsCache = new Map();
+    this.previewSlots = [];
+    this.previewObserver = null;
+    this.previewQueue = [];
+    this.previewActiveRenders = 0;
+    this.continuousLayoutToken = 0;
+    this.skimSettleTimer = null;
+
     this.elements = {
       openButton: $("#openButton"),
       emptyOpenButton: $("#emptyOpenButton"),
@@ -174,6 +195,10 @@ class PdfWorkshop {
       viewerScroll: $("#viewerScroll"),
       emptyState: $("#emptyState"),
       documentView: $("#documentView"),
+      previewFlow: $("#previewFlow"),
+      viewSingleButton: $("#viewSingleButton"),
+      viewContinuousButton: $("#viewContinuousButton"),
+      viewBrowseButton: $("#viewBrowseButton"),
       pageStage: $("#pageStage"),
       pdfCanvas: $("#pdfCanvas"),
       textLayer: $("#textLayer"),
@@ -298,6 +323,7 @@ class PdfWorkshop {
 
     this.ensureRuntimeLayers();
     this.applySavedTheme();
+    this.applyViewModeClasses();
     this.bindEvents();
     this.updateConnectivity();
     this.updateUI();
@@ -503,9 +529,13 @@ class PdfWorkshop {
     openSidebarButton.addEventListener("click", () =>
       document.body.classList.add("sidebar-visible")
     );
-    closeSidebarButton.addEventListener("click", () =>
-      document.body.classList.remove("sidebar-visible")
-    );
+    closeSidebarButton.addEventListener("click", () => {
+      if (this.viewMode === "browse") {
+        this.setViewMode(this.lastPageViewMode || "single");
+        return;
+      }
+      document.body.classList.remove("sidebar-visible");
+    });
 
     document.addEventListener("click", (event) => {
       if (
@@ -727,9 +757,23 @@ class PdfWorkshop {
     zoomInButton.addEventListener("click", () => this.changeZoom(0.15));
     zoomResetButton.addEventListener("click", () => {
       this.zoom = 1;
-      this.updateUI();
-      this.renderActivePage();
+      this.applyZoomChange();
     });
+
+    this.elements.viewSingleButton?.addEventListener("click", () =>
+      this.setViewMode("single")
+    );
+    this.elements.viewContinuousButton?.addEventListener("click", () =>
+      this.setViewMode("continuous")
+    );
+    this.elements.viewBrowseButton?.addEventListener("click", () =>
+      this.setViewMode("browse")
+    );
+    viewerScroll.addEventListener(
+      "scroll",
+      () => this.handleViewerScroll(),
+      { passive: true }
+    );
 
     annotationLayer.addEventListener("click", (event) =>
       this.handleAnnotationLayerClick(event)
@@ -813,7 +857,12 @@ class PdfWorkshop {
     new ResizeObserver(() => {
       if (!this.pages.length) return;
       clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => this.renderActivePage(), 120);
+      this.resizeTimer = setTimeout(() => {
+        if (this.viewMode === "continuous") {
+          this.rebuildContinuousLayout({ anchorActive: true });
+        }
+        this.renderActivePage();
+      }, 120);
     }).observe(viewerScroll);
 
     this.setupToolbarOverflow();
@@ -1863,6 +1912,7 @@ class PdfWorkshop {
     this.normalizeState();
     this.updateUI();
     this.renderSidebar();
+    if (this.viewMode === "continuous") this.rebuildContinuousLayout();
     this.renderActivePage();
   }
 
@@ -1880,6 +1930,10 @@ class PdfWorkshop {
       this.activePageId = null;
       this.selectedPageIds.clear();
       this.selectedAnnotationId = null;
+      this.previewSlots = [];
+      this.previewQueue.length = 0;
+      this.elements.previewFlow?.replaceChildren();
+      this.elements.documentView?.classList.remove("skimming");
       clearTimeout(this.searchDebounceTimer);
       this.searchBuildToken += 1;
       this.searchMatches = [];
@@ -1932,6 +1986,19 @@ class PdfWorkshop {
     this.elements.selectAllCheckbox.disabled = !hasDocument;
 
     this.elements.zoomResetButton.textContent = `${Math.round(this.zoom * 100)}%`;
+
+    const viewModeButtons = [
+      [this.elements.viewSingleButton, "single"],
+      [this.elements.viewContinuousButton, "continuous"],
+      [this.elements.viewBrowseButton, "browse"],
+    ];
+    for (const [button, mode] of viewModeButtons) {
+      if (!button) continue;
+      button.disabled = !hasDocument;
+      const active = this.viewMode === mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    }
     this.elements.pageCount.textContent = hasDocument
       ? `${this.pages.length} 頁${selectedCount ? `・已選 ${selectedCount}` : ""}`
       : "尚未開啟文件";
@@ -2054,11 +2121,21 @@ class PdfWorkshop {
         this.selectPage(pageRecord.id);
       });
 
+      card.addEventListener("dblclick", () => {
+        if (this.viewMode !== "browse") return;
+        this.selectedPageIds = new Set([pageRecord.id]);
+        this.selectPage(pageRecord.id);
+        this.setViewMode(this.lastPageViewMode || "single");
+      });
+
       card.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           this.selectedPageIds = new Set([pageRecord.id]);
           this.selectPage(pageRecord.id);
+          if (this.viewMode === "browse" && event.key === "Enter") {
+            this.setViewMode(this.lastPageViewMode || "single");
+          }
         }
       });
 
@@ -2146,9 +2223,13 @@ class PdfWorkshop {
     const source = this.sources.get(pageRecord.sourceId);
     if (!source) return;
     const rotation = this.getPageRotation(pageRecord);
+    const targetWidth =
+      this.viewMode === "browse"
+        ? THUMBNAIL_WIDTH_BROWSE
+        : THUMBNAIL_WIDTH_SIDEBAR;
 
     const cached = this.thumbnailCache.get(pageRecord.id);
-    if (cached && cached.rotation === rotation) {
+    if (cached && cached.rotation === rotation && cached.width === targetWidth) {
       canvas.width = cached.canvas.width;
       canvas.height = cached.canvas.height;
       canvas.style.width = cached.styleWidth;
@@ -2159,7 +2240,7 @@ class PdfWorkshop {
 
     const page = await source.pdfjsDoc.getPage(pageRecord.sourcePageIndex + 1);
     const baseViewport = page.getViewport({ scale: 1, rotation });
-    const scale = 122 / baseViewport.width;
+    const scale = targetWidth / baseViewport.width;
     const viewport = page.getViewport({ scale, rotation });
     const outputScale = Math.min(window.devicePixelRatio || 1, 2);
     const context = canvas.getContext("2d", { alpha: false });
@@ -2184,6 +2265,7 @@ class PdfWorkshop {
     copy.getContext("2d", { alpha: false }).drawImage(canvas, 0, 0);
     this.thumbnailCache.set(pageRecord.id, {
       rotation,
+      width: targetWidth,
       canvas: copy,
       styleWidth: canvas.style.width,
       styleHeight: canvas.style.height,
@@ -2204,6 +2286,7 @@ class PdfWorkshop {
   }
 
   async renderActivePage() {
+    if (this.viewMode === "browse") return;
     this.hideSelectedPageText({ clearSelection: true });
     const pageRecord = this.pages.find((page) => page.id === this.activePageId);
     if (!pageRecord) {
@@ -2236,15 +2319,7 @@ class PdfWorkshop {
 
       const rotation = this.getPageRotation(pageRecord);
       const baseViewport = page.getViewport({ scale: 1, rotation });
-      const horizontalPadding = matchMedia("(max-width: 720px)").matches ? 40 : 88;
-      const availableWidth = Math.max(
-        260,
-        this.elements.viewerScroll.clientWidth - horizontalPadding
-      );
-      const fitScale = Math.min(
-        1.5,
-        Math.max(0.22, availableWidth / baseViewport.width)
-      );
+      const fitScale = this.getFitScale(baseViewport.width);
       const viewport = page.getViewport({
         scale: fitScale * this.zoom,
         rotation,
@@ -2259,6 +2334,7 @@ class PdfWorkshop {
       canvas.style.height = `${viewport.height}px`;
       this.elements.pageStage.style.width = `${viewport.width}px`;
       this.elements.pageStage.style.height = `${viewport.height}px`;
+      this.syncStageToSlot();
       this.elements.pageStage.style.setProperty(
         "--total-scale-factor",
         viewport.scale
@@ -2549,6 +2625,9 @@ class PdfWorkshop {
       this.closeSearchControls();
       return;
     }
+    if (this.viewMode === "browse") {
+      this.setViewMode(this.lastPageViewMode || "single");
+    }
     this.closeTextControls();
     this.activateDrawingTool("select");
     this.elements.searchControls.hidden = false;
@@ -2787,14 +2866,21 @@ class PdfWorkshop {
     this.activePageId = match.pageId;
     this.selectedPageIds = new Set([match.pageId]);
     this.selectedAnnotationId = null;
+    if (this.viewMode === "browse") {
+      this.setViewMode(this.lastPageViewMode || "single");
+    }
     this.updateUI();
     this.refreshSidebarSelection();
     await this.renderActivePage();
-    this.elements.viewerScroll.scrollTo({
-      top: 0,
-      left: 0,
-      behavior: "smooth",
-    });
+    if (this.viewMode === "continuous") {
+      this.scrollToActiveSlot({ behavior: "smooth" });
+    } else {
+      this.elements.viewerScroll.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: "smooth",
+      });
+    }
     const sourceLabel = match.source === "ocr" ? "OCR" : "PDF 文字";
     const currentPageNumber =
       this.pages.findIndex((page) => page.id === match.pageId) + 1;
@@ -3602,7 +3688,15 @@ class PdfWorkshop {
     this.updateUI();
     this.refreshSidebarSelection();
     this.renderActivePage();
-    this.elements.viewerScroll.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+    if (this.viewMode === "continuous") {
+      this.scrollToActiveSlot({ behavior: "smooth" });
+    } else {
+      this.elements.viewerScroll.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: "smooth",
+      });
+    }
     if (matchMedia("(max-width: 720px)").matches) {
       document.body.classList.remove("sidebar-visible");
     }
@@ -3727,6 +3821,7 @@ class PdfWorkshop {
     this.collectGarbage();
     this.updateUI();
     if (sidebar) this.renderSidebar();
+    if (this.viewMode === "continuous") this.rebuildContinuousLayout();
     this.renderActivePage();
     this.scheduleAutosave();
   }
@@ -3758,6 +3853,10 @@ class PdfWorkshop {
     const pageIds = new Set(this.pages.map((page) => page.id));
     for (const id of [...this.thumbnailCache.keys()]) {
       if (!pageIds.has(id)) this.thumbnailCache.delete(id);
+    }
+    for (const key of [...this.pageDimsCache.keys()]) {
+      const sourceId = key.slice(0, key.lastIndexOf(":"));
+      if (!referencedSourceIds.has(sourceId)) this.pageDimsCache.delete(key);
     }
   }
 
@@ -3792,7 +3891,377 @@ class PdfWorkshop {
 
   changeZoom(delta) {
     this.zoom = Math.min(2.5, Math.max(0.5, this.zoom + delta));
+    this.applyZoomChange();
+  }
+
+  applyZoomChange() {
     this.updateUI();
+    if (this.viewMode === "continuous") {
+      this.rebuildContinuousLayout({ anchorActive: true });
+    }
+    this.renderActivePage();
+  }
+
+  /* ==================== 檢視模式（單頁／連續／瀏覽） ==================== */
+
+  applyViewModeClasses() {
+    document.body.classList.toggle("view-browse", this.viewMode === "browse");
+    document.body.classList.toggle(
+      "view-continuous",
+      this.viewMode === "continuous"
+    );
+    this.elements.documentView?.classList.toggle(
+      "continuous",
+      this.viewMode === "continuous"
+    );
+    if (this.elements.previewFlow) {
+      this.elements.previewFlow.hidden = this.viewMode !== "continuous";
+    }
+  }
+
+  setViewMode(mode) {
+    if (!["single", "continuous", "browse"].includes(mode)) return;
+    if (mode === this.viewMode) return;
+    const previous = this.viewMode;
+    this.viewMode = mode;
+    if (mode !== "browse") this.lastPageViewMode = mode;
+    try {
+      localStorage.setItem(VIEW_MODE_KEY, mode);
+    } catch {
+      /* localStorage 不可用時忽略 */
+    }
+    this.applyViewModeClasses();
+    document.body.classList.remove("sidebar-visible");
+
+    if (previous === "continuous") this.teardownContinuous();
+    if (previous === "browse" || mode === "browse") {
+      // 縮圖解析度隨模式不同，重建側欄
+      this.renderSidebar();
+    }
+
+    if (mode === "continuous") {
+      this.rebuildContinuousLayout({ anchorActive: true });
+      this.renderActivePage();
+    } else if (mode === "single") {
+      this.renderActivePage();
+      this.elements.viewerScroll.scrollTo({ top: 0, left: 0 });
+    }
+    this.updateUI();
+  }
+
+  teardownContinuous() {
+    clearTimeout(this.skimSettleTimer);
+    this.skimSettleTimer = null;
+    this.continuousLayoutToken += 1;
+    this.previewObserver?.disconnect();
+    this.previewQueue.length = 0;
+    this.previewSlots = [];
+    this.elements.previewFlow?.replaceChildren();
+    this.elements.documentView?.classList.remove("skimming");
+    const stage = this.elements.pageStage;
+    if (stage) {
+      stage.style.top = "";
+      stage.style.left = "";
+    }
+  }
+
+  getFitScale(baseWidth) {
+    const horizontalPadding = matchMedia("(max-width: 720px)").matches ? 40 : 88;
+    const availableWidth = Math.max(
+      260,
+      this.elements.viewerScroll.clientWidth - horizontalPadding
+    );
+    return Math.min(1.5, Math.max(0.22, availableWidth / baseWidth));
+  }
+
+  async getPageBaseDims(pageRecord) {
+    const key = `${pageRecord.sourceId}:${pageRecord.sourcePageIndex}`;
+    const cached = this.pageDimsCache.get(key);
+    if (cached) return cached;
+    const source = this.sources.get(pageRecord.sourceId);
+    if (!source) return null;
+    const page = await source.pdfjsDoc.getPage(pageRecord.sourcePageIndex + 1);
+    const viewport = page.getViewport({ scale: 1, rotation: 0 });
+    const dims = { width: viewport.width, height: viewport.height };
+    this.pageDimsCache.set(key, dims);
+    return dims;
+  }
+
+  getRotatedDims(dims, rotation) {
+    return rotation % 180 === 0
+      ? { width: dims.width, height: dims.height }
+      : { width: dims.height, height: dims.width };
+  }
+
+  async rebuildContinuousLayout({ anchorActive = false } = {}) {
+    if (this.viewMode !== "continuous") return;
+    const flow = this.elements.previewFlow;
+    if (!flow) return;
+    const token = ++this.continuousLayoutToken;
+
+    this.previewObserver?.disconnect();
+    this.previewQueue.length = 0;
+
+    if (!this.pages.length) {
+      flow.replaceChildren();
+      this.previewSlots = [];
+      return;
+    }
+
+    const dims = [];
+    for (const pageRecord of this.pages) {
+      const base = await this.getPageBaseDims(pageRecord);
+      if (token !== this.continuousLayoutToken) return;
+      dims.push(base);
+    }
+
+    if (!this.previewObserver) {
+      this.previewObserver = new IntersectionObserver(
+        (entries) => this.handlePreviewIntersection(entries),
+        {
+          root: this.elements.viewerScroll,
+          rootMargin: "130% 0px",
+          threshold: 0,
+        }
+      );
+    }
+
+    const fragment = document.createDocumentFragment();
+    const slots = [];
+    this.pages.forEach((pageRecord, index) => {
+      const base = dims[index];
+      if (!base) return;
+      const rotation = this.getPageRotation(pageRecord);
+      const rotated = this.getRotatedDims(base, rotation);
+      const scale = this.getFitScale(rotated.width) * this.zoom;
+      const slot = document.createElement("div");
+      slot.className = "preview-slot";
+      slot.dataset.pageId = pageRecord.id;
+      slot.style.width = `${rotated.width * scale}px`;
+      slot.style.height = `${rotated.height * scale}px`;
+      slot.setAttribute("aria-label", `第 ${index + 1} 頁預覽`);
+      const canvas = document.createElement("canvas");
+      slot.append(canvas);
+      const chip = document.createElement("span");
+      chip.className = "preview-slot-num";
+      chip.textContent = `${index + 1}`;
+      slot.append(chip);
+      slot.addEventListener("click", () => {
+        this.selectedPageIds = new Set([pageRecord.id]);
+        this.selectPage(pageRecord.id);
+      });
+      slots.push({ el: slot, pageId: pageRecord.id });
+      fragment.append(slot);
+    });
+
+    if (token !== this.continuousLayoutToken) return;
+    flow.replaceChildren(fragment);
+    this.previewSlots = slots;
+    for (const slot of slots) this.previewObserver.observe(slot.el);
+    this.syncStageToSlot();
+    if (anchorActive) this.scrollToActiveSlot({ behavior: "auto" });
+  }
+
+  handlePreviewIntersection(entries) {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        this.queuePreviewRender(entry.target);
+      } else {
+        this.releasePreviewSlot(entry.target);
+      }
+    }
+  }
+
+  queuePreviewRender(slot) {
+    const state = slot.dataset.previewState;
+    if (state === "rendered" || state === "queued") return;
+    slot.dataset.previewState = "queued";
+    this.paintPreviewPlaceholder(slot);
+    this.previewQueue.push(slot);
+    this.processPreviewQueue();
+  }
+
+  releasePreviewSlot(slot) {
+    const queueIndex = this.previewQueue.indexOf(slot);
+    if (queueIndex >= 0) this.previewQueue.splice(queueIndex, 1);
+    if (slot.dataset.previewState === "rendered") {
+      const canvas = slot.querySelector("canvas");
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    }
+    slot.dataset.previewState = "";
+    slot.classList.remove("loaded");
+  }
+
+  paintPreviewPlaceholder(slot) {
+    const pageRecord = this.pages.find(
+      (page) => page.id === slot.dataset.pageId
+    );
+    if (!pageRecord) return;
+    const cached = this.thumbnailCache.get(pageRecord.id);
+    if (!cached || cached.rotation !== this.getPageRotation(pageRecord)) return;
+    const canvas = slot.querySelector("canvas");
+    if (!canvas) return;
+    canvas.width = cached.canvas.width;
+    canvas.height = cached.canvas.height;
+    canvas.getContext("2d", { alpha: false }).drawImage(cached.canvas, 0, 0);
+    slot.classList.add("loaded");
+  }
+
+  processPreviewQueue() {
+    while (
+      this.previewActiveRenders < PREVIEW_RENDER_CONCURRENCY &&
+      this.previewQueue.length
+    ) {
+      const slot = this.previewQueue.shift();
+      this.previewActiveRenders += 1;
+      this.renderPreviewSlot(slot)
+        .catch((error) => {
+          if (error?.name !== "RenderingCancelledException") {
+            console.warn("[PDF Editor] Preview render failed", error);
+          }
+          slot.dataset.previewState = "";
+        })
+        .finally(() => {
+          this.previewActiveRenders -= 1;
+          this.processPreviewQueue();
+        });
+    }
+  }
+
+  async renderPreviewSlot(slot) {
+    const abandon = () => {
+      slot.dataset.previewState = "";
+    };
+    if (this.viewMode !== "continuous" || !slot.isConnected) {
+      abandon();
+      return;
+    }
+    const pageRecord = this.pages.find(
+      (page) => page.id === slot.dataset.pageId
+    );
+    const source = pageRecord && this.sources.get(pageRecord.sourceId);
+    const canvas = slot.querySelector("canvas");
+    if (!source || !canvas) {
+      abandon();
+      return;
+    }
+
+    const rotation = this.getPageRotation(pageRecord);
+    const cssWidth = parseFloat(slot.style.width) || slot.clientWidth;
+    const page = await source.pdfjsDoc.getPage(pageRecord.sourcePageIndex + 1);
+    if (this.viewMode !== "continuous" || !slot.isConnected) {
+      abandon();
+      return;
+    }
+    const baseViewport = page.getViewport({ scale: 1, rotation });
+    const outputScale = Math.min(window.devicePixelRatio || 1, 1.5);
+    const renderWidth = Math.min(900, cssWidth * outputScale);
+    const viewport = page.getViewport({
+      scale: renderWidth / baseViewport.width,
+      rotation,
+    });
+    const target = document.createElement("canvas");
+    target.width = Math.ceil(viewport.width);
+    target.height = Math.ceil(viewport.height);
+    await page.render({
+      canvasContext: target.getContext("2d", { alpha: false }),
+      viewport,
+    }).promise;
+    if (this.viewMode !== "continuous" || !slot.isConnected) {
+      abandon();
+      return;
+    }
+    canvas.width = target.width;
+    canvas.height = target.height;
+    canvas.getContext("2d", { alpha: false }).drawImage(target, 0, 0);
+    slot.dataset.previewState = "rendered";
+    slot.classList.add("loaded");
+  }
+
+  getSlotForPage(pageId) {
+    return this.previewSlots.find((slot) => slot.pageId === pageId)?.el || null;
+  }
+
+  syncStageToSlot() {
+    if (this.viewMode !== "continuous") return;
+    const slot = this.getSlotForPage(this.activePageId);
+    const stage = this.elements.pageStage;
+    if (!slot || !stage) return;
+    stage.style.top = `${slot.offsetTop}px`;
+    stage.style.left = `${slot.offsetLeft}px`;
+  }
+
+  scrollToActiveSlot({ behavior = "smooth" } = {}) {
+    if (this.viewMode !== "continuous") return;
+    const slot = this.getSlotForPage(this.activePageId);
+    if (!slot) return;
+    const top = Math.max(
+      0,
+      slot.offsetTop + this.elements.documentView.offsetTop - 34
+    );
+    this.elements.viewerScroll.scrollTo({ top, behavior });
+  }
+
+  handleViewerScroll() {
+    if (this.viewMode !== "continuous" || !this.pages.length) return;
+    const documentView = this.elements.documentView;
+    if (!documentView.classList.contains("skimming")) {
+      documentView.classList.add("skimming");
+    }
+    const centerSlot = this.getCenterPreviewSlot();
+    if (centerSlot) {
+      const index = this.pages.findIndex(
+        (page) => page.id === centerSlot.pageId
+      );
+      if (index >= 0) {
+        this.elements.activePageStatus.textContent =
+          `第 ${index + 1} / ${this.pages.length} 頁`;
+      }
+    }
+    clearTimeout(this.skimSettleTimer);
+    this.skimSettleTimer = setTimeout(
+      () => this.settleSkim(),
+      SKIM_SETTLE_DELAY_MS
+    );
+  }
+
+  getCenterPreviewSlot() {
+    if (!this.previewSlots.length) return null;
+    const viewerRect = this.elements.viewerScroll.getBoundingClientRect();
+    const centerY = viewerRect.top + viewerRect.height / 2;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const slot of this.previewSlots) {
+      const rect = slot.el.getBoundingClientRect();
+      if (rect.top <= centerY && rect.bottom >= centerY) return slot;
+      const distance =
+        rect.top > centerY ? rect.top - centerY : centerY - rect.bottom;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = slot;
+      }
+      if (rect.top > centerY) break;
+    }
+    return best;
+  }
+
+  settleSkim() {
+    if (this.viewMode !== "continuous") return;
+    this.elements.documentView.classList.remove("skimming");
+    const centerSlot = this.getCenterPreviewSlot();
+    if (!centerSlot) return;
+    if (centerSlot.pageId === this.activePageId) {
+      this.updateUI();
+      return;
+    }
+    this.activePageId = centerSlot.pageId;
+    this.selectedPageIds = new Set([centerSlot.pageId]);
+    this.selectedAnnotationId = null;
+    this.updateUI();
+    this.refreshSidebarSelection();
     this.renderActivePage();
   }
 
