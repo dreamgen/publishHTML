@@ -838,9 +838,58 @@ function argbToRgb(color, fallback = rgb(0.08, 0.1, 0.16)) {
 
 function borderWidth(style) {
   if (!style) return 0;
-  if (/thick|double/i.test(style)) return 1.5;
-  if (/medium/i.test(style)) return 1;
-  return 0.5;
+  const normalized = String(style).toLowerCase();
+  if (normalized === "hair") return 0.25;
+  if (normalized === "thick" || normalized === "double") return 2.25;
+  if (normalized.startsWith("medium")) return 1.5;
+  return 0.75;
+}
+
+function strongestBorderSide(sides) {
+  let strongest = null;
+  let strongestWidth = 0;
+  for (const side of sides) {
+    const width = borderWidth(side?.style);
+    if (width > strongestWidth) {
+      strongest = side;
+      strongestWidth = width;
+    }
+  }
+  return strongest;
+}
+
+// ExcelJS 會把合併範圍的右、下框線保留在最右／最下方的子儲存格；只讀
+// 左上角 master 會漏掉外框。逐邊彙整邊界儲存格，並在同一邊有不同線型
+// 時保留較粗者，才能還原 Excel 顯示的完整合併框線。
+function mergedCellBorder(worksheet, range, masterBorder = {}) {
+  if (!range) return masterBorder || {};
+  const top = [];
+  const right = [];
+  const bottom = [];
+  const left = [];
+  for (let column = range.left; column <= range.right; column += 1) {
+    top.push(worksheet.getCell(range.top, column).border?.top);
+    bottom.push(worksheet.getCell(range.bottom, column).border?.bottom);
+  }
+  for (let row = range.top; row <= range.bottom; row += 1) {
+    left.push(worksheet.getCell(row, range.left).border?.left);
+    right.push(worksheet.getCell(row, range.right).border?.right);
+  }
+  return {
+    top: strongestBorderSide(top) || masterBorder?.top,
+    right: strongestBorderSide(right) || masterBorder?.right,
+    bottom: strongestBorderSide(bottom) || masterBorder?.bottom,
+    left: strongestBorderSide(left) || masterBorder?.left,
+  };
+}
+
+function borderStrength(border) {
+  return Math.max(
+    0,
+    ...["top", "right", "bottom", "left"].map((side) =>
+      borderWidth(border?.[side]?.style)
+    )
+  );
 }
 
 function lineWidth(font, value, size) {
@@ -1109,9 +1158,23 @@ function drawBorders(page, border, x, y, width, height, scale) {
             : { x: x + width - half, y, width: thickness, height };
     page.drawRectangle({
       ...rect,
-      color: argbToRgb(style?.color, rgb(0.25, 0.28, 0.34)),
+      color: argbToRgb(style?.color, rgb(0, 0, 0)),
     });
   }
+}
+
+function drawCellFrame(page, border, box, scale, options) {
+  if (options?.gridLines) {
+    page.drawRectangle({
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+      borderColor: rgb(0.82, 0.84, 0.88),
+      borderWidth: Math.max(0.2, 0.35 * scale),
+    });
+  }
+  drawBorders(page, border, box.x, box.y, box.width, box.height, scale);
 }
 
 function calculateCellBox(layout, rowIndex, columnIndex, mergeRange) {
@@ -1427,18 +1490,6 @@ function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
       color: argbToRgb(fill.fgColor, rgb(1, 1, 1)),
     });
   }
-  if (options?.gridLines) {
-    page.drawRectangle({
-      x: box.x,
-      y: box.y,
-      width: box.width,
-      height: box.height,
-      borderColor: rgb(0.82, 0.84, 0.88),
-      borderWidth: Math.max(0.2, 0.35 * scale),
-    });
-  }
-  drawBorders(page, cell.border, box.x, box.y, box.width, box.height, scale);
-
   const value = cellText(cell);
   if (!value) return;
 
@@ -1482,8 +1533,17 @@ function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
       lines = wrapText(font, safeValue, fontSize, maxWidth, shouldWrap);
     }
   }
-  const lineHeight = fontSize * 1.18;
-  const maxLines = Math.max(1, Math.floor(maxHeight / lineHeight));
+  let lineHeight = fontSize * 1.18;
+  // Excel 的列高常以較緊的行距容納多行（例如 16pt 字、34pt 列高塞兩行，
+  // 行距僅約 1.06 倍）。預設 1.18 倍放不下時先壓縮行距（下限 1.02 倍字
+  // 高），仍放不下才截行；行數計算加入小量容差，避免整行文字消失。
+  if (lines.length > 1 && lines.length * lineHeight > maxHeight) {
+    lineHeight = Math.max(fontSize * 1.02, maxHeight / lines.length);
+  }
+  const maxLines = Math.max(
+    1,
+    Math.floor((maxHeight + lineHeight * 0.25) / lineHeight)
+  );
   if (lines.length > maxLines) {
     lines = lines.slice(0, maxLines);
   }
@@ -1538,9 +1598,11 @@ function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
       x = textBox.x + textBox.width - padding - width;
     }
     const y = firstBaseline - lineIndex * lineHeight;
+    // 容差放寬到 1pt：壓縮行距後文字可能貼齊儲存格邊緣，超出的部分已由
+    // needsClip 剪裁，不應把整行丟棄。
     if (
-      y < textBox.y - 0.1 ||
-      y + fontSize > textBox.y + textBox.height + 0.1
+      y < textBox.y - 1 ||
+      y + fontSize > textBox.y + textBox.height + 1
     ) {
       return;
     }
@@ -1731,6 +1793,8 @@ function renderWorksheetPage(
   const merges = buildMergeMaps(worksheet);
   const page = pdf.addPage();
   page.setSize(layout.pageWidth, layout.pageHeight);
+  const cellFrames = [];
+  const cellImagePlacements = [];
   for (let rowIndex = 0; rowIndex < layout.rows.length; rowIndex += 1) {
     const row = layout.rows[rowIndex];
     for (
@@ -1742,11 +1806,12 @@ function renderWorksheetPage(
       const key = `${row.number}:${column.number}`;
       if (merges.children.has(key)) continue;
       const cell = worksheet.getCell(row.number, column.number);
+      const mergeRange = merges.masters.get(key);
       const box = calculateCellBox(
         layout,
         rowIndex,
         columnIndex,
-        merges.masters.get(key)
+        mergeRange
       );
       const textBox = calculateOverflowTextBox(
         worksheet,
@@ -1767,10 +1832,32 @@ function renderWorksheetPage(
         layout.options,
         textBox
       );
+      cellFrames.push({
+        border: mergeRange
+          ? mergedCellBorder(worksheet, mergeRange, cell.border)
+          : cell.border,
+        box,
+      });
       const cellImage = images?.cellImages?.get(key);
-      if (cellImage) drawCellImage(page, cellImage, box);
+      if (cellImage) cellImagePlacements.push({ image: cellImage, box });
     }
   }
+  // 所有填色與文字完成後再繪製框線，避免後畫的相鄰儲存格底色遮掉一半
+  // 線寬；細線先畫、粗線後畫，讓表格外框與表頭分隔線保持完整。
+  cellFrames
+    .sort((a, b) => borderStrength(a.border) - borderStrength(b.border))
+    .forEach(({ border, box }) =>
+      drawCellFrame(
+        page,
+        border,
+        box,
+        layout.fontScale || layout.scaleX || layout.scale,
+        layout.options
+      )
+    );
+  cellImagePlacements.forEach(({ image, box }) =>
+    drawCellImage(page, image, box)
+  );
   drawPageImages(page, worksheet, layout, images);
   drawPageDecorations(
     page,

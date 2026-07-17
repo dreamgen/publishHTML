@@ -361,6 +361,40 @@ async function createWorkerHarness() {
     ["完整內容"],
     "未換行文字應交由裁切區域處理，不應自行加入省略號"
   );
+  assert.ok(
+    harness.evaluate('borderWidth("thick") > borderWidth("medium")') &&
+      harness.evaluate('borderWidth("medium") > borderWidth("thin")'),
+    "Excel thick／medium／thin 框線應映射成遞減線寬"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const borders = new Map([
+          ["1:1", { top: { style: "medium" }, left: { style: "thin" } }],
+          ["1:2", { top: { style: "medium" } }],
+          ["1:3", { top: { style: "medium" }, right: { style: "thick" } }],
+          ["2:1", { bottom: { style: "thick" }, left: { style: "thin" } }],
+          ["2:2", { bottom: { style: "thick" } }],
+          ["2:3", { bottom: { style: "thick" }, right: { style: "thick" } }],
+        ]);
+        const worksheet = {
+          getCell(row, column) {
+            return { border: borders.get(row + ":" + column) || {} };
+          },
+        };
+        const border = mergedCellBorder(
+          worksheet,
+          { top: 1, left: 1, bottom: 2, right: 3 },
+          worksheet.getCell(1, 1).border
+        );
+        return JSON.stringify(Object.fromEntries(
+          Object.entries(border).map(([side, value]) => [side, value?.style])
+        ));
+      })()`)
+    ),
+    { top: "medium", right: "thick", bottom: "thick", left: "thin" },
+    "合併儲存格應從最右／最下方子儲存格還原外框"
+  );
   assert.equal(
     harness.evaluate(`(() => {
       const testWorkbook = new ExcelJS.Workbook();
