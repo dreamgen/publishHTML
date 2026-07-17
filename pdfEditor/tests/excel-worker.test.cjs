@@ -16,6 +16,10 @@ const fontkit = require(path.join(
   editorRoot,
   "vendor/pdf-lib/fontkit.umd.min.js"
 ));
+const fflate = require(path.join(editorRoot, "vendor/fflate/fflate.min.js"));
+
+const TEST_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 async function buildWorkbook() {
   const workbook = new ExcelJS.Workbook();
@@ -112,9 +116,15 @@ async function buildWorkbook() {
     hyperlink: "https://openai.com/",
   };
 
+  // 框線繪製路徑（drawRectangle 細矩形）至少被執行一次。
+  summary.getCell("B1").border = {
+    top: { style: "thin" },
+    bottom: { style: "medium" },
+    left: { style: "thin" },
+    right: { style: "thin" },
+  };
+
   // 圖片轉換案例：PNG（oneCell 與 twoCell 錨點）應轉入 PDF，GIF 應略過。
-  const TEST_PNG_BASE64 =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
   const pngImageId = workbook.addImage({
     buffer: Buffer.from(TEST_PNG_BASE64, "base64"),
     extension: "png",
@@ -135,11 +145,72 @@ async function buildWorkbook() {
     tl: { col: 3, row: 2 },
     ext: { width: 20, height: 20 },
   });
+  // 錨在 used range（A1:B6 附近）之外的圖片：used 範圍應自動擴大涵蓋它。
+  summary.addImage(pngImageId, {
+    tl: { col: 0, row: 9 },
+    ext: { width: 40, height: 60 },
+  });
 
   const hidden = workbook.addWorksheet("內部設定");
   hidden.state = "hidden";
   hidden.addRow(["不應預設選取", 123]);
   return workbook.xlsx.writeBuffer();
+}
+
+// 產生含 Excel 365「儲存格內圖片」（richValue）的 xlsx：先用 ExcelJS 產生
+// 基本活頁簿，再直接改寫 zip 內容，把 B2 換成 vm 參照並注入 richData 部件。
+async function buildInCellImageWorkbook() {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("封面");
+  sheet.getCell("A1").value = "儲存格內圖片測試";
+  sheet.getCell("B2").value = 1;
+  sheet.getRow(2).height = 60;
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  const entries = fflate.unzipSync(new Uint8Array(buffer));
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const sheetPath = Object.keys(entries).find((name) =>
+    /^xl\/worksheets\/sheet\d+\.xml$/.test(name)
+  );
+  const sheetXml = decoder
+    .decode(entries[sheetPath])
+    .replace(
+      /<c r="B2"[^>]*>[\s\S]*?<\/c>/,
+      '<c r="B2" t="e" vm="1"><v>#VALUE!</v></c>'
+    );
+  assert.ok(sheetXml.includes('vm="1"'), "測試 xlsx 注入 vm 失敗");
+  entries[sheetPath] = encoder.encode(sheetXml);
+  entries["xl/metadata.xml"] = encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">' +
+      '<metadataTypes count="1"><metadataType name="XLRICHVALUE" minSupportedVersion="120000"/></metadataTypes>' +
+      '<futureMetadata name="XLRICHVALUE" count="1"><bk><extLst><ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}"><xlrd:rvb i="0"/></ext></extLst></bk></futureMetadata>' +
+      '<valueMetadata count="1"><bk><rc t="1" v="0"/></bk></valueMetadata></metadata>'
+  );
+  entries["xl/richData/rdrichvalue.xml"] = encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">' +
+      '<rv s="0"><v>0</v><v>5</v></rv></rvData>'
+  );
+  entries["xl/richData/rdrichvaluestructure.xml"] = encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">' +
+      '<s t="_localImage"><k n="_rvRel:LocalImageIdentifier" t="i"/><k n="CalcOrigin" t="i"/></s></rvStructures>'
+  );
+  entries["xl/richData/richValueRel.xml"] = encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<richValueRels xmlns="http://schemas.openxmlformats.org/office/spreadsheetml/2022/richvaluerel" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      '<rel r:id="rId1"/></richValueRels>'
+  );
+  entries["xl/richData/_rels/richValueRel.xml.rels"] = encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image9.png"/></Relationships>'
+  );
+  entries["xl/media/image9.png"] = new Uint8Array(
+    Buffer.from(TEST_PNG_BASE64, "base64")
+  );
+  return fflate.zipSync(entries);
 }
 
 async function createWorkerHarness() {
@@ -173,6 +244,7 @@ async function createWorkerHarness() {
       messages.push(message);
     },
     WebAssembly,
+    TextDecoder,
     async fetch(resource) {
       const url = String(resource);
       const bytes = fs.readFileSync(
@@ -196,13 +268,19 @@ async function createWorkerHarness() {
     },
   };
   vm.createContext(context);
-  // hb-subset 包裝器會掛在 context.self 上；worker 端以全域 HBSubset 取用。
+  // hb-subset 與 fflate 會掛在 context.self 上；worker 端以全域名稱取用。
   vm.runInContext(
     fs.readFileSync(path.join(editorRoot, "vendor/hb-subset/hb-subset.js"), "utf8"),
     context,
     { filename: "hb-subset.js" }
   );
   context.HBSubset = context.self.HBSubset;
+  vm.runInContext(
+    fs.readFileSync(path.join(editorRoot, "vendor/fflate/fflate.min.js"), "utf8"),
+    context,
+    { filename: "fflate.min.js" }
+  );
+  context.fflate = context.self.fflate;
   vm.runInContext(
     fs.readFileSync(path.join(editorRoot, "excel-worker.js"), "utf8"),
     context,
@@ -417,6 +495,58 @@ async function createWorkerHarness() {
     (ref) => !smaskRefs.has(ref)
   ).length;
   assert.equal(mainImageCount, 2, "應嵌入兩份主圖（GIF 略過、共用媒體不重複嵌入）");
+
+  // used range 應被浮動圖片擴大：摘要工作表資料只到第 6 列，圖片錨在第
+  // 10 列（高 60px ≈ 45pt），估算範圍的底列必須涵蓋圖片。
+  const usedEstimate = await harness.send({
+    type: "estimate",
+    sheets: [
+      {
+        id: parsed.sheets[1].id,
+        options: { ...parsed.sheets[1].printSettings, rangeMode: "used" },
+      },
+    ],
+  });
+  const usedRangeText = usedEstimate.sheets[0].ranges[0];
+  const usedBottomRow = Number(usedRangeText.match(/(\d+)$/)?.[1]);
+  assert.ok(
+    usedBottomRow >= 11,
+    `used range 未涵蓋浮動圖片：${usedRangeText}`
+  );
+
+  // 儲存格內圖片（richValue）：#VALUE! 應轉為圖片並繪製於儲存格內。
+  const cellHarness = await createWorkerHarness();
+  const cellXlsxBytes = await buildInCellImageWorkbook();
+  const cellParsed = await cellHarness.send({
+    type: "parse",
+    name: "儲存格內圖片.xlsx",
+    buffer: cellXlsxBytes.buffer.slice(
+      cellXlsxBytes.byteOffset,
+      cellXlsxBytes.byteOffset + cellXlsxBytes.byteLength
+    ),
+  });
+  assert.ok(
+    cellParsed.compatibility.items.some((item) => item.code === "cell-images"),
+    "應回報儲存格內圖片將轉入"
+  );
+  const cellConverted = await cellHarness.send({
+    type: "convert",
+    sheets: [{ id: cellParsed.sheets[0].id, options: {} }],
+  });
+  const cellPdf = await PDFLib.PDFDocument.load(
+    new Uint8Array(cellConverted.bytes)
+  );
+  let cellImageCount = 0;
+  for (const [, object] of cellPdf.context.enumerateIndirectObjects()) {
+    if (
+      object instanceof PDFLib.PDFRawStream &&
+      object.dict.get(PDFLib.PDFName.of("Subtype")) ===
+        PDFLib.PDFName.of("Image")
+    ) {
+      cellImageCount += 1;
+    }
+  }
+  assert.ok(cellImageCount >= 1, "儲存格內圖片未嵌入輸出 PDF");
 
   process.stdout.write(
     `Excel worker test passed: ${parsed.sheets.length} sheets, ${converted.pageCount} PDF pages, ${pdfBytes.byteLength} bytes\n`

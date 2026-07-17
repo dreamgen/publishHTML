@@ -1,4 +1,4 @@
-const SW_VERSION = "v19";
+const SW_VERSION = "v20";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 // Cached during install (required for the core editor to work offline).
@@ -50,6 +50,7 @@ const APP_SHELL = [
   "./vendor/pdf-lib/NotoSansTC-Regular.ttf",
   "./vendor/hb-subset/hb-subset.js",
   "./vendor/hb-subset/hb-subset.wasm",
+  "./vendor/fflate/fflate.min.js",
   "./vendor/exceljs/exceljs.min.js",
   "./vendor/exceljs/LICENSE",
 ];

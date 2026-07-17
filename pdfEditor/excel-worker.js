@@ -1,10 +1,11 @@
-/* global ExcelJS, PDFLib, fontkit, HBSubset */
+/* global ExcelJS, PDFLib, fontkit, HBSubset, fflate */
 
 importScripts(
   "./vendor/exceljs/exceljs.min.js",
   "./vendor/pdf-lib/pdf-lib.min.js",
   "./vendor/pdf-lib/fontkit.umd.min.js",
-  "./vendor/hb-subset/hb-subset.js"
+  "./vendor/hb-subset/hb-subset.js",
+  "./vendor/fflate/fflate.min.js"
 );
 
 const {
@@ -65,6 +66,8 @@ const PAPER_SIZE_CODES = {
 
 let workbook = null;
 let workbookName = "活頁簿.xlsx";
+// Excel 365「儲存格內圖片」（richValue）：sheetName → Map("row:col" → {bytes, extension})
+let inCellImagesBySheet = new Map();
 let fontBytesPromise = null;
 let outlineFontPromise = null;
 let sourceFontPromise = null;
@@ -155,16 +158,83 @@ function worksheetRange(worksheet, rangeMode = "print-area", customRange = "") {
     Number.isFinite(dimensions.right)
   ) {
     return [
-      {
+      expandRangeForDrawings(worksheet, {
         top: Math.max(1, dimensions.top),
         left: Math.max(1, dimensions.left),
         bottom: Math.max(1, dimensions.bottom),
         right: Math.max(1, dimensions.right),
-      },
+      }),
     ];
   }
 
   return [{ top: 1, left: 1, bottom: 1, right: 1 }];
+}
+
+// 儲存格的 used range 不含浮動圖片；若圖片錨在資料範圍之外（例如表尾附
+// 圖），Excel 列印仍會涵蓋它。這裡依圖片的錨點範圍擴大 used range。僅在
+// 未設定列印範圍、也未指定自訂範圍時套用（與 Excel 行為一致）。
+function expandRangeForDrawings(worksheet, range) {
+  for (const item of worksheet.getImages?.() || []) {
+    const anchor = item.range;
+    const tl = anchor?.tl;
+    if (!tl) continue;
+    const extension = String(
+      workbook?.model?.media?.[item.imageId]?.extension || ""
+    ).toLowerCase();
+    if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) continue;
+    const topRow = (tl.nativeRow || 0) + 1;
+    const leftColumn = (tl.nativeCol || 0) + 1;
+    let bottomRow = topRow;
+    let rightColumn = leftColumn;
+    if (anchor.br) {
+      bottomRow =
+        (anchor.br.nativeRow || 0) + ((anchor.br.nativeRowOff || 0) > 0 ? 1 : 0);
+      rightColumn =
+        (anchor.br.nativeCol || 0) + ((anchor.br.nativeColOff || 0) > 0 ? 1 : 0);
+    } else if (anchor.ext) {
+      bottomRow = rowAtSheetOffset(
+        worksheet,
+        sheetOffsetY(worksheet, tl.nativeRow || 0, tl.nativeRowOff) +
+          (Number(anchor.ext.height) || 0) * PIXEL_TO_POINT,
+        topRow
+      );
+      rightColumn = columnAtSheetOffset(
+        worksheet,
+        sheetOffsetX(worksheet, tl.nativeCol || 0, tl.nativeColOff) +
+          (Number(anchor.ext.width) || 0) * PIXEL_TO_POINT,
+        leftColumn
+      );
+    }
+    range.top = Math.min(range.top, topRow);
+    range.left = Math.min(range.left, leftColumn);
+    range.bottom = Math.max(range.bottom, Math.max(topRow, bottomRow));
+    range.right = Math.max(range.right, Math.max(leftColumn, rightColumn));
+  }
+  return range;
+}
+
+const DRAWING_SCAN_LIMIT = 2000;
+
+function rowAtSheetOffset(worksheet, absoluteY, startRow) {
+  let accumulated = sheetOffsetY(worksheet, Math.max(0, startRow - 1), 0);
+  for (let row = startRow; row < startRow + DRAWING_SCAN_LIMIT; row += 1) {
+    accumulated += getRowHeight(worksheet, row);
+    if (accumulated >= absoluteY) return row;
+  }
+  return startRow;
+}
+
+function columnAtSheetOffset(worksheet, absoluteX, startColumn) {
+  let accumulated = sheetOffsetX(worksheet, Math.max(0, startColumn - 1), 0);
+  for (
+    let column = startColumn;
+    column < startColumn + DRAWING_SCAN_LIMIT;
+    column += 1
+  ) {
+    accumulated += getColumnWidth(worksheet, column);
+    if (accumulated >= absoluteX) return column;
+  }
+  return startColumn;
 }
 
 function parseTitleRows(value, range) {
@@ -707,20 +777,24 @@ function cellText(cell) {
 }
 
 function drawBorders(page, border, x, y, width, height, scale) {
-  const sides = {
-    top: [x, y + height, x + width, y + height],
-    right: [x + width, y, x + width, y + height],
-    bottom: [x, y, x + width, y],
-    left: [x, y, x, y + height],
-  };
-  for (const [side, points] of Object.entries(sides)) {
+  for (const side of ["top", "right", "bottom", "left"]) {
     const style = border?.[side];
     const thickness = borderWidth(style?.style) * scale;
     if (!thickness) continue;
-    page.drawLine({
-      start: { x: points[0], y: points[1] },
-      end: { x: points[2], y: points[3] },
-      thickness,
+    const half = thickness / 2;
+    // 以細長矩形取代 drawLine：視覺等價，且選項不含巢狀座標物件
+    //（pdf-lib 對巢狀物件做 instanceof 檢查，在測試的 vm 沙箱會誤判跨
+    // realm 物件，改用 drawRectangle 讓正式與測試環境走同一條路）。
+    const rect =
+      side === "top"
+        ? { x, y: y + height - half, width, height: thickness }
+        : side === "bottom"
+          ? { x, y: y - half, width, height: thickness }
+          : side === "left"
+            ? { x: x - half, y, width: thickness, height }
+            : { x: x + width - half, y, width: thickness, height };
+    page.drawRectangle({
+      ...rect,
       color: argbToRgb(style?.color, rgb(0.25, 0.28, 0.34)),
     });
   }
@@ -821,9 +895,20 @@ function imageSheetBox(worksheet, range) {
   };
 }
 
-// 每個 PDF 文件嵌入同一張媒體一次（embedCache 以 imageId 為鍵、跨工作表共用）。
+async function embedImageBytes(pdf, embedCache, cacheKey, bytes, extension) {
+  let embeddedPromise = embedCache.get(cacheKey);
+  if (!embeddedPromise) {
+    embeddedPromise =
+      extension === "png" ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
+    embedCache.set(cacheKey, embeddedPromise);
+  }
+  return embeddedPromise;
+}
+
+// 每個 PDF 文件嵌入同一張媒體一次（embedCache 跨工作表共用）。回傳
+// anchored（浮動圖片）與 cellImages（儲存格內圖片，鍵為 "row:col"）。
 async function prepareWorksheetImages(pdf, worksheet, embedCache) {
-  const placements = [];
+  const anchored = [];
   for (const item of worksheet.getImages?.() || []) {
     const media = workbook?.model?.media?.[item.imageId];
     const extension = String(media?.extension || "").toLowerCase();
@@ -838,19 +923,61 @@ async function prepareWorksheetImages(pdf, worksheet, embedCache) {
     }
     const box = imageSheetBox(worksheet, item.range);
     if (!box) continue;
-    let embeddedPromise = embedCache.get(item.imageId);
-    if (!embeddedPromise) {
-      embeddedPromise =
-        extension === "png" ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
-      embedCache.set(item.imageId, embeddedPromise);
-    }
     try {
-      placements.push({ box, embedded: await embeddedPromise });
+      anchored.push({
+        box,
+        embedded: await embedImageBytes(
+          pdf,
+          embedCache,
+          `media:${item.imageId}`,
+          bytes,
+          extension
+        ),
+      });
     } catch (error) {
       console.warn("[Excel PDF] 圖片嵌入失敗，已略過。", error);
     }
   }
-  return placements;
+
+  const cellImages = new Map();
+  for (const [key, entry] of inCellImagesBySheet.get(worksheet.name) || []) {
+    if (entry.bytes.byteLength > MAX_IMAGE_BYTES) continue;
+    try {
+      cellImages.set(
+        key,
+        await embedImageBytes(
+          pdf,
+          embedCache,
+          `cell:${entry.mediaPath}`,
+          entry.bytes,
+          entry.extension
+        )
+      );
+    } catch (error) {
+      console.warn("[Excel PDF] 儲存格內圖片嵌入失敗，已略過。", error);
+    }
+  }
+  return { anchored, cellImages };
+}
+
+// 儲存格內圖片：等比縮放置中，內縮一小段避免壓到框線。
+function drawCellImage(page, embedded, box) {
+  const padding = Math.min(1.5, box.width * 0.05, box.height * 0.05);
+  const maxWidth = box.width - padding * 2;
+  const maxHeight = box.height - padding * 2;
+  if (maxWidth <= 0 || maxHeight <= 0) return;
+  const ratio = Math.min(
+    maxWidth / embedded.width,
+    maxHeight / embedded.height
+  );
+  const width = embedded.width * ratio;
+  const height = embedded.height * ratio;
+  page.drawImage(embedded, {
+    x: box.x + (box.width - width) / 2,
+    y: box.y + (box.height - height) / 2,
+    width,
+    height,
+  });
 }
 
 // 把工作表絕對座標映射為「本頁內容區內的未縮放位移」。頁面欄列可能不連續
@@ -869,8 +996,9 @@ function pageContentOffset(entries, startOf, sizeOf, absolute) {
 }
 
 function drawPageImages(page, worksheet, layout, images) {
-  if (!images?.length) return;
-  const visible = images.filter(
+  const anchored = images?.anchored;
+  if (!anchored?.length) return;
+  const visible = anchored.filter(
     (image) =>
       layout.columns.some((column) => column.number === image.box.anchorColumn) &&
       layout.rows.some((row) => row.number === image.box.anchorRow)
@@ -1140,7 +1268,7 @@ function renderWorksheetPage(
   fonts,
   pageIndex,
   pageCount,
-  images = []
+  images = null
 ) {
   const merges = buildMergeMaps(worksheet);
   const page = pdf.addPage();
@@ -1163,6 +1291,8 @@ function renderWorksheetPage(
         merges.masters.get(key)
       );
       drawCell(page, cell, box, fonts, layout.scale, layout.options);
+      const cellImage = images?.cellImages?.get(key);
+      if (cellImage) drawCellImage(page, cellImage, box);
     }
   }
   drawPageImages(page, worksheet, layout, images);
@@ -1177,7 +1307,7 @@ async function renderWorksheet(
   fonts,
   progressState,
   requestId,
-  images = []
+  images = null
 ) {
   for (let pageIndex = 0; pageIndex < layouts.length; pageIndex += 1) {
     renderWorksheetPage(
@@ -1245,6 +1375,19 @@ function auditWorksheet(worksheet) {
         )
       );
     }
+  }
+
+  const cellImageCount = inCellImagesBySheet.get(worksheet.name)?.size || 0;
+  if (cellImageCount) {
+    issues.push(
+      createCompatibilityIssue(
+        worksheet,
+        "info",
+        "cell-images",
+        `${cellImageCount} 張儲存格內圖片將轉入 PDF`,
+        "Excel 365 的儲存格內圖片會等比縮放置中繪製於所屬儲存格。"
+      )
+    );
   }
 
   const conditionalCount = worksheet.conditionalFormattings?.length || 0;
@@ -1478,11 +1621,198 @@ function describeWorkbook() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 儲存格內圖片（Excel 365 richValue）
+//
+// ExcelJS 不認識 richData，這類儲存格會被讀成 #VALUE! 錯誤。這裡直接解開
+// xlsx（zip）解析對應鏈：儲存格 vm → xl/metadata.xml（XLRICHVALUE）→
+// xl/richData/rdrichvalue.xml（_localImage 結構的 LocalImageIdentifier）→
+// richValueRel.xml(.rels) → xl/media/*。解析失敗時靜默略過，不影響一般轉換。
+// ---------------------------------------------------------------------------
+
+function unzipEntries(zipBytes, wanted) {
+  const entries = fflate.unzipSync(zipBytes, {
+    filter: (file) => wanted(file.name),
+  });
+  return entries;
+}
+
+function xmlText(entries, name) {
+  const bytes = entries[name];
+  return bytes ? new TextDecoder().decode(bytes) : "";
+}
+
+function normalizeZipPath(base, target) {
+  if (target.startsWith("/")) return target.slice(1);
+  const parts = base.split("/").slice(0, -1);
+  for (const segment of String(target).split("/")) {
+    if (segment === "..") parts.pop();
+    else if (segment !== ".") parts.push(segment);
+  }
+  return parts.join("/");
+}
+
+function extractInCellImages(zipBytes) {
+  const result = new Map();
+  const small = unzipEntries(zipBytes, (name) =>
+    [
+      "xl/metadata.xml",
+      "xl/workbook.xml",
+      "xl/_rels/workbook.xml.rels",
+      "xl/richData/rdrichvalue.xml",
+      "xl/richData/rdrichvaluestructure.xml",
+      "xl/richData/richValueRel.xml",
+      "xl/richData/_rels/richValueRel.xml.rels",
+    ].includes(name)
+  );
+  const metadataXml = xmlText(small, "xl/metadata.xml");
+  const richValueXml = xmlText(small, "xl/richData/rdrichvalue.xml");
+  if (!metadataXml || !richValueXml) return result;
+
+  // metadata：vm（1-based）→ rich value index
+  const metadataTypes = [
+    ...metadataXml.matchAll(/<metadataType\b[^>]*name="([^"]+)"/g),
+  ].map((m) => m[1]);
+  const futureBlock =
+    metadataXml.match(
+      /<futureMetadata\b[^>]*name="XLRICHVALUE"[^>]*>([\s\S]*?)<\/futureMetadata>/
+    )?.[1] || "";
+  const rvbIndexes = [...futureBlock.matchAll(/<xlrd:rvb i="(\d+)"/g)].map((m) =>
+    Number(m[1])
+  );
+  const valueBlock =
+    metadataXml.match(/<valueMetadata\b[^>]*>([\s\S]*?)<\/valueMetadata>/)?.[1] ||
+    "";
+  const valueRecords = [...valueBlock.matchAll(/<bk>([\s\S]*?)<\/bk>/g)].map(
+    (m) => {
+      const rc = m[1].match(/<rc t="(\d+)" v="(\d+)"/);
+      return rc ? { type: Number(rc[1]), value: Number(rc[2]) } : null;
+    }
+  );
+  const vmToRichValueIndex = (vm) => {
+    const record = valueRecords[vm - 1];
+    if (!record || metadataTypes[record.type - 1] !== "XLRICHVALUE") return null;
+    const index = rvbIndexes[record.value];
+    return Number.isInteger(index) ? index : null;
+  };
+
+  // richData：rich value index → media 路徑
+  const structureXml = xmlText(small, "xl/richData/rdrichvaluestructure.xml");
+  const structures = [
+    ...structureXml.matchAll(/<s t="([^"]*)"[^>]*>([\s\S]*?)<\/s>/g),
+  ].map((m) => ({
+    type: m[1],
+    keys: [...m[2].matchAll(/<k n="([^"]+)"/g)].map((k) => k[1]),
+  }));
+  const richValues = [
+    ...richValueXml.matchAll(/<rv s="(\d+)"[^>]*>([\s\S]*?)<\/rv>/g),
+  ].map((m) => ({
+    structure: Number(m[1]),
+    values: [...m[2].matchAll(/<v[^>]*>([^<]*)<\/v>/g)].map((v) => v[1]),
+  }));
+  const relIds = [
+    ...xmlText(small, "xl/richData/richValueRel.xml").matchAll(
+      /<rel r:id="([^"]+)"/g
+    ),
+  ].map((m) => m[1]);
+  const relTargets = new Map(
+    [
+      ...xmlText(small, "xl/richData/_rels/richValueRel.xml.rels").matchAll(
+        /Id="([^"]+)"[^>]*Target="([^"]+)"/g
+      ),
+    ].map((m) => [m[1], m[2]])
+  );
+  const richValueToMediaPath = (index) => {
+    const richValue = richValues[index];
+    const structure = structures[richValue?.structure];
+    if (!structure || structure.type !== "_localImage") return null;
+    const keyIndex = structure.keys.indexOf("_rvRel:LocalImageIdentifier");
+    if (keyIndex < 0) return null;
+    const relId = relIds[Number(richValue.values[keyIndex])];
+    const target = relId && relTargets.get(relId);
+    return target
+      ? normalizeZipPath("xl/richData/richValueRel.xml", target)
+      : null;
+  };
+
+  // workbook：sheet 名稱 → worksheet xml 路徑
+  const sheetEntries = [
+    ...xmlText(small, "xl/workbook.xml").matchAll(
+      /<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g
+    ),
+  ];
+  const workbookRels = new Map(
+    [
+      ...xmlText(small, "xl/_rels/workbook.xml.rels").matchAll(
+        /Id="([^"]+)"[^>]*Target="([^"]+)"/g
+      ),
+    ].map((m) => [m[1], normalizeZipPath("xl/workbook.xml", m[2])])
+  );
+
+  // 第二趟：worksheet xml + 會用到的 media
+  const sheetPaths = new Set(
+    sheetEntries
+      .map(([, , relId]) => workbookRels.get(relId))
+      .filter((path) => path && path.includes("worksheets/"))
+  );
+  const large = unzipEntries(
+    zipBytes,
+    (name) => sheetPaths.has(name) || name.startsWith("xl/media/")
+  );
+
+  for (const [, sheetName, relId] of sheetEntries) {
+    const sheetXml = xmlText(large, workbookRels.get(relId) || "");
+    if (!sheetXml) continue;
+    let cellMap = null;
+    for (const cellMatch of sheetXml.matchAll(/<c ([^>]*\bvm="\d+"[^>]*?)\/?>/g)) {
+      const attrs = cellMatch[1];
+      const reference = attrs.match(/\br="([A-Z]+\d+)"/)?.[1];
+      const vm = Number(attrs.match(/\bvm="(\d+)"/)?.[1]);
+      if (!reference || !vm) continue;
+      const richValueIndex = vmToRichValueIndex(vm);
+      if (richValueIndex === null) continue;
+      const mediaPath = richValueToMediaPath(richValueIndex);
+      const bytes = mediaPath && large[mediaPath];
+      if (!bytes) continue;
+      const extension = mediaPath.split(".").pop().toLowerCase();
+      if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) continue;
+      const address = decodeCellAddress(reference);
+      if (!address) continue;
+      if (!cellMap) {
+        cellMap = new Map();
+        result.set(sheetName, cellMap);
+      }
+      cellMap.set(`${address.row}:${address.column}`, {
+        bytes,
+        extension,
+        mediaPath,
+      });
+    }
+  }
+  return result;
+}
+
 async function parseWorkbook(message) {
   postProgress(message.requestId, "正在讀取 Excel", message.name || "活頁簿", 8);
   workbookName = message.name || workbookName;
+  inCellImagesBySheet = new Map();
+  try {
+    inCellImagesBySheet = extractInCellImages(new Uint8Array(message.buffer));
+  } catch (error) {
+    console.warn("[Excel PDF] 儲存格內圖片解析失敗，將略過。", error);
+  }
   workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(message.buffer);
+  // 儲存格內圖片在 ExcelJS 眼中是 #VALUE! 錯誤；改由圖片繪製，清掉錯誤文字。
+  for (const [sheetName, cellMap] of inCellImagesBySheet) {
+    const worksheet = workbook.getWorksheet(sheetName);
+    if (!worksheet) continue;
+    for (const key of cellMap.keys()) {
+      const [row, column] = key.split(":").map(Number);
+      const cell = worksheet.getCell(row, column);
+      if (cell.value?.error) cell.value = null;
+    }
+  }
   compatibilityReport = auditWorkbook();
   const sheets = describeWorkbook();
   if (!sheets.length) throw new Error("Excel 中沒有可轉換的工作表。");
