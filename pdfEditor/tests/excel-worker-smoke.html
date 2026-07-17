@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <title>Excel Worker Smoke Test</title>
+  <style>
+    body { font: 16px/1.6 system-ui, sans-serif; padding: 32px; }
+    #result { padding: 16px; border-radius: 10px; background: #f1f5f9; }
+    .pass { color: #18794e; background: #e9f8f0 !important; }
+    .fail { color: #b42318; background: #fff0ee !important; }
+  </style>
+</head>
+<body>
+  <h1>Excel Worker Smoke Test</h1>
+  <pre id="result">RUNNING</pre>
+  <script src="../vendor/exceljs/exceljs.min.js"></script>
+  <script>
+    const result = document.querySelector("#result");
+
+    async function buildWorkbook() {
+      const workbook = new ExcelJS.Workbook();
+      const report = workbook.addWorksheet("中文報表", {
+        pageSetup: { paperSize: 9, orientation: "portrait" },
+      });
+      report.mergeCells("A1:C1");
+      report.getCell("A1").value = "Excel 轉 PDF 測試";
+      report.getCell("A1").font = { bold: true, size: 18 };
+      report.addRows([
+        ["品項", "數量", "金額"],
+        ["測試商品", 2, { formula: "B3*100", result: 200 }],
+      ]);
+      report.columns = [{ width: 22 }, { width: 12 }, { width: 16 }];
+      const hidden = workbook.addWorksheet("隱藏資料");
+      hidden.state = "hidden";
+      hidden.addRow(["secret"]);
+      return workbook.xlsx.writeBuffer();
+    }
+
+    function waitFor(worker, expectedType) {
+      return new Promise((resolve, reject) => {
+        const onMessage = (event) => {
+          if (event.data.type === "progress") return;
+          worker.removeEventListener("message", onMessage);
+          if (event.data.type === "error") reject(new Error(event.data.message));
+          else if (event.data.type !== expectedType) {
+            reject(new Error(`Expected ${expectedType}, got ${event.data.type}`));
+          } else resolve(event.data);
+        };
+        worker.addEventListener("message", onMessage);
+        worker.addEventListener("error", reject, { once: true });
+      });
+    }
+
+    (async () => {
+      const worker = new Worker("../excel-worker.js");
+      const workbookBytes = await buildWorkbook();
+      const input = workbookBytes.buffer.slice(
+        workbookBytes.byteOffset,
+        workbookBytes.byteOffset + workbookBytes.byteLength
+      );
+      const parsedPromise = waitFor(worker, "parsed");
+      worker.postMessage({
+        type: "parse",
+        name: "smoke.xlsx",
+        buffer: input,
+      }, [input]);
+      const parsed = await parsedPromise;
+      if (parsed.sheets.length !== 2 || parsed.sheets[1].state !== "hidden") {
+        throw new Error("Sheet metadata mismatch");
+      }
+
+      const convertedPromise = waitFor(worker, "converted");
+      worker.postMessage({
+        type: "convert",
+        sheetIds: [parsed.sheets[0].id],
+        options: {
+          paperSize: "source",
+          orientation: "source",
+          scaling: "fit-width",
+          usePrintArea: true,
+        },
+      });
+      const converted = await convertedPromise;
+      const signature = new TextDecoder("ascii").decode(
+        new Uint8Array(converted.bytes, 0, 4)
+      );
+      if (signature !== "%PDF" || converted.pageCount !== 1) {
+        throw new Error("Generated PDF mismatch");
+      }
+      worker.terminate();
+      result.className = "pass";
+      result.textContent = `PASS\n${parsed.sheets.length} sheets\n${converted.pageCount} page\n${converted.bytes.byteLength} bytes`;
+    })().catch((error) => {
+      result.className = "fail";
+      result.textContent = `FAIL\n${error.stack || error.message}`;
+    });
+  </script>
+</body>
+</html>

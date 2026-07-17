@@ -86,6 +86,11 @@ class PdfWorkshop {
     this.installIntroTimer = null;
     this.installStateReady = false;
     this.detectedInstalledApp = false;
+    this.excelWorker = null;
+    this.excelWorkerPending = null;
+    this.excelWorkbookInfo = null;
+    this.excelImportMode = "insert";
+    this.excelPreviousActiveId = null;
 
     this.elements = {
       openButton: $("#openButton"),
@@ -100,6 +105,7 @@ class PdfWorkshop {
       mergeFileInput: $("#mergeFileInput"),
       annotationImageInput: $("#annotationImageInput"),
       imageToPdfInput: $("#imageToPdfInput"),
+      excelFileInput: $("#excelFileInput"),
       toolbar: $("#toolbar"),
       toolbarOverflow: $("#toolbarOverflow"),
       toolbarMoreButton: $("#toolbarMoreButton"),
@@ -186,6 +192,24 @@ class PdfWorkshop {
       blankPortraitButton: $("#blankPortraitButton"),
       blankLandscapeButton: $("#blankLandscapeButton"),
       imageToPdfButton: $("#imageToPdfButton"),
+      excelToPdfButton: $("#excelToPdfButton"),
+      excelDialog: $("#excelDialog"),
+      excelCloseButton: $("#excelCloseButton"),
+      excelCancelButton: $("#excelCancelButton"),
+      excelConvertButton: $("#excelConvertButton"),
+      excelFileName: $("#excelFileName"),
+      excelWorkbookMeta: $("#excelWorkbookMeta"),
+      excelSheetList: $("#excelSheetList"),
+      excelSelectionSummary: $("#excelSelectionSummary"),
+      excelSelectVisibleButton: $("#excelSelectVisibleButton"),
+      excelClearSelectionButton: $("#excelClearSelectionButton"),
+      excelPaperSize: $("#excelPaperSize"),
+      excelOrientation: $("#excelOrientation"),
+      excelScaling: $("#excelScaling"),
+      excelUsePrintArea: $("#excelUsePrintArea"),
+      excelInsertPositionField: $("#excelInsertPositionField"),
+      excelInsertPosition: $("#excelInsertPosition"),
+      excelWarning: $("#excelWarning"),
       rangeDialog: $("#rangeDialog"),
       rangeInput: $("#rangeInput"),
       rangeError: $("#rangeError"),
@@ -292,6 +316,7 @@ class PdfWorkshop {
       mergeFileInput,
       annotationImageInput,
       imageToPdfInput,
+      excelFileInput,
       openSidebarButton,
       closeSidebarButton,
       selectAllCheckbox,
@@ -381,12 +406,12 @@ class PdfWorkshop {
       if (this.pages.length) {
         const confirmed = await this.confirmAction({
           title: "開啟新的文件？",
-          message: "目前尚未匯出的編輯內容將被新的 PDF 取代。",
+          message: "目前尚未匯出的編輯內容將被新的文件取代。",
           acceptLabel: "開啟新文件",
         });
         if (!confirmed) return;
       }
-      await this.loadFiles(files, { replace: true });
+      await this.handleOpenFiles(files);
     });
 
     mergeFileInput.addEventListener("change", async (event) => {
@@ -405,6 +430,12 @@ class PdfWorkshop {
       const files = [...(event.target.files || [])];
       event.target.value = "";
       if (files.length) await this.convertImagesToPdf(files);
+    });
+
+    excelFileInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) await this.openExcelImport(file, { mode: "insert" });
     });
 
     openSidebarButton.addEventListener("click", () =>
@@ -491,6 +522,42 @@ class PdfWorkshop {
     this.elements.imageToPdfButton.addEventListener("click", () => {
       this.closeDialog(this.elements.insertDialog);
       imageToPdfInput.click();
+    });
+    this.elements.excelToPdfButton.addEventListener("click", () => {
+      this.closeDialog(this.elements.insertDialog);
+      excelFileInput.click();
+    });
+    this.elements.excelCloseButton.addEventListener("click", () =>
+      this.cancelExcelImport()
+    );
+    this.elements.excelCancelButton.addEventListener("click", () =>
+      this.cancelExcelImport()
+    );
+    this.elements.excelConvertButton.addEventListener("click", () =>
+      this.convertSelectedExcelSheets()
+    );
+    this.elements.excelSelectVisibleButton.addEventListener("click", () => {
+      for (const checkbox of this.elements.excelSheetList.querySelectorAll(
+        'input[type="checkbox"]'
+      )) {
+        checkbox.checked = checkbox.dataset.state === "visible";
+      }
+      this.updateExcelSelection();
+    });
+    this.elements.excelClearSelectionButton.addEventListener("click", () => {
+      for (const checkbox of this.elements.excelSheetList.querySelectorAll(
+        'input[type="checkbox"]'
+      )) {
+        checkbox.checked = false;
+      }
+      this.updateExcelSelection();
+    });
+    this.elements.excelSheetList.addEventListener("change", () =>
+      this.updateExcelSelection()
+    );
+    this.elements.excelDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.cancelExcelImport();
     });
 
     this.bindSignaturePad();
@@ -629,6 +696,17 @@ class PdfWorkshop {
           file.name.toLowerCase().endsWith(".pdf")
       );
       const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      const excelFiles = files.filter((file) => this.isExcelFile(file));
+      if (excelFiles.length) {
+        if (excelFiles.length > 1 || pdfFiles.length || imageFiles.length) {
+          this.toast("請一次拖入一個 Excel，或改為拖入 PDF／圖片。", "error");
+          return;
+        }
+        await this.openExcelImport(excelFiles[0], {
+          mode: this.pages.length ? "insert" : "open",
+        });
+        return;
+      }
       if (pdfFiles.length) {
         await this.loadFiles(pdfFiles, { replace: !this.pages.length });
       }
@@ -636,7 +714,7 @@ class PdfWorkshop {
         await this.convertImagesToPdf(imageFiles);
       }
       if (!pdfFiles.length && !imageFiles.length && files.length) {
-        this.toast("請拖入 PDF 或圖片檔案。", "error");
+        this.toast("請拖入 PDF、Excel 或圖片檔案。", "error");
       }
     });
 
@@ -729,6 +807,292 @@ class PdfWorkshop {
       divider.hidden =
         !!nextGroup?.classList.contains("toolbar-group") &&
         !nextGroup.childElementCount;
+    }
+  }
+
+  isExcelFile(file) {
+    return (
+      file?.type ===
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      file?.name?.toLowerCase().endsWith(".xlsx")
+    );
+  }
+
+  async handleOpenFiles(files) {
+    const excelFiles = files.filter((file) => this.isExcelFile(file));
+    if (excelFiles.length) {
+      if (files.length !== 1 || excelFiles.length !== 1) {
+        this.toast("請單獨選擇一個 Excel 檔案進行轉換。", "error");
+        return;
+      }
+      await this.openExcelImport(excelFiles[0], { mode: "open" });
+      return;
+    }
+    await this.loadFiles(files, { replace: true });
+  }
+
+  createExcelWorker() {
+    this.disposeExcelWorker();
+    if (!("Worker" in window)) {
+      throw new Error("此瀏覽器不支援背景轉換 Excel。");
+    }
+    const worker = new Worker("./excel-worker.js");
+    worker.addEventListener("message", (event) => {
+      const message = event.data || {};
+      if (message.type === "progress") {
+        this.setBusy(
+          true,
+          message.title || "正在處理 Excel",
+          message.detail || "請稍候…",
+          message.progress || 0
+        );
+        return;
+      }
+      if (!this.excelWorkerPending) return;
+      if (message.type === "error") {
+        const { reject } = this.excelWorkerPending;
+        this.excelWorkerPending = null;
+        reject(new Error(message.message || "Excel 轉換失敗。"));
+        return;
+      }
+      if (message.type === "parsed" || message.type === "converted") {
+        const { resolve } = this.excelWorkerPending;
+        this.excelWorkerPending = null;
+        resolve(message);
+      }
+    });
+    worker.addEventListener("error", (event) => {
+      console.error("[PDF Editor] Excel worker failed", event);
+      if (!this.excelWorkerPending) return;
+      const { reject } = this.excelWorkerPending;
+      this.excelWorkerPending = null;
+      reject(new Error("Excel 轉換元件載入失敗。"));
+    });
+    this.excelWorker = worker;
+  }
+
+  requestExcelWorker(type, payload = {}, transfer = []) {
+    if (!this.excelWorker) {
+      return Promise.reject(new Error("Excel 轉換元件尚未啟動。"));
+    }
+    if (this.excelWorkerPending) {
+      return Promise.reject(new Error("上一個 Excel 操作仍在進行中。"));
+    }
+    return new Promise((resolve, reject) => {
+      this.excelWorkerPending = { resolve, reject };
+      try {
+        this.excelWorker.postMessage({ type, ...payload }, transfer);
+      } catch (error) {
+        this.excelWorkerPending = null;
+        reject(error);
+      }
+    });
+  }
+
+  disposeExcelWorker() {
+    if (this.excelWorkerPending) {
+      const { reject } = this.excelWorkerPending;
+      this.excelWorkerPending = null;
+      reject(new DOMException("Excel import cancelled", "AbortError"));
+    }
+    this.excelWorker?.terminate();
+    this.excelWorker = null;
+  }
+
+  cancelExcelImport() {
+    this.closeDialog(this.elements.excelDialog, "cancel");
+    this.disposeExcelWorker();
+    this.excelWorkbookInfo = null;
+    this.setBusy(false);
+  }
+
+  async openExcelImport(file, { mode = "insert" } = {}) {
+    if (!this.isExcelFile(file)) {
+      this.toast("目前支援 .xlsx 格式的 Excel 檔案。", "error");
+      return;
+    }
+    const maxFileBytes = 25 * 1024 * 1024;
+    if (file.size > maxFileBytes) {
+      this.toast("Excel 檔案超過 25 MB，請先縮小檔案或列印範圍。", "error", 8000);
+      return;
+    }
+
+    this.excelImportMode = mode === "open" || !this.pages.length ? "open" : "insert";
+    this.excelPreviousActiveId = this.activePageId;
+    this.excelSourceFile = file;
+    this.excelWorkbookInfo = null;
+    this.elements.excelFileName.textContent = file.name;
+    this.elements.excelWorkbookMeta.textContent = "正在讀取工作表…";
+    this.elements.excelSheetList.replaceChildren();
+    this.elements.excelWarning.hidden = true;
+    this.setBusy(true, "正在讀取 Excel", file.name, 2);
+
+    try {
+      this.createExcelWorker();
+      const buffer = await file.arrayBuffer();
+      const result = await this.requestExcelWorker(
+        "parse",
+        { name: file.name, buffer },
+        [buffer]
+      );
+      this.excelWorkbookInfo = result;
+      this.renderExcelSheetSelection(result);
+      this.setBusy(false);
+      this.openDialog(this.elements.excelDialog);
+    } catch (error) {
+      this.setBusy(false);
+      if (error?.name === "AbortError") return;
+      console.error("[PDF Editor] Excel parse failed", error);
+      this.disposeExcelWorker();
+      this.toast(
+        /password|encrypt/i.test(error?.message || "")
+          ? "目前不支援密碼保護的 Excel 檔案。"
+          : error?.message || "Excel 讀取失敗，請確認檔案未損壞。",
+        "error",
+        8000
+      );
+    }
+  }
+
+  renderExcelSheetSelection(result) {
+    const sheets = Array.isArray(result.sheets) ? result.sheets : [];
+    this.elements.excelSheetList.replaceChildren();
+    const warnings = [];
+    for (const sheet of sheets) {
+      const row = document.createElement("label");
+      row.className = "excel-sheet-row";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = String(sheet.id);
+      checkbox.dataset.state = sheet.state || "visible";
+      checkbox.checked = (sheet.state || "visible") === "visible";
+
+      const name = document.createElement("span");
+      name.className = "excel-sheet-name";
+      const title = document.createElement("strong");
+      title.textContent = sheet.name;
+      const meta = document.createElement("small");
+      meta.textContent = `${sheet.range || sheet.usedRange || "A1:A1"}・${
+        sheet.rowCount || 0
+      } 列 × ${sheet.columnCount || 0} 欄`;
+      name.append(title, meta);
+      if ((sheet.state || "visible") !== "visible") {
+        const state = document.createElement("span");
+        state.className = "excel-sheet-state";
+        state.textContent = sheet.state === "veryHidden" ? "深度隱藏" : "隱藏";
+        name.append(state);
+      }
+
+      const pages = document.createElement("span");
+      pages.className = "excel-sheet-pages";
+      pages.textContent = `約 ${Math.max(1, sheet.estimatedPages || 1)} 頁`;
+      row.append(checkbox, name, pages);
+      this.elements.excelSheetList.append(row);
+      warnings.push(...(sheet.warnings || []));
+    }
+
+    const visibleCount = sheets.filter(
+      (sheet) => (sheet.state || "visible") === "visible"
+    ).length;
+    this.elements.excelWorkbookMeta.textContent = `${sheets.length} 個 Sheet・${visibleCount} 個可見`;
+    this.elements.excelInsertPositionField.hidden =
+      this.excelImportMode !== "insert" || !this.pages.length;
+    this.elements.excelConvertButton.textContent =
+      this.excelImportMode === "open" ? "建立 PDF 文件" : "轉換並插入";
+    this.elements.excelWarning.hidden = !warnings.length;
+    this.elements.excelWarning.textContent = [...new Set(warnings)].join("；");
+    this.updateExcelSelection();
+  }
+
+  updateExcelSelection() {
+    const checked = [
+      ...this.elements.excelSheetList.querySelectorAll(
+        'input[type="checkbox"]:checked'
+      ),
+    ];
+    const estimatedPages = checked.reduce((sum, checkbox) => {
+      const sheet = this.excelWorkbookInfo?.sheets?.find(
+        (item) => String(item.id) === checkbox.value
+      );
+      return sum + Math.max(1, sheet?.estimatedPages || 1);
+    }, 0);
+    this.elements.excelSelectionSummary.textContent = checked.length
+      ? `已選 ${checked.length} 個，預估 ${estimatedPages} 頁`
+      : "尚未選取";
+    this.elements.excelConvertButton.disabled = !checked.length;
+  }
+
+  async convertSelectedExcelSheets() {
+    const selectedSheetIds = [
+      ...this.elements.excelSheetList.querySelectorAll(
+        'input[type="checkbox"]:checked'
+      ),
+    ].map((checkbox) => Number(checkbox.value));
+    if (!selectedSheetIds.length) {
+      this.toast("請至少選取一個 Sheet。", "error");
+      return;
+    }
+
+    const options = {
+      paperSize: this.elements.excelPaperSize.value,
+      orientation: this.elements.excelOrientation.value,
+      scaling: this.elements.excelScaling.value,
+      usePrintArea: this.elements.excelUsePrintArea.checked,
+    };
+    this.elements.excelConvertButton.disabled = true;
+    this.setBusy(true, "正在將 Excel 轉成 PDF", "準備工作表版面", 1);
+
+    try {
+      const result = await this.requestExcelWorker("convert", {
+        sheetIds: selectedSheetIds,
+        options,
+      });
+      const sourceBase = (this.excelSourceFile?.name || "Excel")
+        .replace(/\.xlsx$/i, "")
+        .trim();
+      const pdfName = `${this.sanitizeFileName(sourceBase || "Excel")}-Excel.pdf`;
+      const pdfFile = new File([new Uint8Array(result.bytes)], pdfName, {
+        type: "application/pdf",
+      });
+      const shouldReplace = this.excelImportMode === "open" || !this.pages.length;
+      const insertedIds = await this.loadFiles([pdfFile], {
+        replace: shouldReplace,
+        remember: false,
+      });
+
+      if (
+        !shouldReplace &&
+        this.elements.excelInsertPosition.value === "after" &&
+        this.excelPreviousActiveId &&
+        insertedIds.length
+      ) {
+        this.placePagesAfter(insertedIds, this.excelPreviousActiveId);
+      } else if (insertedIds.length) {
+        this.dirty = true;
+        this.updateUI();
+        this.scheduleAutosave();
+      }
+
+      if (this.excelSourceFile) this.rememberRecentFiles([this.excelSourceFile]);
+      this.closeDialog(this.elements.excelDialog, "converted");
+      this.disposeExcelWorker();
+      this.excelWorkbookInfo = null;
+      this.setBusy(false);
+      this.toast(
+        `已將 ${selectedSheetIds.length} 個 Sheet 轉成 ${result.pageCount} 頁 PDF。`,
+        "success",
+        6500
+      );
+      if (result.warnings?.length) {
+        this.toast(result.warnings.slice(0, 2).join("；"), "error", 8000);
+      }
+    } catch (error) {
+      this.setBusy(false);
+      if (error?.name === "AbortError") return;
+      console.error("[PDF Editor] Excel conversion failed", error);
+      this.elements.excelConvertButton.disabled = false;
+      this.toast(error?.message || "Excel 轉 PDF 失敗。", "error", 8000);
     }
   }
 
@@ -4765,7 +5129,7 @@ class PdfWorkshop {
         });
         if (!confirmed) return;
       }
-      await this.loadFiles(files, { replace: true });
+      await this.handleOpenFiles(files);
     });
   }
 }

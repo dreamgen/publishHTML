@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PDF 工坊</title>
-  <meta name="description" content="完全在裝置本機處理的 PDF 編輯器，支援密碼文件、OCR、文字搜尋、頁面整理、手寫標註、簽名與表單。">
+  <meta name="description" content="完全在裝置本機處理的 PDF 編輯器，支援 Excel Sheet 轉 PDF、密碼文件、OCR、文字搜尋、頁面整理、手寫標註、簽名與表單。">
   <meta name="theme-color" content="#f8fafc">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -253,10 +253,10 @@
               本機處理，不會上傳
             </span>
             <h1>整理 PDF，不必交出文件</h1>
-            <p>拖放 PDF 到這裡，或從裝置選擇檔案。支援密碼文件、OCR、文字搜尋、合併拆分、手寫標註、簽名、圖片與表單。</p>
+            <p>拖放 PDF 或 Excel 到這裡，或從裝置選擇檔案。支援 Excel Sheet 轉 PDF、密碼文件、OCR、文字搜尋、合併拆分、手寫標註、簽名、圖片與表單。</p>
             <button class="button button-primary button-large" id="emptyOpenButton" type="button">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/><path d="m3.5 10 2 8.5h13l2-8.5z"/></svg>
-              選擇 PDF
+              選擇 PDF 或 Excel
             </button>
             <small>也可以一次選取多個檔案直接合併</small>
             <div class="recent-files" id="recentFiles" hidden>
@@ -278,8 +278,8 @@
           <div class="drop-overlay" id="dropOverlay" hidden>
             <div>
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v5h16v-5"/></svg>
-              <strong>放開以加入 PDF 或圖片</strong>
-              <span>圖片會自動轉成 PDF 頁面並加入文件</span>
+              <strong>放開以加入 PDF、Excel 或圖片</strong>
+              <span>Excel 可選擇 Sheet；圖片會自動轉成 PDF 頁面</span>
             </div>
           </div>
         </div>
@@ -296,10 +296,11 @@
     </main>
   </div>
 
-  <input id="openFileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+  <input id="openFileInput" type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx" multiple hidden>
   <input id="mergeFileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
   <input id="annotationImageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
   <input id="imageToPdfInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+  <input id="excelFileInput" type="file" accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx" hidden>
 
   <div class="busy-overlay" id="busyOverlay" hidden aria-live="polite" aria-busy="true">
     <div class="busy-card">
@@ -400,6 +401,93 @@
           <strong>圖片轉 PDF</strong>
           <small>可一次選擇多張圖片</small>
         </button>
+        <button class="insert-card" id="excelToPdfButton" type="button">
+          <span class="insert-excel-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M8 11h8M8 15h8M11 9v9M15 9v9"/></svg>
+          </span>
+          <strong>Excel 轉 PDF</strong>
+          <small>選擇要插入的 Sheet</small>
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog excel-dialog" id="excelDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">本機轉換</span>
+          <h2>選擇 Excel Sheet</h2>
+        </div>
+        <button class="icon-button" id="excelCloseButton" type="button" aria-label="關閉"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+
+      <div class="excel-file-summary">
+        <span class="excel-file-mark" aria-hidden="true">X</span>
+        <div>
+          <strong id="excelFileName">活頁簿.xlsx</strong>
+          <small id="excelWorkbookMeta">正在讀取工作表…</small>
+        </div>
+      </div>
+
+      <div class="excel-sheet-toolbar">
+        <div>
+          <strong>要轉換的 Sheet</strong>
+          <span id="excelSelectionSummary">尚未選取</span>
+        </div>
+        <div>
+          <button class="text-button" id="excelSelectVisibleButton" type="button">選取可見</button>
+          <button class="text-button" id="excelClearSelectionButton" type="button">清除</button>
+        </div>
+      </div>
+      <div class="excel-sheet-list" id="excelSheetList" role="group" aria-label="Excel Sheet 清單"></div>
+
+      <details class="excel-options">
+        <summary>版面設定</summary>
+        <div class="excel-options-grid">
+          <label class="field">
+            <span>紙張</span>
+            <select id="excelPaperSize">
+              <option value="source">依 Excel 設定</option>
+              <option value="a4">A4</option>
+              <option value="letter">Letter</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>方向</span>
+            <select id="excelOrientation">
+              <option value="source">依 Sheet 設定</option>
+              <option value="auto">自動判斷</option>
+              <option value="portrait">直向</option>
+              <option value="landscape">橫向</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>縮放</span>
+            <select id="excelScaling">
+              <option value="fit-width">符合一頁寬度</option>
+              <option value="actual">原始比例</option>
+            </select>
+          </label>
+          <label class="check-label excel-print-area-option">
+            <input id="excelUsePrintArea" type="checkbox" checked>
+            <span>優先使用 Excel 列印範圍</span>
+          </label>
+          <label class="field" id="excelInsertPositionField">
+            <span>插入位置</span>
+            <select id="excelInsertPosition">
+              <option value="after">目前頁面之後</option>
+              <option value="end">文件最後</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <div class="excel-warning" id="excelWarning" hidden></div>
+      <p class="dialog-note">檔案只在這個裝置解析。公式使用 Excel 檔案中已儲存的結果；圖表、SmartArt、巨集及部分條件格式不會轉換。</p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" id="excelCancelButton" type="button">取消</button>
+        <button class="button button-primary" id="excelConvertButton" type="button" disabled>轉換並插入</button>
       </div>
     </form>
   </dialog>

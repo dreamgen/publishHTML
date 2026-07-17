@@ -1704,7 +1704,7 @@ dialog.dialog-fallback-open {
 
 .insert-options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1774,6 +1774,202 @@ dialog.dialog-fallback-open {
   stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.insert-excel-icon {
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: #18794e;
+  background: #e9f8f0;
+}
+
+.insert-excel-icon svg {
+  width: 34px;
+  height: 34px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.excel-dialog {
+  width: min(720px, calc(100% - 28px));
+}
+
+.excel-file-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.excel-file-mark {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #fff;
+  background: #18794e;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.excel-file-summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.excel-file-summary strong {
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.excel-file-summary small,
+.excel-sheet-toolbar span {
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.excel-sheet-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.excel-sheet-toolbar > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.excel-sheet-toolbar > div:last-child {
+  display: flex;
+  gap: 12px;
+}
+
+.excel-sheet-toolbar strong {
+  font-size: 12px;
+}
+
+.excel-sheet-list {
+  max-height: 270px;
+  display: grid;
+  gap: 7px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.excel-sheet-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.excel-sheet-row:hover,
+.excel-sheet-row:has(input:checked) {
+  border-color: #93cfac;
+  background: #f0faf4;
+}
+
+.excel-sheet-name {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.excel-sheet-name strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.excel-sheet-name small,
+.excel-sheet-pages {
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.excel-sheet-state {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #7a4d00;
+  background: #fff1cc;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.excel-options {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.excel-options summary {
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.excel-options-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.excel-print-area-option {
+  min-height: 38px;
+  align-self: end;
+}
+
+.excel-warning {
+  padding: 10px 12px;
+  border: 1px solid #f0cf78;
+  border-radius: 9px;
+  color: #6c4d00;
+  background: #fff8de;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+[data-theme="dark"] .insert-excel-icon {
+  color: #7ed9a6;
+  background: rgba(24, 121, 78, .22);
+}
+
+[data-theme="dark"] .excel-sheet-row:has(input:checked) {
+  border-color: #347e58;
+  background: rgba(24, 121, 78, .16);
+}
+
+[data-theme="dark"] .excel-warning {
+  border-color: #826923;
+  color: #f4d77d;
+  background: rgba(130, 105, 35, .18);
 }
 
 .signature-dialog {
@@ -2184,6 +2380,14 @@ dialog.dialog-fallback-open {
     grid-row: 1 / 3;
     align-self: center;
     justify-self: center;
+  }
+
+  .excel-options-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-sheet-toolbar {
+    align-items: flex-start;
   }
 
   .form-field-row {

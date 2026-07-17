@@ -1,4 +1,4 @@
-const SW_VERSION = "v15";
+const SW_VERSION = "v16";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 // Cached during install (required for the core editor to work offline).
@@ -9,6 +9,7 @@ const LAZY_MANIFESTS = ["./vendor/tesseract/offline-assets.json"];
 const NETWORK_FIRST_ASSETS = [
   "/index.html",
   "/app.js",
+  "/excel-worker.js",
   "/styles.css",
   "/manifest.webmanifest",
 ];
@@ -17,6 +18,7 @@ const APP_SHELL = [
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./excel-worker.js",
   "./manifest.webmanifest",
   "./icons/pdfEditor-192.svg",
   "./icons/pdfEditor-512.svg",
@@ -43,7 +45,9 @@ const APP_SHELL = [
   "./vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
   "./vendor/pdf-lib/pdf-lib.min.js",
   "./vendor/pdf-lib/fontkit.umd.min.js",
-  "./vendor/pdf-lib/NotoSansCJKtc-Regular.otf"
+  "./vendor/pdf-lib/NotoSansCJKtc-Regular.otf",
+  "./vendor/exceljs/exceljs.min.js",
+  "./vendor/exceljs/LICENSE",
 ];
 
 async function readAssetManifest(cache, manifestUrl) {
