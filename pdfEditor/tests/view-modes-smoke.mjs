@@ -642,20 +642,55 @@ state = await page.evaluate(() => {
   ].map((path) => path.getAttribute("d"));
   const collapsed =
     group.classList.contains("collapsed") &&
-    getComputedStyle(group.querySelector(".page-group-pages")).display ===
-      "none" &&
+    !group.querySelector(".page-group-pages") &&
+    !!group.querySelector(".page-group-collapsed-preview") &&
     group
       .querySelector(".group-collapse-button")
       .getAttribute("aria-expanded") === "false";
+  const horizontalToolbar =
+    getComputedStyle(group.querySelector(".page-group-header")).flexDirection ===
+      "row" &&
+    getComputedStyle(group.querySelector(".page-group-actions")).flexDirection ===
+      "row";
   const controlsRemain =
     !!group.querySelector(".group-rename-button") &&
     !!group.querySelector(".group-ungroup-button") &&
     group.querySelectorAll(".mini-button").length >= 4;
+  app.selectedPageIds = new Set([app.pages.at(-1).id, "outside-selection"]);
+  app.refreshSidebarSelection();
+  group.querySelector(".page-group-collapsed-preview").click();
+  const collapsedBlockSingleSelect =
+    app.selectedPageIds.size === 6 &&
+    app.pages.every((item) => app.selectedPageIds.has(item.id)) &&
+    group.classList.contains("selected");
   group.querySelector(".group-collapse-button").click();
   group = document.querySelector("#pageList .page-group");
+  app.selectedPageIds = new Set([app.pages.at(-1).id]);
+  app.refreshSidebarSelection();
+  group.querySelector(".page-group-header").click();
+  const expandedBlockDoesNotSelect =
+    !group.querySelector(".page-group-collapsed-preview") &&
+    app.selectedPageIds.size === 1 &&
+    app.selectedPageIds.has(app.pages.at(-1).id);
+  app.setViewMode("continuous");
+  let continuousGroup = document.querySelector("#pageList .page-group");
+  continuousGroup.querySelector(".group-collapse-button").click();
+  continuousGroup = document.querySelector("#pageList .page-group");
+  const continuousUsesCollapsedCard =
+    !!continuousGroup.querySelector(".page-group-collapsed-preview") &&
+    continuousGroup.querySelectorAll(".page-group-collapsed-thumb").length === 3 &&
+    getComputedStyle(
+      continuousGroup.querySelector(".page-group-header")
+    ).flexDirection === "row";
+  continuousGroup.querySelector(".group-collapse-button").click();
+  app.setViewMode("single");
   return {
     collapsed,
+    horizontalToolbar,
     controlsRemain,
+    collapsedBlockSingleSelect,
+    expandedBlockDoesNotSelect,
+    continuousUsesCollapsedCard,
     inwardOutwardIcons:
       collapseIcon.join("|") === "m5 7 5 5-5 5|m19 7-5 5 5 5" &&
       expandIcon.join("|") === "m10 7-5 5 5 5|m14 7 5 5-5 5",
@@ -668,7 +703,11 @@ state = await page.evaluate(() => {
 check(
   "一般側欄群組可收合且保留整組操作",
   state.collapsed &&
+    state.horizontalToolbar &&
     state.controlsRemain &&
+    state.collapsedBlockSingleSelect &&
+    state.expandedBlockDoesNotSelect &&
+    state.continuousUsesCollapsedCard &&
     state.inwardOutwardIcons &&
     state.expanded,
   JSON.stringify(state)
@@ -800,6 +839,19 @@ state = await page.evaluate(async () => {
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
   app.setViewMode("single");
+  app.selectedPageIds = new Set();
+  app.updateUI();
+  app.refreshSidebarSelection();
+  const importedGroupCheckboxes = [
+    ...document.querySelectorAll(".group-select-checkbox"),
+  ];
+  importedGroupCheckboxes[0].click();
+  importedGroupCheckboxes[1].click();
+  imported.checkboxSupportsMultipleGroups =
+    app.selectedPageIds.size === app.pages.length &&
+    importedGroupCheckboxes.every((item) => item.checked);
+  importedGroupCheckboxes[0].click();
+  importedGroupCheckboxes[1].click();
   const sourceHeader = document.querySelector(
     `.page-group[data-group-id="${firstGroupId}"] .page-group-header`
   );
@@ -855,6 +907,11 @@ check(
   state.collapsedGroupsInline && state.collapsedGroupDragMoved,
   JSON.stringify(state)
 );
+check(
+  "群組核取方塊可累加選取多個群組",
+  state.checkboxSupportsMultipleGroups,
+  JSON.stringify(state)
+);
 check("群組標題列可拖曳整組排序", state.groupDragMoved, JSON.stringify(state));
 
 state = await page.evaluate(() => {
@@ -883,7 +940,10 @@ state = await page.evaluate(() => {
 });
 check(
   "群組核取方塊支援全選、取消與半選狀態",
-  state.initiallyUnchecked && state.selectedAll && state.clearedAll && state.partial,
+    state.initiallyUnchecked &&
+    state.selectedAll &&
+    state.clearedAll &&
+    state.partial,
   JSON.stringify(state)
 );
 

@@ -2730,8 +2730,114 @@ class PdfWorkshop {
       (currentGroupPages || list).append(card);
     });
 
-    this.scheduleBrowseGroupLayout();
+    if (this.viewMode === "browse") {
+      this.scheduleBrowseGroupLayout();
+    } else {
+      this.layoutCollapsedSidebarGroups();
+    }
     this.queueThumbnails(thumbnailJobs, generation);
+  }
+
+  layoutCollapsedSidebarGroups() {
+    const list = this.elements.pageList;
+    for (const group of list.querySelectorAll(":scope > .page-group.collapsed")) {
+      const header = group.querySelector(".page-group-header");
+      const cards = [...group.querySelectorAll(".page-card")];
+      if (!header || !cards.length) continue;
+      const collapsedRow = document.createElement("div");
+      collapsedRow.className = "page-group-row page-group-collapsed-row";
+      collapsedRow.append(
+        header,
+        this.createCollapsedGroupPreview(group.dataset.groupId, cards)
+      );
+      group.replaceChildren(collapsedRow);
+    }
+  }
+
+  createCollapsedGroupPreview(groupId, cards) {
+    const groupName = this.getPageGroupLabel(groupId);
+    const groupedPageIds = cards
+      .map((card) => card.dataset.pageId)
+      .filter(Boolean);
+    const collapsedPreview = document.createElement("div");
+    collapsedPreview.className = "page-group-collapsed-preview";
+    collapsedPreview.tabIndex = 0;
+    collapsedPreview.setAttribute("role", "button");
+    collapsedPreview.setAttribute(
+      "aria-label",
+      `單選群組「${groupName}」，共 ${groupedPageIds.length} 頁`
+    );
+    collapsedPreview.title = `單選群組「${groupName}」`;
+    const selectCollapsedGroup = (event) => {
+      if (this.suppressPageClick) {
+        event.preventDefault();
+        return;
+      }
+      event.stopPropagation();
+      if (!groupedPageIds.length) return;
+      this.selectedPageIds = new Set(groupedPageIds);
+      this.selectPage(groupedPageIds[0]);
+    };
+    collapsedPreview.addEventListener("click", selectCollapsedGroup);
+    collapsedPreview.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectCollapsedGroup(event);
+    });
+
+    const collapsedMeta = document.createElement("div");
+    collapsedMeta.className = "page-group-collapsed-meta";
+    const collapsedName = document.createElement("strong");
+    collapsedName.textContent = groupName;
+    collapsedName.title = groupName;
+    const collapsedCount = document.createElement("span");
+    collapsedCount.textContent = `${cards.length} 頁`;
+    collapsedMeta.append(collapsedName, collapsedCount);
+
+    const deck = document.createElement("div");
+    deck.className = "page-group-collapsed-deck";
+    const previewCount = Math.min(
+      5,
+      Math.max(3, Math.ceil(cards.length / 16) + 2)
+    );
+    deck.style.setProperty("--deck-count", String(previewCount));
+    const sampleIndexes = new Set();
+    for (let previewIndex = 0; previewIndex < previewCount; previewIndex += 1) {
+      const sampleIndex =
+        previewCount === 1
+          ? 0
+          : Math.round(
+              (previewIndex * (cards.length - 1)) / (previewCount - 1)
+            );
+      sampleIndexes.add(sampleIndex);
+    }
+    const uniqueSampleIndexes = [...sampleIndexes];
+    for (let previewIndex = 0; previewIndex < previewCount; previewIndex += 1) {
+      const sampleIndex = uniqueSampleIndexes[previewIndex];
+      const thumbnail = cards[sampleIndex]?.querySelector(".thumbnail-wrap");
+      const deckCard = document.createElement("div");
+      deckCard.className = "page-group-collapsed-thumb";
+      const center = (previewCount - 1) / 2;
+      deckCard.style.setProperty(
+        "--stack-offset",
+        `${(previewIndex - center) * 24}%`
+      );
+      deckCard.style.setProperty(
+        "--stack-rotate",
+        `${(previewIndex - center) * 1.6}deg`
+      );
+      deckCard.style.zIndex = String(previewIndex + 1);
+      if (thumbnail) {
+        deckCard.append(thumbnail);
+      } else {
+        deckCard.classList.add("placeholder");
+        deckCard.innerHTML =
+          '<span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>';
+      }
+      deck.append(deckCard);
+    }
+    collapsedPreview.append(collapsedMeta, deck);
+    return collapsedPreview;
   }
 
   scheduleBrowseGroupLayout() {
@@ -2775,61 +2881,10 @@ class PdfWorkshop {
       if (group.classList.contains("collapsed")) {
         const collapsedRow = document.createElement("div");
         collapsedRow.className = "page-group-row page-group-collapsed-row";
-        const collapsedPreview = document.createElement("div");
-        collapsedPreview.className = "page-group-collapsed-preview";
-        const collapsedMeta = document.createElement("div");
-        collapsedMeta.className = "page-group-collapsed-meta";
-        const collapsedName = document.createElement("strong");
-        collapsedName.textContent = groupName;
-        collapsedName.title = groupName;
-        const collapsedCount = document.createElement("span");
-        collapsedCount.textContent = `${cards.length} 頁`;
-        collapsedMeta.append(collapsedName, collapsedCount);
-
-        const deck = document.createElement("div");
-        deck.className = "page-group-collapsed-deck";
-        const previewCount = Math.min(
-          5,
-          Math.max(3, Math.ceil(cards.length / 16) + 2)
+        collapsedRow.append(
+          header,
+          this.createCollapsedGroupPreview(group.dataset.groupId, cards)
         );
-        deck.style.setProperty("--deck-count", String(previewCount));
-        const sampleIndexes = new Set();
-        for (let previewIndex = 0; previewIndex < previewCount; previewIndex += 1) {
-          const sampleIndex =
-            previewCount === 1
-              ? 0
-              : Math.round(
-                  (previewIndex * (cards.length - 1)) / (previewCount - 1)
-                );
-          sampleIndexes.add(sampleIndex);
-        }
-        const uniqueSampleIndexes = [...sampleIndexes];
-        for (let previewIndex = 0; previewIndex < previewCount; previewIndex += 1) {
-          const sampleIndex = uniqueSampleIndexes[previewIndex];
-          const thumbnail = cards[sampleIndex]?.querySelector(".thumbnail-wrap");
-          const deckCard = document.createElement("div");
-          deckCard.className = "page-group-collapsed-thumb";
-          const center = (previewCount - 1) / 2;
-          deckCard.style.setProperty(
-            "--stack-offset",
-            `${(previewIndex - center) * 24}%`
-          );
-          deckCard.style.setProperty(
-            "--stack-rotate",
-            `${(previewIndex - center) * 1.6}deg`
-          );
-          deckCard.style.zIndex = String(previewIndex + 1);
-          if (thumbnail) {
-            deckCard.append(thumbnail);
-          } else {
-            deckCard.classList.add("placeholder");
-            deckCard.innerHTML =
-              '<span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>';
-          }
-          deck.append(deckCard);
-        }
-        collapsedPreview.append(collapsedMeta, deck);
-        collapsedRow.append(header, collapsedPreview);
         group.replaceChildren(collapsedRow);
         continue;
       }
@@ -3000,6 +3055,10 @@ class PdfWorkshop {
       group.classList.toggle(
         "active",
         groupPageIds.includes(this.activePageId)
+      );
+      group.classList.toggle(
+        "selected",
+        groupPageIds.length > 0 && selectedCount === groupPageIds.length
       );
     }
   }
