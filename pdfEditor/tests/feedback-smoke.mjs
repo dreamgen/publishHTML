@@ -51,6 +51,14 @@ check(
   /^v\d+$/.test(serviceWorkerVersion),
   serviceWorkerVersion
 );
+const cachedServiceWorkerVersion = await page.evaluate(() =>
+  window.__PDF_WORKSHOP_TEST__.app.detectFeedbackServiceWorkerCacheVersion()
+);
+check(
+  "舊 SW 無法回訊時可從快取辨識版號",
+  /^v\d+$/.test(cachedServiceWorkerVersion),
+  cachedServiceWorkerVersion
+);
 
 await page.click("#feedbackButton");
 let state = await page.evaluate(() => ({
@@ -150,6 +158,52 @@ check(
     fields["entry.6"]?.includes('"serviceWorkerVersion":"v') &&
     fields["entry.6"]?.includes('"pageCount":0')
 );
+
+const recentState = await page.evaluate(async () => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const pdf = await window.PDFLib.PDFDocument.create();
+  pdf.addPage([200, 300]);
+  const bytes = await pdf.save();
+  const file = new File([bytes], "recent-reopen-test.pdf", {
+    type: "application/pdf",
+    lastModified: 1784340000000,
+  });
+  await app.loadFiles([file], { replace: true, remember: true });
+  const records = await app.dbOperation("recentFiles", "readonly", (store) =>
+    store.getAll()
+  );
+  for (const source of app.sources.values()) {
+    source.loadingTask?.destroy?.().catch?.(() => {});
+  }
+  app.sources.clear();
+  app.pages = [];
+  app.activePageId = null;
+  app.selectedPageIds.clear();
+  app.renderAll();
+  app.renderRecentFiles();
+  const row = document.querySelector("#recentFileList .recent-file-row");
+  return {
+    stored: records.some((record) => record.name === file.name),
+    isButton: row?.tagName === "BUTTON",
+    label: row?.getAttribute("aria-label") || "",
+  };
+});
+check(
+  "最近使用會在 IndexedDB 保存可重開副本",
+  recentState.stored
+);
+check(
+  "最近使用項目可點擊且具備無障礙名稱",
+  recentState.isButton && recentState.label.includes("recent-reopen-test.pdf")
+);
+await page.click("#recentFileList .recent-file-row");
+await page.waitForFunction(
+  () => window.__PDF_WORKSHOP_TEST__.app.pages.length === 1
+);
+const reopenedName = await page.evaluate(() =>
+  [...window.__PDF_WORKSHOP_TEST__.app.sources.values()][0]?.name
+);
+check("點擊最近使用可重新開啟 PDF", reopenedName === "recent-reopen-test.pdf");
 
 await page.waitForTimeout(600);
 check("測試期間沒有未預期 console error", consoleErrors.length === 0, consoleErrors.join(" | "));

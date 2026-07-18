@@ -1983,11 +1983,35 @@ dialog.dialog-fallback-open {
 }
 
 .recent-file-row {
+  width: 100%;
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 10px;
   padding-top: 6px;
+  padding-right: 0;
+  padding-bottom: 0;
+  padding-left: 0;
   border-top: 1px solid var(--line);
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-file-row:hover span,
+.recent-file-row:focus-visible span {
+  color: var(--accent);
+}
+
+.recent-file-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .recent-file-row span {

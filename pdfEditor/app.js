@@ -28,8 +28,10 @@ const PDFJS_WASM_URL = new URL(
 
 const { PDFDocument, degrees } = window.PDFLib || {};
 const EDITOR_DB_NAME = "pdfEditor-db";
-const EDITOR_DB_VERSION = 2;
+const EDITOR_DB_VERSION = 3;
 const AUTOSAVE_KEY = "autosave";
+const RECENT_FILES_KEY = "pdfEditor-recent";
+const RECENT_FILE_LIMIT = 5;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 const INSTALL_INTRO_KEY = "pdfEditor-install-intro-seen-v1";
 const VIEW_MODE_KEY = "pdfEditor-view-mode-v1";
@@ -1823,7 +1825,9 @@ class PdfWorkshop {
         this.scheduleAutosave();
       }
 
-      if (this.excelSourceFile) this.rememberRecentFiles([this.excelSourceFile]);
+      if (this.excelSourceFile) {
+        await this.rememberRecentFiles([this.excelSourceFile]);
+      }
       this.closeDialog(this.elements.excelDialog, "converted");
       this.disposeExcelWorker();
       this.destroyExcelPreview();
@@ -1914,7 +1918,7 @@ class PdfWorkshop {
       this.closeTextControls();
       this.activateDrawingTool("select");
       this.renderAll();
-      if (remember) this.rememberRecentFiles(files);
+      if (remember) await this.rememberRecentFiles(files);
       this.scheduleAutosave();
       if (
         this.elements.searchControls &&
@@ -6727,48 +6731,174 @@ class PdfWorkshop {
     );
   }
 
-  rememberRecentFiles(files) {
+  recentFileStorageId(file) {
+    return JSON.stringify([
+      String(file?.name || ""),
+      Number(file?.size) || 0,
+      Number(file?.lastModified) || 0,
+    ]);
+  }
+
+  readRecentFiles() {
     let current = [];
     try {
-      current = JSON.parse(localStorage.getItem("pdfEditor-recent") || "[]");
+      current = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || "[]");
     } catch {}
-    if (!Array.isArray(current)) current = [];
+    return Array.isArray(current) ? current : [];
+  }
+
+  writeRecentFiles(items) {
+    try {
+      localStorage.setItem(
+        RECENT_FILES_KEY,
+        JSON.stringify(items.slice(0, RECENT_FILE_LIMIT))
+      );
+    } catch {}
+  }
+
+  async persistRecentFiles(files, recentItems) {
+    const storedIds = new Set();
+    for (const file of files) {
+      const storageId = this.recentFileStorageId(file);
+      try {
+        const bytes = await file.arrayBuffer();
+        await this.dbOperation("recentFiles", "readwrite", (store) =>
+          store.put({
+            id: storageId,
+            name: file.name,
+            size: file.size,
+            type: file.type || "",
+            lastModified: Number(file.lastModified) || 0,
+            bytes,
+          })
+        );
+        storedIds.add(storageId);
+      } catch (error) {
+        console.warn("[PDF Editor] Recent file persistence failed", error);
+      }
+    }
+
+    try {
+      const retainedIds = new Set(
+        recentItems.map((item) => item.storageId).filter(Boolean)
+      );
+      const existingIds =
+        (await this.dbOperation("recentFiles", "readonly", (store) =>
+          store.getAllKeys()
+        )) || [];
+      for (const id of existingIds) {
+        if (retainedIds.has(id)) continue;
+        await this.dbOperation("recentFiles", "readwrite", (store) =>
+          store.delete(id)
+        );
+      }
+    } catch (error) {
+      console.warn("[PDF Editor] Recent file cleanup failed", error);
+    }
+    return storedIds;
+  }
+
+  async rememberRecentFiles(files) {
+    const current = this.readRecentFiles();
     const now = Date.now();
     for (const file of files) {
       const index = current.findIndex((item) => item.name === file.name);
       if (index >= 0) current.splice(index, 1);
       current.unshift({
+        storageId: this.recentFileStorageId(file),
         name: file.name,
         size: file.size,
+        type: file.type || "",
+        lastModified: Number(file.lastModified) || 0,
         openedAt: now,
       });
     }
-    try {
-      localStorage.setItem(
-        "pdfEditor-recent",
-        JSON.stringify(current.slice(0, 5))
-      );
-    } catch {}
+    const retained = current.slice(0, RECENT_FILE_LIMIT);
+    const storedIds = await this.persistRecentFiles(files, retained);
+    for (const item of retained) {
+      if (storedIds.has(item.storageId)) item.available = true;
+    }
+    this.writeRecentFiles(retained);
     this.renderRecentFiles();
   }
 
-  renderRecentFiles() {
-    let recent = [];
+  async loadRecentFileRecord(item) {
+    if (item.storageId) {
+      const record = await this.dbOperation("recentFiles", "readonly", (store) =>
+        store.get(item.storageId)
+      );
+      if (record?.bytes) return record;
+    }
+
+    // v2 and earlier only stored metadata. If the same PDF is still part of
+    // the autosaved project, reuse that source as a one-time migration path.
+    const legacySources =
+      (await this.dbOperation("sources", "readonly", (store) =>
+        store.getAll()
+      )) || [];
+    return legacySources.find(
+      (source) =>
+        source.name === item.name && Number(source.size) === Number(item.size)
+    );
+  }
+
+  async openRecentFile(item) {
     try {
-      recent = JSON.parse(localStorage.getItem("pdfEditor-recent") || "[]");
-    } catch {}
-    if (!Array.isArray(recent)) recent = [];
+      const record = await this.loadRecentFileRecord(item);
+      if (!record?.bytes) {
+        this.toast(
+          "這筆是舊版最近紀錄，當時未保存檔案內容，請從裝置重新選擇檔案。",
+          "error",
+          7500
+        );
+        return;
+      }
+      if (this.pages.length) {
+        const confirmed = await this.confirmAction({
+          title: "重新開啟最近文件？",
+          message: "目前尚未匯出的編輯內容將被最近文件取代。",
+          acceptLabel: "開啟文件",
+        });
+        if (!confirmed) return;
+      }
+      const file = new File([record.bytes], record.name || item.name, {
+        type:
+          record.type ||
+          (String(record.name || item.name).toLowerCase().endsWith(".xlsx")
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "application/pdf"),
+        lastModified: Number(record.lastModified) || Date.now(),
+      });
+      if (this.isExcelFile(file)) {
+        await this.openExcelImport(file, { mode: "open" });
+        if (this.excelWorkbookInfo) await this.rememberRecentFiles([file]);
+      } else {
+        await this.loadFiles([file], { replace: true, remember: true });
+      }
+    } catch (error) {
+      console.warn("[PDF Editor] Recent file reopen failed", error);
+      this.setBusy(false);
+      this.toast("最近文件無法開啟，請從裝置重新選擇檔案。", "error", 7000);
+    }
+  }
+
+  renderRecentFiles() {
+    const recent = this.readRecentFiles();
     this.elements.recentFileList?.replaceChildren();
     this.elements.recentFiles.hidden = !recent.length;
     for (const item of recent) {
-      const row = document.createElement("div");
+      const row = document.createElement("button");
       row.className = "recent-file-row";
+      row.type = "button";
+      row.title = `重新開啟 ${item.name}`;
+      row.setAttribute("aria-label", `重新開啟最近文件：${item.name}`);
+      row.addEventListener("click", () => this.openRecentFile(item));
       const name = document.createElement("span");
       name.textContent = item.name;
       const meta = document.createElement("small");
       meta.textContent = `${this.formatBytes(item.size)}・${new Date(
         item.openedAt
-      ).toLocaleDateString("zh-TW")}`;
+      ).toLocaleDateString("zh-TW")}・開啟`;
       row.append(name, meta);
       this.elements.recentFileList.append(row);
     }
@@ -6785,6 +6915,9 @@ class PdfWorkshop {
         }
         if (!db.objectStoreNames.contains("sources")) {
           db.createObjectStore("sources", { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains("recentFiles")) {
+          db.createObjectStore("recentFiles", { keyPath: "id" });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -7357,7 +7490,7 @@ class PdfWorkshop {
         channel.port1.close();
         resolve(String(value || ""));
       };
-      const timeoutId = setTimeout(() => finish(""), 1500);
+      const timeoutId = setTimeout(() => finish(""), 1200);
       channel.port1.onmessage = (event) => finish(event.data?.version);
       try {
         worker.postMessage({ type: "get-sw-version" }, [channel.port2]);
@@ -7365,6 +7498,21 @@ class PdfWorkshop {
         finish("");
       }
     });
+  }
+
+  async detectFeedbackServiceWorkerCacheVersion() {
+    if (typeof caches === "undefined") return "";
+    try {
+      const versions = (await caches.keys())
+        .map((name) => name.match(/^pdfEditor-(v\d+)$/i)?.[1] || "")
+        .filter(Boolean)
+        .sort((left, right) =>
+          Number(left.slice(1)) - Number(right.slice(1))
+        );
+      return versions.at(-1) || "";
+    } catch {
+      return "";
+    }
   }
 
   async refreshFeedbackServiceWorkerVersion(registration = null) {
@@ -7379,15 +7527,46 @@ class PdfWorkshop {
       try {
         const currentRegistration =
           registration || (await navigator.serviceWorker.getRegistration());
-        const worker =
-          navigator.serviceWorker.controller ||
-          currentRegistration?.active ||
-          currentRegistration?.waiting ||
-          currentRegistration?.installing;
-        if (!worker) return "尚未啟用";
-        return (await this.queryFeedbackServiceWorkerVersion(worker)) || "無法取得";
+        const candidates = [
+          ["目前控制", navigator.serviceWorker.controller],
+          ["Active", currentRegistration?.active],
+          ["等待啟用", currentRegistration?.waiting],
+          ["安裝中", currentRegistration?.installing],
+        ];
+        const seen = new Set();
+        const uniqueCandidates = candidates.filter(([, worker]) => {
+          if (!worker || seen.has(worker)) return false;
+          seen.add(worker);
+          return true;
+        });
+        if (!uniqueCandidates.length) return "尚未啟用";
+        const results = await Promise.all(
+          uniqueCandidates.map(async ([role, worker]) => ({
+            role,
+            version: await this.queryFeedbackServiceWorkerVersion(worker),
+          }))
+        );
+        const current = results.find(
+          (item) => item.version && ["目前控制", "Active"].includes(item.role)
+        );
+        const pending = results.find(
+          (item) => item.version && ["等待啟用", "安裝中"].includes(item.role)
+        );
+        if (current) {
+          return pending && pending.version !== current.version
+            ? `${current.version}（目前）／${pending.version}（${pending.role}）`
+            : current.version;
+        }
+        if (pending) return `${pending.version}（${pending.role}）`;
+        const cachedVersion = await this.detectFeedbackServiceWorkerCacheVersion();
+        return cachedVersion
+          ? `${cachedVersion}（由快取辨識）`
+          : "無法取得";
       } catch {
-        return "無法取得";
+        const cachedVersion = await this.detectFeedbackServiceWorkerCacheVersion();
+        return cachedVersion
+          ? `${cachedVersion}（由快取辨識）`
+          : "無法取得";
       }
     })();
     try {
