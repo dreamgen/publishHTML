@@ -137,6 +137,8 @@ class PdfWorkshop {
     this.feedbackSubmitting = false;
     this.feedbackInviteShownAt = 0;
     this.feedbackConsoleRestore = [];
+    this.feedbackServiceWorkerVersion = "尚未取得";
+    this.feedbackServiceWorkerVersionPromise = null;
 
     let savedViewMode = null;
     try {
@@ -7308,6 +7310,7 @@ class PdfWorkshop {
       reason === "global-error";
     this.elements.feedbackEnvironment.value = this.buildFeedbackEnvironment();
     this.refreshFeedbackDiagnosticsPreview();
+    this.refreshFeedbackServiceWorkerVersion();
 
     const configured = this.isFeedbackFormConfigured();
     this.elements.feedbackConfigWarning.textContent =
@@ -7342,6 +7345,64 @@ class PdfWorkshop {
     return "瀏覽器分頁";
   }
 
+  queryFeedbackServiceWorkerVersion(worker) {
+    if (!worker || typeof MessageChannel === "undefined") return Promise.resolve("");
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      let settled = false;
+      const finish = (value = "") => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        channel.port1.close();
+        resolve(String(value || ""));
+      };
+      const timeoutId = setTimeout(() => finish(""), 1500);
+      channel.port1.onmessage = (event) => finish(event.data?.version);
+      try {
+        worker.postMessage({ type: "get-sw-version" }, [channel.port2]);
+      } catch {
+        finish("");
+      }
+    });
+  }
+
+  async refreshFeedbackServiceWorkerVersion(registration = null) {
+    if (!("serviceWorker" in navigator)) {
+      this.feedbackServiceWorkerVersion = "瀏覽器不支援";
+      return this.feedbackServiceWorkerVersion;
+    }
+    if (this.feedbackServiceWorkerVersionPromise) {
+      return this.feedbackServiceWorkerVersionPromise;
+    }
+    this.feedbackServiceWorkerVersionPromise = (async () => {
+      try {
+        const currentRegistration =
+          registration || (await navigator.serviceWorker.getRegistration());
+        const worker =
+          navigator.serviceWorker.controller ||
+          currentRegistration?.active ||
+          currentRegistration?.waiting ||
+          currentRegistration?.installing;
+        if (!worker) return "尚未啟用";
+        return (await this.queryFeedbackServiceWorkerVersion(worker)) || "無法取得";
+      } catch {
+        return "無法取得";
+      }
+    })();
+    try {
+      this.feedbackServiceWorkerVersion =
+        await this.feedbackServiceWorkerVersionPromise;
+      if (this.elements.feedbackDialog?.open) {
+        this.elements.feedbackEnvironment.value = this.buildFeedbackEnvironment();
+        this.refreshFeedbackDiagnosticsPreview();
+      }
+      return this.feedbackServiceWorkerVersion;
+    } finally {
+      this.feedbackServiceWorkerVersionPromise = null;
+    }
+  }
+
   buildFeedbackEnvironment() {
     const uaData = navigator.userAgentData;
     const platform = uaData?.platform || navigator.platform || "未知平台";
@@ -7350,6 +7411,7 @@ class PdfWorkshop {
       : "桌面裝置";
     return [
       `PDF 工坊版本：${PDF_WORKSHOP_VERSION}`,
+      `Service Worker 版本：${this.feedbackServiceWorkerVersion}`,
       `裝置：${device}／${platform}`,
       `瀏覽器：${this.detectFeedbackBrowser()}`,
       `PWA 狀態：${this.getFeedbackPwaState()}`,
@@ -7369,6 +7431,7 @@ class PdfWorkshop {
       activeTool: this.activeTool,
       dirty: this.dirty,
       zoom: this.zoom,
+      serviceWorkerVersion: this.feedbackServiceWorkerVersion,
     };
     const records = this.feedbackDiagnostics.slice(-FEEDBACK_LOG_LIMIT);
     if (this.pendingFeedbackError) {
@@ -7487,16 +7550,23 @@ class PdfWorkshop {
       return;
     }
 
+    this.feedbackSubmitting = true;
+    this.elements.feedbackSubmitButton.disabled = true;
+    this.elements.feedbackSubmitStatus.textContent = "正在準備回報…";
+    await this.refreshFeedbackServiceWorkerVersion();
+    this.elements.feedbackEnvironment.value = this.buildFeedbackEnvironment();
+    this.refreshFeedbackDiagnosticsPreview();
     const payload = this.buildFeedbackPayload();
     const validationError = this.validateFeedbackPayload(payload);
     if (validationError) {
       errorElement.textContent = validationError;
       errorElement.hidden = false;
+      this.elements.feedbackSubmitStatus.textContent = "";
+      this.elements.feedbackSubmitButton.disabled = false;
+      this.feedbackSubmitting = false;
       return;
     }
 
-    this.feedbackSubmitting = true;
-    this.elements.feedbackSubmitButton.disabled = true;
     this.elements.feedbackSubmitStatus.textContent = "正在送出…";
     try {
       await this.sendFeedbackToGoogleForm(payload);
@@ -7851,9 +7921,11 @@ class PdfWorkshop {
       });
       const registration = await navigator.serviceWorker.register("./sw.js");
       await registration.update();
+      this.refreshFeedbackServiceWorkerVersion(registration);
       // Ask the worker to warm the large OCR assets in the background so
       // install stays fast while offline OCR still becomes available.
       navigator.serviceWorker.ready.then((ready) => {
+        this.refreshFeedbackServiceWorkerVersion(ready);
         setTimeout(
           () => ready.active?.postMessage({ type: "warm-ocr-cache" }),
           4000

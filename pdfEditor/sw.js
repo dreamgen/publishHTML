@@ -1,4 +1,4 @@
-const SW_VERSION = "v33";
+const SW_VERSION = "v34";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 // Cached during install (required for the core editor to work offline).
@@ -122,6 +122,11 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data?.type === "warm-ocr-cache") {
     event.waitUntil(warmLazyAssets().catch(() => {}));
+  } else if (event.data?.type === "get-sw-version") {
+    event.ports?.[0]?.postMessage({
+      version: SW_VERSION,
+      cacheName: CACHE_NAME,
+    });
   }
 });
 

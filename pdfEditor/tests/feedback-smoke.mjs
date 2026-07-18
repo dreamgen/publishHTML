@@ -43,6 +43,14 @@ await page.route(
 await page.goto(`${BASE}/?testHarness=1`, { waitUntil: "networkidle" });
 await page.waitForFunction(() => window.__PDF_WORKSHOP_TEST__);
 await page.evaluate(() => window.__PDF_WORKSHOP_TEST__.ready);
+const serviceWorkerVersion = await page.evaluate(() =>
+  window.__PDF_WORKSHOP_TEST__.app.refreshFeedbackServiceWorkerVersion()
+);
+check(
+  "可讀取目前 Service Worker 版號",
+  /^v\d+$/.test(serviceWorkerVersion),
+  serviceWorkerVersion
+);
 
 await page.click("#feedbackButton");
 let state = await page.evaluate(() => ({
@@ -56,13 +64,14 @@ check("回報按鈕開啟站內彈窗", state.open);
 check(
   "自動帶入版本、裝置、瀏覽器與 PWA 狀態",
   /PDF 工坊版本：/.test(state.environment) &&
+    /Service Worker 版本：v\d+/.test(state.environment) &&
     /裝置：/.test(state.environment) &&
     /瀏覽器：/.test(state.environment) &&
     /PWA 狀態：/.test(state.environment)
 );
 check(
-  "未設定 Google 表單時禁止誤送",
-  state.configWarning && state.submitDisabled
+  "已設定 Google 表單時允許送出",
+  !state.configWarning && !state.submitDisabled
 );
 check(
   "診斷紀錄預設不附加",
@@ -95,7 +104,8 @@ check(
   state.open &&
     state.title.includes("未預期錯誤") &&
     state.diagnosticsChecked &&
-    state.diagnostics.includes("Smoke unexpected error")
+    state.diagnostics.includes("Smoke unexpected error") &&
+    state.diagnostics.includes('"serviceWorkerVersion":"v')
 );
 await page.click("#feedbackCancelButton");
 
@@ -136,6 +146,8 @@ check(
 check(
   "送出內容包含環境與選擇性診斷",
   fields["entry.5"]?.includes("PWA 狀態：") &&
+    fields["entry.5"]?.includes("Service Worker 版本：v") &&
+    fields["entry.6"]?.includes('"serviceWorkerVersion":"v') &&
     fields["entry.6"]?.includes('"pageCount":0')
 );
 
