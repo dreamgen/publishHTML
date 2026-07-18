@@ -69,6 +69,8 @@ class PdfWorkshop {
     this.draggedPageId = null;
     this.draggedPageIds = [];
     this.draggedGroupId = null;
+    this.collapsedPageGroupIds = new Set();
+    this.pendingGroupRenameId = null;
     this.dragDropPosition = "before";
     this.suppressPageClick = false;
     this.annotationDrag = null;
@@ -315,6 +317,10 @@ class PdfWorkshop {
       excelPreviewNext: $("#excelPreviewNext"),
       excelInsertPositionField: $("#excelInsertPositionField"),
       excelInsertPosition: $("#excelInsertPosition"),
+      groupNameDialog: $("#groupNameDialog"),
+      groupNameInput: $("#groupNameInput"),
+      groupNameError: $("#groupNameError"),
+      groupNameAcceptButton: $("#groupNameAcceptButton"),
       rangeDialog: $("#rangeDialog"),
       rangeInput: $("#rangeInput"),
       rangeError: $("#rangeError"),
@@ -755,6 +761,21 @@ class PdfWorkshop {
       if (!this.ocrRunning) return;
       event.preventDefault();
       this.cancelOcr();
+    });
+    this.elements.groupNameDialog?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.submitter?.value !== "confirm") {
+        this.closeDialog(this.elements.groupNameDialog, "cancel");
+        return;
+      }
+      this.applyPageGroupName();
+    });
+    this.elements.groupNameDialog?.addEventListener("close", () => {
+      this.pendingGroupRenameId = null;
+      if (this.elements.groupNameError) {
+        this.elements.groupNameError.hidden = true;
+      }
     });
     document.addEventListener("click", (event) => {
       const button = event.target.closest(
@@ -2005,8 +2026,14 @@ class PdfWorkshop {
 
   normalizeState() {
     const pageIds = new Set(this.pages.map((page) => page.id));
+    const pageGroupIds = new Set(
+      this.pages.map((page) => page.groupId).filter(Boolean)
+    );
     this.selectedPageIds = new Set(
       [...this.selectedPageIds].filter((id) => pageIds.has(id))
+    );
+    this.collapsedPageGroupIds = new Set(
+      [...this.collapsedPageGroupIds].filter((id) => pageGroupIds.has(id))
     );
 
     if (!pageIds.has(this.activePageId)) {
@@ -2259,6 +2286,9 @@ class PdfWorkshop {
           group.dataset.groupColor = String(
             this.getPageGroupColorIndex(displayGroupId)
           );
+          const groupCollapsed =
+            this.collapsedPageGroupIds.has(displayGroupId);
+          group.classList.toggle("collapsed", groupCollapsed);
           if (
             this.pages.some(
               (page) =>
@@ -2318,7 +2348,36 @@ class PdfWorkshop {
 
           const actions = document.createElement("div");
           actions.className = "page-group-actions";
+          const collapseButton = document.createElement("button");
+          collapseButton.className = "mini-button group-collapse-button";
+          collapseButton.type = "button";
+          collapseButton.title = groupCollapsed ? "展開群組" : "收合群組";
+          collapseButton.setAttribute("aria-label", collapseButton.title);
+          collapseButton.setAttribute(
+            "aria-expanded",
+            groupCollapsed ? "false" : "true"
+          );
+          collapseButton.innerHTML = groupCollapsed
+            ? '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>'
+            : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>';
+          collapseButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            this.togglePageGroupCollapsed(displayGroupId);
+          });
+          const renameButton = document.createElement("button");
+          renameButton.className = "mini-button group-rename-button";
+          renameButton.type = "button";
+          renameButton.title = "修改群組名稱";
+          renameButton.setAttribute("aria-label", renameButton.title);
+          renameButton.innerHTML =
+            '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 20 4.2-1 10.6-10.6a2.1 2.1 0 0 0-3-3L5.2 16z"/><path d="m14.5 6.7 2.8 2.8"/></svg>';
+          renameButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            this.openPageGroupNameDialog(displayGroupId);
+          });
           actions.append(
+            collapseButton,
+            renameButton,
             this.createMoveButton(
               "up",
               !this.canMovePageGroup(displayGroupId, -1),
@@ -2702,6 +2761,13 @@ class PdfWorkshop {
       const cards = [...group.querySelectorAll(".page-card")];
       if (!header || !cards.length) continue;
       const groupName = this.getPageGroupLabel(group.dataset.groupId);
+      if (group.classList.contains("collapsed")) {
+        const collapsedRow = document.createElement("div");
+        collapsedRow.className = "page-group-row page-group-collapsed-row";
+        collapsedRow.append(header);
+        group.replaceChildren(collapsedRow);
+        continue;
+      }
       const rowCount = Math.ceil(cards.length / columns);
       const fragment = document.createDocumentFragment();
       group.style.setProperty("--group-columns", String(columns));
@@ -4450,6 +4516,63 @@ class PdfWorkshop {
       this.selectedPageIds = new Set(selected.map((page) => page.id));
     });
     this.toast(`已將 ${selected.length} 頁設為群組。`, "success");
+  }
+
+  togglePageGroupCollapsed(groupId) {
+    if (!this.pages.some((page) => page.groupId === groupId)) return;
+    if (this.collapsedPageGroupIds.has(groupId)) {
+      this.collapsedPageGroupIds.delete(groupId);
+    } else {
+      this.collapsedPageGroupIds.add(groupId);
+    }
+    this.renderSidebar();
+  }
+
+  openPageGroupNameDialog(groupId) {
+    const dialog = this.elements.groupNameDialog;
+    const input = this.elements.groupNameInput;
+    if (!dialog || !input) return;
+    if (!this.pages.some((page) => page.groupId === groupId)) return;
+    this.pendingGroupRenameId = groupId;
+    input.value = this.getPageGroupLabel(groupId);
+    this.elements.groupNameError.hidden = true;
+    this.openDialog(dialog);
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 50);
+  }
+
+  applyPageGroupName() {
+    const groupId = this.pendingGroupRenameId;
+    const input = this.elements.groupNameInput;
+    const error = this.elements.groupNameError;
+    const name = input?.value.trim() || "";
+    if (!groupId || !this.pages.some((page) => page.groupId === groupId)) {
+      this.closeDialog(this.elements.groupNameDialog, "cancel");
+      return;
+    }
+    if (!name) {
+      error.textContent = "請輸入群組名稱。";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    if (name.length > 80) {
+      error.textContent = "群組名稱最多 80 個字元。";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    const previousName = this.getPageGroupLabel(groupId);
+    this.closeDialog(this.elements.groupNameDialog, "confirm");
+    if (name === previousName) return;
+    this.mutate(() => {
+      for (const page of this.pages) {
+        if (page.groupId === groupId) page.groupName = name;
+      }
+    });
+    this.toast(`群組已重新命名為「${name}」。`, "success");
   }
 
   movePageGroup(groupId, delta) {

@@ -548,6 +548,18 @@ input[type="checkbox"] {
   padding: 3px;
 }
 
+.page-group.collapsed .page-group-header {
+  border-bottom: 0;
+}
+
+.page-group.collapsed .page-group-pages {
+  display: none;
+}
+
+.group-name-dialog {
+  width: min(440px, calc(100% - 28px));
+}
+
 .page-card-checkbox {
   display: grid;
   place-items: center;
@@ -3352,6 +3364,34 @@ body.view-browse .page-group-row-label {
 
 body.view-browse .page-group-row-label strong {
   font-size: 11px;
+}
+
+body.view-browse .page-group-collapsed-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.view-browse .page-group-collapsed-row .page-group-header {
+  min-height: 50px;
+  flex-direction: row;
+  padding: 7px 10px;
+  border-right: 0;
+}
+
+body.view-browse .page-group-collapsed-row .page-group-title,
+body.view-browse .page-group-collapsed-row .page-group-actions {
+  flex-direction: row;
+}
+
+body.view-browse .page-group-collapsed-row .page-group-title strong {
+  max-height: none;
+  writing-mode: horizontal-tb;
+}
+
+body.view-browse .page-group-collapsed-row .group-ungroup-button {
+  width: auto;
+  height: 25px;
+  min-height: 25px;
+  padding: 0 7px;
 }
 
 body.view-browse .page-group.drag-over-before .page-group-row:first-child {

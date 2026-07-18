@@ -327,6 +327,48 @@ check(
     state.dimensions[3].wrapH
   )}`
 );
+state = await page.evaluate(async () => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const groupId = app.pages[0].groupId;
+  app.togglePageGroupCollapsed(groupId);
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  const collapsedGroup = document.querySelector(
+    `.page-group[data-group-id="${groupId}"]`
+  );
+  const collapsed = {
+    classApplied: collapsedGroup.classList.contains("collapsed"),
+    rowCount: collapsedGroup.querySelectorAll(".page-group-row").length,
+    visibleCards: collapsedGroup.querySelectorAll(".page-card").length,
+    compactTitle:
+      getComputedStyle(
+        collapsedGroup.querySelector(".page-group-title strong")
+      ).writingMode === "horizontal-tb",
+    expandedState:
+      collapsedGroup
+        .querySelector(".group-collapse-button")
+        .getAttribute("aria-expanded") === "false",
+  };
+  app.togglePageGroupCollapsed(groupId);
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  collapsed.expandedCards = document.querySelectorAll(
+    `.page-group[data-group-id="${groupId}"] .page-card`
+  ).length;
+  return collapsed;
+});
+check(
+  "瀏覽群組可收合為精簡橫列並再次展開",
+  state.classApplied &&
+    state.rowCount === 1 &&
+    state.visibleCards === 0 &&
+    state.compactTitle &&
+  state.expandedState &&
+    state.expandedCards === 6,
+  JSON.stringify(state)
+);
 
 // ---------- 瀏覽模式縮放 ----------
 await page.click("#zoomInButton");
@@ -555,6 +597,72 @@ state = await page.evaluate(() => {
 check(
   "同一匯入檔案預設為一個群組",
   state.groupIds.length === 1 && state.groupCount === 1 && state.groupedCards === 6,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  let group = document.querySelector("#pageList .page-group");
+  group.querySelector(".group-collapse-button").click();
+  group = document.querySelector("#pageList .page-group");
+  const collapsed =
+    group.classList.contains("collapsed") &&
+    getComputedStyle(group.querySelector(".page-group-pages")).display ===
+      "none" &&
+    group
+      .querySelector(".group-collapse-button")
+      .getAttribute("aria-expanded") === "false";
+  const controlsRemain =
+    !!group.querySelector(".group-rename-button") &&
+    !!group.querySelector(".group-ungroup-button") &&
+    group.querySelectorAll(".mini-button").length >= 4;
+  group.querySelector(".group-collapse-button").click();
+  group = document.querySelector("#pageList .page-group");
+  return {
+    collapsed,
+    controlsRemain,
+    expanded:
+      !group.classList.contains("collapsed") &&
+      getComputedStyle(group.querySelector(".page-group-pages")).display !==
+        "none",
+  };
+});
+check(
+  "一般側欄群組可收合且保留整組操作",
+  state.collapsed && state.controlsRemain && state.expanded,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  document.querySelector(".group-rename-button").click();
+  const dialog = document.querySelector("#groupNameDialog");
+  const input = document.querySelector("#groupNameInput");
+  const opened = dialog.open && input.value === "smoke.pdf";
+  input.value = "測試章節群組";
+  dialog
+    .querySelector("form")
+    .requestSubmit(document.querySelector("#groupNameAcceptButton"));
+  const groupId = app.pages[0].groupId;
+  const renamed =
+    app.pages
+      .filter((item) => item.groupId === groupId)
+      .every((item) => item.groupName === "測試章節群組") &&
+    document.querySelector(".page-group-title strong").textContent ===
+      "測試章節群組";
+  app.undo();
+  const undoName = app.getPageGroupLabel(groupId);
+  app.redo();
+  const redoName = app.getPageGroupLabel(groupId);
+  app.undo();
+  return { opened, renamed, undoName, redoName };
+});
+check(
+  "群組名稱可修改並支援復原與重做",
+  state.opened &&
+    state.renamed &&
+    state.undoName === "smoke.pdf" &&
+    state.redoName === "測試章節群組",
   JSON.stringify(state)
 );
 

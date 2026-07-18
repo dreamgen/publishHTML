@@ -663,6 +663,27 @@
     </form>
   </dialog>
 
+  <dialog class="panel-dialog group-name-dialog" id="groupNameDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">頁面群組</span>
+          <h2>修改群組名稱</h2>
+        </div>
+      </div>
+      <label class="field">
+        <span>群組名稱</span>
+        <input id="groupNameInput" type="text" maxlength="80" autocomplete="off" placeholder="輸入容易辨識的群組名稱">
+      </label>
+      <p class="dialog-note">名稱會保存在目前草稿中，也可以使用復原還原。</p>
+      <p class="field-error" id="groupNameError" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">取消</button>
+        <button class="button button-primary" id="groupNameAcceptButton" value="confirm">儲存名稱</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="panel-dialog" id="rangeDialog">
     <form method="dialog">
       <div class="dialog-heading">
