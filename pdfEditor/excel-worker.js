@@ -1948,6 +1948,27 @@ function expandHeaderFooter(value, worksheet, pageIndex, pageCount, pagination =
     .trim();
 }
 
+function headerFooterFontSize(value, fallback = 8) {
+  const match = String(value || "").match(/&(\d+(?:\.\d+)?)/);
+  const requestedSize = Number(match?.[1]);
+  return Number.isFinite(requestedSize)
+    ? clamp(requestedSize, 5, 72)
+    : fallback;
+}
+
+function headerFooterDocumentScale(worksheet, layout) {
+  const headerFooter = worksheet.headerFooter || {};
+  if (
+    headerFooter.scaleWithDoc === false ||
+    headerFooter.scaleWithDocument === false
+  ) {
+    return 1;
+  }
+  const horizontal = Number(layout.scaleX || layout.scale || 1);
+  const vertical = Number(layout.scaleY || layout.scale || 1);
+  return clamp(Math.min(horizontal, vertical), 0.1, 4);
+}
+
 function sourceHeaderFooterValue(worksheet, kind, pageIndex) {
   const headerFooter = worksheet.headerFooter || {};
   const isHeader = kind === "header";
@@ -1974,29 +1995,49 @@ function drawHeaderFooterLine(
   if (!rawValue) return;
   const sections = splitHeaderFooterSections(rawValue);
   const font = fonts.unicode;
-  const baseSize = 8;
-  const y =
-    kind === "header"
-      ? layout.pageHeight - layout.margins.header - baseSize
-      : layout.margins.footer;
   const left = layout.margins.left;
   const right = layout.pageWidth - layout.margins.right;
-  const maxWidth = Math.max(24, (right - left) * 0.32);
-  for (const [alignment, rawText] of Object.entries(sections)) {
-    let value = expandHeaderFooter(
+  const contentWidth = right - left;
+  const documentScale = headerFooterDocumentScale(worksheet, layout);
+  const activeSections = Object.entries(sections)
+    .map(([alignment, rawText]) => ({
+      alignment,
       rawText,
-      worksheet,
-      pageIndex,
-      pageCount,
-      pagination
-    );
-    if (!value) continue;
-    value = sanitizeTextForFont(font, value, baseSize);
+      value: expandHeaderFooter(
+        rawText,
+        worksheet,
+        pageIndex,
+        pageCount,
+        pagination
+      ),
+      baseSize: headerFooterFontSize(rawText) * documentScale,
+      hasExplicitSize: /&\d+(?:\.\d+)?/.test(rawText),
+    }))
+    .filter((section) => section.value);
+  const maxWidth = Math.max(
+    24,
+    activeSections.length === 1 ? contentWidth : contentWidth * 0.32
+  );
+  for (const section of activeSections) {
+    const { alignment, baseSize, hasExplicitSize } = section;
+    let value = sanitizeTextForFont(font, section.value, baseSize);
     const naturalWidth = lineWidth(font, value, baseSize);
+    // Excel header/footer font names cannot always be embedded in the browser.
+    // Keep an explicit source size visually comparable when using the Unicode
+    // fallback font. The requested size has already followed Excel's
+    // scale-with-document rule, so a 26 pt title at 62% remains about 16 pt
+    // instead of silently collapsing to the old fixed 8 pt.
+    const minimumSize = hasExplicitSize
+      ? Math.max(5, baseSize * 0.82)
+      : 5;
     const size = naturalWidth > maxWidth
-      ? Math.max(5, baseSize * (maxWidth / naturalWidth))
+      ? Math.max(minimumSize, baseSize * (maxWidth / naturalWidth))
       : baseSize;
     const width = lineWidth(font, value, size);
+    const y =
+      kind === "header"
+        ? layout.pageHeight - layout.margins.header - size
+        : layout.margins.footer;
     let x = left;
     if (alignment === "center") x = (layout.pageWidth - width) / 2;
     else if (alignment === "right") x = right - width;

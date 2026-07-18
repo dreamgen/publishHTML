@@ -352,6 +352,48 @@ async function createWorkerHarness() {
     "7/10",
     "Excel 自動頁碼 sentinel 不得輸出為 4294967295"
   );
+  assert.equal(
+    harness.evaluate(
+      'headerFooterFontSize(\'&C&"Calibri Bold,粗體"&26&K000000 2026瑞周天達行事曆\')'
+    ),
+    26,
+    "自訂頁首應保留 Excel 明確設定的字級"
+  );
+  assert.equal(
+    harness.evaluate(
+      'headerFooterDocumentScale({headerFooter:{}},{scaleX:0.67,scaleY:0.623})'
+    ),
+    0.623,
+    "頁首應遵循 Excel 的隨文件縮放設定"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const calls = [];
+        drawHeaderFooterLine(
+          { drawText(value, options) { calls.push({ value, size: options.size, y: options.y }); } },
+          '&C&"Calibri Bold,粗體"&26&K000000 2026瑞周天達行事曆',
+          { name: "天達行事曆2026", pageSetup: {} },
+          { unicode: {
+            hasGlyph() { return true; },
+            widthOfTextAtSize(value, size) { return value.length * size; },
+          } },
+          {
+            pageWidth: 595,
+            pageHeight: 842,
+            margins: { left: 48, right: 48, header: 40, footer: 30 },
+          },
+          0,
+          1,
+          "header",
+          {}
+        );
+        return JSON.stringify(calls);
+      })()`)
+    ),
+    [{ value: "2026瑞周天達行事曆", size: 26, y: 776 }],
+    "單一置中頁首應使用完整列印寬度並維持來源字級"
+  );
   assert.deepEqual(
     Array.from(
       harness.evaluate(
