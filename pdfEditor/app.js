@@ -2169,6 +2169,7 @@ class PdfWorkshop {
       checkboxWrap.append(checkbox);
 
       const previewColumn = document.createElement("div");
+      previewColumn.className = "page-card-preview";
       const thumbWrap = document.createElement("div");
       thumbWrap.className = "thumbnail-wrap";
       const canvas = document.createElement("canvas");
@@ -2340,8 +2341,16 @@ class PdfWorkshop {
 
     canvas.width = Math.ceil(viewport.width * outputScale);
     canvas.height = Math.ceil(viewport.height * outputScale);
-    canvas.style.width = `${Math.round(viewport.width)}px`;
-    canvas.style.height = `${Math.round(viewport.height)}px`;
+    if (this.viewMode === "browse") {
+      // 網格卡片可能比縮圖解析度級距窄；只讓 CSS 縮小寬度、卻保留
+      // 固定像素高度會把橫式與直式頁都拉成細長形。讓瀏覽縮圖填滿
+      // 可用寬度，並由 canvas 的 intrinsic ratio 自動計算高度。
+      canvas.style.width = "100%";
+      canvas.style.height = "auto";
+    } else {
+      canvas.style.width = `${Math.round(viewport.width)}px`;
+      canvas.style.height = `${Math.round(viewport.height)}px`;
+    }
 
     await page.render({
       canvasContext: context,

@@ -241,6 +241,16 @@ state = await page.evaluate(() => {
   const list = document.querySelector("#pageList");
   const cards = [...list.querySelectorAll(".page-card")];
   const firstCanvas = cards[0]?.querySelector("canvas");
+  const dimensions = cards.map((card) => {
+    const canvasRect = card.querySelector("canvas")?.getBoundingClientRect();
+    const wrapRect = card.querySelector(".thumbnail-wrap")?.getBoundingClientRect();
+    return {
+      canvasW: canvasRect?.width || 0,
+      canvasH: canvasRect?.height || 0,
+      wrapW: wrapRect?.width || 0,
+      wrapH: wrapRect?.height || 0,
+    };
+  });
   return {
     viewMode: app.viewMode,
     bodyClass: document.body.classList.contains("view-browse"),
@@ -251,6 +261,7 @@ state = await page.evaluate(() => {
       document.querySelector("#sidebar").getBoundingClientRect().width
     ),
     previewFlowHidden: document.querySelector("#previewFlow").hidden,
+    dimensions,
   };
 });
 check("切換瀏覽模式", state.viewMode === "browse" && state.bodyClass);
@@ -258,6 +269,18 @@ check("頁面清單為網格", state.display === "grid");
 check("6 張頁卡", state.cardCount === 6);
 check("側欄展開至全寬", state.sidebarW >= 1200, `w=${state.sidebarW}`);
 check("縮圖高解析（230px）", state.canvasW >= 220, `canvasW=${state.canvasW}`);
+check(
+  "瀏覽縮圖保留橫／直式比例",
+  state.dimensions[0].canvasH > state.dimensions[0].canvasW &&
+    state.dimensions[3].canvasW > state.dimensions[3].canvasH &&
+    state.dimensions[0].wrapH > state.dimensions[0].wrapW &&
+    state.dimensions[3].wrapW > state.dimensions[3].wrapH,
+  `portrait=${Math.round(state.dimensions[0].wrapW)}x${Math.round(
+    state.dimensions[0].wrapH
+  )} landscape=${Math.round(state.dimensions[3].wrapW)}x${Math.round(
+    state.dimensions[3].wrapH
+  )}`
+);
 
 // ---------- 瀏覽模式縮放 ----------
 await page.click("#zoomInButton");
@@ -390,6 +413,45 @@ check(
   state.label === "100%" && state.cardVar === "180px" && state.canvasW <= 240,
   `label=${state.label} var=${state.cardVar} canvasW=${state.canvasW}`
 );
+
+// 低倍率時卡片比縮圖解析度級距窄，仍必須同步縮放寬高，不能只壓寬度。
+await page.evaluate(() => {
+  const slider = document.querySelector("#zoomSlider");
+  slider.value = "60";
+  slider.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(900);
+state = await page.evaluate(() => {
+  const cards = [...document.querySelectorAll("#pageList .page-card")];
+  return cards.map((card) => {
+    const canvas = card.querySelector("canvas").getBoundingClientRect();
+    const wrap = card.querySelector(".thumbnail-wrap").getBoundingClientRect();
+    return {
+      canvasW: canvas.width,
+      canvasH: canvas.height,
+      wrapW: wrap.width,
+      wrapH: wrap.height,
+    };
+  });
+});
+check(
+  "瀏覽 60% 仍保留橫／直式比例",
+  state[0].canvasH > state[0].canvasW &&
+    state[3].canvasW > state[3].canvasH &&
+    state[0].wrapH > state[0].wrapW &&
+    state[3].wrapW > state[3].wrapH,
+  `portrait=${Math.round(state[0].wrapW)}x${Math.round(
+    state[0].wrapH
+  )} landscape=${Math.round(state[3].wrapW)}x${Math.round(state[3].wrapH)}`
+);
+if (process.env.PDF_EDITOR_VIEW_MODE_SCREENSHOT) {
+  await page.screenshot({
+    path: process.env.PDF_EDITOR_VIEW_MODE_SCREENSHOT,
+    fullPage: false,
+  });
+}
+await page.click("#zoomResetButton");
+await page.waitForTimeout(700);
 
 // ---------- 瀏覽模式雙擊回到前一種頁面模式 ----------
 await page.evaluate(() => {

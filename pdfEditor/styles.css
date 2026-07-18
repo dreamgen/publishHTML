@@ -3072,10 +3072,30 @@ body.view-browse .page-card + .page-card {
 }
 
 body.view-browse .page-card {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
   align-content: start;
+  gap: 6px;
   padding: 10px 9px;
   border-color: var(--line);
   background: var(--surface-soft);
+}
+
+body.view-browse .page-card-checkbox {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+body.view-browse .page-card-preview {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+body.view-browse .page-move-buttons {
+  grid-column: 3;
+  grid-row: 1;
+  grid-template-columns: repeat(2, 25px);
 }
 
 body.view-browse .page-card:hover {
@@ -3089,7 +3109,7 @@ body.view-browse .page-card.active {
 }
 
 body.view-browse .thumbnail-wrap {
-  min-height: 150px;
+  min-height: 0;
 }
 
 body.view-browse .thumbnail-wrap canvas {

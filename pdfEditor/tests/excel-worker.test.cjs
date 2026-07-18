@@ -514,6 +514,76 @@ async function createWorkerHarness() {
     })()`) > 140,
     "未換行文字應延伸到右側連續空白儲存格"
   );
+  assert.ok(
+    harness.evaluate(`(() => {
+      const testWorkbook = new ExcelJS.Workbook();
+      const sheet = testWorkbook.addWorksheet("隱藏欄文字延伸");
+      sheet.getCell("A1").value = "開班日期：每星期二 19：00 ~ 21：30";
+      sheet.getColumn(4).hidden = true;
+      sheet.getCell("G1").value = "壇主：測試";
+      const layout = {
+        columns: [
+          { number: 1, width: 30 },
+          { number: 2, width: 30 },
+          { number: 3, width: 40 },
+          { number: 5, width: 35 },
+          { number: 6, width: 250 },
+          { number: 7, width: 120 },
+        ],
+        rows: [{ number: 1, height: 20 }],
+        scale: 1,
+        scaleX: 1,
+      };
+      const box = { x: 0, y: 0, width: 30, height: 20 };
+      return calculateOverflowTextBox(
+        sheet, layout, 0, 0, sheet.getCell("A1"), box,
+        buildMergeMaps(sheet), new Map()
+      ).width;
+    })()`) > 380,
+    "未換行文字應跨過空白隱藏欄，並在下一個有內容的可見欄前停止"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const order = [];
+        const page = {
+          drawRectangle() { order.push("background"); },
+          drawText(value) { order.push("text:" + value); },
+        };
+        const blankStyledCell = {
+          fill: {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFFFFFFF" },
+          },
+        };
+        const textCell = {
+          value: "完整表頭",
+          font: { size: 12 },
+          alignment: { horizontal: "left", vertical: "middle" },
+        };
+        const box = { x: 0, y: 0, width: 200, height: 24 };
+        drawCellBackground(page, textCell, box);
+        drawCellBackground(page, blankStyledCell, box);
+        drawCellText(
+          page,
+          textCell,
+          box,
+          {
+            unicode: {
+              widthOfTextAtSize(value, size) { return value.length * size; },
+            },
+          },
+          1,
+          {},
+          box
+        );
+        return JSON.stringify(order);
+      })()`)
+    ),
+    ["background", "text:完整表頭"],
+    "有底色的空白儲存格必須先於延伸文字繪製，避免表頭被覆蓋"
+  );
   const input = xlsx.buffer.slice(xlsx.byteOffset, xlsx.byteOffset + xlsx.byteLength);
   const parsed = await harness.send({
     type: "parse",

@@ -1492,7 +1492,35 @@ function calculateOverflowTextBox(
   ) {
     const previousColumn = layout.columns[edgeIndex];
     const nextColumn = layout.columns[nextIndex];
-    if (Math.abs(nextColumn.number - previousColumn.number) !== 1) break;
+    const columnDelta = nextColumn.number - previousColumn.number;
+    if (Math.sign(columnDelta) !== direction) break;
+    // 版面會排除隱藏欄，因此相鄰的「可見欄」欄號可能不連續。Excel 的
+    // 未換行文字仍可跨過空白隱藏欄延伸；但若中間其實是被分頁排除的可見
+    // 欄，或隱藏欄本身有內容／合併／圖片，就必須停止，避免跨頁或重疊。
+    let blockedByOmittedColumn = false;
+    for (
+      let omittedColumnNumber = previousColumn.number + direction;
+      omittedColumnNumber !== nextColumn.number;
+      omittedColumnNumber += direction
+    ) {
+      const omittedKey = `${layout.rows[rowIndex].number}:${omittedColumnNumber}`;
+      if (
+        getColumnWidth(worksheet, omittedColumnNumber) > 0 ||
+        merges.masters.has(omittedKey) ||
+        merges.children.has(omittedKey) ||
+        cellImages?.has(omittedKey) ||
+        cellText(
+          worksheet.getCell(
+            layout.rows[rowIndex].number,
+            omittedColumnNumber
+          )
+        )
+      ) {
+        blockedByOmittedColumn = true;
+        break;
+      }
+    }
+    if (blockedByOmittedColumn) break;
     const nextKey = `${layout.rows[rowIndex].number}:${nextColumn.number}`;
     if (
       merges.masters.has(nextKey) ||
@@ -1714,7 +1742,7 @@ function drawPageImages(page, worksheet, layout, images) {
   page.pushOperators(popGraphicsState());
 }
 
-function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
+function drawCellBackground(page, cell, box) {
   const fill = cell.fill;
   if (fill?.type === "pattern" && fill.pattern === "solid") {
     page.drawRectangle({
@@ -1725,6 +1753,9 @@ function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
       color: argbToRgb(fill.fgColor, rgb(1, 1, 1)),
     });
   }
+}
+
+function drawCellText(page, cell, box, fonts, scale, options, textBox = box) {
   const value = cellText(cell);
   if (!value) return;
 
@@ -1857,6 +1888,11 @@ function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
     });
   });
   if (needsClip) page.pushOperators(popGraphicsState());
+}
+
+function drawCell(page, cell, box, fonts, scale, options, textBox = box) {
+  drawCellBackground(page, cell, box);
+  drawCellText(page, cell, box, fonts, scale, options, textBox);
 }
 
 function splitHeaderFooterSections(value) {
@@ -2036,6 +2072,7 @@ function renderWorksheetPage(
   const page = pdf.addPage();
   page.setSize(layout.pageWidth, layout.pageHeight);
   const cellFrames = [];
+  const cellTexts = [];
   const cellImagePlacements = [];
   for (let rowIndex = 0; rowIndex < layout.rows.length; rowIndex += 1) {
     const row = layout.rows[rowIndex];
@@ -2065,15 +2102,11 @@ function renderWorksheetPage(
         merges,
         images?.cellImages
       );
-      drawCell(
-        page,
-        cell,
-        box,
-        fonts,
-        layout.fontScale || layout.scaleX || layout.scale,
-        layout.options,
-        textBox
-      );
+      // Excel 會先完成整頁的儲存格底色，再讓未換行文字延伸到相鄰空白
+      // 格。若逐格同時畫底色與文字，後面的「有樣式空白格」會把前格已
+      // 延伸的文字蓋掉（例如課程表的開班日期與地址）。
+      drawCellBackground(page, cell, box);
+      cellTexts.push({ cell, box, textBox });
       cellFrames.push({
         border: mergeRange
           ? mergedCellBorder(worksheet, mergeRange, cell.border)
@@ -2084,6 +2117,18 @@ function renderWorksheetPage(
       if (cellImage) cellImagePlacements.push({ image: cellImage, box });
     }
   }
+  // 所有底色完成後再畫文字，保留 Excel 的跨空白格延伸行為。
+  cellTexts.forEach(({ cell, box, textBox }) =>
+    drawCellText(
+      page,
+      cell,
+      box,
+      fonts,
+      layout.fontScale || layout.scaleX || layout.scale,
+      layout.options,
+      textBox
+    )
+  );
   // 所有填色與文字完成後再繪製框線，避免後畫的相鄰儲存格底色遮掉一半
   // 線寬；細線先畫、粗線後畫，讓表格外框與表頭分隔線保持完整。
   cellFrames
