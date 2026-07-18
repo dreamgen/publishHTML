@@ -72,6 +72,26 @@ check("預設單頁模式", state.viewMode === "single");
 check("模式按鈕啟用且單頁為 active", !state.singleDisabled && state.singlePressed === "true");
 check("單頁 canvas 已渲染", state.canvasW > 0, `w=${state.canvasW}`);
 
+state = await page.evaluate(() => {
+  const actions = [...document.querySelectorAll(".selection-bar .selection-action")];
+  return {
+    labels: actions.map((item) => item.querySelector("span")?.textContent || ""),
+    allHaveTips: actions.every((item) => item.title.length >= 8),
+    allSingleLine: actions.every(
+      (item) => item.getBoundingClientRect().height <= 32
+    ),
+    iconCount: actions.filter((item) => item.querySelector("svg, input")).length,
+  };
+});
+check(
+  "頁面操作列使用圖示、兩字短標籤與完整提示",
+  state.labels.join("|") === "全選|範圍|群組|擷取" &&
+    state.allHaveTips &&
+    state.allSingleLine &&
+    state.iconCount === 4,
+  JSON.stringify(state)
+);
+
 // ---------- 底部縮放滑桿（單頁模式） ----------
 const beforeSliderCanvasW = await page.evaluate(
   () => document.querySelector("#pdfCanvas").width
@@ -265,6 +285,21 @@ state = await page.evaluate(() => {
     ),
     previewFlowHidden: document.querySelector("#previewFlow").hidden,
     dimensions,
+    groupRows: document.querySelectorAll("#pageList .page-group-row").length,
+    groupCardsVisible: [...document.querySelectorAll("#pageList .page-group .page-card")]
+      .every((card) => {
+        const rect = card.getBoundingClientRect();
+        return rect.width > 80 && rect.height > 80;
+      }),
+    verticalGroupTitle:
+      getComputedStyle(
+        document.querySelector("#pageList .page-group-title strong")
+      ).writingMode === "vertical-rl",
+    coloredGroupFrame:
+      parseFloat(
+        getComputedStyle(document.querySelector("#pageList .page-group-row"))
+          .borderTopWidth
+      ) >= 2,
   };
 });
 check("切換瀏覽模式", state.viewMode === "browse" && state.bodyClass);
@@ -272,6 +307,14 @@ check("頁面清單為網格", state.display === "grid");
 check("6 張頁卡", state.cardCount === 6);
 check("側欄展開至全寬", state.sidebarW >= 1200, `w=${state.sidebarW}`);
 check("縮圖高解析（230px）", state.canvasW >= 220, `canvasW=${state.canvasW}`);
+check(
+  "瀏覽群組顯示彩色橫向分列與垂直標題",
+  state.groupRows >= 1 &&
+    state.groupCardsVisible &&
+    state.verticalGroupTitle &&
+    state.coloredGroupFrame,
+  JSON.stringify(state)
+);
 check(
   "瀏覽縮圖保留橫／直式比例",
   state.dimensions[0].canvasH > state.dimensions[0].canvasW &&
@@ -531,6 +574,21 @@ state = await page.evaluate(async () => {
     groupHeaders: document.querySelectorAll("#pageList .page-group").length,
   };
   const [firstGroupId, secondGroupId] = imported.groupIds;
+  app.setViewMode("browse");
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  const browseGroups = [...document.querySelectorAll("#pageList .page-group")];
+  imported.browseGroupRows = document.querySelectorAll(
+    "#pageList .page-group-row"
+  ).length;
+  imported.browseVisibleCards = [
+    ...document.querySelectorAll("#pageList .page-group .page-card"),
+  ].filter((card) => card.getBoundingClientRect().width > 80).length;
+  imported.browseGroupColors = new Set(
+    browseGroups.map((group) => group.dataset.groupColor)
+  ).size;
+  app.setViewMode("single");
   const sourceHeader = document.querySelector(
     `.page-group[data-group-id="${firstGroupId}"] .page-group-header`
   );
@@ -572,6 +630,13 @@ state = await page.evaluate(async () => {
 check(
   "多個匯入檔案會建立多個預設群組",
   state.sourceCount === 2 && state.groupIds.length === 2 && state.groupHeaders === 2,
+  JSON.stringify(state)
+);
+check(
+  "多個瀏覽群組分列可見且使用不同顏色",
+  state.browseGroupRows >= 2 &&
+    state.browseVisibleCards === 8 &&
+    state.browseGroupColors === 2,
   JSON.stringify(state)
 );
 check("群組標題列可拖曳整組排序", state.groupDragMoved, JSON.stringify(state));

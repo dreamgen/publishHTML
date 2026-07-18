@@ -923,6 +923,9 @@ class PdfWorkshop {
       if (!this.pages.length) return;
       clearTimeout(this.resizeTimer);
       this.resizeTimer = setTimeout(() => {
+        if (this.viewMode === "browse") {
+          this.scheduleBrowseGroupLayout();
+        }
         if (this.viewMode === "continuous") {
           this.rebuildContinuousLayout({ anchorActive: true });
         }
@@ -2202,6 +2205,13 @@ class PdfWorkshop {
     return sourceNames.length === 1 ? sourceNames[0] : "自訂頁面群組";
   }
 
+  getPageGroupColorIndex(groupId) {
+    const groupIds = [
+      ...new Set(this.pages.map((page) => page.groupId).filter(Boolean)),
+    ];
+    return Math.max(0, groupIds.indexOf(groupId)) % 6;
+  }
+
   canMovePageGroup(groupId, delta) {
     const blocks = this.getPageBlocks();
     const index = blocks.findIndex(
@@ -2246,6 +2256,9 @@ class PdfWorkshop {
           const group = document.createElement("section");
           group.className = "page-group";
           group.dataset.groupId = displayGroupId;
+          group.dataset.groupColor = String(
+            this.getPageGroupColorIndex(displayGroupId)
+          );
           if (
             this.pages.some(
               (page) =>
@@ -2647,7 +2660,80 @@ class PdfWorkshop {
       (currentGroupPages || list).append(card);
     });
 
+    this.scheduleBrowseGroupLayout();
     this.queueThumbnails(thumbnailJobs, generation);
+  }
+
+  scheduleBrowseGroupLayout() {
+    if (this.viewMode !== "browse" || !this.elements.pageList) return;
+    cancelAnimationFrame(this.browseGroupLayoutFrame);
+    this.browseGroupLayoutFrame = requestAnimationFrame(() => {
+      this.browseGroupLayoutFrame = requestAnimationFrame(() => {
+        this.browseGroupLayoutFrame = null;
+        this.layoutBrowseGroupRows();
+      });
+    });
+  }
+
+  layoutBrowseGroupRows() {
+    if (this.viewMode !== "browse") return;
+    const list = this.elements.pageList;
+    const listStyle = getComputedStyle(list);
+    const contentWidth =
+      list.clientWidth -
+      (parseFloat(listStyle.paddingLeft) || 0) -
+      (parseFloat(listStyle.paddingRight) || 0);
+    const cardWidth =
+      parseFloat(listStyle.getPropertyValue("--browse-card-width")) ||
+      BROWSE_CARD_BASE_WIDTH;
+    const railWidth = 54;
+    const innerPadding = 20;
+    const gap = 14;
+    const columns = Math.max(
+      1,
+      Math.floor(
+        (Math.max(cardWidth, contentWidth - railWidth - innerPadding) + gap) /
+          (cardWidth + gap)
+      )
+    );
+
+    for (const group of list.querySelectorAll(":scope > .page-group")) {
+      const header = group.querySelector(".page-group-header");
+      const cards = [...group.querySelectorAll(".page-card")];
+      if (!header || !cards.length) continue;
+      const groupName = this.getPageGroupLabel(group.dataset.groupId);
+      const rowCount = Math.ceil(cards.length / columns);
+      const fragment = document.createDocumentFragment();
+      group.style.setProperty("--group-columns", String(columns));
+
+      for (let start = 0, rowIndex = 0; start < cards.length; start += columns) {
+        const row = document.createElement("div");
+        row.className = "page-group-row";
+        row.dataset.groupRow = String(rowIndex + 1);
+
+        if (rowIndex === 0) {
+          row.append(header);
+        } else {
+          const continuation = document.createElement("div");
+          continuation.className = "page-group-row-label";
+          continuation.title = `${groupName}（第 ${rowIndex + 1} 列，共 ${rowCount} 列）`;
+          const continuationName = document.createElement("strong");
+          continuationName.textContent = groupName;
+          const continuationCount = document.createElement("span");
+          continuationCount.textContent = `${rowIndex + 1}/${rowCount}`;
+          continuation.append(continuationName, continuationCount);
+          row.append(continuation);
+        }
+
+        const rowPages = document.createElement("div");
+        rowPages.className = "page-group-pages page-group-row-pages";
+        rowPages.append(...cards.slice(start, start + columns));
+        row.append(rowPages);
+        fragment.append(row);
+        rowIndex += 1;
+      }
+      group.replaceChildren(fragment);
+    }
   }
 
   createMoveButton(direction, disabled, handler, title = "") {
@@ -4612,6 +4698,8 @@ class PdfWorkshop {
     if (this.viewMode === "browse" && bucketChanged) {
       // 縮圖解析度跨級距時重建側欄，維持清晰度
       this.renderSidebar();
+    } else if (this.viewMode === "browse") {
+      this.scheduleBrowseGroupLayout();
     }
   }
 

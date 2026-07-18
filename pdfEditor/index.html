@@ -76,13 +76,22 @@
           </button>
         </div>
         <div class="selection-bar">
-          <label class="check-label">
-            <input id="selectAllCheckbox" type="checkbox">
+          <label class="check-label selection-action" title="選取或取消全部頁面">
+            <input id="selectAllCheckbox" type="checkbox" aria-label="選取或取消全部頁面">
             <span>全選</span>
           </label>
-          <button class="text-button" id="rangeButton" type="button" disabled>頁碼範圍</button>
-          <button class="text-button" id="groupSelectedButton" type="button" disabled>建立群組</button>
-          <button class="text-button" id="extractButton" type="button" disabled>擷取所選</button>
+          <button class="text-button selection-action" id="rangeButton" type="button" disabled title="依頁碼範圍選取頁面" aria-label="依頁碼範圍選取頁面">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M9 3v4M15 3v4M8 11h3M13 11h3M8 15h3M13 15h3"/></svg>
+            <span>範圍</span>
+          </button>
+          <button class="text-button selection-action" id="groupSelectedButton" type="button" disabled title="將所選頁面建立為一個群組" aria-label="將所選頁面建立為一個群組">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="7" height="6" rx="1"/><rect x="14" y="5" width="7" height="6" rx="1"/><rect x="3" y="14" width="7" height="6" rx="1"/><rect x="14" y="14" width="7" height="6" rx="1"/><path d="M10 8h4M10 17h4"/></svg>
+            <span>群組</span>
+          </button>
+          <button class="text-button selection-action" id="extractButton" type="button" disabled title="擷取所選頁面並另存為 PDF" aria-label="擷取所選頁面並另存為 PDF">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v5h5M4 9v9h9M8 14l-4 4"/></svg>
+            <span>擷取</span>
+          </button>
         </div>
         <div class="page-list" id="pageList">
           <div class="sidebar-placeholder">

@@ -1,4 +1,4 @@
-const SW_VERSION = "v27";
+const SW_VERSION = "v28";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 // Cached during install (required for the core editor to work offline).
