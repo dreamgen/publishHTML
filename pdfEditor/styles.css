@@ -3366,32 +3366,135 @@ body.view-browse .page-group-row-label strong {
   font-size: 11px;
 }
 
+body.view-browse .page-group.collapsed {
+  grid-column: auto;
+  min-width: 0;
+  height: 100%;
+  display: block;
+}
+
 body.view-browse .page-group-collapsed-row {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-height: calc(var(--browse-card-width, 180px) * 1.42);
+  height: 100%;
 }
 
 body.view-browse .page-group-collapsed-row .page-group-header {
-  min-height: 50px;
-  flex-direction: row;
-  padding: 7px 10px;
-  border-right: 0;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 7px 4px;
+  border-right: 1px solid color-mix(in srgb, var(--group-accent) 55%, transparent);
 }
 
 body.view-browse .page-group-collapsed-row .page-group-title,
 body.view-browse .page-group-collapsed-row .page-group-actions {
-  flex-direction: row;
+  flex-direction: column;
 }
 
-body.view-browse .page-group-collapsed-row .page-group-title strong {
-  max-height: none;
-  writing-mode: horizontal-tb;
+body.view-browse .page-group-collapsed-row .page-group-title strong,
+body.view-browse .page-group-collapsed-row .page-group-title > span:not(.page-group-drag-handle) {
+  display: none;
 }
 
 body.view-browse .page-group-collapsed-row .group-ungroup-button {
-  width: auto;
-  height: 25px;
-  min-height: 25px;
-  padding: 0 7px;
+  width: 27px;
+  height: auto;
+  min-height: 42px;
+  padding: 4px 3px;
+  line-height: 1.1;
+}
+
+body.view-browse .page-group-collapsed-preview {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  padding: 10px 8px 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--group-tint) 42%, var(--surface));
+}
+
+body.view-browse .page-group-collapsed-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--group-accent);
+}
+
+body.view-browse .page-group-collapsed-meta strong {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+body.view-browse .page-group-collapsed-meta span {
+  font-size: 10px;
+  font-weight: 800;
+  opacity: .82;
+}
+
+body.view-browse .page-group-collapsed-deck {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.view-browse .page-group-collapsed-thumb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52%;
+  height: 82%;
+  transform: translate(calc(-50% + var(--stack-offset)), -50%) rotate(var(--stack-rotate));
+  transform-origin: center bottom;
+  filter: drop-shadow(0 5px 5px color-mix(in srgb, var(--group-accent) 18%, transparent));
+}
+
+body.view-browse .page-group-collapsed-thumb .thumbnail-wrap {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-color: color-mix(in srgb, var(--group-accent) 48%, var(--line));
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+body.view-browse .page-group-collapsed-thumb .thumbnail-wrap canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+body.view-browse .page-group-collapsed-thumb.placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 8%;
+  padding: 18% 14%;
+  border: 1px solid color-mix(in srgb, var(--group-accent) 48%, var(--line));
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+body.view-browse .page-group-collapsed-thumb.placeholder span {
+  height: 4px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--group-accent) 28%, var(--line));
+}
+
+body.view-browse .page-group-collapsed-thumb.placeholder span:nth-child(2) {
+  width: 78%;
+}
+
+body.view-browse .page-group-collapsed-thumb.placeholder span:nth-child(3) {
+  width: 56%;
 }
 
 body.view-browse .page-group.drag-over-before .page-group-row:first-child {
@@ -3400,6 +3503,14 @@ body.view-browse .page-group.drag-over-before .page-group-row:first-child {
 
 body.view-browse .page-group.drag-over-after .page-group-row:last-child {
   box-shadow: 0 4px 0 var(--accent);
+}
+
+body.view-browse .page-group.collapsed.drag-over-before .page-group-row:first-child {
+  box-shadow: -4px 0 0 var(--accent);
+}
+
+body.view-browse .page-group.collapsed.drag-over-after .page-group-row:last-child {
+  box-shadow: 4px 0 0 var(--accent);
 }
 
 body.view-browse .selection-bar {

@@ -337,14 +337,39 @@ state = await page.evaluate(async () => {
   const collapsedGroup = document.querySelector(
     `.page-group[data-group-id="${groupId}"]`
   );
+  const listRect = document.querySelector("#pageList").getBoundingClientRect();
+  const groupRect = collapsedGroup.getBoundingClientRect();
+  const deckThumbs = [
+    ...collapsedGroup.querySelectorAll(".page-group-collapsed-thumb"),
+  ];
+  const deckLefts = deckThumbs.map(
+    (item) => Math.round(item.getBoundingClientRect().left)
+  );
+  const metaRect = collapsedGroup
+    .querySelector(".page-group-collapsed-meta")
+    .getBoundingClientRect();
+  const deckRect = collapsedGroup
+    .querySelector(".page-group-collapsed-deck")
+    .getBoundingClientRect();
   const collapsed = {
     classApplied: collapsedGroup.classList.contains("collapsed"),
     rowCount: collapsedGroup.querySelectorAll(".page-group-row").length,
     visibleCards: collapsedGroup.querySelectorAll(".page-card").length,
-    compactTitle:
+    inlineGridCard: groupRect.width < listRect.width / 2,
+    verticalMenu:
       getComputedStyle(
-        collapsedGroup.querySelector(".page-group-title strong")
-      ).writingMode === "horizontal-tb",
+        collapsedGroup.querySelector(".page-group-header")
+      ).flexDirection === "column",
+    previewCount: deckThumbs.length,
+    horizontalDeck: deckLefts.every(
+      (left, index) => index === 0 || left > deckLefts[index - 1]
+    ),
+    nameAboveDeck:
+      metaRect.bottom <= deckRect.top + 1 &&
+      collapsedGroup.querySelector(".page-group-collapsed-meta strong")
+        .textContent === "smoke.pdf" &&
+      collapsedGroup.querySelector(".page-group-collapsed-meta span")
+        .textContent === "6 頁",
     expandedState:
       collapsedGroup
         .querySelector(".group-collapse-button")
@@ -360,12 +385,16 @@ state = await page.evaluate(async () => {
   return collapsed;
 });
 check(
-  "瀏覽群組可收合為精簡橫列並再次展開",
+  "瀏覽群組可收合為單頁大小的橫向疊頁卡並再次展開",
   state.classApplied &&
     state.rowCount === 1 &&
     state.visibleCards === 0 &&
-    state.compactTitle &&
-  state.expandedState &&
+    state.inlineGridCard &&
+    state.verticalMenu &&
+    state.previewCount === 3 &&
+    state.horizontalDeck &&
+    state.nameAboveDeck &&
+    state.expandedState &&
     state.expandedCards === 6,
   JSON.stringify(state)
 );
@@ -603,8 +632,14 @@ check(
 state = await page.evaluate(() => {
   const app = window.__PDF_WORKSHOP_TEST__.app;
   let group = document.querySelector("#pageList .page-group");
+  const collapseIcon = [
+    ...group.querySelectorAll(".group-collapse-button path"),
+  ].map((path) => path.getAttribute("d"));
   group.querySelector(".group-collapse-button").click();
   group = document.querySelector("#pageList .page-group");
+  const expandIcon = [
+    ...group.querySelectorAll(".group-collapse-button path"),
+  ].map((path) => path.getAttribute("d"));
   const collapsed =
     group.classList.contains("collapsed") &&
     getComputedStyle(group.querySelector(".page-group-pages")).display ===
@@ -621,6 +656,9 @@ state = await page.evaluate(() => {
   return {
     collapsed,
     controlsRemain,
+    inwardOutwardIcons:
+      collapseIcon.join("|") === "m5 7 5 5-5 5|m19 7-5 5 5 5" &&
+      expandIcon.join("|") === "m10 7-5 5 5 5|m14 7 5 5-5 5",
     expanded:
       !group.classList.contains("collapsed") &&
       getComputedStyle(group.querySelector(".page-group-pages")).display !==
@@ -629,7 +667,10 @@ state = await page.evaluate(() => {
 });
 check(
   "一般側欄群組可收合且保留整組操作",
-  state.collapsed && state.controlsRemain && state.expanded,
+  state.collapsed &&
+    state.controlsRemain &&
+    state.inwardOutwardIcons &&
+    state.expanded,
   JSON.stringify(state)
 );
 
@@ -696,6 +737,68 @@ state = await page.evaluate(async () => {
   imported.browseGroupColors = new Set(
     browseGroups.map((group) => group.dataset.groupColor)
   ).size;
+  for (const groupId of imported.groupIds) {
+    app.togglePageGroupCollapsed(groupId);
+  }
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  const collapsedGroups = [
+    ...document.querySelectorAll("#pageList .page-group.collapsed"),
+  ];
+  const collapsedRects = collapsedGroups.map((group) =>
+    group.getBoundingClientRect()
+  );
+  imported.collapsedGroupsInline =
+    collapsedGroups.length === 2 &&
+    Math.abs(collapsedRects[0].top - collapsedRects[1].top) <= 2 &&
+    collapsedRects[0].right <= collapsedRects[1].left + 2 &&
+    collapsedGroups.every(
+      (group) =>
+        group.querySelectorAll(".page-group-collapsed-thumb").length >= 3
+    );
+  const collapsedDragTransfer = new DataTransfer();
+  collapsedGroups[0].dispatchEvent(
+    new DragEvent("dragstart", {
+      bubbles: true,
+      dataTransfer: collapsedDragTransfer,
+    })
+  );
+  const collapsedTargetRect = collapsedGroups[1].getBoundingClientRect();
+  collapsedGroups[1].dispatchEvent(
+    new DragEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      clientX: collapsedTargetRect.right - 1,
+      clientY: collapsedTargetRect.top + collapsedTargetRect.height / 2,
+      dataTransfer: collapsedDragTransfer,
+    })
+  );
+  collapsedGroups[1].dispatchEvent(
+    new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientX: collapsedTargetRect.right - 1,
+      clientY: collapsedTargetRect.top + collapsedTargetRect.height / 2,
+      dataTransfer: collapsedDragTransfer,
+    })
+  );
+  collapsedGroups[0].dispatchEvent(
+    new DragEvent("dragend", {
+      bubbles: true,
+      dataTransfer: collapsedDragTransfer,
+    })
+  );
+  imported.collapsedGroupDragMoved =
+    app.pages[0].groupId === secondGroupId &&
+    app.pages.at(-1).groupId === firstGroupId;
+  app.undo();
+  for (const groupId of imported.groupIds) {
+    app.togglePageGroupCollapsed(groupId);
+  }
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
   app.setViewMode("single");
   const sourceHeader = document.querySelector(
     `.page-group[data-group-id="${firstGroupId}"] .page-group-header`
@@ -745,6 +848,11 @@ check(
   state.browseGroupRows >= 2 &&
     state.browseVisibleCards === 8 &&
     state.browseGroupColors === 2,
+  JSON.stringify(state)
+);
+check(
+  "多個收合群組以單一卡片連續排列且各顯示至少三張疊頁",
+  state.collapsedGroupsInline && state.collapsedGroupDragMoved,
   JSON.stringify(state)
 );
 check("群組標題列可拖曳整組排序", state.groupDragMoved, JSON.stringify(state));

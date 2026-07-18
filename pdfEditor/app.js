@@ -2358,8 +2358,8 @@ class PdfWorkshop {
             groupCollapsed ? "false" : "true"
           );
           collapseButton.innerHTML = groupCollapsed
-            ? '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>'
-            : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>';
+            ? '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m10 7-5 5 5 5"/><path d="m14 7 5 5-5 5"/></svg>'
+            : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5"/><path d="m19 7-5 5 5 5"/></svg>';
           collapseButton.addEventListener("click", (event) => {
             event.stopPropagation();
             this.togglePageGroupCollapsed(displayGroupId);
@@ -2403,7 +2403,11 @@ class PdfWorkshop {
           actions.append(ungroupButton);
           header.append(title, actions);
 
-          header.addEventListener("dragstart", (event) => {
+          const groupDragTarget = groupCollapsed ? group : header;
+          groupDragTarget.draggable = true;
+          groupDragTarget.title = "拖曳以移動整個群組";
+          if (groupCollapsed) header.draggable = false;
+          groupDragTarget.addEventListener("dragstart", (event) => {
             if (event.target.closest("button, input, label")) {
               event.preventDefault();
               return;
@@ -2430,7 +2434,7 @@ class PdfWorkshop {
               JSON.stringify(groupedPageIds)
             );
           });
-          header.addEventListener("dragend", () => {
+          groupDragTarget.addEventListener("dragend", () => {
             this.draggedGroupId = null;
             this.draggedPageId = null;
             this.draggedPageIds = [];
@@ -2462,8 +2466,15 @@ class PdfWorkshop {
             const dropZone =
               event.target.closest(".page-group-header") || group;
             const rect = dropZone.getBoundingClientRect();
-            this.dragDropPosition =
-              event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+            const useHorizontalAxis =
+              this.viewMode === "browse" && group.classList.contains("collapsed");
+            this.dragDropPosition = useHorizontalAxis
+              ? event.clientX < rect.left + rect.width / 2
+                ? "before"
+                : "after"
+              : event.clientY < rect.top + rect.height / 2
+                ? "before"
+                : "after";
             group.classList.toggle(
               "drag-over-before",
               this.dragDropPosition === "before"
@@ -2764,7 +2775,61 @@ class PdfWorkshop {
       if (group.classList.contains("collapsed")) {
         const collapsedRow = document.createElement("div");
         collapsedRow.className = "page-group-row page-group-collapsed-row";
-        collapsedRow.append(header);
+        const collapsedPreview = document.createElement("div");
+        collapsedPreview.className = "page-group-collapsed-preview";
+        const collapsedMeta = document.createElement("div");
+        collapsedMeta.className = "page-group-collapsed-meta";
+        const collapsedName = document.createElement("strong");
+        collapsedName.textContent = groupName;
+        collapsedName.title = groupName;
+        const collapsedCount = document.createElement("span");
+        collapsedCount.textContent = `${cards.length} 頁`;
+        collapsedMeta.append(collapsedName, collapsedCount);
+
+        const deck = document.createElement("div");
+        deck.className = "page-group-collapsed-deck";
+        const previewCount = Math.min(
+          5,
+          Math.max(3, Math.ceil(cards.length / 16) + 2)
+        );
+        deck.style.setProperty("--deck-count", String(previewCount));
+        const sampleIndexes = new Set();
+        for (let previewIndex = 0; previewIndex < previewCount; previewIndex += 1) {
+          const sampleIndex =
+            previewCount === 1
+              ? 0
+              : Math.round(
+                  (previewIndex * (cards.length - 1)) / (previewCount - 1)
+                );
+          sampleIndexes.add(sampleIndex);
+        }
+        const uniqueSampleIndexes = [...sampleIndexes];
+        for (let previewIndex = 0; previewIndex < previewCount; previewIndex += 1) {
+          const sampleIndex = uniqueSampleIndexes[previewIndex];
+          const thumbnail = cards[sampleIndex]?.querySelector(".thumbnail-wrap");
+          const deckCard = document.createElement("div");
+          deckCard.className = "page-group-collapsed-thumb";
+          const center = (previewCount - 1) / 2;
+          deckCard.style.setProperty(
+            "--stack-offset",
+            `${(previewIndex - center) * 24}%`
+          );
+          deckCard.style.setProperty(
+            "--stack-rotate",
+            `${(previewIndex - center) * 1.6}deg`
+          );
+          deckCard.style.zIndex = String(previewIndex + 1);
+          if (thumbnail) {
+            deckCard.append(thumbnail);
+          } else {
+            deckCard.classList.add("placeholder");
+            deckCard.innerHTML =
+              '<span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>';
+          }
+          deck.append(deckCard);
+        }
+        collapsedPreview.append(collapsedMeta, deck);
+        collapsedRow.append(header, collapsedPreview);
         group.replaceChildren(collapsedRow);
         continue;
       }
@@ -2823,12 +2888,8 @@ class PdfWorkshop {
 
   async queueThumbnails(jobs, generation) {
     for (const job of jobs) {
-      if (
-        generation !== this.thumbnailGeneration ||
-        !job.canvas.isConnected
-      ) {
-        return;
-      }
+      if (generation !== this.thumbnailGeneration) return;
+      if (!job.canvas.isConnected) continue;
       try {
         await this.renderThumbnail(job.canvas, job.pageRecord);
         job.thumbWrap.classList.add("loaded");
