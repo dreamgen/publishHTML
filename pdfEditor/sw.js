@@ -1,4 +1,4 @@
-const SW_VERSION = "v31";
+const SW_VERSION = "v32";
 const CACHE_NAME = `pdfEditor-${SW_VERSION}`;
 const SHARE_CACHE_NAME = "pdfEditor-share-inbox";
 // Cached during install (required for the core editor to work offline).
@@ -9,6 +9,7 @@ const LAZY_MANIFESTS = ["./vendor/tesseract/offline-assets.json"];
 const NETWORK_FIRST_ASSETS = [
   "/index.html",
   "/app.js",
+  "/feedback-config.js",
   "/export-delivery.mjs",
   "/pdf-page-copy.mjs",
   "/excel-worker.js",
@@ -20,6 +21,7 @@ const APP_SHELL = [
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./feedback-config.js",
   "./export-delivery.mjs",
   "./pdf-page-copy.mjs",
   "./excel-worker.js",

@@ -53,6 +53,10 @@
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v11M8 10l4 4 4-4"/><path d="M5 17v3h14v-3"/></svg>
           <span>安裝 APP</span>
         </button>
+        <button class="button button-ghost feedback-header-button" id="feedbackButton" type="button" aria-label="回報問題或提供建議" title="回報問題或提供建議">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v12H9l-4 4z"/><path d="M8.5 8.5h7M8.5 12h4.5"/></svg>
+          <span>回報</span>
+        </button>
         <button class="icon-button theme-button" id="themeButton" type="button" aria-label="切換深色模式" title="切換深色模式">
           <svg class="theme-sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
           <svg class="theme-moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5z"/></svg>
@@ -358,6 +362,18 @@
 
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
 
+  <section class="error-report-invite" id="errorReportInvite" role="alert" hidden>
+    <span class="error-report-invite-icon" aria-hidden="true">!</span>
+    <div>
+      <strong>PDF 工坊發生未預期錯誤</strong>
+      <span id="errorReportInviteMessage">您可以附上診斷資料協助我們修正。</span>
+    </div>
+    <button class="button button-primary" id="errorReportInviteButton" type="button">回報問題</button>
+    <button class="icon-button" id="errorReportDismissButton" type="button" aria-label="稍後再回報" title="稍後再回報">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+    </button>
+  </section>
+
   <dialog class="confirm-dialog" id="confirmDialog">
     <form method="dialog">
       <div class="dialog-icon" aria-hidden="true">
@@ -419,6 +435,72 @@
       <div class="dialog-actions">
         <button class="button button-ghost" value="cancel">稍後</button>
         <button class="button button-primary" id="installNowButton" type="button">立即安裝</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="panel-dialog feedback-dialog" id="feedbackDialog">
+    <form id="feedbackForm" novalidate>
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">意見回饋</span>
+          <h2>回報問題或提供建議</h2>
+        </div>
+        <button class="icon-button" id="feedbackCloseButton" type="button" aria-label="關閉"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+
+      <div class="feedback-fields-grid">
+        <label class="field">
+          <span>回報類型</span>
+          <select id="feedbackCategory">
+            <option value="使用問題回報">使用問題回報</option>
+            <option value="功能建議">功能建議</option>
+            <option value="效能異常">效能異常</option>
+            <option value="其他">其他意見</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>聯絡方式（選填）</span>
+          <input id="feedbackContact" type="text" maxlength="160" autocomplete="email" placeholder="Email 或其他聯絡方式">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>標題</span>
+        <input id="feedbackTitle" type="text" maxlength="120" required placeholder="簡短說明問題或建議">
+      </label>
+      <label class="field">
+        <span>詳細說明</span>
+        <textarea id="feedbackDescription" rows="5" maxlength="4000" required placeholder="若是問題，請說明操作步驟、預期結果與實際結果。"></textarea>
+      </label>
+      <p class="field-error" id="feedbackError" hidden></p>
+
+      <section class="feedback-environment" aria-labelledby="feedbackEnvironmentTitle">
+        <div>
+          <strong id="feedbackEnvironmentTitle">自動帶入環境資訊</strong>
+          <span>版本、裝置、瀏覽器與 PWA 狀態</span>
+        </div>
+        <textarea id="feedbackEnvironment" rows="5" readonly aria-label="環境資訊"></textarea>
+      </section>
+
+      <section class="feedback-attachment-card">
+        <label class="check-label feedback-diagnostic-toggle">
+          <input id="feedbackIncludeDiagnostics" type="checkbox">
+          <span>附上診斷紀錄（選填）</span>
+        </label>
+        <p>包含最近的錯誤訊息、頁數與顯示模式，不包含 PDF／Excel 原始內容。</p>
+        <details class="feedback-diagnostics-details">
+          <summary>預覽診斷紀錄</summary>
+          <textarea id="feedbackDiagnostics" rows="8" readonly aria-label="診斷紀錄"></textarea>
+        </details>
+      </section>
+
+      <p class="dialog-note">PDF／Excel 原始檔不會被上傳。環境資訊會隨回報送出；診斷紀錄只有在您主動勾選時才會傳送。</p>
+      <p class="feedback-config-warning" id="feedbackConfigWarning" hidden>Google 表單尚未設定，請先在 feedback-config.js 填入表單 ID 與欄位 ID。</p>
+      <div class="dialog-actions">
+        <span class="feedback-submit-status" id="feedbackSubmitStatus" aria-live="polite"></span>
+        <button class="button button-ghost" id="feedbackCancelButton" type="button">取消</button>
+        <button class="button button-primary" id="feedbackSubmitButton" type="submit">送出回報</button>
       </div>
     </form>
   </dialog>

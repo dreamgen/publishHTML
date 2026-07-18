@@ -243,6 +243,14 @@ svg {
   box-shadow: 0 5px 14px rgba(226, 71, 69, .14);
 }
 
+.feedback-header-button {
+  color: var(--ink-soft);
+}
+
+.feedback-header-button:hover:not(:disabled) {
+  color: var(--accent-dark);
+}
+
 .button-danger {
   color: #fff;
   background: var(--danger);
@@ -1727,6 +1735,57 @@ body.view-browse .browse-zoom .zoom-range {
   background: rgba(177, 47, 57, .97);
 }
 
+.error-report-invite {
+  position: fixed;
+  z-index: 175;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 18px));
+  width: min(520px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid rgba(239, 90, 82, .28);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.error-report-invite-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--danger);
+  font-weight: 900;
+}
+
+.error-report-invite > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.error-report-invite strong {
+  font-size: 13px;
+}
+
+.error-report-invite span:not(.error-report-invite-icon) {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.error-report-invite .button {
+  min-height: 34px;
+  padding-inline: 12px;
+}
+
 .toast svg {
   width: 17px;
   height: 17px;
@@ -2056,6 +2115,95 @@ dialog.dialog-fallback-open {
 
 .install-dialog {
   width: min(480px, calc(100% - 28px));
+}
+
+.feedback-dialog {
+  width: min(680px, calc(100% - 28px));
+}
+
+.feedback-dialog > form {
+  gap: 15px;
+}
+
+.feedback-fields-grid {
+  display: grid;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  gap: 12px;
+}
+
+.feedback-environment,
+.feedback-attachment-card {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.feedback-environment > div {
+  display: grid;
+  gap: 2px;
+}
+
+.feedback-environment strong {
+  font-size: 12px;
+}
+
+.feedback-environment span,
+.feedback-attachment-card > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.feedback-environment textarea,
+.feedback-diagnostics-details textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.feedback-diagnostic-toggle {
+  justify-self: start;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.feedback-diagnostics-details summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.feedback-diagnostics-details textarea {
+  margin-top: 9px;
+}
+
+.feedback-config-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(200, 91, 28, .25);
+  border-radius: 9px;
+  color: #9b471c !important;
+  background: #fff5e9;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
+.feedback-submit-status {
+  align-self: center;
+  margin-right: auto;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .install-dialog-hero {
@@ -3019,6 +3167,20 @@ dialog.dialog-fallback-open {
     padding-inline: 12px;
   }
 
+  .error-report-invite {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .error-report-invite .button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .error-report-invite > .icon-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
   .app-main {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3149,6 +3311,10 @@ dialog.dialog-fallback-open {
     grid-template-columns: 1fr;
   }
 
+  .feedback-fields-grid {
+    grid-template-columns: 1fr;
+  }
+
   .insert-card {
     min-height: 105px;
     display: grid;
@@ -3258,6 +3424,7 @@ dialog.dialog-fallback-open {
   .empty-state p {
     font-size: 13px;
   }
+
 }
 
 @media (max-width: 380px) {

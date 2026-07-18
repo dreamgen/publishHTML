@@ -1,5 +1,9 @@
 import * as pdfjsLib from "./vendor/pdfjs/pdf.mjs";
 import {
+  FEEDBACK_FORM_CONFIG,
+  PDF_WORKSHOP_VERSION,
+} from "./feedback-config.js";
+import {
   chooseExportDelivery,
   detectExportEnvironment,
 } from "./export-delivery.mjs";
@@ -37,6 +41,8 @@ const BROWSE_ZOOM_MAX = 2.4;
 const PREVIEW_RENDER_CONCURRENCY = 2;
 const SKIM_SETTLE_DELAY_MS = 160;
 const BLOB_URL_LIFETIME_MS = 10 * 60 * 1000;
+const FEEDBACK_LOG_LIMIT = 40;
+const FEEDBACK_ERROR_INVITE_COOLDOWN_MS = 60 * 1000;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -122,6 +128,15 @@ class PdfWorkshop {
     this.excelPreviousActiveId = null;
     this.pendingExportShare = null;
     this.pendingDownloadUrls = new Map();
+    this.feedbackConfig = {
+      ...FEEDBACK_FORM_CONFIG,
+      entries: { ...FEEDBACK_FORM_CONFIG.entries },
+    };
+    this.feedbackDiagnostics = [];
+    this.pendingFeedbackError = null;
+    this.feedbackSubmitting = false;
+    this.feedbackInviteShownAt = 0;
+    this.feedbackConsoleRestore = [];
 
     let savedViewMode = null;
     try {
@@ -157,6 +172,7 @@ class PdfWorkshop {
       insertButton: $("#insertButton"),
       shareButton: $("#shareButton"),
       installButton: $("#installButton"),
+      feedbackButton: $("#feedbackButton"),
       themeButton: $("#themeButton"),
       exportButton: $("#exportButton"),
       openFileInput: $("#openFileInput"),
@@ -262,6 +278,25 @@ class PdfWorkshop {
       installNowButton: $("#installNowButton"),
       installStepsList: $("#installStepsList"),
       installDialogNote: $("#installDialogNote"),
+      feedbackDialog: $("#feedbackDialog"),
+      feedbackForm: $("#feedbackForm"),
+      feedbackCloseButton: $("#feedbackCloseButton"),
+      feedbackCancelButton: $("#feedbackCancelButton"),
+      feedbackCategory: $("#feedbackCategory"),
+      feedbackContact: $("#feedbackContact"),
+      feedbackTitle: $("#feedbackTitle"),
+      feedbackDescription: $("#feedbackDescription"),
+      feedbackError: $("#feedbackError"),
+      feedbackEnvironment: $("#feedbackEnvironment"),
+      feedbackIncludeDiagnostics: $("#feedbackIncludeDiagnostics"),
+      feedbackDiagnostics: $("#feedbackDiagnostics"),
+      feedbackConfigWarning: $("#feedbackConfigWarning"),
+      feedbackSubmitStatus: $("#feedbackSubmitStatus"),
+      feedbackSubmitButton: $("#feedbackSubmitButton"),
+      errorReportInvite: $("#errorReportInvite"),
+      errorReportInviteMessage: $("#errorReportInviteMessage"),
+      errorReportInviteButton: $("#errorReportInviteButton"),
+      errorReportDismissButton: $("#errorReportDismissButton"),
       recentFiles: $("#recentFiles"),
       recentFileList: $("#recentFileList"),
       passwordDialog: $("#passwordDialog"),
@@ -350,6 +385,7 @@ class PdfWorkshop {
   }
 
   async init() {
+    this.installFeedbackDiagnostics();
     if (!PDFDocument) {
       this.toast("PDF 編輯元件載入失敗，請重新整理頁面。", "error", 8000);
       return;
@@ -427,6 +463,7 @@ class PdfWorkshop {
       insertButton,
       shareButton,
       installButton,
+      feedbackButton,
       themeButton,
       exportButton,
       openFileInput,
@@ -495,6 +532,39 @@ class PdfWorkshop {
     );
     installButton?.addEventListener("click", () =>
       this.showInstallIntro({ force: true })
+    );
+    feedbackButton?.addEventListener("click", () =>
+      this.openFeedbackDialog({ reason: "manual" })
+    );
+    this.elements.feedbackIncludeDiagnostics?.addEventListener("change", () =>
+      this.refreshFeedbackDiagnosticsPreview()
+    );
+    this.elements.feedbackForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.submitFeedback();
+    });
+    for (const button of [
+      this.elements.feedbackCloseButton,
+      this.elements.feedbackCancelButton,
+    ]) {
+      button?.addEventListener("click", () =>
+        this.closeDialog(this.elements.feedbackDialog, "cancel")
+      );
+    }
+    this.elements.feedbackDialog?.addEventListener("close", () => {
+      this.feedbackSubmitting = false;
+      this.elements.feedbackSubmitStatus.textContent = "";
+    });
+    this.elements.errorReportInviteButton?.addEventListener("click", () => {
+      this.hideErrorReportInvite();
+      this.openFeedbackDialog({
+        reason: "global-error",
+        errorRecord: this.pendingFeedbackError,
+      });
+    });
+    this.elements.errorReportDismissButton?.addEventListener("click", () =>
+      this.hideErrorReportInvite()
     );
     this.elements.installNowButton?.addEventListener("click", () =>
       this.installApp()
@@ -7086,6 +7156,364 @@ class PdfWorkshop {
       100,
       Math.max(0, progress)
     )}%`;
+  }
+
+  installFeedbackDiagnostics() {
+    if (this.feedbackDiagnosticsInstalled) return;
+    this.feedbackDiagnosticsInstalled = true;
+
+    for (const level of ["warn", "error"]) {
+      const original = console[level]?.bind(console);
+      if (!original) continue;
+      console[level] = (...args) => {
+        this.recordFeedbackDiagnostic(level, ...args);
+        original(...args);
+      };
+      this.feedbackConsoleRestore.push(() => {
+        console[level] = original;
+      });
+    }
+
+    window.addEventListener("error", (event) => {
+      if (event.target && event.target !== window && !event.error) return;
+      this.handleGlobalFeedbackError(
+        event.error || new Error(event.message || "未知的 JavaScript 錯誤"),
+        "window.error"
+      );
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      this.handleGlobalFeedbackError(event.reason, "unhandledrejection");
+    });
+  }
+
+  serializeFeedbackDiagnosticValue(value) {
+    if (value instanceof Error) {
+      return `${value.name || "Error"}: ${value.message || "未知錯誤"}${
+        value.stack ? `\n${value.stack}` : ""
+      }`;
+    }
+    if (value instanceof File) {
+      return `[File type=${value.type || "unknown"} size=${value.size}]`;
+    }
+    if (value instanceof Blob) {
+      return `[Blob type=${value.type || "unknown"} size=${value.size}]`;
+    }
+    if (value instanceof Element) {
+      return `[Element ${value.tagName.toLowerCase()}${value.id ? `#${value.id}` : ""}]`;
+    }
+    if (typeof value === "string") return value;
+    if (value == null || ["number", "boolean", "bigint"].includes(typeof value)) {
+      return String(value);
+    }
+    try {
+      const seen = new WeakSet();
+      return JSON.stringify(value, (key, nested) => {
+        if (nested instanceof File) {
+          return { type: nested.type || "unknown", size: nested.size };
+        }
+        if (nested instanceof Blob) {
+          return { type: nested.type || "unknown", size: nested.size };
+        }
+        if (nested && typeof nested === "object") {
+          if (seen.has(nested)) return "[Circular]";
+          seen.add(nested);
+        }
+        return nested;
+      });
+    } catch {
+      return String(value);
+    }
+  }
+
+  recordFeedbackDiagnostic(level, ...values) {
+    const message = values
+      .map((value) => this.serializeFeedbackDiagnosticValue(value))
+      .join(" ")
+      .slice(0, 6000);
+    this.feedbackDiagnostics.push({
+      at: new Date().toISOString(),
+      level,
+      message,
+    });
+    if (this.feedbackDiagnostics.length > FEEDBACK_LOG_LIMIT) {
+      this.feedbackDiagnostics.splice(
+        0,
+        this.feedbackDiagnostics.length - FEEDBACK_LOG_LIMIT
+      );
+    }
+  }
+
+  normalizeFeedbackError(error, source = "runtime") {
+    const normalized = error instanceof Error ? error : new Error(String(error || "未知錯誤"));
+    return {
+      at: new Date().toISOString(),
+      source,
+      name: normalized.name || "Error",
+      message: normalized.message || "未知錯誤",
+      stack: normalized.stack || "",
+    };
+  }
+
+  shouldIgnoreGlobalFeedbackError(record) {
+    return /AbortError|RenderingCancelledException|ResizeObserver loop/i.test(
+      `${record.name} ${record.message}`
+    );
+  }
+
+  handleGlobalFeedbackError(error, source = "runtime") {
+    const record = this.normalizeFeedbackError(error, source);
+    this.recordFeedbackDiagnostic("unhandled", record);
+    if (this.shouldIgnoreGlobalFeedbackError(record)) return;
+    this.pendingFeedbackError = record;
+    const now = Date.now();
+    if (now - this.feedbackInviteShownAt < FEEDBACK_ERROR_INVITE_COOLDOWN_MS) {
+      return;
+    }
+    this.feedbackInviteShownAt = now;
+    this.showErrorReportInvite(record);
+  }
+
+  showErrorReportInvite(record) {
+    const invite = this.elements.errorReportInvite;
+    if (!invite) return;
+    const message = String(record?.message || "未預期錯誤")
+      .replace(/\s+/g, " ")
+      .slice(0, 120);
+    this.elements.errorReportInviteMessage.textContent = `${message}。您可以附上診斷資料協助我們修正。`;
+    invite.hidden = false;
+  }
+
+  hideErrorReportInvite() {
+    if (this.elements.errorReportInvite) {
+      this.elements.errorReportInvite.hidden = true;
+    }
+  }
+
+  openFeedbackDialog({ reason = "manual", errorRecord = null } = {}) {
+    const dialog = this.elements.feedbackDialog;
+    if (!dialog) return;
+
+    this.elements.feedbackError.hidden = true;
+    this.elements.feedbackSubmitStatus.textContent = "";
+    this.elements.feedbackCategory.value =
+      reason === "global-error" ? "效能異常" : "使用問題回報";
+    this.elements.feedbackTitle.value =
+      reason === "global-error" ? "操作時發生未預期錯誤" : "";
+    this.elements.feedbackDescription.value =
+      reason === "global-error"
+        ? "請補充錯誤發生前的操作步驟，以及您原本預期的結果。"
+        : "";
+    this.pendingFeedbackError = errorRecord || this.pendingFeedbackError;
+    this.elements.feedbackIncludeDiagnostics.checked =
+      reason === "global-error";
+    this.elements.feedbackEnvironment.value = this.buildFeedbackEnvironment();
+    this.refreshFeedbackDiagnosticsPreview();
+
+    const configured = this.isFeedbackFormConfigured();
+    this.elements.feedbackConfigWarning.textContent =
+      this.feedbackConfig.disabledReason ||
+      "Google 表單尚未設定，請先在 feedback-config.js 填入表單 ID 與欄位 ID。";
+    this.elements.feedbackConfigWarning.hidden = configured;
+    this.elements.feedbackSubmitButton.disabled = !configured;
+    this.openDialog(dialog);
+    setTimeout(() => this.elements.feedbackTitle.focus(), 60);
+  }
+
+  detectFeedbackBrowser() {
+    const ua = navigator.userAgent || "";
+    if (/Edg\//.test(ua)) return `Microsoft Edge ${ua.match(/Edg\/([\d.]+)/)?.[1] || ""}`.trim();
+    if (/OPR\//.test(ua)) return `Opera ${ua.match(/OPR\/([\d.]+)/)?.[1] || ""}`.trim();
+    if (/SamsungBrowser\//.test(ua)) {
+      return `Samsung Internet ${ua.match(/SamsungBrowser\/([\d.]+)/)?.[1] || ""}`.trim();
+    }
+    if (/CriOS\//.test(ua)) return `Chrome iOS ${ua.match(/CriOS\/([\d.]+)/)?.[1] || ""}`.trim();
+    if (/FxiOS\//.test(ua)) return `Firefox iOS ${ua.match(/FxiOS\/([\d.]+)/)?.[1] || ""}`.trim();
+    if (/Chrome\//.test(ua)) return `Chrome ${ua.match(/Chrome\/([\d.]+)/)?.[1] || ""}`.trim();
+    if (/Firefox\//.test(ua)) return `Firefox ${ua.match(/Firefox\/([\d.]+)/)?.[1] || ""}`.trim();
+    if (/Safari\//.test(ua)) return `Safari ${ua.match(/Version\/([\d.]+)/)?.[1] || ""}`.trim();
+    return "未知瀏覽器";
+  }
+
+  getFeedbackPwaState() {
+    if (navigator.standalone === true) return "iOS 主畫面 PWA";
+    if (matchMedia("(display-mode: standalone)").matches) return "Standalone PWA";
+    if (matchMedia("(display-mode: fullscreen)").matches) return "Fullscreen PWA";
+    if (matchMedia("(display-mode: minimal-ui)").matches) return "Minimal UI PWA";
+    return "瀏覽器分頁";
+  }
+
+  buildFeedbackEnvironment() {
+    const uaData = navigator.userAgentData;
+    const platform = uaData?.platform || navigator.platform || "未知平台";
+    const device = uaData?.mobile || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      ? "行動裝置"
+      : "桌面裝置";
+    return [
+      `PDF 工坊版本：${PDF_WORKSHOP_VERSION}`,
+      `裝置：${device}／${platform}`,
+      `瀏覽器：${this.detectFeedbackBrowser()}`,
+      `PWA 狀態：${this.getFeedbackPwaState()}`,
+      `語言：${navigator.language || "未知"}`,
+      `螢幕：${screen.width}×${screen.height}／視窗：${innerWidth}×${innerHeight}／DPR ${devicePixelRatio || 1}`,
+      `連線：${navigator.onLine ? "線上" : "離線"}`,
+      `時間：${new Date().toISOString()}`,
+    ].join("\n");
+  }
+
+  buildFeedbackDiagnostics() {
+    const state = {
+      pageCount: this.pages.length,
+      selectedPageCount: this.selectedPageIds.size,
+      sourceCount: this.sources.size,
+      viewMode: this.viewMode,
+      activeTool: this.activeTool,
+      dirty: this.dirty,
+      zoom: this.zoom,
+    };
+    const records = this.feedbackDiagnostics.slice(-FEEDBACK_LOG_LIMIT);
+    if (this.pendingFeedbackError) {
+      const alreadyIncluded = records.some((item) =>
+        item.message.includes(this.pendingFeedbackError.message)
+      );
+      if (!alreadyIncluded) {
+        records.push({
+          at: this.pendingFeedbackError.at,
+          level: "unhandled",
+          message: this.serializeFeedbackDiagnosticValue(this.pendingFeedbackError),
+        });
+      }
+    }
+    return [
+      `狀態：${JSON.stringify(state)}`,
+      "最近紀錄：",
+      records.length
+        ? records.map((item) => `[${item.at}] ${item.level}: ${item.message}`).join("\n")
+        : "（沒有錯誤紀錄）",
+    ].join("\n");
+  }
+
+  refreshFeedbackDiagnosticsPreview() {
+    if (!this.elements.feedbackDiagnostics) return;
+    this.elements.feedbackDiagnostics.value = this.buildFeedbackDiagnostics();
+  }
+
+  isFeedbackConfigValue(value) {
+    return Boolean(
+      String(value || "").trim() && !/[【】]/.test(String(value || ""))
+    );
+  }
+
+  normalizeFeedbackEntry(value) {
+    const entry = String(value || "").trim();
+    if (!entry) return "";
+    return entry.startsWith("entry.") ? entry : `entry.${entry}`;
+  }
+
+  isFeedbackFormConfigured() {
+    const { enabled, formResponseUrl, entries = {} } = this.feedbackConfig || {};
+    return (
+      enabled !== false &&
+      this.isFeedbackConfigValue(formResponseUrl) &&
+      /^https:\/\/docs\.google\.com\/forms\/d\/e\/[^/]+\/formResponse$/.test(
+        formResponseUrl
+      ) &&
+      ["category", "title", "description", "environment"].every((key) =>
+        this.isFeedbackConfigValue(entries[key])
+      )
+    );
+  }
+
+  buildFeedbackPayload() {
+    return {
+      category: this.elements.feedbackCategory.value,
+      title: this.elements.feedbackTitle.value.trim(),
+      description: this.elements.feedbackDescription.value.trim(),
+      contact: this.elements.feedbackContact.value.trim(),
+      environment: this.elements.feedbackEnvironment.value,
+      diagnostics: this.elements.feedbackIncludeDiagnostics.checked
+        ? this.buildFeedbackDiagnostics()
+        : "",
+    };
+  }
+
+  validateFeedbackPayload(payload) {
+    if (!payload.title) return "請輸入回報標題。";
+    if (!payload.description) return "請輸入詳細說明。";
+    const entries = this.feedbackConfig?.entries || {};
+    if (payload.contact && !this.isFeedbackConfigValue(entries.contact)) {
+      return "Google 表單尚未設定聯絡方式欄位。";
+    }
+    if (payload.diagnostics && !this.isFeedbackConfigValue(entries.diagnostics)) {
+      return "Google 表單尚未設定診斷紀錄欄位。";
+    }
+    return "";
+  }
+
+  async sendFeedbackToGoogleForm(payload) {
+    const { formResponseUrl, entries } = this.feedbackConfig;
+    const params = new URLSearchParams();
+    const groupedValues = new Map();
+    for (const [key, value] of Object.entries(payload)) {
+      if (!value || !this.isFeedbackConfigValue(entries[key])) continue;
+      const entry = this.normalizeFeedbackEntry(entries[key]);
+      const label = key === "diagnostics" ? "診斷紀錄" : "";
+      const part = label ? `【${label}】\n${value}` : value;
+      const existing = groupedValues.get(entry);
+      groupedValues.set(entry, existing ? `${existing}\n\n${part}` : part);
+    }
+    for (const [entry, value] of groupedValues) params.set(entry, value);
+    params.set("submit", "Submit");
+    await fetch(formResponseUrl, {
+      method: "POST",
+      mode: "no-cors",
+      body: params,
+    });
+  }
+
+  async submitFeedback() {
+    if (this.feedbackSubmitting) return;
+    const errorElement = this.elements.feedbackError;
+    errorElement.hidden = true;
+    this.elements.feedbackSubmitStatus.textContent = "";
+
+    if (!this.isFeedbackFormConfigured()) {
+      errorElement.textContent = "Google 表單尚未完成設定，暫時無法送出。";
+      errorElement.hidden = false;
+      return;
+    }
+    if (!navigator.onLine) {
+      errorElement.textContent = "目前是離線狀態，請連線後再送出回報。";
+      errorElement.hidden = false;
+      return;
+    }
+
+    const payload = this.buildFeedbackPayload();
+    const validationError = this.validateFeedbackPayload(payload);
+    if (validationError) {
+      errorElement.textContent = validationError;
+      errorElement.hidden = false;
+      return;
+    }
+
+    this.feedbackSubmitting = true;
+    this.elements.feedbackSubmitButton.disabled = true;
+    this.elements.feedbackSubmitStatus.textContent = "正在送出…";
+    try {
+      await this.sendFeedbackToGoogleForm(payload);
+      this.elements.feedbackSubmitStatus.textContent = "已送出";
+      this.hideErrorReportInvite();
+      this.pendingFeedbackError = null;
+      this.toast("回報已送出，感謝您協助改善 PDF 工坊。", "success", 6000);
+      setTimeout(() => this.closeDialog(this.elements.feedbackDialog, "sent"), 500);
+    } catch (error) {
+      console.warn("[PDF Editor] Feedback submission failed", error);
+      errorElement.textContent = "回報送出失敗，請檢查網路後再試一次。";
+      errorElement.hidden = false;
+      this.elements.feedbackSubmitStatus.textContent = "";
+      this.elements.feedbackSubmitButton.disabled = false;
+    } finally {
+      this.feedbackSubmitting = false;
+    }
   }
 
   toast(message, type = "default", duration = 4200) {
