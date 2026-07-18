@@ -392,9 +392,134 @@ input[type="checkbox"] {
   opacity: .45;
 }
 
-.page-card.drag-over {
+.page-card.drag-over-before {
   transform: translateY(3px);
   border-top-color: var(--accent);
+  box-shadow: 0 -3px 0 var(--accent);
+}
+
+.page-card.drag-over-after {
+  transform: translateY(-3px);
+  border-bottom-color: var(--accent);
+  box-shadow: 0 3px 0 var(--accent);
+}
+
+.page-group {
+  margin: 7px 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-soft) 70%, transparent);
+}
+
+.page-group.active {
+  border-color: #f2aaa4;
+}
+
+.page-group.dragging {
+  opacity: .5;
+}
+
+.page-group.drag-over-before {
+  box-shadow: 0 -4px 0 var(--accent);
+}
+
+.page-group.drag-over-after {
+  box-shadow: 0 4px 0 var(--accent);
+}
+
+.page-group-header {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px 5px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.page-group-header[draggable="true"] {
+  cursor: grab;
+  user-select: none;
+}
+
+.page-group-header[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.page-group-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-group-drag-handle {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -3px;
+}
+
+.group-select {
+  flex: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.group-select-checkbox {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.page-group-title strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.page-group-title span {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.page-group-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.group-ungroup-button {
+  height: 25px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.group-ungroup-button:hover {
+  color: var(--accent-dark);
+  border-color: #f0aaa6;
+  background: var(--accent-soft);
+}
+
+.page-group-pages {
+  padding: 3px;
 }
 
 .page-card-checkbox {
@@ -2681,6 +2806,11 @@ dialog.dialog-fallback-open {
   background: var(--accent-soft);
 }
 
+[data-theme="dark"] .page-group,
+[data-theme="dark"] .page-group-header {
+  background: var(--surface-muted);
+}
+
 [data-theme="dark"] .page-stage {
   box-shadow: 0 20px 48px rgba(0, 0, 0, .42), 0 3px 12px rgba(0, 0, 0, .3);
 }
@@ -3069,6 +3199,25 @@ body.view-browse .page-list {
 
 body.view-browse .page-card + .page-card {
   margin-top: 0;
+}
+
+body.view-browse .page-group {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+body.view-browse .page-group-pages {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(var(--browse-card-width, 180px), 100%), 1fr)
+  );
+  gap: 14px;
+  padding: 12px;
+}
+
+body.view-browse .page-group-header {
+  padding-inline: 12px;
 }
 
 body.view-browse .page-card {

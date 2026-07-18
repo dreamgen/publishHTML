@@ -12,8 +12,11 @@ function check(name, condition, detail = "") {
 
 const browser = await chromium.launch({
   executablePath:
-    process.env.HOME +
-    "/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell",
+    process.env.PLAYWRIGHT_CHROMIUM_PATH ||
+    (process.platform === "darwin"
+      ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      : process.env.HOME +
+        "/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell"),
   args: ["--no-sandbox"],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
@@ -495,6 +498,252 @@ check(
   JSON.stringify(state)
 );
 check("單頁重新渲染", state.canvasW > 0);
+
+// ---------- 批次移動與頁面群組 ----------
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  return {
+    groupIds: [...new Set(app.pages.map((item) => item.groupId))],
+    groupCount: document.querySelectorAll("#pageList .page-group").length,
+    groupedCards:
+      document.querySelector("#pageList .page-group-pages")?.children.length || 0,
+  };
+});
+check(
+  "同一匯入檔案預設為一個群組",
+  state.groupIds.length === 1 && state.groupCount === 1 && state.groupedCards === 6,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate(async () => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const doc = await window.PDFLib.PDFDocument.create();
+  doc.addPage([612, 792]);
+  doc.addPage([612, 792]);
+  const bytes = await doc.save();
+  await app.loadFiles(
+    [new File([bytes], "第二份測試.pdf", { type: "application/pdf" })],
+    { replace: false, remember: false }
+  );
+  const imported = {
+    sourceCount: app.sources.size,
+    groupIds: [...new Set(app.pages.map((item) => item.groupId))],
+    groupHeaders: document.querySelectorAll("#pageList .page-group").length,
+  };
+  const [firstGroupId, secondGroupId] = imported.groupIds;
+  const sourceHeader = document.querySelector(
+    `.page-group[data-group-id="${firstGroupId}"] .page-group-header`
+  );
+  const targetHeader = document.querySelector(
+    `.page-group[data-group-id="${secondGroupId}"] .page-group-header`
+  );
+  const dataTransfer = new DataTransfer();
+  sourceHeader.dispatchEvent(
+    new DragEvent("dragstart", { bubbles: true, dataTransfer })
+  );
+  const rect = targetHeader.getBoundingClientRect();
+  targetHeader.dispatchEvent(
+    new DragEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      clientY: rect.bottom - 1,
+      dataTransfer,
+    })
+  );
+  targetHeader.dispatchEvent(
+    new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientY: rect.bottom - 1,
+      dataTransfer,
+    })
+  );
+  sourceHeader.dispatchEvent(
+    new DragEvent("dragend", { bubbles: true, dataTransfer })
+  );
+  imported.groupDragMoved =
+    app.pages[0].groupId === secondGroupId &&
+    app.pages.at(-1).groupId === firstGroupId &&
+    [...app.selectedPageIds].length === 6;
+  app.undo();
+  app.undo();
+  return imported;
+});
+check(
+  "多個匯入檔案會建立多個預設群組",
+  state.sourceCount === 2 && state.groupIds.length === 2 && state.groupHeaders === 2,
+  JSON.stringify(state)
+);
+check("群組標題列可拖曳整組排序", state.groupDragMoved, JSON.stringify(state));
+
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  app.selectedPageIds = new Set();
+  app.updateUI();
+  app.refreshSidebarSelection();
+  const group = document.querySelector("#pageList .page-group");
+  const checkbox = group.querySelector(".group-select-checkbox");
+  const groupPageCount = group.querySelectorAll(".page-card").length;
+  const initiallyUnchecked = !checkbox.checked && !checkbox.indeterminate;
+  checkbox.click();
+  const selectedAll =
+    checkbox.checked && app.selectedPageIds.size === groupPageCount;
+  checkbox.click();
+  const clearedAll = !checkbox.checked && app.selectedPageIds.size === 0;
+  app.selectedPageIds.add(app.pages[0].id);
+  app.updateUI();
+  app.refreshSidebarSelection();
+  return {
+    initiallyUnchecked,
+    selectedAll,
+    clearedAll,
+    partial: checkbox.indeterminate && !checkbox.checked,
+  };
+});
+check(
+  "群組核取方塊支援全選、取消與半選狀態",
+  state.initiallyUnchecked && state.selectedAll && state.clearedAll && state.partial,
+  JSON.stringify(state)
+);
+
+const dragBatch = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const ids = app.pages.slice(1, 3).map((item) => item.id);
+  app.selectedPageIds = new Set(ids);
+  app.updateUI();
+  app.refreshSidebarSelection();
+  return { ids, targetId: app.pages.at(-1).id };
+});
+await page.evaluate(({ ids, targetId }) => {
+  const source = document.querySelector(`.page-card[data-page-id="${ids[0]}"]`);
+  const target = document.querySelector(`.page-card[data-page-id="${targetId}"]`);
+  const dataTransfer = new DataTransfer();
+  source.dispatchEvent(
+    new DragEvent("dragstart", { bubbles: true, dataTransfer })
+  );
+  const rect = target.getBoundingClientRect();
+  target.dispatchEvent(
+    new DragEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.bottom - 2,
+      dataTransfer,
+    })
+  );
+  target.dispatchEvent(
+    new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.bottom - 2,
+      dataTransfer,
+    })
+  );
+  source.dispatchEvent(
+    new DragEvent("dragend", { bubbles: true, dataTransfer })
+  );
+  source.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+}, dragBatch);
+await page.waitForTimeout(500);
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  return {
+    tail: app.pages.slice(-2).map((item) => item.id),
+    selected: [...app.selectedPageIds],
+    sameGroup:
+      app.pages.at(-2).groupId &&
+      app.pages.at(-2).groupId === app.pages.at(-1).groupId,
+  };
+});
+check(
+  "拖曳已勾選頁面會整批移動",
+  state.tail.join("|") === dragBatch.ids.join("|") &&
+    state.selected.join("|") === dragBatch.ids.join("|") &&
+    state.sameGroup,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const selected = [app.pages[1].id, app.pages[3].id];
+  app.selectedPageIds = new Set(selected);
+  app.groupSelectedPages();
+  const indices = selected.map((id) => app.pages.findIndex((item) => item.id === id));
+  const groupIds = selected.map(
+    (id) => app.pages.find((item) => item.id === id)?.groupId
+  );
+  return {
+    selected,
+    indices,
+    sameGroup: groupIds[0] && groupIds[0] === groupIds[1],
+    groupCount: document.querySelectorAll("#pageList .page-group").length,
+  };
+});
+check(
+  "非連續多頁可建立連續群組",
+  state.sameGroup && state.indices[1] === state.indices[0] + 1,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate((selected) => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const targetId = app.pages.at(-1).id;
+  app.selectedPageIds = new Set(selected);
+  app.reorderPages(selected, targetId, "after");
+  return {
+    tail: app.pages.slice(-2).map((item) => item.id),
+    selected: [...app.selectedPageIds],
+  };
+}, state.selected);
+check(
+  "勾選多頁可一起移到新位置",
+  state.tail.join("|") === state.selected.join("|") && state.selected.length === 2,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const customGroup = app.pages.find((item) => item.groupName)?.groupId;
+  const groupPages = app.pages.filter((item) => item.groupId === customGroup);
+  const movedId = groupPages[0].id;
+  const targetId = app.pages.find((item) => item.groupId !== customGroup).id;
+  app.reorderPages([movedId], targetId, "before");
+  return {
+    movedGroupId: app.pages.find((item) => item.id === movedId)?.groupId,
+    leftoverGroupId: app.pages.find((item) => item.id === groupPages[1].id)?.groupId,
+  };
+});
+check(
+  "群組頁面可單獨拖出且單頁殘留自動解除",
+  !state.movedGroupId && !state.leftoverGroupId,
+  JSON.stringify(state)
+);
+
+state = await page.evaluate(() => {
+  const app = window.__PDF_WORKSHOP_TEST__.app;
+  const selected = app.pages.slice(-2).map((item) => item.id);
+  app.selectedPageIds = new Set(selected);
+  app.groupSelectedPages();
+  const groupId = app.pages.find((item) => item.id === selected[0]).groupId;
+  const before = app.getPageBlocks().findIndex((block) => block.id === groupId);
+  app.movePageGroup(groupId, -1);
+  const after = app.getPageBlocks().findIndex((block) => block.id === groupId);
+  app.ungroupPages(groupId);
+  return {
+    before,
+    after,
+    ungrouped: selected.every(
+      (id) => !app.pages.find((item) => item.id === id)?.groupId
+    ),
+    groupHeaderCount: document.querySelectorAll("#pageList .page-group").length,
+  };
+});
+check(
+  "群組可用按鈕移動並解除",
+  state.after === state.before - 1 && state.ungrouped,
+  JSON.stringify(state)
+);
 
 const realErrors = consoleErrors.filter(
   (text) =>

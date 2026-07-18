@@ -67,6 +67,10 @@ class PdfWorkshop {
     this.renderToken = 0;
     this.thumbnailGeneration = 0;
     this.draggedPageId = null;
+    this.draggedPageIds = [];
+    this.draggedGroupId = null;
+    this.dragDropPosition = "before";
+    this.suppressPageClick = false;
     this.annotationDrag = null;
     this.activeTool = "select";
     this.drawingDraft = null;
@@ -170,6 +174,7 @@ class PdfWorkshop {
       selectAllCheckbox: $("#selectAllCheckbox"),
       rangeButton: $("#rangeButton"),
       extractButton: $("#extractButton"),
+      groupSelectedButton: $("#groupSelectedButton"),
       undoButton: $("#undoButton"),
       redoButton: $("#redoButton"),
       rotateButton: $("#rotateButton"),
@@ -428,6 +433,7 @@ class PdfWorkshop {
       selectAllCheckbox,
       rangeButton,
       extractButton,
+      groupSelectedButton,
       undoButton,
       redoButton,
       rotateButton,
@@ -597,6 +603,9 @@ class PdfWorkshop {
           .map((page) => page.id),
         { mode: "download", suffix: "selected-pages" }
       )
+    );
+    groupSelectedButton.addEventListener("click", () =>
+      this.groupSelectedPages()
     );
 
     undoButton.addEventListener("click", () => this.undo());
@@ -1921,6 +1930,7 @@ class PdfWorkshop {
       pages.push({
         id: makeId("page"),
         sourceId,
+        groupId: sourceId,
         sourcePageIndex: index,
         baseRotation: normalizedRotation(pdfPage.rotate || 0),
         rotation: 0,
@@ -1970,6 +1980,24 @@ class PdfWorkshop {
     this.renderSidebar();
     if (this.viewMode === "continuous") this.rebuildContinuousLayout();
     this.renderActivePage();
+  }
+
+  migrateLegacyPageGroups(pages) {
+    let previousSourceId = null;
+    let runGroupId = null;
+    for (const page of pages) {
+      if (Object.prototype.hasOwnProperty.call(page, "groupId")) {
+        previousSourceId = page.sourceId;
+        runGroupId = page.groupId;
+        continue;
+      }
+      if (page.sourceId !== previousSourceId || !runGroupId) {
+        runGroupId = makeId("group");
+      }
+      page.groupId = runGroupId;
+      previousSourceId = page.sourceId;
+    }
+    return pages;
   }
 
   normalizeState() {
@@ -2075,6 +2103,7 @@ class PdfWorkshop {
       value.textContent = `${zoomPercent}%`;
     }
     this.elements.extractButton.disabled = !selectedCount;
+    this.elements.groupSelectedButton.disabled = selectedCount < 2;
     this.elements.rangeButton.disabled = !hasDocument;
     this.elements.selectAllCheckbox.disabled = !hasDocument;
 
@@ -2126,6 +2155,61 @@ class PdfWorkshop {
     }
   }
 
+  getPageGroupCounts() {
+    const counts = new Map();
+    for (const page of this.pages) {
+      if (!page.groupId) continue;
+      counts.set(page.groupId, (counts.get(page.groupId) || 0) + 1);
+    }
+    return counts;
+  }
+
+  getPageBlocks() {
+    const groupCounts = this.getPageGroupCounts();
+    const blocks = [];
+    for (let index = 0; index < this.pages.length; ) {
+      const page = this.pages[index];
+      const groupId =
+        page.groupId && (groupCounts.get(page.groupId) || 0) > 1
+          ? page.groupId
+          : null;
+      if (!groupId) {
+        blocks.push({ type: "page", id: page.id, pages: [page] });
+        index += 1;
+        continue;
+      }
+      const pages = [];
+      while (index < this.pages.length && this.pages[index].groupId === groupId) {
+        pages.push(this.pages[index]);
+        index += 1;
+      }
+      blocks.push({ type: "group", id: groupId, pages });
+    }
+    return blocks;
+  }
+
+  getPageGroupLabel(groupId) {
+    const pages = this.pages.filter((page) => page.groupId === groupId);
+    const customLabel = pages.find((page) => page.groupName)?.groupName;
+    if (customLabel) return customLabel;
+    const sourceNames = [
+      ...new Set(
+        pages
+          .map((page) => this.sources.get(page.sourceId)?.name)
+          .filter(Boolean)
+      ),
+    ];
+    return sourceNames.length === 1 ? sourceNames[0] : "自訂頁面群組";
+  }
+
+  canMovePageGroup(groupId, delta) {
+    const blocks = this.getPageBlocks();
+    const index = blocks.findIndex(
+      (block) => block.type === "group" && block.id === groupId
+    );
+    return index >= 0 && index + delta >= 0 && index + delta < blocks.length;
+  }
+
   renderSidebar() {
     const list = this.elements.pageList;
     this.thumbnailGeneration += 1;
@@ -2141,9 +2225,225 @@ class PdfWorkshop {
     }
 
     const thumbnailJobs = [];
+    const groupCounts = this.getPageGroupCounts();
+    let currentGroupId = null;
+    let currentGroupPages = null;
 
     this.pages.forEach((pageRecord, index) => {
       const source = this.sources.get(pageRecord.sourceId);
+      const displayGroupId =
+        pageRecord.groupId && (groupCounts.get(pageRecord.groupId) || 0) > 1
+          ? pageRecord.groupId
+          : null;
+      if (displayGroupId !== currentGroupId) {
+        currentGroupId = displayGroupId;
+        currentGroupPages = null;
+        if (displayGroupId) {
+          const groupedPageRecords = this.pages.filter(
+            (page) => page.groupId === displayGroupId
+          );
+          const groupedPageIds = groupedPageRecords.map((page) => page.id);
+          const group = document.createElement("section");
+          group.className = "page-group";
+          group.dataset.groupId = displayGroupId;
+          if (
+            this.pages.some(
+              (page) =>
+                page.groupId === displayGroupId && page.id === this.activePageId
+            )
+          ) {
+            group.classList.add("active");
+          }
+
+          const header = document.createElement("div");
+          header.className = "page-group-header";
+          header.draggable = true;
+          header.title = "拖曳以移動整個群組";
+          const title = document.createElement("div");
+          title.className = "page-group-title";
+          const dragHandle = document.createElement("span");
+          dragHandle.className = "page-group-drag-handle";
+          dragHandle.textContent = "⋮⋮";
+          dragHandle.setAttribute("aria-hidden", "true");
+          const selectWrap = document.createElement("label");
+          selectWrap.className = "group-select";
+          selectWrap.title = "選取或取消這個群組的所有頁面";
+          const groupCheckbox = document.createElement("input");
+          groupCheckbox.type = "checkbox";
+          groupCheckbox.className = "group-select-checkbox";
+          groupCheckbox.dataset.groupId = displayGroupId;
+          const selectedGroupPageCount = groupedPageIds.filter((id) =>
+            this.selectedPageIds.has(id)
+          ).length;
+          groupCheckbox.checked =
+            selectedGroupPageCount === groupedPageIds.length;
+          groupCheckbox.indeterminate =
+            selectedGroupPageCount > 0 &&
+            selectedGroupPageCount < groupedPageIds.length;
+          groupCheckbox.setAttribute(
+            "aria-label",
+            `選取或取消群組「${this.getPageGroupLabel(displayGroupId)}」的所有頁面`
+          );
+          groupCheckbox.addEventListener("click", (event) =>
+            event.stopPropagation()
+          );
+          groupCheckbox.addEventListener("change", () => {
+            for (const pageId of groupedPageIds) {
+              if (groupCheckbox.checked) this.selectedPageIds.add(pageId);
+              else this.selectedPageIds.delete(pageId);
+            }
+            this.updateUI();
+            this.refreshSidebarSelection();
+          });
+          selectWrap.append(groupCheckbox);
+          const name = document.createElement("strong");
+          name.textContent = this.getPageGroupLabel(displayGroupId);
+          name.title = name.textContent;
+          const count = document.createElement("span");
+          count.textContent = `${groupCounts.get(displayGroupId)} 頁`;
+          title.append(dragHandle, selectWrap, name, count);
+
+          const actions = document.createElement("div");
+          actions.className = "page-group-actions";
+          actions.append(
+            this.createMoveButton(
+              "up",
+              !this.canMovePageGroup(displayGroupId, -1),
+              () => this.movePageGroup(displayGroupId, -1),
+              "整組向前移動"
+            ),
+            this.createMoveButton(
+              "down",
+              !this.canMovePageGroup(displayGroupId, 1),
+              () => this.movePageGroup(displayGroupId, 1),
+              "整組向後移動"
+            )
+          );
+          const ungroupButton = document.createElement("button");
+          ungroupButton.className = "group-ungroup-button";
+          ungroupButton.type = "button";
+          ungroupButton.textContent = "解除";
+          ungroupButton.title = "解除這個群組";
+          ungroupButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            this.ungroupPages(displayGroupId);
+          });
+          actions.append(ungroupButton);
+          header.append(title, actions);
+
+          header.addEventListener("dragstart", (event) => {
+            if (event.target.closest("button, input, label")) {
+              event.preventDefault();
+              return;
+            }
+            this.suppressPageClick = true;
+            this.draggedGroupId = displayGroupId;
+            this.draggedPageId = null;
+            this.draggedPageIds = [...groupedPageIds];
+            this.activePageId = groupedPageIds[0] || this.activePageId;
+            this.selectedPageIds = new Set(groupedPageIds);
+            group.classList.add("dragging");
+            for (const draggedCard of list.querySelectorAll(".page-card")) {
+              draggedCard.classList.toggle(
+                "dragging",
+                this.draggedPageIds.includes(draggedCard.dataset.pageId)
+              );
+            }
+            this.updateUI();
+            this.refreshSidebarSelection();
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", groupedPageIds[0] || "");
+            event.dataTransfer.setData(
+              "application/x-pdf-workshop-pages",
+              JSON.stringify(groupedPageIds)
+            );
+          });
+          header.addEventListener("dragend", () => {
+            this.draggedGroupId = null;
+            this.draggedPageId = null;
+            this.draggedPageIds = [];
+            list
+              .querySelectorAll(
+                ".page-group.dragging, .page-group.drag-over-before, .page-group.drag-over-after, .page-card.dragging, .page-card.drag-over-before, .page-card.drag-over-after"
+              )
+              .forEach((item) =>
+                item.classList.remove(
+                  "dragging",
+                  "drag-over-before",
+                  "drag-over-after"
+                )
+              );
+            setTimeout(() => {
+              this.suppressPageClick = false;
+            }, 350);
+          });
+
+          group.addEventListener("dragover", (event) => {
+            if (
+              event.target.closest(".page-card") ||
+              !this.draggedPageIds.length ||
+              groupedPageIds.every((id) => this.draggedPageIds.includes(id))
+            ) {
+              return;
+            }
+            event.preventDefault();
+            const dropZone =
+              event.target.closest(".page-group-header") || group;
+            const rect = dropZone.getBoundingClientRect();
+            this.dragDropPosition =
+              event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+            group.classList.toggle(
+              "drag-over-before",
+              this.dragDropPosition === "before"
+            );
+            group.classList.toggle(
+              "drag-over-after",
+              this.dragDropPosition === "after"
+            );
+            event.dataTransfer.dropEffect = "move";
+          });
+          group.addEventListener("dragleave", (event) => {
+            if (group.contains(event.relatedTarget)) return;
+            group.classList.remove("drag-over-before", "drag-over-after");
+          });
+          group.addEventListener("drop", (event) => {
+            if (event.target.closest(".page-card")) return;
+            event.preventDefault();
+            event.stopPropagation();
+            group.classList.remove("drag-over-before", "drag-over-after");
+            let draggedIds = this.draggedPageIds;
+            if (!draggedIds.length) {
+              try {
+                draggedIds = JSON.parse(
+                  event.dataTransfer.getData(
+                    "application/x-pdf-workshop-pages"
+                  )
+                );
+              } catch {
+                draggedIds = [event.dataTransfer.getData("text/plain")].filter(
+                  Boolean
+                );
+              }
+            }
+            if (
+              !draggedIds.length ||
+              groupedPageIds.every((id) => draggedIds.includes(id))
+            ) {
+              return;
+            }
+            const targetId =
+              this.dragDropPosition === "after"
+                ? groupedPageIds.at(-1)
+                : groupedPageIds[0];
+            this.reorderPages(draggedIds, targetId, this.dragDropPosition);
+          });
+
+          currentGroupPages = document.createElement("div");
+          currentGroupPages.className = "page-group-pages";
+          group.append(header, currentGroupPages);
+          list.append(group);
+        }
+      }
       const card = document.createElement("article");
       card.className = `page-card${
         pageRecord.id === this.activePageId ? " active" : ""
@@ -2165,6 +2465,7 @@ class PdfWorkshop {
         if (checkbox.checked) this.selectedPageIds.add(pageRecord.id);
         else this.selectedPageIds.delete(pageRecord.id);
         this.updateUI();
+        this.refreshSidebarSelection();
       });
       checkboxWrap.append(checkbox);
 
@@ -2203,6 +2504,10 @@ class PdfWorkshop {
       card.append(checkboxWrap, previewColumn, moveButtons);
 
       card.addEventListener("click", (event) => {
+        if (this.suppressPageClick) {
+          event.preventDefault();
+          return;
+        }
         if (event.metaKey || event.ctrlKey) {
           if (this.selectedPageIds.has(pageRecord.id)) {
             this.selectedPageIds.delete(pageRecord.id);
@@ -2234,47 +2539,124 @@ class PdfWorkshop {
       });
 
       card.addEventListener("dragstart", (event) => {
+        this.suppressPageClick = true;
+        this.draggedGroupId = null;
         this.draggedPageId = pageRecord.id;
-        card.classList.add("dragging");
+        const moveSelection =
+          this.selectedPageIds.has(pageRecord.id) &&
+          this.selectedPageIds.size > 1;
+        this.draggedPageIds = moveSelection
+          ? this.pages
+              .filter((page) => this.selectedPageIds.has(page.id))
+              .map((page) => page.id)
+          : [pageRecord.id];
+        if (!moveSelection) {
+          this.selectedPageIds = new Set([pageRecord.id]);
+          this.activePageId = pageRecord.id;
+          this.refreshSidebarSelection();
+        }
+        for (const draggedCard of list.querySelectorAll(".page-card")) {
+          draggedCard.classList.toggle(
+            "dragging",
+            this.draggedPageIds.includes(draggedCard.dataset.pageId)
+          );
+        }
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", pageRecord.id);
-      });
-      card.addEventListener("dragend", () => {
-        this.draggedPageId = null;
-        card.classList.remove("dragging");
-        $$(".page-card.drag-over").forEach((item) =>
-          item.classList.remove("drag-over")
+        event.dataTransfer.setData(
+          "application/x-pdf-workshop-pages",
+          JSON.stringify(this.draggedPageIds)
         );
       });
+      card.addEventListener("dragend", () => {
+        this.draggedGroupId = null;
+        this.draggedPageId = null;
+        this.draggedPageIds = [];
+        list
+          .querySelectorAll(
+            ".page-group.dragging, .page-group.drag-over-before, .page-group.drag-over-after, .page-card.dragging, .page-card.drag-over-before, .page-card.drag-over-after"
+          )
+          .forEach((item) =>
+            item.classList.remove(
+              "dragging",
+              "drag-over-before",
+              "drag-over-after"
+            )
+          );
+        setTimeout(() => {
+          this.suppressPageClick = false;
+        }, 350);
+      });
       card.addEventListener("dragover", (event) => {
-        if (!this.draggedPageId || this.draggedPageId === pageRecord.id) return;
+        if (
+          !this.draggedPageIds.length ||
+          this.draggedPageIds.includes(pageRecord.id)
+        ) {
+          return;
+        }
         event.preventDefault();
-        card.classList.add("drag-over");
+        const rect = card.getBoundingClientRect();
+        const useHorizontalAxis =
+          this.viewMode === "browse" &&
+          Math.abs(event.clientY - (rect.top + rect.height / 2)) <
+            rect.height * 0.3;
+        this.dragDropPosition = useHorizontalAxis
+          ? event.clientX < rect.left + rect.width / 2
+            ? "before"
+            : "after"
+          : event.clientY < rect.top + rect.height / 2
+            ? "before"
+            : "after";
+        card.classList.toggle(
+          "drag-over-before",
+          this.dragDropPosition === "before"
+        );
+        card.classList.toggle(
+          "drag-over-after",
+          this.dragDropPosition === "after"
+        );
         event.dataTransfer.dropEffect = "move";
       });
-      card.addEventListener("dragleave", () => card.classList.remove("drag-over"));
+      card.addEventListener("dragleave", () =>
+        card.classList.remove("drag-over-before", "drag-over-after")
+      );
       card.addEventListener("drop", (event) => {
         event.preventDefault();
-        card.classList.remove("drag-over");
-        const draggedId =
-          this.draggedPageId || event.dataTransfer.getData("text/plain");
-        if (draggedId && draggedId !== pageRecord.id) {
-          this.reorderPage(draggedId, pageRecord.id);
+        card.classList.remove("drag-over-before", "drag-over-after");
+        let draggedIds = this.draggedPageIds;
+        if (!draggedIds.length) {
+          try {
+            draggedIds = JSON.parse(
+              event.dataTransfer.getData("application/x-pdf-workshop-pages")
+            );
+          } catch {
+            draggedIds = [event.dataTransfer.getData("text/plain")].filter(
+              Boolean
+            );
+          }
+        }
+        if (draggedIds.length && !draggedIds.includes(pageRecord.id)) {
+          this.reorderPages(
+            draggedIds,
+            pageRecord.id,
+            this.dragDropPosition
+          );
         }
       });
 
-      list.append(card);
+      (currentGroupPages || list).append(card);
     });
 
     this.queueThumbnails(thumbnailJobs, generation);
   }
 
-  createMoveButton(direction, disabled, handler) {
+  createMoveButton(direction, disabled, handler, title = "") {
     const button = document.createElement("button");
     button.className = "mini-button";
     button.type = "button";
     button.disabled = disabled;
-    button.title = direction === "up" ? "向前移一頁" : "向後移一頁";
+    button.title =
+      title || (direction === "up" ? "向前移一頁" : "向後移一頁");
     button.setAttribute("aria-label", button.title);
     button.innerHTML =
       direction === "up"
@@ -2384,6 +2766,28 @@ class PdfWorkshop {
       card.classList.toggle("active", pageId === this.activePageId);
       const checkbox = card.querySelector('input[type="checkbox"]');
       if (checkbox) checkbox.checked = this.selectedPageIds.has(pageId);
+    }
+    for (const group of this.elements.pageList.querySelectorAll(
+      ".page-group[data-group-id]"
+    )) {
+      const groupId = group.dataset.groupId;
+      const groupPageIds = this.pages
+        .filter((page) => page.groupId === groupId)
+        .map((page) => page.id);
+      const selectedCount = groupPageIds.filter((id) =>
+        this.selectedPageIds.has(id)
+      ).length;
+      const checkbox = group.querySelector(".group-select-checkbox");
+      if (checkbox) {
+        checkbox.checked =
+          groupPageIds.length > 0 && selectedCount === groupPageIds.length;
+        checkbox.indeterminate =
+          selectedCount > 0 && selectedCount < groupPageIds.length;
+      }
+      group.classList.toggle(
+        "active",
+        groupPageIds.includes(this.activePageId)
+      );
     }
   }
 
@@ -3805,30 +4209,192 @@ class PdfWorkshop {
   }
 
   reorderPage(draggedId, targetId) {
-    const from = this.pages.findIndex((page) => page.id === draggedId);
-    const to = this.pages.findIndex((page) => page.id === targetId);
-    if (from < 0 || to < 0 || from === to) return;
+    this.reorderPages([draggedId], targetId, "before");
+  }
+
+  reorderPages(draggedIds, targetId, position = "before") {
+    const movedSet = new Set(
+      draggedIds.filter((id) => this.pages.some((page) => page.id === id))
+    );
+    if (!movedSet.size || movedSet.has(targetId)) return;
+    const targetPage = this.pages.find((page) => page.id === targetId);
+    if (!targetPage) return;
+
+    const originalGroupCounts = this.getPageGroupCounts();
+    const movedGroupCounts = new Map();
+    for (const page of this.pages) {
+      if (!movedSet.has(page.id) || !page.groupId) continue;
+      movedGroupCounts.set(
+        page.groupId,
+        (movedGroupCounts.get(page.groupId) || 0) + 1
+      );
+    }
+    const movedGroupIds = [...movedGroupCounts.keys()];
+    const preserveWithinGroupId =
+      movedGroupIds.length === 1 && targetPage.groupId === movedGroupIds[0]
+        ? movedGroupIds[0]
+        : null;
+    const partialGroupIds = new Set(
+      [...movedGroupCounts]
+        .filter(
+          ([groupId, count]) =>
+            groupId !== preserveWithinGroupId &&
+            count < (originalGroupCounts.get(groupId) || 0)
+        )
+        .map(([groupId]) => groupId)
+    );
+    const targetGroupId =
+      !preserveWithinGroupId &&
+      targetPage.groupId &&
+      (originalGroupCounts.get(targetPage.groupId) || 0) > 1
+        ? targetPage.groupId
+        : null;
 
     this.mutate(() => {
-      const [moved] = this.pages.splice(from, 1);
-      const insertionIndex = this.pages.findIndex((page) => page.id === targetId);
-      this.pages.splice(insertionIndex, 0, moved);
-      this.activePageId = moved.id;
-      this.selectedPageIds = new Set([moved.id]);
+      const moved = this.pages.filter((page) => movedSet.has(page.id));
+      const remaining = this.pages.filter((page) => !movedSet.has(page.id));
+
+      for (const page of moved) {
+        if (!partialGroupIds.has(page.groupId)) continue;
+        page.groupId = null;
+        delete page.groupName;
+      }
+      for (const groupId of partialGroupIds) {
+        const leftovers = remaining.filter((page) => page.groupId === groupId);
+        if (leftovers.length > 1) continue;
+        for (const page of leftovers) {
+          page.groupId = null;
+          delete page.groupName;
+        }
+      }
+
+      let insertionIndex;
+      const remainingTargetGroup = targetGroupId
+        ? remaining.filter((page) => page.groupId === targetGroupId)
+        : [];
+      if (remainingTargetGroup.length > 1) {
+        const groupIndices = remainingTargetGroup.map((page) =>
+          remaining.findIndex((item) => item.id === page.id)
+        );
+        insertionIndex =
+          position === "after"
+            ? Math.max(...groupIndices) + 1
+            : Math.min(...groupIndices);
+      } else {
+        const targetIndex = remaining.findIndex((page) => page.id === targetId);
+        insertionIndex = targetIndex + (position === "after" ? 1 : 0);
+      }
+      this.pages = [
+        ...remaining.slice(0, insertionIndex),
+        ...moved,
+        ...remaining.slice(insertionIndex),
+      ];
+      this.activePageId = moved[0]?.id || this.activePageId;
+      this.selectedPageIds = new Set(moved.map((page) => page.id));
     });
+    this.toast(
+      movedSet.size > 1
+        ? `已一起移動 ${movedSet.size} 頁。`
+        : "頁面順序已更新。",
+      "success"
+    );
   }
 
   movePage(pageId, delta) {
     const index = this.pages.findIndex((page) => page.id === pageId);
     const targetIndex = index + delta;
     if (index < 0 || targetIndex < 0 || targetIndex >= this.pages.length) return;
+    this.reorderPages(
+      [pageId],
+      this.pages[targetIndex].id,
+      delta < 0 ? "before" : "after"
+    );
+  }
+
+  groupSelectedPages() {
+    const selected = this.pages.filter((page) =>
+      this.selectedPageIds.has(page.id)
+    );
+    if (selected.length < 2) {
+      this.toast("請先選取至少兩頁。", "error");
+      return;
+    }
+    const selectedSet = new Set(selected.map((page) => page.id));
+    const firstIndex = this.pages.findIndex((page) => selectedSet.has(page.id));
+    const remainingPages = this.pages.filter(
+      (page) => !selectedSet.has(page.id)
+    );
+    let insertionIndex = this.pages
+      .slice(0, firstIndex)
+      .filter((page) => !selectedSet.has(page.id)).length;
+    const firstOriginalGroupId = selected[0].groupId;
+    if (firstOriginalGroupId) {
+      const originalGroupStart = remainingPages.findIndex(
+        (page) => page.groupId === firstOriginalGroupId
+      );
+      if (originalGroupStart >= 0) insertionIndex = originalGroupStart;
+    }
+    const groupId = makeId("group");
+    const affectedGroupIds = new Set(
+      selected.map((page) => page.groupId).filter(Boolean)
+    );
 
     this.mutate(() => {
-      const [moved] = this.pages.splice(index, 1);
-      this.pages.splice(targetIndex, 0, moved);
-      this.activePageId = pageId;
-      this.selectedPageIds = new Set([pageId]);
+      const remaining = this.pages.filter((page) => !selectedSet.has(page.id));
+      for (const page of selected) {
+        page.groupId = groupId;
+        page.groupName = "自訂頁面群組";
+      }
+      for (const oldGroupId of affectedGroupIds) {
+        const leftovers = remaining.filter(
+          (page) => page.groupId === oldGroupId
+        );
+        if (leftovers.length > 1) continue;
+        for (const page of leftovers) {
+          page.groupId = null;
+          delete page.groupName;
+        }
+      }
+      this.pages = [
+        ...remaining.slice(0, insertionIndex),
+        ...selected,
+        ...remaining.slice(insertionIndex),
+      ];
+      this.activePageId = selected[0].id;
+      this.selectedPageIds = new Set(selected.map((page) => page.id));
     });
+    this.toast(`已將 ${selected.length} 頁設為群組。`, "success");
+  }
+
+  movePageGroup(groupId, delta) {
+    const blocks = this.getPageBlocks();
+    const index = blocks.findIndex(
+      (block) => block.type === "group" && block.id === groupId
+    );
+    const targetIndex = index + delta;
+    if (index < 0 || targetIndex < 0 || targetIndex >= blocks.length) return;
+    const groupPages = blocks[index].pages;
+    [blocks[index], blocks[targetIndex]] = [blocks[targetIndex], blocks[index]];
+    this.mutate(() => {
+      this.pages = blocks.flatMap((block) => block.pages);
+      this.activePageId = groupPages[0]?.id || this.activePageId;
+      this.selectedPageIds = new Set(groupPages.map((page) => page.id));
+    });
+    this.toast(`已整組${delta < 0 ? "向前" : "向後"}移動。`, "success");
+  }
+
+  ungroupPages(groupId) {
+    const groupPages = this.pages.filter((page) => page.groupId === groupId);
+    if (!groupPages.length) return;
+    this.mutate(() => {
+      for (const page of groupPages) {
+        page.groupId = null;
+        delete page.groupName;
+      }
+      this.activePageId = groupPages[0].id;
+      this.selectedPageIds = new Set(groupPages.map((page) => page.id));
+    });
+    this.toast(`已解除 ${groupPages.length} 頁的群組。`, "success");
   }
 
   rotateSelectedPages() {
@@ -6000,7 +6566,7 @@ class PdfWorkshop {
       this.persistedSourceIds = Array.isArray(project.sources)
         ? new Set()
         : new Set(restoredSources.keys());
-      this.pages = clonePages(project.pages);
+      this.pages = this.migrateLegacyPageGroups(clonePages(project.pages));
       this.thumbnailCache.clear();
       this.annotationImages = new Map(
         Array.isArray(project.annotationImages) ? project.annotationImages : []
