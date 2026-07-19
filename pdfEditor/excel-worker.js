@@ -1632,7 +1632,8 @@ function cellCanOverflow(cell) {
 }
 
 // Excel 的未換行文字可延伸到相鄰空白儲存格；網址、備註與說明文字經常
-// 仰賴此行為。只擴大文字的裁切盒，原儲存格的填色與框線仍維持原尺寸。
+// 仰賴此行為。除了擴大文字裁切盒，也記錄實際跨越的可見欄索引，讓後續
+// 框線繪製隱藏延伸區內部的直線，避免直線穿過文字。
 function calculateOverflowTextBox(
   worksheet,
   layout,
@@ -1643,7 +1644,13 @@ function calculateOverflowTextBox(
   merges,
   cellImages
 ) {
-  if (!cellCanOverflow(cell)) return box;
+  if (!cellCanOverflow(cell)) {
+    return {
+      ...box,
+      overflowStartColumnIndex: columnIndex,
+      overflowEndColumnIndex: columnIndex,
+    };
+  }
   const horizontal = cell.alignment?.horizontal || "left";
   const direction = horizontal === "right" ? -1 : 1;
   let edgeIndex = columnIndex;
@@ -1699,7 +1706,38 @@ function calculateOverflowTextBox(
     if (direction < 0) x -= addedWidth;
     edgeIndex = nextIndex;
   }
-  return { ...box, x, width };
+  return {
+    ...box,
+    x,
+    width,
+    overflowStartColumnIndex: Math.min(columnIndex, edgeIndex),
+    overflowEndColumnIndex: Math.max(columnIndex, edgeIndex),
+  };
+}
+
+function registerOverflowBoundaries(boundaries, rowIndex, textBox) {
+  const start = Number(textBox?.overflowStartColumnIndex);
+  const end = Number(textBox?.overflowEndColumnIndex);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return;
+  for (let columnIndex = start; columnIndex < end; columnIndex += 1) {
+    boundaries.add(`${rowIndex}:${columnIndex}`);
+  }
+}
+
+function borderWithoutOverflowEdges(
+  border,
+  rowIndex,
+  columnIndex,
+  overflowBoundaries
+) {
+  const suppressLeft = overflowBoundaries.has(`${rowIndex}:${columnIndex - 1}`);
+  const suppressRight = overflowBoundaries.has(`${rowIndex}:${columnIndex}`);
+  if (!suppressLeft && !suppressRight) return border;
+  return {
+    ...border,
+    left: suppressLeft ? undefined : border?.left,
+    right: suppressRight ? undefined : border?.right,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2280,6 +2318,7 @@ function renderWorksheetPage(
   const cellTexts = [];
   const cellImagePlacements = [];
   const cellLinks = [];
+  const overflowBoundaries = new Set();
   for (let rowIndex = 0; rowIndex < layout.rows.length; rowIndex += 1) {
     const row = layout.rows[rowIndex];
     for (
@@ -2308,6 +2347,7 @@ function renderWorksheetPage(
         merges,
         images?.cellImages
       );
+      registerOverflowBoundaries(overflowBoundaries, rowIndex, textBox);
       // Excel 會先完成整頁的儲存格底色，再讓未換行文字延伸到相鄰空白
       // 格。若逐格同時畫底色與文字，後面的「有樣式空白格」會把前格已
       // 延伸的文字蓋掉（例如課程表的開班日期與地址）。
@@ -2318,6 +2358,8 @@ function renderWorksheetPage(
           ? mergedCellBorder(worksheet, mergeRange, cell.border)
           : cell.border,
         box,
+        rowIndex,
+        columnIndex,
       });
       const hyperlink = cellHyperlink(cell);
       if (hyperlink) cellLinks.push({ target: hyperlink, box: textBox });
@@ -2340,6 +2382,15 @@ function renderWorksheetPage(
   // 所有填色與文字完成後再繪製框線，避免後畫的相鄰儲存格底色遮掉一半
   // 線寬；細線先畫、粗線後畫，讓表格外框與表頭分隔線保持完整。
   cellFrames
+    .map((frame) => ({
+      ...frame,
+      border: borderWithoutOverflowEdges(
+        frame.border,
+        frame.rowIndex,
+        frame.columnIndex,
+        overflowBoundaries
+      ),
+    }))
     .sort((a, b) => borderStrength(a.border) - borderStrength(b.border))
     .forEach(({ border, box }) =>
       drawCellFrame(

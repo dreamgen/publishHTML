@@ -593,6 +593,78 @@ async function createWorkerHarness() {
     })()`) > 140,
     "未換行文字應延伸到右側連續空白儲存格"
   );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const testWorkbook = new ExcelJS.Workbook();
+        const sheet = testWorkbook.addWorksheet("文字延伸範圍");
+        sheet.getCell("A1").value = "三欄群組內容";
+        const layout = {
+          columns: [
+            { number: 1, width: 40 },
+            { number: 2, width: 50 },
+            { number: 3, width: 60 },
+          ],
+          rows: [{ number: 1, height: 20 }],
+          scale: 1,
+          scaleX: 1,
+        };
+        const result = calculateOverflowTextBox(
+          sheet,
+          layout,
+          0,
+          0,
+          sheet.getCell("A1"),
+          { x: 0, y: 0, width: 40, height: 20 },
+          buildMergeMaps(sheet),
+          new Map()
+        );
+        return JSON.stringify({
+          start: result.overflowStartColumnIndex,
+          end: result.overflowEndColumnIndex,
+        });
+      })()`)
+    ),
+    { start: 0, end: 2 },
+    "文字延伸應記錄實際跨越的可見欄範圍"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const border = Object.fromEntries(
+          ["top", "right", "bottom", "left"].map((side) => [
+            side,
+            { style: "thin" },
+          ])
+        );
+        const boundaries = new Set();
+        registerOverflowBoundaries(boundaries, 0, {
+          overflowStartColumnIndex: 0,
+          overflowEndColumnIndex: 2,
+        });
+        return JSON.stringify([0, 1, 2].map((columnIndex) => {
+          const result = borderWithoutOverflowEdges(
+            border,
+            0,
+            columnIndex,
+            boundaries
+          );
+          return {
+            top: result.top?.style || null,
+            right: result.right?.style || null,
+            bottom: result.bottom?.style || null,
+            left: result.left?.style || null,
+          };
+        }));
+      })()`)
+    ),
+    [
+      { top: "thin", right: null, bottom: "thin", left: "thin" },
+      { top: "thin", right: null, bottom: "thin", left: null },
+      { top: "thin", right: "thin", bottom: "thin", left: null },
+    ],
+    "文字延伸範圍內應只隱藏內部直線並保留外框與水平線"
+  );
   assert.ok(
     harness.evaluate(`(() => {
       const testWorkbook = new ExcelJS.Workbook();
