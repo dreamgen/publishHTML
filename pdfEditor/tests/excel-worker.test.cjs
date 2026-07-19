@@ -115,6 +115,10 @@ async function buildWorkbook() {
     text: "OpenAI",
     hyperlink: "https://openai.com/",
   };
+  summary.getCell("A7").value = {
+    text: "https://example、com/meeting",
+    hyperlink: "https://example.com/meeting",
+  };
   // ASCII-only cells can still contain line breaks that WinAnsi fonts cannot
   // encode directly. The worker must preserve the break without replacing it
   // with a Unicode fallback glyph while still using Helvetica.
@@ -160,7 +164,19 @@ async function buildWorkbook() {
   const hidden = workbook.addWorksheet("內部設定");
   hidden.state = "hidden";
   hidden.addRow(["不應預設選取", 123]);
-  return workbook.xlsx.writeBuffer();
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  const entries = fflate.unzipSync(new Uint8Array(buffer));
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const reportPath = "xl/worksheets/sheet1.xml";
+  const reportXml = decoder.decode(entries[reportPath]).replace(
+    "</worksheet>",
+    '<rowBreaks count="1" manualBreakCount="1"><brk id="12" min="0" max="16383" man="1"/></rowBreaks>' +
+      '<colBreaks count="1" manualBreakCount="1"><brk id="2" min="0" max="1048575" man="1"/></colBreaks>' +
+      "</worksheet>"
+  );
+  entries[reportPath] = encoder.encode(reportXml);
+  return fflate.zipSync(entries);
 }
 
 // 產生含 Excel 365「儲存格內圖片」（richValue）的 xlsx：先用 ExcelJS 產生
@@ -346,6 +362,15 @@ async function createWorkerHarness() {
     "日期時間混合格式應區分月份與分鐘"
   );
   assert.equal(
+    harness.evaluate(`cellText({
+      value: { sharedFormula: "B8", result: new Date(2026, 4, 11) },
+      numFmt: "m/d",
+      text: "Mon May 11 2026 00:00:00 GMT+0800"
+    })`),
+    "5/11",
+    "共用公式的 Date result 應依 Excel 數字格式輸出，不得落入 Date.toString()"
+  );
+  assert.equal(
     harness.evaluate(
       'expandHeaderFooter("&P/&N",{name:"測試",pageSetup:{useFirstPageNumber:true,firstPageNumber:4294967295}},1,3,{documentPageOffset:5,documentPageCount:10})'
     ),
@@ -489,6 +514,18 @@ async function createWorkerHarness() {
     harness.evaluate('borderWidth("thick") > borderWidth("medium")') &&
       harness.evaluate('borderWidth("medium") > borderWidth("thin")'),
     "Excel thick／medium／thin 框線應映射成遞減線寬"
+  );
+  assert.deepEqual(
+    Array.from(harness.evaluate('borderDashPattern("dotted", 1)')),
+    [0.45, 2],
+    "dotted 框線應保留點線 dash pattern"
+  );
+  assert.equal(
+    harness.evaluate(
+      'borderLineSegments("bottom", "double", 0, 0, 100, 20, 2.25).length'
+    ),
+    2,
+    "double 框線應繪製兩條平行線"
   );
   assert.deepEqual(
     JSON.parse(
@@ -649,7 +686,30 @@ async function createWorkerHarness() {
     compatibilityCodes.includes("rich-text-styled"),
     "「摘要」A5 的顏色/粗細差異 Rich Text 應標示為已還原樣式，而非合併成單一樣式"
   );
+  assert.ok(
+    compatibilityCodes.includes("hyperlink-display-mismatch"),
+    "顯示網址與實際目標不同時應提出警告"
+  );
   assert.equal(parsed.sheets[0].printSettings.repeatColumns, "A:A");
+  assert.equal(
+    parsed.sheets[0].printSettings.rowBreaks,
+    "12",
+    "應從 worksheet OOXML 補回人工水平分頁"
+  );
+  assert.equal(
+    parsed.sheets[0].printSettings.columnBreaks,
+    "B",
+    "應從 worksheet OOXML 補回人工垂直分頁"
+  );
+  assert.equal(
+    harness.evaluate(`(() => {
+      const sheet = workbook.getWorksheet(1);
+      const layout = createSheetLayout(sheet, sourceSheetSettings(sheet))[0];
+      return Math.abs(layout.scaleX - layout.scaleY) < 1e-12;
+    })()`),
+    true,
+    "Excel 版面縮放必須等比例套用到 X/Y 軸"
+  );
 
   const estimated = await harness.send({
     type: "estimate",
@@ -758,6 +818,30 @@ async function createWorkerHarness() {
   assert.equal(pdf.getPageCount(), converted.pageCount);
   const firstPage = pdf.getPage(0).getSize();
   assert.ok(firstPage.width > firstPage.height);
+  assert.ok(
+    converted.warnings.some((warning) => warning.includes("網址顯示文字與連結目標不一致")),
+    "轉檔結果應回傳網址顯示文字／目標不一致警告"
+  );
+  const linkUris = [];
+  for (const [, object] of pdf.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFLib.PDFDict)) continue;
+    if (
+      object.get(PDFLib.PDFName.of("Subtype")) !==
+      PDFLib.PDFName.of("Link")
+    ) {
+      continue;
+    }
+    const action = pdf.context.lookup(
+      object.get(PDFLib.PDFName.of("A")),
+      PDFLib.PDFDict
+    );
+    const uri = action?.get(PDFLib.PDFName.of("URI"));
+    if (uri?.decodeText) linkUris.push(uri.decodeText());
+  }
+  assert.ok(
+    linkUris.includes("https://openai.com/"),
+    "外部超連結應轉換為 PDF Link Annotation"
+  );
   if (process.env.PDF_EDITOR_TEST_OUTPUT) {
     fs.writeFileSync(process.env.PDF_EDITOR_TEST_OUTPUT, pdfBytes);
   }

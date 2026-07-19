@@ -3716,28 +3716,40 @@ body.view-browse .page-group-collapsed-row .group-ungroup-button {
 
 .page-group-collapsed-thumb {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 52%;
-  height: 82%;
-  transform: translate(calc(-50% + var(--stack-offset)), -50%) rotate(var(--stack-rotate));
-  transform-origin: center bottom;
+  top: 0;
+  left: var(--stack-left, 0%);
+  width: auto;
+  height: 100%;
+  aspect-ratio: var(--page-aspect-ratio, 595 / 842);
+  box-sizing: border-box;
+  overflow: hidden;
   filter: drop-shadow(0 5px 5px color-mix(in srgb, var(--group-accent) 18%, transparent));
+  transform: translateX(0);
+  transition: transform .18s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .page-group-collapsed-thumb:not(:last-child):hover ~ .page-group-collapsed-thumb {
+    /* 將上層牌組整疊向右推，約多露出 20% 的原重疊區域。 */
+    transform: translateX(18%);
+  }
 }
 
 .page-group-collapsed-thumb .thumbnail-wrap {
   width: 100%;
   height: 100%;
   min-height: 0;
+  box-sizing: border-box;
   border-color: color-mix(in srgb, var(--group-accent) 48%, var(--line));
   border-radius: 6px;
   background: var(--surface);
 }
 
 .page-group-collapsed-thumb .thumbnail-wrap canvas {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  max-height: none;
   background: #fff;
 }
 

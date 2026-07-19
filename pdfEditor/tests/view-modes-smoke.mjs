@@ -1,4 +1,11 @@
-import { chromium } from "playwright-core";
+import { pathToFileURL } from "node:url";
+
+const playwright = await import("playwright-core").catch(async (error) => {
+  const fallback = process.env.PDF_EDITOR_PLAYWRIGHT_CORE_PATH;
+  if (!fallback) throw error;
+  return import(pathToFileURL(fallback).href);
+});
+const { chromium } = playwright;
 
 const BASE = "http://127.0.0.1:8123";
 const results = [];
@@ -351,6 +358,69 @@ state = await page.evaluate(async () => {
   const deckRect = collapsedGroup
     .querySelector(".page-group-collapsed-deck")
     .getBoundingClientRect();
+  const deckLayoutVariants = [5, 17, 33].map((sourceCount) => {
+    const cards = Array.from({ length: sourceCount }, (_, index) => {
+      const card = document.createElement("article");
+      card.dataset.pageId = `layout-${sourceCount}-${index}`;
+      const wrap = document.createElement("div");
+      wrap.className = "thumbnail-wrap loaded";
+      const canvas = document.createElement("canvas");
+      const landscape = index % 2 === 1;
+      canvas.width = landscape ? 792 : 612;
+      canvas.height = landscape ? 612 : 792;
+      wrap.append(canvas);
+      card.append(wrap);
+      return card;
+    });
+    const preview = app.createCollapsedGroupPreview(
+      `layout-${sourceCount}`,
+      cards
+    );
+    Object.assign(preview.style, {
+      position: "fixed",
+      left: "0",
+      top: "0",
+      width: "260px",
+      height: "360px",
+      visibility: "hidden",
+    });
+    document.body.append(preview);
+    const testDeck = preview.querySelector(".page-group-collapsed-deck");
+    const testDeckRect = testDeck.getBoundingClientRect();
+    const thumbs = [...preview.querySelectorAll(".page-group-collapsed-thumb")];
+    const measurements = thumbs.map((thumb) => {
+      const thumbRect = thumb.getBoundingClientRect();
+      const canvas = thumb.querySelector("canvas");
+      const canvasRect = canvas?.getBoundingClientRect();
+      return {
+        left: thumbRect.left,
+        right: thumbRect.right,
+        height: thumbRect.height,
+        ratio: canvasRect ? canvasRect.width / canvasRect.height : 0,
+        sourceRatio: canvas ? canvas.width / canvas.height : 0,
+      };
+    });
+    const result = {
+      count: measurements.length,
+      expectedCount: sourceCount === 5 ? 3 : sourceCount === 17 ? 4 : 5,
+      startsAtLeft:
+        Math.abs((measurements[0]?.left || 0) - testDeckRect.left) <= 1,
+      fillsHeight: measurements.every(
+        (item) => Math.abs(item.height - testDeckRect.height) <= 1
+      ),
+      preservesRatio: measurements.every(
+        (item) => Math.abs(item.ratio - item.sourceRatio) < 0.01
+      ),
+      increasesLeft: measurements.every(
+        (item, index) => index === 0 || item.left > measurements[index - 1].left
+      ),
+      clipsRight:
+        getComputedStyle(testDeck).overflow === "hidden" &&
+        measurements.some((item) => item.right > testDeckRect.right + 1),
+    };
+    preview.remove();
+    return result;
+  });
   const collapsed = {
     classApplied: collapsedGroup.classList.contains("collapsed"),
     rowCount: collapsedGroup.querySelectorAll(".page-group-row").length,
@@ -374,6 +444,7 @@ state = await page.evaluate(async () => {
       collapsedGroup
         .querySelector(".group-collapse-button")
         .getAttribute("aria-expanded") === "false",
+    deckLayoutVariants,
   };
   app.togglePageGroupCollapsed(groupId);
   await new Promise((resolve) =>
@@ -397,6 +468,19 @@ check(
     state.expandedState &&
     state.expandedCards === 6,
   JSON.stringify(state)
+);
+check(
+  "收合群組的 3～5 張預覽皆滿高、等比例、靠左排列並裁切右側",
+  state.deckLayoutVariants.every(
+    (variant) =>
+      variant.count === variant.expectedCount &&
+      variant.startsAtLeft &&
+      variant.fillsHeight &&
+      variant.preservesRatio &&
+      variant.increasesLeft &&
+      variant.clipsRight
+  ),
+  JSON.stringify(state.deckLayoutVariants)
 );
 
 // ---------- 瀏覽模式縮放 ----------

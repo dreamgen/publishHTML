@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PureReader - 快速小說模式
 // @namespace    https://github.com/pure-reader
-// @version      1.9.2
+// @version      1.10.0
 // @description  多站全螢幕閱讀、背景預抓，並可將 10、50 或 100 章預存到 PWA 或本地檔案。
 // @match        https://m.biquge.tw/book/*/*.html
 // @match        https://look.thisiscm.com/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  document.documentElement.dataset.pureReaderVersion = '1.9.2';
+  document.documentElement.dataset.pureReaderVersion = '1.10.0';
 
   const SITE_PROFILES = [
     {
@@ -65,6 +65,11 @@
   const FONT_MIN = 16;
   const FONT_MAX = 34;
   const FONT_STEP = 2;
+  const LAYOUTS = [
+    { id: 'full', name: '全螢幕', maxWidth: 'none' },
+    { id: 'medium', name: '適中', maxWidth: '1080px' },
+    { id: 'book', name: '書頁', maxWidth: '720px' },
+  ];
   const THEMES = [
     { id: 'paper', name: '紙張米', background: '#f7f3e8', text: '#27231d', panel: 'rgba(247, 243, 232, .94)', surface: '#e8e0d1', accent: '#343027', accentText: '#ffffff', border: 'rgba(70, 58, 40, .16)', scheme: 'light' },
     { id: 'snow', name: '柔和白', background: '#ffffff', text: '#202124', panel: 'rgba(255, 255, 255, .94)', surface: '#eceff1', accent: '#30343b', accentText: '#ffffff', border: 'rgba(32, 33, 36, .14)', scheme: 'light' },
@@ -83,6 +88,7 @@
   let readerShell = null;
   let readerFontSize = readNumberPreference('fontSize', 20);
   let themeIndex = readNumberPreference('themeIndex', preferredThemeIndex());
+  let layoutIndex = readNumberPreference('layoutIndex', 0);
   let readerOpen = readNumberPreference('readerOpen', 1) !== 0;
 
   function preferredThemeIndex() {
@@ -295,6 +301,10 @@
             <span class="pure-reader-swatch" aria-hidden="true"></span>
             <span id="pure-reader-theme-name"></span>
           </button>
+          <button type="button" id="pure-reader-layout" data-reader-action="layout" aria-label="切換版面寬度" title="切換版面寬度">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h16M8 10h8M8 14h8"/></svg>
+            <span id="pure-reader-layout-name"></span>
+          </button>
           <button type="button" data-reader-action="close" aria-label="關閉閱讀模式" title="恢復原始頁面">關閉</button>
         </div>
         <h1 id="pure-reader-title"></h1>
@@ -362,9 +372,12 @@
     if (!readerShell) return;
     readerFontSize = clampFontSize(readerFontSize);
     themeIndex = ((Math.trunc(themeIndex) % THEMES.length) + THEMES.length) % THEMES.length;
+    layoutIndex = ((Math.trunc(layoutIndex) % LAYOUTS.length) + LAYOUTS.length) % LAYOUTS.length;
     const theme = THEMES[themeIndex];
+    const layout = LAYOUTS[layoutIndex];
 
     readerShell.style.setProperty('--reader-font-size', `${readerFontSize}px`);
+    readerShell.style.setProperty('--reader-page-max-width', layout.maxWidth);
     readerShell.style.setProperty('--reader-background', theme.background);
     readerShell.style.setProperty('--reader-text', theme.text);
     readerShell.style.setProperty('--reader-panel', theme.panel);
@@ -374,11 +387,16 @@
     readerShell.style.setProperty('--reader-border', theme.border);
     readerShell.style.setProperty('--reader-color-scheme', theme.scheme);
     readerShell.dataset.theme = theme.id;
+    readerShell.dataset.layout = layout.id;
 
     const themeButton = readerShell.querySelector('#pure-reader-theme');
     readerShell.querySelector('#pure-reader-theme-name').textContent = theme.name;
     themeButton.setAttribute('aria-label', `切換閱讀配色，目前為${theme.name}`);
     themeButton.title = `目前：${theme.name}；點擊切換配色`;
+    const layoutButton = readerShell.querySelector('#pure-reader-layout');
+    readerShell.querySelector('#pure-reader-layout-name').textContent = layout.name;
+    layoutButton.setAttribute('aria-label', `切換版面寬度，目前為${layout.name}`);
+    layoutButton.title = `目前：${layout.name}；點擊切換全螢幕、適中與書頁版面`;
     readerShell.querySelector('[data-reader-action="decrease"]').disabled = readerFontSize <= FONT_MIN;
     readerShell.querySelector('[data-reader-action="increase"]').disabled = readerFontSize >= FONT_MAX;
   }
@@ -397,6 +415,9 @@
     } else if (action === 'theme') {
       themeIndex = (themeIndex + 1) % THEMES.length;
       savePreference('themeIndex', themeIndex);
+    } else if (action === 'layout') {
+      layoutIndex = (layoutIndex + 1) % LAYOUTS.length;
+      savePreference('layoutIndex', layoutIndex);
     } else if (action === 'close') {
       setReaderOpen(false);
       return;
@@ -596,9 +617,9 @@
       #pure-reader-article {
         box-sizing: border-box;
         width: 100%;
-        max-width: none;
+        max-width: var(--reader-page-max-width, none);
         min-height: 100%;
-        margin: 0;
+        margin: 0 auto;
         padding: max(22px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) clamp(88px, 9vw, 112px) max(18px, env(safe-area-inset-left));
       }
 
@@ -607,6 +628,7 @@
         width: 100%;
         align-items: center;
         justify-content: flex-end;
+        flex-wrap: wrap;
         gap: 8px;
         margin: 0 0 18px;
         font-family: ui-sans-serif, system-ui, sans-serif;
@@ -646,6 +668,20 @@
 
       #pure-reader-theme {
         min-width: 116px;
+      }
+
+      #pure-reader-layout {
+        min-width: 112px;
+      }
+
+      #pure-reader-layout svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
       }
 
       .pure-reader-swatch {
@@ -767,6 +803,10 @@
 
         #pure-reader-theme {
           min-width: 108px;
+        }
+
+        #pure-reader-layout {
+          min-width: 100px;
         }
       }
     `;

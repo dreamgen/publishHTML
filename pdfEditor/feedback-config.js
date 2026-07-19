@@ -5,7 +5,7 @@
 // 3. Google 表單必須允許匿名填答，否則跨來源 formResponse 無法可靠送達。
 //
 // 未完成必要設定時，PDF 工坊仍會顯示回報介面，但不會送出資料。
-export const PDF_WORKSHOP_VERSION = "2026.07.18.3";
+export const PDF_WORKSHOP_VERSION = "2026.07.19.2";
 
 export const FEEDBACK_FORM_CONFIG = Object.freeze({
   enabled: true,

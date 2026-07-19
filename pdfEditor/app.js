@@ -2893,18 +2893,15 @@ class PdfWorkshop {
       const thumbnail = cards[sampleIndex]?.querySelector(".thumbnail-wrap");
       const deckCard = document.createElement("div");
       deckCard.className = "page-group-collapsed-thumb";
-      const center = (previewCount - 1) / 2;
       deckCard.style.setProperty(
-        "--stack-offset",
-        `${(previewIndex - center) * 24}%`
-      );
-      deckCard.style.setProperty(
-        "--stack-rotate",
-        `${(previewIndex - center) * 1.6}deg`
+        "--stack-left",
+        `${previewCount > 1 ? (previewIndex * 42) / (previewCount - 1) : 0}%`
       );
       deckCard.style.zIndex = String(previewIndex + 1);
       if (thumbnail) {
         deckCard.append(thumbnail);
+        const canvas = thumbnail.querySelector("canvas");
+        this.syncCollapsedThumbnailAspect(canvas);
       } else {
         deckCard.classList.add("placeholder");
         deckCard.innerHTML =
@@ -2914,6 +2911,16 @@ class PdfWorkshop {
     }
     collapsedPreview.append(collapsedMeta, deck);
     return collapsedPreview;
+  }
+
+  syncCollapsedThumbnailAspect(canvas) {
+    if (!canvas?.width || !canvas?.height) return;
+    const collapsedThumb = canvas.closest(".page-group-collapsed-thumb");
+    if (!collapsedThumb) return;
+    collapsedThumb.style.setProperty(
+      "--page-aspect-ratio",
+      `${canvas.width} / ${canvas.height}`
+    );
   }
 
   scheduleBrowseGroupLayout() {
@@ -3055,6 +3062,7 @@ class PdfWorkshop {
       canvas.style.width = cached.styleWidth;
       canvas.style.height = cached.styleHeight;
       canvas.getContext("2d", { alpha: false }).drawImage(cached.canvas, 0, 0);
+      this.syncCollapsedThumbnailAspect(canvas);
       return;
     }
 
@@ -3067,6 +3075,7 @@ class PdfWorkshop {
 
     canvas.width = Math.ceil(viewport.width * outputScale);
     canvas.height = Math.ceil(viewport.height * outputScale);
+    this.syncCollapsedThumbnailAspect(canvas);
     if (this.viewMode === "browse") {
       // 網格卡片可能比縮圖解析度級距窄；只讓 CSS 縮小寬度、卻保留
       // 固定像素高度會把橫式與直式頁都拉成細長形。讓瀏覽縮圖填滿

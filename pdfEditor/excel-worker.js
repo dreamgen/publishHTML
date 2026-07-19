@@ -19,6 +19,13 @@ const {
   closePath,
   clip,
   endPath,
+  setLineCap,
+  setLineWidth,
+  setDashPattern,
+  setStrokingColor,
+  stroke,
+  LineCapStyle,
+  PDFString,
 } = PDFLib;
 const DEFAULT_OPTIONS = {
   paperSize: "source",
@@ -68,6 +75,9 @@ let workbook = null;
 let workbookName = "活頁簿.xlsx";
 // Excel 365「儲存格內圖片」（richValue）：sheetName → Map("row:col" → {bytes, extension})
 let inCellImagesBySheet = new Map();
+// ExcelJS 不會載入 OOXML 的人工分頁；由原始 worksheet XML 補回。
+// sheetName → { rowBreaks: number[], columnBreaks: number[] }
+let manualPageBreaksBySheet = new Map();
 let fontBytesPromise = null;
 let outlineFontPromise = null;
 let sourceFontPromise = null;
@@ -524,6 +534,32 @@ function compactTrailingChunk(
   );
 }
 
+// Excel 的實際欄寬／列高換算與瀏覽器近似值可能有數個百分點誤差。
+// 若來源檔明確指定人工分頁，先把人工分頁前的區段壓到同一頁，避免在
+// 人工分頁前又插入一個自動分頁，產生只有一兩列的額外頁面。
+function scaleForManualBreakSegments(
+  items,
+  scale,
+  availableSize,
+  repeatedTitleSize,
+  sizeOf,
+  breaksAfter
+) {
+  if (!breaksAfter?.size) return scale;
+  let segmentSize = 0;
+  let resolved = scale;
+  for (const item of items) {
+    segmentSize += sizeOf(item);
+    if (!breaksAfter.has(item.number)) continue;
+    resolved = Math.min(
+      resolved,
+      availableSize / Math.max(1, repeatedTitleSize + segmentSize)
+    );
+    segmentSize = 0;
+  }
+  return clamp(resolved, MIN_FIT_SCALE, scale);
+}
+
 function resolvedScaling(
   worksheet,
   options,
@@ -621,24 +657,14 @@ function createRangeLayout(worksheet, range, options) {
   const titleRowNumbers = parseTitleRows(options.repeatRows, range);
   const titleRows = rows.filter((row) => titleRowNumbers.includes(row.number));
   const titleHeight = titleRows.reduce((sum, row) => sum + row.height, 0);
-  let scaleX = resolvedScaling(
+  let scale = resolvedScaling(
     worksheet,
     options,
     totalWidth,
-    0,
-    availableWidth,
-    Number.MAX_SAFE_INTEGER,
-    titleWidth,
-    0
-  );
-  let scaleY = resolvedScaling(
-    worksheet,
-    options,
-    0,
     totalHeight,
-    Number.MAX_SAFE_INTEGER,
+    availableWidth,
     availableHeight,
-    0,
+    titleWidth,
     titleHeight
   );
 
@@ -656,9 +682,9 @@ function createRangeLayout(worksheet, range, options) {
       Number(worksheet.pageSetup.fitToHeight) || 0
     );
     if (targetColumnPages > 0) {
-      scaleX = scaleForChunkTarget(
+      scale = scaleForChunkTarget(
         bodyColumns,
-        scaleX,
+        scale,
         MIN_FIT_SCALE,
         targetColumnPages,
         availableWidth,
@@ -667,9 +693,9 @@ function createRangeLayout(worksheet, range, options) {
         columnBreaks
       );
     } else {
-      scaleX = compactTrailingChunk(
+      scale = compactTrailingChunk(
         bodyColumns,
-        scaleX,
+        scale,
         availableWidth,
         titleWidth,
         (column) => column.width,
@@ -679,9 +705,9 @@ function createRangeLayout(worksheet, range, options) {
       );
     }
     if (targetRowPages > 0) {
-      scaleY = scaleForChunkTarget(
+      scale = scaleForChunkTarget(
         bodyRows,
-        scaleY,
+        scale,
         MIN_FIT_SCALE,
         targetRowPages,
         availableHeight,
@@ -689,26 +715,26 @@ function createRangeLayout(worksheet, range, options) {
         (row) => row.height,
         rowBreaks
       );
+    } else {
+      // fitToHeight=0 代表高度頁數不設上限；來源檔若只因點數換算誤差
+      // 多出至多四列的尾頁，允許小幅縮小，但仍將相同比例套用至兩軸。
+      scale = compactTrailingChunk(
+        bodyRows,
+        scale,
+        availableHeight,
+        titleHeight,
+        (row) => row.height,
+        rowBreaks,
+        4,
+        0.12
+      );
     }
-    // Fit-to-page 活頁簿常由 Excel 保留「自動高度」(fitToHeight=0)。若
-    // 最後一頁只有極少數列，Excel 的列印引擎會以稍低比例消化尾頁；用
-    // 12% 上限避免把真正的多頁表格過度縮小。
-    scaleY = compactTrailingChunk(
-      bodyRows,
-      scaleY,
-      availableHeight,
-      titleHeight,
-      (row) => row.height,
-      rowBreaks,
-      4,
-      0.12
-    );
   } else if (options.scaling === "source") {
     // 固定百分比只容許小幅修正，用來吸收 Excel、瀏覽器與 PDF 點數換算
-    // 的四捨五入差異，不改變使用者原本的列印比例意圖。
-    scaleX = compactTrailingChunk(
+    // 的四捨五入差異；每次修正都套用到兩軸，避免表格與文字被拉伸。
+    scale = compactTrailingChunk(
       bodyColumns,
-      scaleX,
+      scale,
       availableWidth,
       titleWidth,
       (column) => column.width,
@@ -716,9 +742,9 @@ function createRangeLayout(worksheet, range, options) {
       2,
       0.015
     );
-    scaleY = compactTrailingChunk(
+    scale = compactTrailingChunk(
       bodyRows,
-      scaleY,
+      scale,
       availableHeight,
       titleHeight,
       (row) => row.height,
@@ -727,6 +753,26 @@ function createRangeLayout(worksheet, range, options) {
       0.015
     );
   }
+  if (options.scaling === "source") {
+    scale = scaleForManualBreakSegments(
+      bodyColumns,
+      scale,
+      availableWidth,
+      titleWidth,
+      (column) => column.width,
+      columnBreaks
+    );
+    scale = scaleForManualBreakSegments(
+      bodyRows,
+      scale,
+      availableHeight,
+      titleHeight,
+      (row) => row.height,
+      rowBreaks
+    );
+  }
+  const scaleX = scale;
+  const scaleY = scale;
   const columnChunks = chunkBySize(
     bodyColumns,
     Math.max(20, availableWidth / scaleX - titleWidth),
@@ -806,10 +852,10 @@ function normalizeSheetOptions(worksheet, rawOptions = {}) {
       rawOptions?.repeatColumns ?? worksheet.pageSetup?.printTitlesColumn ?? "",
     rowBreaks:
       rawOptions?.rowBreaks ??
-      (worksheet.rowBreaks || []).map((item) => item.id).filter(Boolean).join(","),
+      sourcePageBreakIds(worksheet, "row").join(","),
     columnBreaks:
       rawOptions?.columnBreaks ??
-      (worksheet.columnBreaks || []).map((item) => item.id).filter(Boolean).join(","),
+      sourcePageBreakIds(worksheet, "column").join(","),
     centerHorizontal:
       rawOptions?.centerHorizontal ?? !!worksheet.pageSetup?.horizontalCentered,
     centerVertical:
@@ -1125,18 +1171,87 @@ function formatNumberValue(value, numFmt) {
   return `${currency}${formatted}${percent ? "%" : ""}`;
 }
 
+function resolvedCellValue(cell) {
+  const value = cell?.value;
+  if (
+    value &&
+    typeof value === "object" &&
+    (Object.prototype.hasOwnProperty.call(value, "formula") ||
+      Object.prototype.hasOwnProperty.call(value, "sharedFormula"))
+  ) {
+    return value.result;
+  }
+  return value;
+}
+
 function cellText(cell) {
   if (cell?.value == null) return "";
   if (cell.value?.richText) {
     return cell.value.richText.map((part) => part.text || "").join("");
   }
   if (cell.value?.error) return String(cell.value.error);
-  const value = cell.value?.formula ? cell.value.result : cell.value;
+  const value = resolvedCellValue(cell);
   if (value == null) return "";
   if (value instanceof Date) return formatDateValue(value, cell.numFmt);
   if (typeof value === "number") return formatNumberValue(value, cell.numFmt);
   if (typeof cell.text === "string") return cell.text;
   return String(value);
+}
+
+function cellHyperlink(cell) {
+  const target = cell?.value?.hyperlink;
+  if (typeof target !== "string" || !target.trim()) return null;
+  const trimmed = target.trim();
+  if (!/^(?:https?|mailto|tel|ftp):/i.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed);
+    if (/^(?:javascript|data|file):$/i.test(url.protocol)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalDisplayedUrl(value) {
+  let candidate = String(value || "").trim().replace(/\s+/g, "");
+  if (!/^(?:https?:\/\/|www\.)/i.test(candidate)) return null;
+  if (/^www\./i.test(candidate)) candidate = `https://${candidate}`;
+  try {
+    const url = new URL(candidate);
+    return url.href.replace(/\/$/, "");
+  } catch {
+    return candidate;
+  }
+}
+
+function hyperlinkDisplayTargetMismatch(cell) {
+  const target = cellHyperlink(cell);
+  const display = canonicalDisplayedUrl(cellText(cell));
+  if (!target || !display) return false;
+  return display !== target.replace(/\/$/, "");
+}
+
+function addHyperlinkAnnotation(pdf, page, target, box, layout) {
+  if (!target || !box) return false;
+  const left = clamp(Number(box.x) || 0, 0, layout.pageWidth);
+  const bottom = clamp(Number(box.y) || 0, 0, layout.pageHeight);
+  const right = clamp(left + Math.max(1, Number(box.width) || 0), 0, layout.pageWidth);
+  const top = clamp(bottom + Math.max(1, Number(box.height) || 0), 0, layout.pageHeight);
+  if (right <= left || top <= bottom) return false;
+  const annotation = pdf.context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [left, bottom, right, top],
+    Border: [0, 0, 0],
+    H: "I",
+    A: {
+      Type: "Action",
+      S: "URI",
+      URI: PDFString.of(target),
+    },
+  });
+  page.node.addAnnot(pdf.context.register(annotation));
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1374,27 +1489,76 @@ function drawStyledCellText(page, runs, fonts, scale, textBox, cell, fontSize) {
   if (needsClip) page.pushOperators(popGraphicsState());
 }
 
+function borderDashPattern(style, thickness) {
+  const normalized = String(style || "").toLowerCase();
+  const dash = Math.max(2, thickness * 4);
+  const gap = Math.max(1.2, thickness * 2);
+  const dot = Math.max(0.2, thickness * 0.45);
+  if (normalized === "dotted") return [dot, gap];
+  if (normalized.includes("dashdotdot")) {
+    return [dash, gap, dot, gap, dot, gap];
+  }
+  if (normalized.includes("dashdot") || normalized === "slantdashdot") {
+    return [dash, gap, dot, gap];
+  }
+  if (normalized.includes("dashed")) return [dash, gap];
+  return [];
+}
+
+function borderLineSegments(side, style, x, y, width, height, thickness) {
+  const horizontal = side === "top" || side === "bottom";
+  const coordinate =
+    side === "top" ? y + height : side === "right" ? x + width : side === "bottom" ? y : x;
+  const segment = horizontal
+    ? { start: [x, coordinate], end: [x + width, coordinate] }
+    : { start: [coordinate, y], end: [coordinate, y + height] };
+  if (String(style || "").toLowerCase() !== "double") return [segment];
+  const offset = Math.max(0.45, thickness / 3);
+  return [-offset, offset].map((delta) =>
+    horizontal
+      ? {
+          start: [segment.start[0], segment.start[1] + delta],
+          end: [segment.end[0], segment.end[1] + delta],
+        }
+      : {
+          start: [segment.start[0] + delta, segment.start[1]],
+          end: [segment.end[0] + delta, segment.end[1]],
+        }
+  );
+}
+
 function drawBorders(page, border, x, y, width, height, scale) {
   for (const side of ["top", "right", "bottom", "left"]) {
-    const style = border?.[side];
-    const thickness = borderWidth(style?.style) * scale;
+    const definition = border?.[side];
+    const style = String(definition?.style || "").toLowerCase();
+    const thickness = borderWidth(style) * scale;
     if (!thickness) continue;
-    const half = thickness / 2;
-    // 以細長矩形取代 drawLine：視覺等價，且選項不含巢狀座標物件
-    //（pdf-lib 對巢狀物件做 instanceof 檢查，在測試的 vm 沙箱會誤判跨
-    // realm 物件，改用 drawRectangle 讓正式與測試環境走同一條路）。
-    const rect =
-      side === "top"
-        ? { x, y: y + height - half, width, height: thickness }
-        : side === "bottom"
-          ? { x, y: y - half, width, height: thickness }
-          : side === "left"
-            ? { x: x - half, y, width: thickness, height }
-            : { x: x + width - half, y, width: thickness, height };
-    page.drawRectangle({
-      ...rect,
-      color: argbToRgb(style?.color, rgb(0, 0, 0)),
-    });
+    const strokeWidth =
+      style === "double" ? Math.max(0.25, thickness / 3) : Math.max(0.15, thickness);
+    const dashPattern = borderDashPattern(style, strokeWidth);
+    const lineCap = style === "dotted" ? LineCapStyle.Round : LineCapStyle.Butt;
+    const color = argbToRgb(definition?.color, rgb(0, 0, 0));
+    for (const segment of borderLineSegments(
+      side,
+      style,
+      x,
+      y,
+      width,
+      height,
+      thickness
+    )) {
+      page.pushOperators(
+        pushGraphicsState(),
+        setLineWidth(strokeWidth),
+        setLineCap(lineCap),
+        setDashPattern(dashPattern, 0),
+        setStrokingColor(color),
+        moveTo(segment.start[0], segment.start[1]),
+        lineTo(segment.end[0], segment.end[1]),
+        stroke(),
+        popGraphicsState()
+      );
+    }
   }
 }
 
@@ -1459,7 +1623,7 @@ function cellCanOverflow(cell) {
   if (cell.alignment?.wrapText || cell.alignment?.shrinkToFit) return false;
   const horizontal = cell.alignment?.horizontal || "left";
   if (!["left", "right", "general"].includes(horizontal)) return false;
-  const rawValue = cell.value?.formula ? cell.value.result : cell.value;
+  const rawValue = resolvedCellValue(cell);
   return (
     typeof rawValue === "string" ||
     !!rawValue?.richText ||
@@ -2115,6 +2279,7 @@ function renderWorksheetPage(
   const cellFrames = [];
   const cellTexts = [];
   const cellImagePlacements = [];
+  const cellLinks = [];
   for (let rowIndex = 0; rowIndex < layout.rows.length; rowIndex += 1) {
     const row = layout.rows[rowIndex];
     for (
@@ -2154,6 +2319,8 @@ function renderWorksheetPage(
           : cell.border,
         box,
       });
+      const hyperlink = cellHyperlink(cell);
+      if (hyperlink) cellLinks.push({ target: hyperlink, box: textBox });
       const cellImage = images?.cellImages?.get(key);
       if (cellImage) cellImagePlacements.push({ image: cellImage, box });
     }
@@ -2187,6 +2354,9 @@ function renderWorksheetPage(
     drawCellImage(page, image, box)
   );
   drawPageImages(page, worksheet, layout, images);
+  cellLinks.forEach(({ target, box }) =>
+    addHyperlinkAnnotation(pdf, page, target, box, layout)
+  );
   drawPageDecorations(
     page,
     worksheet,
@@ -2310,6 +2480,7 @@ function auditWorksheet(worksheet) {
     richText: 0,
     richTextStyled: 0,
     hyperlinks: 0,
+    hyperlinkMismatches: 0,
     rotatedText: 0,
     gradientFills: 0,
   };
@@ -2329,7 +2500,12 @@ function auditWorksheet(worksheet) {
         if (cellStyledRuns(cell)) record("richTextStyled", cell);
         else record("richText", cell);
       }
-      if (value?.hyperlink) record("hyperlinks", cell);
+      if (cellHyperlink(cell)) {
+        record("hyperlinks", cell);
+        if (hyperlinkDisplayTargetMismatch(cell)) {
+          record("hyperlinkMismatches", cell);
+        }
+      }
       if (cell.alignment?.textRotation) record("rotatedText", cell);
       if (cell.fill?.type === "gradient") record("gradientFills", cell);
     });
@@ -2387,8 +2563,19 @@ function auditWorksheet(worksheet) {
         worksheet,
         "info",
         "hyperlinks",
-        `${counters.hyperlinks} 個超連結只保留顯示文字`,
+        `${counters.hyperlinks} 個外部超連結會保留為可點擊連結`,
         exampleText("hyperlinks")
+      )
+    );
+  }
+  if (counters.hyperlinkMismatches) {
+    issues.push(
+      createCompatibilityIssue(
+        worksheet,
+        "warning",
+        "hyperlink-display-mismatch",
+        `${counters.hyperlinkMismatches} 個網址顯示文字與連結目標不一致`,
+        `${exampleText("hyperlinkMismatches")}；PDF 會顯示原文字，但點擊時使用儲存的超連結目標。`
       )
     );
   }
@@ -2487,13 +2674,8 @@ function sourceSheetSettings(worksheet) {
     margins: "source",
     repeatRows: worksheet.pageSetup?.printTitlesRow || "",
     repeatColumns: worksheet.pageSetup?.printTitlesColumn || "",
-    rowBreaks: (worksheet.rowBreaks || [])
-      .map((item) => item.id)
-      .filter(Boolean)
-      .join(","),
-    columnBreaks: (worksheet.columnBreaks || [])
-      .map((item) => item.id)
-      .filter(Boolean)
+    rowBreaks: sourcePageBreakIds(worksheet, "row").join(","),
+    columnBreaks: sourcePageBreakIds(worksheet, "column")
       .map(columnLetters)
       .join(","),
     pageOrder: "source",
@@ -2566,6 +2748,90 @@ function normalizeZipPath(base, target) {
     else if (segment !== ".") parts.push(segment);
   }
   return parts.join("/");
+}
+
+function decodeXmlEntities(value) {
+  return String(value || "")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function xmlAttributes(value) {
+  const attributes = {};
+  for (const match of String(value || "").matchAll(/([\w:.-]+)="([^"]*)"/g)) {
+    attributes[match[1]] = decodeXmlEntities(match[2]);
+  }
+  return attributes;
+}
+
+function workbookSheetXmlPaths(zipBytes) {
+  const entries = unzipEntries(zipBytes, (name) =>
+    name === "xl/workbook.xml" || name === "xl/_rels/workbook.xml.rels"
+  );
+  const workbookXml = xmlText(entries, "xl/workbook.xml");
+  const relsXml = xmlText(entries, "xl/_rels/workbook.xml.rels");
+  const relationships = new Map();
+  for (const match of relsXml.matchAll(/<Relationship\b([^>]*)\/?\s*>/g)) {
+    const attributes = xmlAttributes(match[1]);
+    if (!attributes.Id || !attributes.Target) continue;
+    relationships.set(
+      attributes.Id,
+      normalizeZipPath("xl/workbook.xml", attributes.Target)
+    );
+  }
+  const sheets = [];
+  for (const match of workbookXml.matchAll(/<sheet\b([^>]*)\/?\s*>/g)) {
+    const attributes = xmlAttributes(match[1]);
+    const path = relationships.get(attributes["r:id"]);
+    if (attributes.name && path?.includes("worksheets/")) {
+      sheets.push({ name: attributes.name, path });
+    }
+  }
+  return sheets;
+}
+
+function manualBreakIds(sheetXml, tagName) {
+  const block = sheetXml.match(
+    new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`)
+  )?.[1];
+  if (!block) return [];
+  const ids = [];
+  for (const match of block.matchAll(/<brk\b([^>]*)\/?\s*>/g)) {
+    const attributes = xmlAttributes(match[1]);
+    const id = Number(attributes.id);
+    const manual = /^(?:1|true)$/i.test(attributes.man || "");
+    if (manual && Number.isInteger(id) && id > 0) ids.push(id);
+  }
+  return [...new Set(ids)].sort((a, b) => a - b);
+}
+
+function extractManualPageBreaks(zipBytes) {
+  const result = new Map();
+  const sheets = workbookSheetXmlPaths(zipBytes);
+  const wantedPaths = new Set(sheets.map((sheet) => sheet.path));
+  const entries = unzipEntries(zipBytes, (name) => wantedPaths.has(name));
+  for (const sheet of sheets) {
+    const sheetXml = xmlText(entries, sheet.path);
+    if (!sheetXml) continue;
+    const rowBreaks = manualBreakIds(sheetXml, "rowBreaks");
+    const columnBreaks = manualBreakIds(sheetXml, "colBreaks");
+    if (rowBreaks.length || columnBreaks.length) {
+      result.set(sheet.name, { rowBreaks, columnBreaks });
+    }
+  }
+  return result;
+}
+
+function sourcePageBreakIds(worksheet, axis) {
+  const property = axis === "row" ? "rowBreaks" : "columnBreaks";
+  const raw = manualPageBreaksBySheet.get(worksheet.name)?.[property] || [];
+  const parsed = (worksheet[property] || [])
+    .map((item) => Number(item?.id))
+    .filter((item) => Number.isInteger(item) && item > 0);
+  return [...new Set([...raw, ...parsed])].sort((a, b) => a - b);
 }
 
 function extractInCellImages(zipBytes) {
@@ -2712,10 +2978,17 @@ async function parseWorkbook(message) {
   postProgress(message.requestId, "正在讀取 Excel", message.name || "活頁簿", 8);
   workbookName = message.name || workbookName;
   inCellImagesBySheet = new Map();
+  manualPageBreaksBySheet = new Map();
+  const zipBytes = new Uint8Array(message.buffer);
   try {
-    inCellImagesBySheet = extractInCellImages(new Uint8Array(message.buffer));
+    inCellImagesBySheet = extractInCellImages(zipBytes);
   } catch (error) {
     console.warn("[Excel PDF] 儲存格內圖片解析失敗，將略過。", error);
+  }
+  try {
+    manualPageBreaksBySheet = extractManualPageBreaks(zipBytes);
+  } catch (error) {
+    console.warn("[Excel PDF] 人工分頁解析失敗，將依自動分頁處理。", error);
   }
   workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(message.buffer);
