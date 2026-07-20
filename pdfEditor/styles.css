@@ -2349,6 +2349,65 @@ dialog.dialog-fallback-open {
   font-size: 10px;
 }
 
+.grouped-insertion-dialog {
+  width: min(620px, calc(100% - 28px));
+}
+
+.grouped-insertion-options {
+  display: grid;
+  gap: 10px;
+}
+
+.grouped-insertion-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.grouped-insertion-card:hover,
+.grouped-insertion-card:focus-visible {
+  border-color: #efaaa5;
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.grouped-insertion-card > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.grouped-insertion-card strong {
+  font-size: 13px;
+}
+
+.grouped-insertion-card small {
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.grouped-insertion-number {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .insert-icon {
   display: block;
   border: 2px solid var(--line-strong);

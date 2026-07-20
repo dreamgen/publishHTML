@@ -9,6 +9,11 @@ import {
   detectExportEnvironment,
 } from "./export-delivery.mjs";
 import { copyPagesBySource } from "./pdf-page-copy.mjs";
+import {
+  arrangeInsertedPages,
+  getContainingPageGroup,
+  PAGE_INSERTION_MODE,
+} from "./page-insertion.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "./vendor/pdfjs/pdf.worker.mjs",
@@ -309,6 +314,10 @@ class PdfWorkshop {
       passwordInput: $("#passwordInput"),
       passwordError: $("#passwordError"),
       insertDialog: $("#insertDialog"),
+      groupedInsertionDialog: $("#groupedInsertionDialog"),
+      groupedInsertionTitle: $("#groupedInsertionTitle"),
+      groupedInsertionMessage: $("#groupedInsertionMessage"),
+      groupedInsertionCurrentGroupName: $("#groupedInsertionCurrentGroupName"),
       blankPortraitButton: $("#blankPortraitButton"),
       blankLandscapeButton: $("#blankLandscapeButton"),
       imageToPdfButton: $("#imageToPdfButton"),
@@ -616,7 +625,13 @@ class PdfWorkshop {
     mergeFileInput.addEventListener("change", async (event) => {
       const files = [...event.target.files];
       event.target.value = "";
-      if (files.length) await this.loadFiles(files, { replace: false });
+      if (files.length) {
+        await this.loadFiles(files, {
+          replace: false,
+          insertionAnchorId: this.activePageId,
+          insertAtAnchorOnlyIfGrouped: true,
+        });
+      }
     });
 
     annotationImageInput.addEventListener("change", async (event) => {
@@ -1005,7 +1020,11 @@ class PdfWorkshop {
         return;
       }
       if (pdfFiles.length) {
-        await this.loadFiles(pdfFiles, { replace: !this.pages.length });
+        await this.loadFiles(pdfFiles, {
+          replace: !this.pages.length,
+          insertionAnchorId: this.activePageId,
+          insertAtAnchorOnlyIfGrouped: true,
+        });
       }
       if (imageFiles.length) {
         await this.convertImagesToPdf(imageFiles);
@@ -1811,16 +1830,14 @@ class PdfWorkshop {
       const insertedIds = await this.loadFiles([pdfFile], {
         replace: shouldReplace,
         remember: false,
+        insertionAnchorId:
+          !shouldReplace &&
+          this.elements.excelInsertPosition.value === "after"
+            ? this.excelPreviousActiveId
+            : null,
       });
 
-      if (
-        !shouldReplace &&
-        this.elements.excelInsertPosition.value === "after" &&
-        this.excelPreviousActiveId &&
-        insertedIds.length
-      ) {
-        this.placePagesAfter(insertedIds, this.excelPreviousActiveId);
-      } else if (insertedIds.length) {
+      if (insertedIds.length) {
         this.dirty = true;
         this.updateUI();
         this.scheduleAutosave();
@@ -1852,7 +1869,15 @@ class PdfWorkshop {
     }
   }
 
-  async loadFiles(fileList, { replace = false, remember = true } = {}) {
+  async loadFiles(
+    fileList,
+    {
+      replace = false,
+      remember = true,
+      insertionAnchorId = null,
+      insertAtAnchorOnlyIfGrouped = false,
+    } = {}
+  ) {
     const files = fileList.filter(
       (file) =>
         file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
@@ -1885,6 +1910,41 @@ class PdfWorkshop {
     }
 
     if (loaded.length) {
+      const pageTotal = loaded.reduce((sum, item) => sum + item.pages.length, 0);
+      const insertionContext =
+        !replace && insertionAnchorId
+          ? getContainingPageGroup(this.pages, insertionAnchorId)
+          : null;
+      let insertionMode = null;
+      let targetGroupName = "";
+
+      if (insertionContext) {
+        targetGroupName = this.getPageGroupLabel(insertionContext.groupId);
+        if (pageTotal === 1) {
+          insertionMode = PAGE_INSERTION_MODE.CURRENT_GROUP;
+        } else {
+          this.setBusy(false);
+          insertionMode = await this.chooseGroupedPageInsertion({
+            pageCount: pageTotal,
+            groupName: targetGroupName,
+          });
+          if (!insertionMode) {
+            for (const { source } of loaded) {
+              source.loadingTask?.destroy?.().catch?.(() => {});
+            }
+            return [];
+          }
+          this.setBusy(
+            true,
+            "正在插入 PDF",
+            `準備加入 ${pageTotal} 個頁面`,
+            90
+          );
+        }
+      } else if (insertionAnchorId && !insertAtAnchorOnlyIfGrouped) {
+        insertionMode = PAGE_INSERTION_MODE.AFTER_ANCHOR;
+      }
+
       if (replace) {
         for (const source of this.sources.values()) {
           source.loadingTask?.destroy?.().catch?.(() => {});
@@ -1899,6 +1959,7 @@ class PdfWorkshop {
         this.redoStack = [];
       } else {
         this.pushHistory();
+        this.redoStack = [];
       }
 
       newPageIds = [];
@@ -1906,6 +1967,20 @@ class PdfWorkshop {
         this.sources.set(source.id, source);
         this.pages.push(...pages);
         newPageIds.push(...pages.map((page) => page.id));
+      }
+
+      if (insertionMode) {
+        this.pages = arrangeInsertedPages({
+          pages: this.pages,
+          insertedIds: newPageIds,
+          anchorPageId: insertionAnchorId,
+          mode: insertionMode,
+          newGroupId:
+            insertionMode === PAGE_INSERTION_MODE.AFTER_GROUP
+              ? makeId("group")
+              : null,
+          targetGroupName,
+        });
       }
 
       this.activePageId = newPageIds[0] || this.activePageId;
@@ -1929,7 +2004,6 @@ class PdfWorkshop {
         this.performSearch();
       }
 
-      const pageTotal = loaded.reduce((sum, item) => sum + item.pages.length, 0);
       const encryptedCount = loaded.filter((item) => item.source.encrypted).length;
       this.toast(
         replace
@@ -1963,6 +2037,32 @@ class PdfWorkshop {
       );
     }
     return newPageIds;
+  }
+
+  chooseGroupedPageInsertion({ pageCount, groupName }) {
+    const dialog = this.elements.groupedInsertionDialog;
+    if (!dialog) return Promise.resolve(PAGE_INSERTION_MODE.CURRENT_GROUP);
+    this.elements.groupedInsertionTitle.textContent = `插入 ${pageCount} 個頁面`;
+    this.elements.groupedInsertionMessage.textContent =
+      "目前頁面位於群組中，請選擇多頁內容的插入方式。";
+    this.elements.groupedInsertionCurrentGroupName.textContent = groupName;
+    dialog.returnValue = "cancel";
+    this.openDialog(dialog);
+    return new Promise((resolve) => {
+      dialog.addEventListener(
+        "close",
+        () => {
+          const value = dialog.returnValue;
+          resolve(
+            value === PAGE_INSERTION_MODE.CURRENT_GROUP ||
+              value === PAGE_INSERTION_MODE.AFTER_GROUP
+              ? value
+              : null
+          );
+        },
+        { once: true }
+      );
+    });
   }
 
   async loadSource(file) {
@@ -5584,10 +5684,9 @@ class PdfWorkshop {
     const insertedIds = await this.loadFiles([file], {
       replace: !this.pages.length,
       remember: false,
+      insertionAnchorId: previousActiveId,
     });
-    if (previousActiveId && insertedIds.length) {
-      this.placePagesAfter(insertedIds, previousActiveId);
-    } else if (insertedIds.length) {
+    if (insertedIds.length) {
       this.dirty = true;
       this.updateUI();
       this.scheduleAutosave();
@@ -5662,10 +5761,9 @@ class PdfWorkshop {
       const insertedIds = await this.loadFiles([pdfFile], {
         replace: !this.pages.length,
         remember: false,
+        insertionAnchorId: previousActiveId,
       });
-      if (previousActiveId && insertedIds.length) {
-        this.placePagesAfter(insertedIds, previousActiveId);
-      } else if (insertedIds.length) {
+      if (insertedIds.length) {
         this.dirty = true;
         this.updateUI();
         this.scheduleAutosave();

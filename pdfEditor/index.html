@@ -563,6 +563,38 @@
     </form>
   </dialog>
 
+  <dialog class="panel-dialog grouped-insertion-dialog" id="groupedInsertionDialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">頁面群組</span>
+          <h2 id="groupedInsertionTitle">插入多個頁面</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="關閉"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p id="groupedInsertionMessage">目前頁面位於群組中，請選擇多頁內容的插入方式。</p>
+      <div class="grouped-insertion-options">
+        <button class="grouped-insertion-card" type="submit" value="current-group">
+          <span class="grouped-insertion-number" aria-hidden="true">1</span>
+          <span>
+            <strong>在目前位置插入檔案</strong>
+            <small>納入所在群組「<span id="groupedInsertionCurrentGroupName">目前群組</span>」</small>
+          </span>
+        </button>
+        <button class="grouped-insertion-card" type="submit" value="after-group">
+          <span class="grouped-insertion-number" aria-hidden="true">2</span>
+          <span>
+            <strong>在目前群組之後插入檔案</strong>
+            <small>為插入的頁面建立新群組</small>
+          </span>
+        </button>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel">取消</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="panel-dialog excel-dialog" id="excelDialog">
     <form method="dialog">
       <div class="dialog-heading">
