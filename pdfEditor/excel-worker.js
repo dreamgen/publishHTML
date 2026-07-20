@@ -78,6 +78,19 @@ let inCellImagesBySheet = new Map();
 // ExcelJS 不會載入 OOXML 的人工分頁；由原始 worksheet XML 補回。
 // sheetName → { rowBreaks: number[], columnBreaks: number[] }
 let manualPageBreaksBySheet = new Map();
+// ExcelJS 會遺失部分只存在 OOXML 層的列印資訊。這些資料在載入 xlsx 前
+// 直接從 zip 補讀，供欄寬、日期、DrawingML 與 VML 頁首頁尾共用。
+let normalStyleMetrics = {
+  fontName: "Calibri",
+  fontSize: 11,
+  maximumDigitWidthPixels: 7,
+};
+// sheetName → Map("row:col" → built-in numFmtId)
+let builtinNumberFormatIdsBySheet = new Map();
+// sheetName → { anchors: [{ anchor, objects }] }
+let groupedDrawingsBySheet = new Map();
+// sheetName → [{ section: "LF", width, height, ... }]
+let headerFooterImagesBySheet = new Map();
 let fontBytesPromise = null;
 let outlineFontPromise = null;
 let sourceFontPromise = null;
@@ -343,11 +356,42 @@ function parseColumnBreaks(value) {
   );
 }
 
-function excelColumnWidthToPoints(width) {
+function maximumDigitWidthPixelsForFont(fontName, fontSize) {
+  const name = String(fontName || "").toLowerCase();
+  const size = clamp(Number(fontSize) || 11, 5, 72);
+  // Excel 的欄寬以 Normal 樣式字型中 0-9 的最大像素寬（MDW）為基準。
+  // 瀏覽器 worker 沒有可靠的 Canvas 字型量測環境，因此依常見 Office
+  // 字型的數字字面比例估算，保留 1/4px 級距以模擬 Excel 的 hinting。
+  // Calibri 10/11/12pt 約為 6.75/7.25/7.75px；若先取成整數，多欄
+  // 表格會累積出一整個額外分頁。
+  if (/calibri/.test(name)) {
+    return clamp(Math.round((6.75 + (size - 10) * 0.5) * 4) / 4, 5, 32);
+  }
+  let digitEmRatio = 0.49;
+  if (/courier|consolas|monaco|menlo/.test(name)) digitEmRatio = 0.6;
+  else if (/microsoft jhenghei|微軟正黑|mingliu|新細明|simsun|宋体/.test(name)) {
+    digitEmRatio = 0.54;
+  } else if (/arial|helvetica|aptos/.test(name)) digitEmRatio = 0.49;
+  return clamp(
+    Math.round(size * (96 / 72) * digitEmRatio * 4) / 4,
+    5,
+    32
+  );
+}
+
+function excelColumnWidthToPoints(width, metrics = normalStyleMetrics) {
   const resolved = Number.isFinite(width) && width > 0 ? width : 8.43;
-  // 活頁簿的 Normal 樣式多為 Calibri 12；其最大數字寬約 7.75px。
-  // 舊值 7px 是 Calibri 11 的近似值，會讓中文表格整體窄約一成。
-  return Math.max(5, Math.floor(resolved * 7.75 + 5) * 0.75);
+  const maximumDigitWidth = clamp(
+    Number(metrics?.maximumDigitWidthPixels) || 7,
+    5,
+    32
+  );
+  // Excel 儲存的是「字元寬度」，顯示時先乘 MDW、加上 5px 儲存格內距，
+  // 最後才由 96dpi 像素轉成 PDF point。
+  return Math.max(
+    5,
+    Math.floor(resolved * maximumDigitWidth + 5) * PIXEL_TO_POINT
+  );
 }
 
 function getColumnWidth(worksheet, columnNumber) {
@@ -926,13 +970,14 @@ function mergedCellBorder(worksheet, range, masterBorder = {}) {
     right: strongestBorderSide(right) || masterBorder?.right,
     bottom: strongestBorderSide(bottom) || masterBorder?.bottom,
     left: strongestBorderSide(left) || masterBorder?.left,
+    diagonal: masterBorder?.diagonal,
   };
 }
 
 function borderStrength(border) {
   return Math.max(
     0,
-    ...["top", "right", "bottom", "left"].map((side) =>
+    ...["top", "right", "bottom", "left", "diagonal"].map((side) =>
       borderWidth(border?.[side]?.style)
     )
   );
@@ -1171,6 +1216,23 @@ function formatNumberValue(value, numFmt) {
   return `${currency}${formatted}${percent ? "%" : ""}`;
 }
 
+function cellBuiltinNumberFormatId(cell) {
+  const sheetName = cell?.worksheet?.name || cell?._row?.worksheet?.name;
+  const row = Number(cell?.row || cell?._row?.number);
+  const column = Number(cell?.col || cell?._column?.number);
+  if (!sheetName || !Number.isInteger(row) || !Number.isInteger(column)) {
+    return null;
+  }
+  return builtinNumberFormatIdsBySheet.get(sheetName)?.get(`${row}:${column}`) ?? null;
+}
+
+// OOXML built-in format 14 是 locale-dependent 的 short date。ExcelJS 會把
+// 它展開為固定的 mm-dd-yy，因而失去 Excel 在繁中環境顯示 yyyy/m/d 的
+// 行為。此 worker/UI 的地區為 zh-TW，保留西元年並使用不補零的短日期。
+function formatBuiltinShortDate(value) {
+  return `${value.getFullYear()}/${value.getMonth() + 1}/${value.getDate()}`;
+}
+
 function resolvedCellValue(cell) {
   const value = cell?.value;
   if (
@@ -1192,7 +1254,12 @@ function cellText(cell) {
   if (cell.value?.error) return String(cell.value.error);
   const value = resolvedCellValue(cell);
   if (value == null) return "";
-  if (value instanceof Date) return formatDateValue(value, cell.numFmt);
+  if (value instanceof Date) {
+    if (cellBuiltinNumberFormatId(cell) === 14) {
+      return formatBuiltinShortDate(value);
+    }
+    return formatDateValue(value, cell.numFmt);
+  }
   if (typeof value === "number") return formatNumberValue(value, cell.numFmt);
   if (typeof cell.text === "string") return cell.text;
   return String(value);
@@ -1560,6 +1627,35 @@ function drawBorders(page, border, x, y, width, height, scale) {
       );
     }
   }
+
+  const diagonal = border?.diagonal;
+  const diagonalStyle = String(diagonal?.style || "").toLowerCase();
+  const diagonalThickness = borderWidth(diagonalStyle) * scale;
+  if (!diagonalThickness || (!diagonal?.up && !diagonal?.down)) return;
+  const strokeWidth =
+    diagonalStyle === "double"
+      ? Math.max(0.25, diagonalThickness / 3)
+      : Math.max(0.15, diagonalThickness);
+  const dashPattern = borderDashPattern(diagonalStyle, strokeWidth);
+  const lineCap = diagonalStyle === "dotted" ? LineCapStyle.Round : LineCapStyle.Butt;
+  const color = argbToRgb(diagonal?.color, rgb(0, 0, 0));
+  const diagonals = [];
+  // PDF 座標原點在左下；Excel diagonalUp 為左下到右上。
+  if (diagonal.up) diagonals.push([[x, y], [x + width, y + height]]);
+  if (diagonal.down) diagonals.push([[x, y + height], [x + width, y]]);
+  for (const [start, end] of diagonals) {
+    page.pushOperators(
+      pushGraphicsState(),
+      setLineWidth(strokeWidth),
+      setLineCap(lineCap),
+      setDashPattern(dashPattern, 0),
+      setStrokingColor(color),
+      moveTo(start[0], start[1]),
+      lineTo(end[0], end[1]),
+      stroke(),
+      popGraphicsState()
+    );
+  }
 }
 
 function drawCellFrame(page, border, box, scale, options) {
@@ -1803,11 +1899,50 @@ async function embedImageBytes(pdf, embedCache, cacheKey, bytes, extension) {
   return embeddedPromise;
 }
 
+function sameDrawingAnchor(range, anchor) {
+  const tl = range?.tl;
+  if (!tl || !anchor) return false;
+  return (
+    Number(tl.nativeCol || 0) === Number(anchor.nativeCol || 0) &&
+    Number(tl.nativeRow || 0) === Number(anchor.nativeRow || 0) &&
+    Math.abs(Number(tl.nativeColOff || 0) - Number(anchor.nativeColOff || 0)) < 2 &&
+    Math.abs(Number(tl.nativeRowOff || 0) - Number(anchor.nativeRowOff || 0)) < 2
+  );
+}
+
+function groupedObjectSheetBox(worksheet, anchor, object) {
+  const left =
+    sheetOffsetX(worksheet, anchor.nativeCol || 0, anchor.nativeColOff) +
+    object.leftEmu / EMU_PER_POINT;
+  const top =
+    sheetOffsetY(worksheet, anchor.nativeRow || 0, anchor.nativeRowOff) +
+    object.topEmu / EMU_PER_POINT;
+  const width = object.widthEmu / EMU_PER_POINT;
+  const height = object.heightEmu / EMU_PER_POINT;
+  if (!(width > 0) || !(height > 0)) return null;
+  return {
+    left,
+    top,
+    width,
+    height,
+    anchorColumn: (anchor.nativeCol || 0) + 1,
+    anchorRow: (anchor.nativeRow || 0) + 1,
+  };
+}
+
 // 每個 PDF 文件嵌入同一張媒體一次（embedCache 跨工作表共用）。回傳
 // anchored（浮動圖片）與 cellImages（儲存格內圖片，鍵為 "row:col"）。
 async function prepareWorksheetImages(pdf, worksheet, embedCache) {
   const anchored = [];
+  const drawingTexts = [];
+  const groupedMetadata = groupedDrawingsBySheet.get(worksheet.name);
+  const groupedAnchors = groupedMetadata?.anchors || [];
   for (const item of worksheet.getImages?.() || []) {
+    // ExcelJS 只把群組內圖片扁平化成外框圖片，會遺失 srcRect 與群組文字；
+    // 這些錨點改由下方的原始 DrawingML 資料繪製。
+    if (groupedAnchors.some((entry) => sameDrawingAnchor(item.range, entry.anchor))) {
+      continue;
+    }
     const media = workbook?.model?.media?.[item.imageId];
     const extension = String(media?.extension || "").toLowerCase();
     if (!media?.buffer || !SUPPORTED_IMAGE_EXTENSIONS.has(extension)) continue;
@@ -1837,6 +1972,39 @@ async function prepareWorksheetImages(pdf, worksheet, embedCache) {
     }
   }
 
+  for (const entry of groupedAnchors) {
+    for (const object of entry.objects) {
+      const box = groupedObjectSheetBox(worksheet, entry.anchor, object);
+      if (!box) continue;
+      if (object.kind === "text") {
+        drawingTexts.push({ ...object, box });
+        continue;
+      }
+      if (
+        object.kind !== "image" ||
+        !object.bytes ||
+        object.bytes.byteLength > MAX_IMAGE_BYTES
+      ) {
+        continue;
+      }
+      try {
+        anchored.push({
+          box,
+          crop: object.crop,
+          embedded: await embedImageBytes(
+            pdf,
+            embedCache,
+            `drawing:${object.mediaPath}`,
+            object.bytes,
+            object.extension
+          ),
+        });
+      } catch (error) {
+        console.warn("[Excel PDF] 群組圖片嵌入失敗，已略過。", error);
+      }
+    }
+  }
+
   const cellImages = new Map();
   for (const [key, entry] of inCellImagesBySheet.get(worksheet.name) || []) {
     if (entry.bytes.byteLength > MAX_IMAGE_BYTES) continue;
@@ -1855,7 +2023,25 @@ async function prepareWorksheetImages(pdf, worksheet, embedCache) {
       console.warn("[Excel PDF] 儲存格內圖片嵌入失敗，已略過。", error);
     }
   }
-  return { anchored, cellImages };
+  const headerFooter = [];
+  for (const entry of headerFooterImagesBySheet.get(worksheet.name) || []) {
+    if (!entry.bytes || entry.bytes.byteLength > MAX_IMAGE_BYTES) continue;
+    try {
+      headerFooter.push({
+        ...entry,
+        embedded: await embedImageBytes(
+          pdf,
+          embedCache,
+          `header-footer:${entry.mediaPath}`,
+          entry.bytes,
+          entry.extension
+        ),
+      });
+    } catch (error) {
+      console.warn("[Excel PDF] 頁首頁尾圖片嵌入失敗，已略過。", error);
+    }
+  }
+  return { anchored, drawingTexts, cellImages, headerFooter };
 }
 
 // 儲存格內圖片：等比縮放置中，內縮一小段避免壓到框線。
@@ -1893,19 +2079,126 @@ function pageContentOffset(entries, startOf, sizeOf, absolute) {
   return accumulated;
 }
 
-function drawPageImages(page, worksheet, layout, images) {
-  const anchored = images?.anchored;
-  if (!anchored?.length) return;
+function sheetBoxOnPage(worksheet, layout, box) {
+  const contentLeft = layout.margins.left + (layout.contentOffsetX || 0);
+  const contentTop =
+    layout.pageHeight - layout.margins.top - (layout.contentOffsetY || 0);
+  const offsetX = pageContentOffset(
+    layout.columns,
+    (column) => sheetOffsetX(worksheet, column.number - 1, 0),
+    (column) => column.width,
+    box.left
+  );
+  const offsetY = pageContentOffset(
+    layout.rows,
+    (row) => sheetOffsetY(worksheet, row.number - 1, 0),
+    (row) => row.height,
+    box.top
+  );
+  const scaleX = layout.scaleX || layout.scale;
+  const scaleY = layout.scaleY || layout.scale;
+  const width = box.width * scaleX;
+  const height = box.height * scaleY;
+  return {
+    x: contentLeft + offsetX * scaleX,
+    y: contentTop - offsetY * scaleY - height,
+    width,
+    height,
+  };
+}
+
+function drawCroppedImage(page, embedded, box, crop = {}) {
+  const left = clamp(Number(crop.left) || 0, 0, 0.99);
+  const top = clamp(Number(crop.top) || 0, 0, 0.99);
+  const right = clamp(Number(crop.right) || 0, 0, 0.99);
+  const bottom = clamp(Number(crop.bottom) || 0, 0, 0.99);
+  const visibleWidth = Math.max(0.01, 1 - left - right);
+  const visibleHeight = Math.max(0.01, 1 - top - bottom);
+  const fullWidth = box.width / visibleWidth;
+  const fullHeight = box.height / visibleHeight;
+  page.pushOperators(
+    pushGraphicsState(),
+    moveTo(box.x, box.y),
+    lineTo(box.x + box.width, box.y),
+    lineTo(box.x + box.width, box.y + box.height),
+    lineTo(box.x, box.y + box.height),
+    closePath(),
+    clip(),
+    endPath()
+  );
+  page.drawImage(embedded, {
+    x: box.x - left * fullWidth,
+    y: box.y - bottom * fullHeight,
+    width: fullWidth,
+    height: fullHeight,
+  });
+  page.pushOperators(popGraphicsState());
+}
+
+function hexToPdfRgb(value, fallback = null) {
+  if (!/^[0-9a-f]{6}$/i.test(String(value || ""))) return fallback;
+  return rgb(
+    parseInt(value.slice(0, 2), 16) / 255,
+    parseInt(value.slice(2, 4), 16) / 255,
+    parseInt(value.slice(4, 6), 16) / 255
+  );
+}
+
+function drawDrawingText(page, item, box, fonts, layout) {
+  const fillColor = hexToPdfRgb(item.fillColor);
+  const lineColor = hexToPdfRgb(item.lineColor);
+  if (fillColor || (lineColor && item.lineWidth > 0)) {
+    page.drawRectangle({
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+      color: fillColor || undefined,
+      borderColor: lineColor || undefined,
+      borderWidth: lineColor
+        ? Math.max(0.2, item.lineWidth * (layout.fontScale || layout.scale || 1))
+        : 0,
+    });
+  }
+  const font = fonts?.unicode;
+  if (!font || !item.text) return;
+  const scale = layout.fontScale || layout.scale || 1;
+  const size = clamp((Number(item.fontSize) || 11) * scale, 4, 72);
+  const lines = sanitizeTextForFont(font, item.text, size, {
+    preserveLineBreaks: true,
+  }).split("\n");
+  const lineHeight = size * 1.12;
+  const firstY = box.y + (box.height + lines.length * lineHeight) / 2 - lineHeight;
+  lines.forEach((line, index) => {
+    const width = lineWidth(font, line, size);
+    let x = box.x + Math.max(1, 2 * scale);
+    if (item.horizontal === "center") x = box.x + (box.width - width) / 2;
+    else if (item.horizontal === "right") x = box.x + box.width - width - 2 * scale;
+    drawText(page, line, {
+      x,
+      y: firstY - index * lineHeight,
+      size,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  });
+}
+
+function drawPageImages(page, worksheet, layout, images, fonts) {
+  const anchored = images?.anchored || [];
+  const drawingTexts = images?.drawingTexts || [];
+  if (!anchored?.length && !drawingTexts.length) return;
   const visible = anchored.filter(
     (image) =>
       layout.columns.some((column) => column.number === image.box.anchorColumn) &&
       layout.rows.some((row) => row.number === image.box.anchorRow)
   );
-  if (!visible.length) return;
-
-  const contentLeft = layout.margins.left + (layout.contentOffsetX || 0);
-  const contentTop =
-    layout.pageHeight - layout.margins.top - (layout.contentOffsetY || 0);
+  const visibleTexts = drawingTexts.filter(
+    (item) =>
+      layout.columns.some((column) => column.number === item.box.anchorColumn) &&
+      layout.rows.some((row) => row.number === item.box.anchorRow)
+  );
+  if (!visible.length && !visibleTexts.length) return;
   const clipLeft = layout.margins.left;
   const clipRight = layout.pageWidth - layout.margins.right;
   const clipBottom = layout.margins.bottom;
@@ -1923,23 +2216,21 @@ function drawPageImages(page, worksheet, layout, images) {
     endPath()
   );
   for (const image of visible) {
-    const offsetX = pageContentOffset(
-      layout.columns,
-      (column) => sheetOffsetX(worksheet, column.number - 1, 0),
-      (column) => column.width,
-      image.box.left
+    drawCroppedImage(
+      page,
+      image.embedded,
+      sheetBoxOnPage(worksheet, layout, image.box),
+      image.crop
     );
-    const offsetY = pageContentOffset(
-      layout.rows,
-      (row) => sheetOffsetY(worksheet, row.number - 1, 0),
-      (row) => row.height,
-      image.box.top
+  }
+  for (const item of visibleTexts) {
+    drawDrawingText(
+      page,
+      item,
+      sheetBoxOnPage(worksheet, layout, item.box),
+      fonts,
+      layout
     );
-    const x = contentLeft + offsetX * (layout.scaleX || layout.scale);
-    const yTop = contentTop - offsetY * (layout.scaleY || layout.scale);
-    const width = image.box.width * (layout.scaleX || layout.scale);
-    const height = image.box.height * (layout.scaleY || layout.scale);
-    page.drawImage(image.embedded, { x, y: yTop - height, width, height });
   }
   page.pushOperators(popGraphicsState());
 }
@@ -2222,8 +2513,13 @@ function drawHeaderFooterLine(
   );
   for (const section of activeSections) {
     const { alignment, baseSize, hasExplicitSize } = section;
-    let value = sanitizeTextForFont(font, section.value, baseSize);
-    const naturalWidth = lineWidth(font, value, baseSize);
+    const lines = sanitizeTextForFont(font, section.value, baseSize, {
+      preserveLineBreaks: true,
+    }).split("\n");
+    const naturalWidth = Math.max(
+      0,
+      ...lines.map((line) => lineWidth(font, line, baseSize))
+    );
     // Excel header/footer font names cannot always be embedded in the browser.
     // Keep an explicit source size visually comparable when using the Unicode
     // fallback font. The requested size has already followed Excel's
@@ -2235,21 +2531,59 @@ function drawHeaderFooterLine(
     const size = naturalWidth > maxWidth
       ? Math.max(minimumSize, baseSize * (maxWidth / naturalWidth))
       : baseSize;
-    const width = lineWidth(font, value, size);
-    const y =
+    const lineHeight = size * 1.15;
+    const firstY =
       kind === "header"
         ? layout.pageHeight - layout.margins.header - size
-        : layout.margins.footer;
-    let x = left;
-    if (alignment === "center") x = (layout.pageWidth - width) / 2;
-    else if (alignment === "right") x = right - width;
-    drawText(page, value, {
-      x: Math.max(left, x),
-      y,
-      size,
-      font,
-      color: rgb(0.28, 0.3, 0.34),
+        : layout.margins.footer + (lines.length - 1) * lineHeight;
+    lines.forEach((line, index) => {
+      const width = lineWidth(font, line, size);
+      let x = left;
+      if (alignment === "center") x = (layout.pageWidth - width) / 2;
+      else if (alignment === "right") x = right - width;
+      drawText(page, line, {
+        x: Math.max(left, x),
+        y: firstY - index * lineHeight,
+        size,
+        font,
+        color: rgb(0.28, 0.3, 0.34),
+      });
     });
+  }
+}
+
+function drawHeaderFooterImages(
+  page,
+  rawValue,
+  worksheet,
+  layout,
+  kind,
+  images
+) {
+  const entries = images?.headerFooter || [];
+  if (!rawValue || !entries.length) return;
+  const sections = splitHeaderFooterSections(rawValue);
+  const sectionNames = { L: "left", C: "center", R: "right" };
+  const kindCode = kind === "header" ? "H" : "F";
+  const documentScale = headerFooterDocumentScale(worksheet, layout);
+  const left = layout.margins.left;
+  const right = layout.pageWidth - layout.margins.right;
+  for (const entry of entries) {
+    if (entry.section?.[1] !== kindCode) continue;
+    const alignment = sectionNames[entry.section?.[0]];
+    if (!alignment || !/&G/i.test(sections[alignment] || "")) continue;
+    const width = entry.width * documentScale;
+    const height = entry.height * documentScale;
+    const marginLeft = entry.marginLeft * documentScale;
+    const marginTop = entry.marginTop * documentScale;
+    let x = left + marginLeft;
+    if (alignment === "center") x = (layout.pageWidth - width) / 2 + marginLeft;
+    else if (alignment === "right") x = right - width - marginLeft;
+    const y =
+      kind === "header"
+        ? layout.pageHeight - layout.margins.header - height - marginTop
+        : layout.margins.footer + marginTop;
+    page.drawImage(entry.embedded, { x, y, width, height });
   }
 }
 
@@ -2260,12 +2594,31 @@ function drawPageDecorations(
   layout,
   pageIndex,
   pageCount,
-  pagination
+  pagination,
+  images
 ) {
   if (layout.options?.includeHeaderFooter) {
+    const headerValue = sourceHeaderFooterValue(worksheet, "header", pageIndex);
+    const footerValue = sourceHeaderFooterValue(worksheet, "footer", pageIndex);
+    drawHeaderFooterImages(
+      page,
+      headerValue,
+      worksheet,
+      layout,
+      "header",
+      images
+    );
+    drawHeaderFooterImages(
+      page,
+      footerValue,
+      worksheet,
+      layout,
+      "footer",
+      images
+    );
     drawHeaderFooterLine(
       page,
-      sourceHeaderFooterValue(worksheet, "header", pageIndex),
+      headerValue,
       worksheet,
       fonts,
       layout,
@@ -2276,7 +2629,7 @@ function drawPageDecorations(
     );
     drawHeaderFooterLine(
       page,
-      sourceHeaderFooterValue(worksheet, "footer", pageIndex),
+      footerValue,
       worksheet,
       fonts,
       layout,
@@ -2404,7 +2757,7 @@ function renderWorksheetPage(
   cellImagePlacements.forEach(({ image, box }) =>
     drawCellImage(page, image, box)
   );
-  drawPageImages(page, worksheet, layout, images);
+  drawPageImages(page, worksheet, layout, images, fonts);
   cellLinks.forEach(({ target, box }) =>
     addHyperlinkAnnotation(pdf, page, target, box, layout)
   );
@@ -2415,7 +2768,8 @@ function renderWorksheetPage(
     layout,
     pageIndex,
     pageCount,
-    pagination || { documentPageOffset: 0, documentPageCount: pageCount }
+    pagination || { documentPageOffset: 0, documentPageCount: pageCount },
+    images
   );
   return page;
 }
@@ -2812,10 +3166,91 @@ function decodeXmlEntities(value) {
 
 function xmlAttributes(value) {
   const attributes = {};
-  for (const match of String(value || "").matchAll(/([\w:.-]+)="([^"]*)"/g)) {
-    attributes[match[1]] = decodeXmlEntities(match[2]);
+  for (const match of String(value || "").matchAll(
+    /([\w:.-]+)=(?:"([^"]*)"|'([^']*)')/g
+  )) {
+    attributes[match[1]] = decodeXmlEntities(match[2] ?? match[3] ?? "");
   }
   return attributes;
+}
+
+function xmlLocalName(name) {
+  return String(name || "").split(":").pop();
+}
+
+// DrawingML/VML 僅需元素、屬性與文字；用小型樹狀解析器避免在 Web Worker
+// 依賴 DOMParser，也讓 Node 測試環境與瀏覽器走完全相同的路徑。
+function parseXmlTree(xml) {
+  const root = { name: "#document", attributes: {}, children: [], text: "" };
+  const stack = [root];
+  let cursor = 0;
+  for (const match of String(xml || "").matchAll(/<([^>]+)>/g)) {
+    const raw = match[1].trim();
+    const textValue = String(xml).slice(cursor, match.index);
+    if (textValue) stack[stack.length - 1].text += decodeXmlEntities(textValue);
+    cursor = match.index + match[0].length;
+    if (!raw || raw.startsWith("?") || raw.startsWith("!")) continue;
+    if (raw.startsWith("/")) {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    const selfClosing = raw.endsWith("/");
+    const content = selfClosing ? raw.slice(0, -1).trim() : raw;
+    const name = content.match(/^([^\s]+)/)?.[1];
+    if (!name) continue;
+    const node = {
+      name,
+      attributes: xmlAttributes(content.slice(name.length)),
+      children: [],
+      text: "",
+    };
+    stack[stack.length - 1].children.push(node);
+    if (!selfClosing) stack.push(node);
+  }
+  return root;
+}
+
+function xmlChild(node, localName) {
+  return node?.children?.find((child) => xmlLocalName(child.name) === localName) || null;
+}
+
+function xmlChildren(node, localName) {
+  return (node?.children || []).filter(
+    (child) => !localName || xmlLocalName(child.name) === localName
+  );
+}
+
+function xmlDescendants(node, localName, result = []) {
+  for (const child of node?.children || []) {
+    if (xmlLocalName(child.name) === localName) result.push(child);
+    xmlDescendants(child, localName, result);
+  }
+  return result;
+}
+
+function xmlNodeText(node) {
+  return [node?.text || "", ...(node?.children || []).map(xmlNodeText)].join("");
+}
+
+function relationshipPartPath(partPath) {
+  const slash = partPath.lastIndexOf("/");
+  const directory = slash >= 0 ? partPath.slice(0, slash) : "";
+  const filename = slash >= 0 ? partPath.slice(slash + 1) : partPath;
+  return `${directory}/_rels/${filename}.rels`;
+}
+
+function relationshipTargets(entries, partPath) {
+  const result = new Map();
+  const relsXml = xmlText(entries, relationshipPartPath(partPath));
+  for (const match of relsXml.matchAll(/<Relationship\b([^>]*)\/?\s*>/g)) {
+    const attributes = xmlAttributes(match[1]);
+    if (!attributes.Id || !attributes.Target) continue;
+    result.set(attributes.Id, {
+      path: normalizeZipPath(partPath, attributes.Target),
+      type: attributes.Type || "",
+    });
+  }
+  return result;
 }
 
 function workbookSheetXmlPaths(zipBytes) {
@@ -2842,6 +3277,357 @@ function workbookSheetXmlPaths(zipBytes) {
     }
   }
   return sheets;
+}
+
+function parseNormalStyleMetrics(stylesXml) {
+  const fallback = {
+    fontName: "Calibri",
+    fontSize: 11,
+    maximumDigitWidthPixels: 7,
+  };
+  if (!stylesXml) return fallback;
+  const fontBlock = stylesXml.match(/<fonts\b[^>]*>([\s\S]*?)<\/fonts>/)?.[1] || "";
+  const fonts = [...fontBlock.matchAll(/<font\b[^>]*>([\s\S]*?)<\/font>/g)].map(
+    (match) => {
+      const body = match[1];
+      const name = xmlAttributes(body.match(/<name\b([^>]*)\/?\s*>/)?.[1]).val;
+      const size = Number(
+        xmlAttributes(body.match(/<sz\b([^>]*)\/?\s*>/)?.[1]).val
+      );
+      return { name: name || fallback.fontName, size: size || fallback.fontSize };
+    }
+  );
+  const styleXfsBlock =
+    stylesXml.match(/<cellStyleXfs\b[^>]*>([\s\S]*?)<\/cellStyleXfs>/)?.[1] || "";
+  const styleXfs = [...styleXfsBlock.matchAll(/<xf\b([^>]*)\/?\s*>/g)].map(
+    (match) => xmlAttributes(match[1])
+  );
+  const normalStyleMatch = [...stylesXml.matchAll(/<cellStyle\b([^>]*)\/?\s*>/g)]
+    .map((match) => xmlAttributes(match[1]))
+    .find((attributes) => String(attributes.name || "").toLowerCase() === "normal");
+  const normalXf = styleXfs[Number(normalStyleMatch?.xfId) || 0] || styleXfs[0];
+  const normalFont = fonts[Number(normalXf?.fontId) || 0] || fonts[0];
+  const fontName = normalFont?.name || fallback.fontName;
+  const fontSize = normalFont?.size || fallback.fontSize;
+  return {
+    fontName,
+    fontSize,
+    maximumDigitWidthPixels: maximumDigitWidthPixelsForFont(fontName, fontSize),
+  };
+}
+
+function cellXfNumberFormatIds(stylesXml) {
+  const block =
+    stylesXml.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] || "";
+  return [...block.matchAll(/<xf\b([^>]*)\/?\s*>/g)].map((match) => {
+    const id = Number(xmlAttributes(match[1]).numFmtId);
+    return Number.isInteger(id) ? id : 0;
+  });
+}
+
+function builtInNumberFormatCells(sheetXml, numberFormatIds) {
+  const result = new Map();
+  for (const match of String(sheetXml || "").matchAll(/<c\b([^>]*)>/g)) {
+    const attributes = xmlAttributes(match[1]);
+    const address = decodeCellAddress(attributes.r);
+    const styleIndex = Number(attributes.s || 0);
+    const numberFormatId = numberFormatIds[styleIndex];
+    if (!address || numberFormatId !== 14) continue;
+    result.set(`${address.row}:${address.column}`, numberFormatId);
+  }
+  return result;
+}
+
+function drawingNumber(node, childName, fallback = 0) {
+  const value = Number(xmlNodeText(xmlChild(node, childName)));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function drawingXfrm(node) {
+  if (!node) return null;
+  const off = xmlChild(node, "off");
+  const ext = xmlChild(node, "ext");
+  if (!off || !ext) return null;
+  const chOff = xmlChild(node, "chOff");
+  const chExt = xmlChild(node, "chExt");
+  return {
+    offX: Number(off.attributes.x) || 0,
+    offY: Number(off.attributes.y) || 0,
+    width: Number(ext.attributes.cx) || 0,
+    height: Number(ext.attributes.cy) || 0,
+    childOffX: Number(chOff?.attributes.x) || 0,
+    childOffY: Number(chOff?.attributes.y) || 0,
+    childWidth: Number(chExt?.attributes.cx) || Number(ext.attributes.cx) || 1,
+    childHeight: Number(chExt?.attributes.cy) || Number(ext.attributes.cy) || 1,
+  };
+}
+
+function childDrawingTransform(parent, xfrm) {
+  if (!xfrm) return parent;
+  const scaleX = parent.scaleX * (xfrm.width / Math.max(1, xfrm.childWidth));
+  const scaleY = parent.scaleY * (xfrm.height / Math.max(1, xfrm.childHeight));
+  const mappedLeft = parent.originX + xfrm.offX * parent.scaleX;
+  const mappedTop = parent.originY + xfrm.offY * parent.scaleY;
+  return {
+    originX: mappedLeft - xfrm.childOffX * scaleX,
+    originY: mappedTop - xfrm.childOffY * scaleY,
+    scaleX,
+    scaleY,
+  };
+}
+
+function drawingBox(transform, xfrm) {
+  if (!xfrm) return null;
+  const width = xfrm.width * transform.scaleX;
+  const height = xfrm.height * transform.scaleY;
+  if (!(width > 0) || !(height > 0)) return null;
+  return {
+    leftEmu: transform.originX + xfrm.offX * transform.scaleX,
+    topEmu: transform.originY + xfrm.offY * transform.scaleY,
+    widthEmu: width,
+    heightEmu: height,
+  };
+}
+
+function drawingHexColor(node) {
+  const color = xmlDescendants(node, "srgbClr")[0]?.attributes?.val;
+  return /^[0-9a-f]{6}$/i.test(color || "") ? color.toUpperCase() : null;
+}
+
+function drawingTextValue(txBody) {
+  const paragraphs = xmlDescendants(txBody, "p")
+    .map((paragraph) =>
+      xmlDescendants(paragraph, "t")
+        .map((textNode) => xmlNodeText(textNode))
+        .join("")
+    )
+    .filter((value) => value !== "");
+  return paragraphs.join("\n");
+}
+
+function parseDrawingGroupObjects(groupNode, transform, relationships, objects) {
+  for (const child of groupNode?.children || []) {
+    const localName = xmlLocalName(child.name);
+    if (localName === "grpSp") {
+      const properties = xmlChild(child, "grpSpPr");
+      parseDrawingGroupObjects(
+        child,
+        childDrawingTransform(transform, drawingXfrm(xmlChild(properties, "xfrm"))),
+        relationships,
+        objects
+      );
+      continue;
+    }
+    if (localName === "pic") {
+      const shapeProperties = xmlChild(child, "spPr");
+      const box = drawingBox(transform, drawingXfrm(xmlChild(shapeProperties, "xfrm")));
+      const blipFill = xmlChild(child, "blipFill");
+      const blip = xmlChild(blipFill, "blip");
+      const relationship = relationships.get(blip?.attributes?.["r:embed"]);
+      if (!box || !relationship?.path) continue;
+      const sourceRect = xmlChild(blipFill, "srcRect");
+      objects.push({
+        kind: "image",
+        ...box,
+        mediaPath: relationship.path,
+        crop: {
+          left: clamp((Number(sourceRect?.attributes?.l) || 0) / 100000, 0, 0.99),
+          top: clamp((Number(sourceRect?.attributes?.t) || 0) / 100000, 0, 0.99),
+          right: clamp((Number(sourceRect?.attributes?.r) || 0) / 100000, 0, 0.99),
+          bottom: clamp((Number(sourceRect?.attributes?.b) || 0) / 100000, 0, 0.99),
+        },
+      });
+      continue;
+    }
+    if (localName !== "sp") continue;
+    const txBody = xmlChild(child, "txBody");
+    const text = drawingTextValue(txBody);
+    if (!text) continue;
+    const shapeProperties = xmlChild(child, "spPr");
+    const box = drawingBox(transform, drawingXfrm(xmlChild(shapeProperties, "xfrm")));
+    if (!box) continue;
+    const runProperties = xmlDescendants(txBody, "rPr")[0];
+    const paragraphProperties = xmlDescendants(txBody, "pPr")[0];
+    const line = xmlChild(shapeProperties, "ln");
+    objects.push({
+      kind: "text",
+      ...box,
+      text,
+      fontSize: clamp((Number(runProperties?.attributes?.sz) || 1100) / 100, 5, 72),
+      horizontal:
+        paragraphProperties?.attributes?.algn === "ctr"
+          ? "center"
+          : paragraphProperties?.attributes?.algn === "r"
+            ? "right"
+            : "left",
+      fillColor: drawingHexColor(xmlChild(shapeProperties, "solidFill")),
+      lineColor: drawingHexColor(line),
+      lineWidth: Math.max(0, (Number(line?.attributes?.w) || 0) / EMU_PER_POINT),
+    });
+  }
+}
+
+function parseGroupedDrawingAnchors(drawingXml, relationships) {
+  const root = parseXmlTree(drawingXml);
+  const anchors = [];
+  for (const anchorNode of xmlDescendants(root, "oneCellAnchor")) {
+    const groupNode = xmlChild(anchorNode, "grpSp");
+    const from = xmlChild(anchorNode, "from");
+    const extent = xmlChild(anchorNode, "ext");
+    const width = Number(extent?.attributes?.cx) || 0;
+    const height = Number(extent?.attributes?.cy) || 0;
+    if (!groupNode || !from || !(width > 0) || !(height > 0)) continue;
+    const groupProperties = xmlChild(groupNode, "grpSpPr");
+    const groupXfrm = drawingXfrm(xmlChild(groupProperties, "xfrm"));
+    const childWidth = groupXfrm?.childWidth || width;
+    const childHeight = groupXfrm?.childHeight || height;
+    const scaleX = width / Math.max(1, childWidth);
+    const scaleY = height / Math.max(1, childHeight);
+    const transform = {
+      originX: -(groupXfrm?.childOffX || 0) * scaleX,
+      originY: -(groupXfrm?.childOffY || 0) * scaleY,
+      scaleX,
+      scaleY,
+    };
+    const objects = [];
+    parseDrawingGroupObjects(groupNode, transform, relationships, objects);
+    if (!objects.length) continue;
+    anchors.push({
+      anchor: {
+        nativeCol: drawingNumber(from, "col"),
+        nativeColOff: drawingNumber(from, "colOff"),
+        nativeRow: drawingNumber(from, "row"),
+        nativeRowOff: drawingNumber(from, "rowOff"),
+      },
+      widthEmu: width,
+      heightEmu: height,
+      objects,
+    });
+  }
+  return anchors;
+}
+
+function parseVmlLength(value) {
+  const match = String(value || "").trim().match(/^(-?\d+(?:\.\d+)?)(pt|px|in|cm|mm)?$/i);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  const unit = String(match[2] || "pt").toLowerCase();
+  if (unit === "px") return amount * PIXEL_TO_POINT;
+  if (unit === "in") return amount * 72;
+  if (unit === "cm") return (amount / 2.54) * 72;
+  if (unit === "mm") return (amount / 25.4) * 72;
+  return amount;
+}
+
+function parseVmlHeaderFooterImages(vmlXml, relationships) {
+  const root = parseXmlTree(vmlXml);
+  const images = [];
+  for (const shape of xmlDescendants(root, "shape")) {
+    const section = String(shape.attributes.id || "").toUpperCase();
+    if (!/^[LCR][HF]$/.test(section)) continue;
+    const imageData = xmlChild(shape, "imagedata");
+    const relationship = relationships.get(imageData?.attributes?.["o:relid"]);
+    if (!relationship?.path) continue;
+    const style = Object.fromEntries(
+      String(shape.attributes.style || "")
+        .split(";")
+        .map((entry) => entry.split(":").map((part) => part.trim()))
+        .filter((parts) => parts.length === 2 && parts[0])
+    );
+    const width = parseVmlLength(style.width);
+    const height = parseVmlLength(style.height);
+    if (!(width > 0) || !(height > 0)) continue;
+    images.push({
+      section,
+      mediaPath: relationship.path,
+      width,
+      height,
+      marginLeft: parseVmlLength(style["margin-left"]),
+      marginTop: parseVmlLength(style["margin-top"]),
+    });
+  }
+  return images;
+}
+
+function extractWorkbookRenderingMetadata(zipBytes) {
+  const sheets = workbookSheetXmlPaths(zipBytes);
+  const sheetPaths = new Set(sheets.map((sheet) => sheet.path));
+  const entries = unzipEntries(zipBytes, (name) =>
+    name === "xl/styles.xml" ||
+    sheetPaths.has(name) ||
+    name.startsWith("xl/worksheets/_rels/") ||
+    name.startsWith("xl/drawings/")
+  );
+  const stylesXml = xmlText(entries, "xl/styles.xml");
+  const numberFormatIds = cellXfNumberFormatIds(stylesXml);
+  const result = {
+    normalStyleMetrics: parseNormalStyleMetrics(stylesXml),
+    builtinNumberFormatIdsBySheet: new Map(),
+    groupedDrawingsBySheet: new Map(),
+    headerFooterImagesBySheet: new Map(),
+  };
+  const mediaPaths = new Set();
+
+  for (const sheet of sheets) {
+    const sheetXml = xmlText(entries, sheet.path);
+    if (!sheetXml) continue;
+    const builtInFormats = builtInNumberFormatCells(sheetXml, numberFormatIds);
+    if (builtInFormats.size) {
+      result.builtinNumberFormatIdsBySheet.set(sheet.name, builtInFormats);
+    }
+    const sheetRelationships = relationshipTargets(entries, sheet.path);
+    const drawingRelId = sheetXml.match(/<drawing\b[^>]*r:id="([^"]+)"/)?.[1];
+    const drawingPath = sheetRelationships.get(drawingRelId)?.path;
+    if (drawingPath) {
+      const drawingRelationships = relationshipTargets(entries, drawingPath);
+      const anchors = parseGroupedDrawingAnchors(
+        xmlText(entries, drawingPath),
+        drawingRelationships
+      );
+      if (anchors.length) {
+        result.groupedDrawingsBySheet.set(sheet.name, { anchors });
+        for (const anchor of anchors) {
+          for (const object of anchor.objects) {
+            if (object.mediaPath) mediaPaths.add(object.mediaPath);
+          }
+        }
+      }
+    }
+
+    const vmlRelId = sheetXml.match(/<legacyDrawingHF\b[^>]*r:id="([^"]+)"/)?.[1];
+    const vmlPath = sheetRelationships.get(vmlRelId)?.path;
+    if (vmlPath) {
+      const images = parseVmlHeaderFooterImages(
+        xmlText(entries, vmlPath),
+        relationshipTargets(entries, vmlPath)
+      );
+      if (images.length) {
+        result.headerFooterImagesBySheet.set(sheet.name, images);
+        images.forEach((image) => mediaPaths.add(image.mediaPath));
+      }
+    }
+  }
+
+  const mediaEntries = unzipEntries(zipBytes, (name) => mediaPaths.has(name));
+  const attachMedia = (entry) => {
+    const bytes = mediaEntries[entry.mediaPath];
+    const extension = String(entry.mediaPath || "").split(".").pop().toLowerCase();
+    if (!bytes || !SUPPORTED_IMAGE_EXTENSIONS.has(extension)) return false;
+    entry.bytes = bytes;
+    entry.extension = extension;
+    return true;
+  };
+  for (const metadata of result.groupedDrawingsBySheet.values()) {
+    for (const anchor of metadata.anchors) {
+      anchor.objects = anchor.objects.filter(
+        (object) => object.kind !== "image" || attachMedia(object)
+      );
+    }
+  }
+  for (const [sheetName, images] of result.headerFooterImagesBySheet) {
+    result.headerFooterImagesBySheet.set(sheetName, images.filter(attachMedia));
+  }
+  return result;
 }
 
 function manualBreakIds(sheetXml, tagName) {
@@ -3030,6 +3816,14 @@ async function parseWorkbook(message) {
   workbookName = message.name || workbookName;
   inCellImagesBySheet = new Map();
   manualPageBreaksBySheet = new Map();
+  normalStyleMetrics = {
+    fontName: "Calibri",
+    fontSize: 11,
+    maximumDigitWidthPixels: 7,
+  };
+  builtinNumberFormatIdsBySheet = new Map();
+  groupedDrawingsBySheet = new Map();
+  headerFooterImagesBySheet = new Map();
   const zipBytes = new Uint8Array(message.buffer);
   try {
     inCellImagesBySheet = extractInCellImages(zipBytes);
@@ -3040,6 +3834,15 @@ async function parseWorkbook(message) {
     manualPageBreaksBySheet = extractManualPageBreaks(zipBytes);
   } catch (error) {
     console.warn("[Excel PDF] 人工分頁解析失敗，將依自動分頁處理。", error);
+  }
+  try {
+    const metadata = extractWorkbookRenderingMetadata(zipBytes);
+    normalStyleMetrics = metadata.normalStyleMetrics;
+    builtinNumberFormatIdsBySheet = metadata.builtinNumberFormatIdsBySheet;
+    groupedDrawingsBySheet = metadata.groupedDrawingsBySheet;
+    headerFooterImagesBySheet = metadata.headerFooterImagesBySheet;
+  } catch (error) {
+    console.warn("[Excel PDF] OOXML 版面資料解析失敗，將使用相容模式。", error);
   }
   workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(message.buffer);
@@ -3205,6 +4008,11 @@ function collectSubsetText(jobs) {
   for (const job of jobs) {
     const worksheet = job.worksheet;
     chunks.push(String(worksheet.name || ""));
+    for (const anchor of groupedDrawingsBySheet.get(worksheet.name)?.anchors || []) {
+      for (const object of anchor.objects) {
+        if (object.kind === "text" && object.text) chunks.push(object.text);
+      }
+    }
     const headerFooter = worksheet.headerFooter || {};
     for (const key of [
       "oddHeader",

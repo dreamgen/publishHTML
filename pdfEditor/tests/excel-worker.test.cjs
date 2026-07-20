@@ -362,6 +362,31 @@ async function createWorkerHarness() {
     "日期時間混合格式應區分月份與分鐘"
   );
   assert.equal(
+    harness.evaluate('maximumDigitWidthPixelsForFont("Calibri",10)'),
+    6.75,
+    "Calibri 10 的欄寬基準應保留分數 MDW，避免多欄累積成額外分頁"
+  );
+  assert.equal(
+    harness.evaluate(
+      'excelColumnWidthToPoints(10,{maximumDigitWidthPixels:6.75})'
+    ),
+    54,
+    "Excel 欄寬應依活頁簿 Normal style 的 MDW 換算"
+  );
+  assert.equal(
+    harness.evaluate(`(() => {
+      builtinNumberFormatIdsBySheet = new Map([
+        ["日期", new Map([["2:1", 14]])]
+      ]);
+      return cellText({
+        worksheet: { name: "日期" }, row: 2, col: 1,
+        value: new Date(2026, 2, 1), numFmt: "mm-dd-yy"
+      });
+    })()`),
+    "2026/3/1",
+    "OOXML built-in 14 應依繁中地區顯示 yyyy/m/d"
+  );
+  assert.equal(
     harness.evaluate(`cellText({
       value: { sharedFormula: "B8", result: new Date(2026, 4, 11) },
       numFmt: "m/d",
@@ -418,6 +443,94 @@ async function createWorkerHarness() {
     ),
     [{ value: "2026瑞周天達行事曆", size: 26, y: 776 }],
     "單一置中頁首應使用完整列印寬度並維持來源字級"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const calls = [];
+        drawHeaderFooterLine(
+          { drawText(value, options) { calls.push({ value, y: options.y }); } },
+          "&L&10第一行\\n第二行",
+          { name: "多行頁尾", pageSetup: {} },
+          { unicode: {
+            hasGlyph() { return true; },
+            widthOfTextAtSize(value, size) { return value.length * size; },
+          } },
+          {
+            pageWidth: 595,
+            pageHeight: 842,
+            margins: { left: 48, right: 48, header: 40, footer: 30 },
+          },
+          0, 1, "footer", {}
+        );
+        return JSON.stringify(calls);
+      })()`)
+    ),
+    [
+      { value: "第一行", y: 41.5 },
+      { value: "第二行", y: 30 },
+    ],
+    "頁尾換行應逐行向上排列，不得壓成單一行"
+  );
+  assert.equal(
+    harness.evaluate(`(() => {
+      const calls = [];
+      drawBorders(
+        { pushOperators(...operators) { calls.push(operators.length); } },
+        { diagonal: { style: "thin", up: true, down: true } },
+        0, 0, 100, 50, 1
+      );
+      return calls.length;
+    })()`),
+    2,
+    "diagonalUp 與 diagonalDown 應各繪製一條斜線"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const images = parseVmlHeaderFooterImages(
+          "<xml><v:shape id=\\\"LF\\\" style='width:100pt;height:50pt;margin-left:2pt'><v:imagedata o:relid=\\\"rId1\\\"/></v:shape></xml>",
+          new Map([["rId1", { path: "xl/media/footer.png" }]])
+        );
+        return JSON.stringify(images);
+      })()`)
+    ),
+    [
+      {
+        section: "LF",
+        mediaPath: "xl/media/footer.png",
+        width: 100,
+        height: 50,
+        marginLeft: 2,
+        marginTop: 0,
+      },
+    ],
+    "VML 頁尾圖片應保留區段、尺寸與相對位置"
+  );
+  assert.deepEqual(
+    JSON.parse(
+      harness.evaluate(`(() => {
+        const xml = '<xdr:wsDr><xdr:oneCellAnchor>' +
+          '<xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>' +
+          '<xdr:ext cx="1000" cy="1000"/><xdr:grpSp>' +
+          '<xdr:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000" cy="1000"/><a:chOff x="0" y="0"/><a:chExt cx="1000" cy="1000"/></a:xfrm></xdr:grpSpPr>' +
+          '<xdr:pic><xdr:blipFill><a:blip r:embed="rId1"/><a:srcRect l="10000"/></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="100" y="200"/><a:ext cx="500" cy="400"/></a:xfrm></xdr:spPr></xdr:pic>' +
+          '<xdr:sp><xdr:spPr><a:xfrm><a:off x="200" y="700"/><a:ext cx="400" cy="200"/></a:xfrm></xdr:spPr><xdr:txBody><a:p><a:r><a:rPr sz="1100"/><a:t>圖說</a:t></a:r></a:p></xdr:txBody></xdr:sp>' +
+          '</xdr:grpSp></xdr:oneCellAnchor></xdr:wsDr>';
+        const anchors = parseGroupedDrawingAnchors(
+          xml,
+          new Map([["rId1", { path: "xl/media/group.png" }]])
+        );
+        return JSON.stringify({
+          count: anchors.length,
+          kinds: anchors[0].objects.map((item) => item.kind),
+          cropLeft: anchors[0].objects[0].crop.left,
+          text: anchors[0].objects[1].text,
+        });
+      })()`)
+    ),
+    { count: 1, kinds: ["image", "text"], cropLeft: 0.1, text: "圖說" },
+    "DrawingML 群組應保留圖片裁切與文字方塊"
   );
   assert.deepEqual(
     Array.from(
