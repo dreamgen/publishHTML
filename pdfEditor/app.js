@@ -4,6 +4,7 @@ import {
   PDF_WORKSHOP_VERSION,
 } from "./feedback-config.js";
 import {
+  buildPdfFileShareData,
   chooseExportDelivery,
   detectExportEnvironment,
 } from "./export-delivery.mjs";
@@ -6253,11 +6254,7 @@ class PdfWorkshop {
   }
 
   async sharePdfFile(file) {
-    const shareData = {
-      title: file.name,
-      text: "由 PDF 工坊匯出的文件",
-      files: [file],
-    };
+    const shareData = buildPdfFileShareData(file);
     if (navigator.userActivation?.isActive === false) {
       return this.queuePreparedExportShare(file);
     }
@@ -6307,11 +6304,7 @@ class PdfWorkshop {
     button.disabled = true;
     button.textContent = "正在開啟…";
     try {
-      await navigator.share({
-        title: pending.file.name,
-        text: "由 PDF 工坊匯出的文件",
-        files: [pending.file],
-      });
+      await navigator.share(buildPdfFileShareData(pending.file));
       this.pendingExportShare = null;
       pending.resolve("file-share");
       this.closeDialog(this.elements.exportReadyDialog, "shared");

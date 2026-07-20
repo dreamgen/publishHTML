@@ -57,6 +57,7 @@ Manifest 同時接受標準 PDF MIME、常見舊式 PDF MIME、`.pdf` 副檔名�
 ## 行動裝置匯出
 
 - 桌面瀏覽器支援 `showSaveFilePicker` 時，仍會先讓使用者指定檔名與位置。
+- macOS Safari（包含加入 Dock 的 Safari Web App）沒有檔案選擇器時，「匯出 PDF」會直接下載一次；只有明確按「分享」才開啟系統分享。
 - Android／iPhone／iPad 沒有檔案選擇器但支援分享 PDF 檔案時，「匯出 PDF」、擷取所選頁面與儲存快捷鍵會改走系統分享；可從分享面板選擇「儲存到檔案」、雲端硬碟或其他 APP。
 - PDF 建立時間過長而失去瀏覽器操作權限時，會顯示「PDF 已建立」視窗；再次點選「開啟系統分享」即可分享，不會重新產生 PDF。
 - iOS standalone PWA 若無法分享檔案，會阻止 `blob:` PDF 在同一個 WebView 內開啟，並明確提示改用 Safari；其他不支援分享的 standalone PWA 也不會交給不可靠的系統下載管理員。

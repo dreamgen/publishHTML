@@ -31,7 +31,7 @@ export function chooseExportDelivery({
   if (requestedMode === "download" && hasFileHandle) return "file-picker";
   if (
     canShareFile &&
-    (requestedMode === "share" || mobile || standalone)
+    (requestedMode === "share" || mobile)
   ) {
     return "file-share";
   }
@@ -39,4 +39,10 @@ export function chooseExportDelivery({
   if (ios && standalone) return "ios-standalone-unsupported";
   if (mobile && standalone) return "standalone-unsupported";
   return "blob-download";
+}
+
+// Safari/macOS 的 Web Share 在同時提供文字與檔案時，「拷貝」可能產生
+// 兩個相同的檔案項目。PDF 分享只傳遞單一 File；檔名已足以作為標題。
+export function buildPdfFileShareData(file) {
+  return { files: [file] };
 }

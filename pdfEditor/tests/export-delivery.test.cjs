@@ -20,6 +20,28 @@ test("desktop download keeps the selected file handle", async () => {
   );
 });
 
+test("macOS Safari web app download does not open the share sheet", async () => {
+  const { chooseExportDelivery } = await import(moduleUrl);
+  assert.equal(
+    chooseExportDelivery({
+      requestedMode: "download",
+      hasFileHandle: false,
+      canShareFile: true,
+      environment: { mobile: false, standalone: true },
+    }),
+    "blob-download"
+  );
+});
+
+test("PDF file sharing sends one file without duplicate text payload", async () => {
+  const { buildPdfFileShareData } = await import(moduleUrl);
+  const file = { name: "document.pdf", type: "application/pdf" };
+  const shareData = buildPdfFileShareData(file);
+  assert.deepEqual(shareData, { files: [file] });
+  assert.equal(Object.hasOwn(shareData, "title"), false);
+  assert.equal(Object.hasOwn(shareData, "text"), false);
+});
+
 test("Android without a picker uses file sharing", async () => {
   const { chooseExportDelivery } = await import(moduleUrl);
   assert.equal(
@@ -118,5 +140,21 @@ test("iPadOS desktop user agent is detected as iOS mobile", async () => {
       standalone: true,
     }),
     { android: false, ios: true, mobile: true, standalone: true }
+  );
+});
+
+test("macOS Safari is detected as desktop even in standalone mode", async () => {
+  const { detectExportEnvironment } = await import(moduleUrl);
+  assert.deepEqual(
+    detectExportEnvironment({
+      navigatorLike: {
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.5 Safari/605.1.15",
+        platform: "MacIntel",
+        maxTouchPoints: 0,
+      },
+      standalone: true,
+    }),
+    { android: false, ios: false, mobile: false, standalone: true }
   );
 });
