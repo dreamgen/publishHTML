@@ -1395,7 +1395,7 @@ body:not(.view-browse) .page-group-collapsed-row .page-group-collapsed-preview {
 }
 
 .annotation-item.selected::after {
-  content: "拖曳移動・Delete 刪除";
+  content: "拖曳移動・控制點調整大小・Delete 刪除";
   position: absolute;
   left: -1px;
   bottom: calc(100% + 5px);
@@ -1955,13 +1955,94 @@ dialog.dialog-fallback-open {
   filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 4px var(--accent));
 }
 
+.annotation-selection-box {
+  position: absolute;
+  z-index: 6;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .9);
+  pointer-events: none;
+}
+
+.annotation-resize-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 1px 4px rgba(23, 32, 51, .3);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.annotation-resize-handle:hover,
+.annotation-resize-handle:focus-visible {
+  background: var(--accent-dark);
+  transform: scale(1.12);
+}
+
+.annotation-resize-handle.handle-nw {
+  top: -8px;
+  left: -8px;
+  cursor: nwse-resize;
+}
+
+.annotation-resize-handle.handle-ne {
+  top: -8px;
+  right: -8px;
+  cursor: nesw-resize;
+}
+
+.annotation-resize-handle.handle-se {
+  right: -8px;
+  bottom: -8px;
+  cursor: nwse-resize;
+}
+
+.annotation-resize-handle.handle-sw {
+  bottom: -8px;
+  left: -8px;
+  cursor: nesw-resize;
+}
+
 .annotation-image {
   display: block;
+  box-sizing: border-box;
+  padding: 0;
   object-fit: contain;
 }
 
 .annotation-image.selected {
   box-shadow: 0 0 0 1px #fff, 0 0 0 3px rgba(239, 90, 82, .35);
+}
+
+@media (pointer: coarse) {
+  .annotation-resize-handle {
+    width: 20px;
+    height: 20px;
+  }
+
+  .annotation-resize-handle.handle-nw {
+    top: -11px;
+    left: -11px;
+  }
+
+  .annotation-resize-handle.handle-ne {
+    top: -11px;
+    right: -11px;
+  }
+
+  .annotation-resize-handle.handle-se {
+    right: -11px;
+    bottom: -11px;
+  }
+
+  .annotation-resize-handle.handle-sw {
+    bottom: -11px;
+    left: -11px;
+  }
 }
 
 .recent-files {

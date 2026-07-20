@@ -14,6 +14,10 @@ import {
   getContainingPageGroup,
   PAGE_INSERTION_MODE,
 } from "./page-insertion.mjs";
+import {
+  resizeRectFromHandle,
+  transformPointBetweenRects,
+} from "./annotation-resize.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "./vendor/pdfjs/pdf.worker.mjs",
@@ -88,6 +92,7 @@ class PdfWorkshop {
     this.dragDropPosition = "before";
     this.suppressPageClick = false;
     this.annotationDrag = null;
+    this.annotationResize = null;
     this.activeTool = "select";
     this.drawingDraft = null;
     this.drawingFrame = null;
@@ -207,6 +212,7 @@ class PdfWorkshop {
       redoButton: $("#redoButton"),
       rotateButton: $("#rotateButton"),
       deleteButton: $("#deleteButton"),
+      selectToolButton: $("#selectToolButton"),
       textToolButton: $("#textToolButton"),
       penToolButton: $("#penToolButton"),
       highlightToolButton: $("#highlightToolButton"),
@@ -495,6 +501,7 @@ class PdfWorkshop {
       redoButton,
       rotateButton,
       deleteButton,
+      selectToolButton,
       textToolButton,
       penToolButton,
       highlightToolButton,
@@ -708,6 +715,9 @@ class PdfWorkshop {
     redoButton.addEventListener("click", () => this.redo());
     rotateButton.addEventListener("click", () => this.rotateSelectedPages());
     deleteButton.addEventListener("click", () => this.deleteSelection());
+    selectToolButton.addEventListener("click", () =>
+      this.activateDrawingTool("select")
+    );
     textToolButton.addEventListener("click", () => this.toggleTextControls());
     penToolButton.addEventListener("click", () => this.activateDrawingTool("pen"));
     highlightToolButton.addEventListener("click", () =>
@@ -717,8 +727,14 @@ class PdfWorkshop {
     arrowToolButton.addEventListener("click", () =>
       this.activateDrawingTool("arrow")
     );
-    imageToolButton.addEventListener("click", () => annotationImageInput.click());
-    signatureToolButton.addEventListener("click", () => this.openSignatureDialog());
+    imageToolButton.addEventListener("click", () => {
+      this.activateDrawingTool("select");
+      annotationImageInput.click();
+    });
+    signatureToolButton.addEventListener("click", () => {
+      this.activateDrawingTool("select");
+      this.openSignatureDialog();
+    });
     formToolButton.addEventListener("click", () => this.openFormDialog());
     searchToolButton?.addEventListener("click", () =>
       this.toggleSearchControls()
@@ -2255,6 +2271,7 @@ class PdfWorkshop {
     this.elements.redoButton.disabled = !hasDocument || !this.redoStack.length;
     this.elements.rotateButton.disabled = !hasDocument;
     this.elements.deleteButton.disabled = !hasDocument;
+    this.elements.selectToolButton.disabled = !hasDocument;
     this.elements.textToolButton.disabled = !hasDocument;
     [
       this.elements.penToolButton,
@@ -3570,10 +3587,63 @@ class PdfWorkshop {
       }
     }
 
+    const selectedAnnotation = pageRecord.annotations.find(
+      (annotation) => annotation.id === this.selectedAnnotationId
+    );
+    if (selectedAnnotation) {
+      this.renderAnnotationResizeControls(layer, selectedAnnotation);
+    }
+
     if (this.drawingDraft) {
       const draftShape = this.createSvgAnnotation(this.drawingDraft, true);
       if (draftShape) vectorLayer.append(draftShape);
     }
+  }
+
+  renderAnnotationResizeControls(layer, annotation) {
+    const target = [...layer.querySelectorAll("[data-annotation-id]")].find(
+      (element) =>
+        element.dataset.annotationId === annotation.id &&
+        !element.classList.contains("annotation-resize-handle")
+    );
+    if (!target) return;
+    const layerRect = layer.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (!targetRect.width && !targetRect.height) return;
+
+    const minControlSize = 18;
+    const width = Math.max(minControlSize, targetRect.width);
+    const height = Math.max(minControlSize, targetRect.height);
+    const left =
+      targetRect.left - layerRect.left - (width - targetRect.width) / 2;
+    const top =
+      targetRect.top - layerRect.top - (height - targetRect.height) / 2;
+    const box = document.createElement("div");
+    box.className = "annotation-selection-box";
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", "標註大小調整");
+
+    const labels = {
+      nw: "從左上角調整大小",
+      ne: "從右上角調整大小",
+      se: "從右下角調整大小",
+      sw: "從左下角調整大小",
+    };
+    for (const handle of ["nw", "ne", "se", "sw"]) {
+      const control = document.createElement("button");
+      control.className = `annotation-resize-handle handle-${handle}`;
+      control.type = "button";
+      control.dataset.annotationId = annotation.id;
+      control.dataset.resizeHandle = handle;
+      control.setAttribute("aria-label", labels[handle]);
+      control.title = labels[handle];
+      box.append(control);
+    }
+    layer.append(box);
   }
 
   toggleSearchControls() {
@@ -4445,11 +4515,43 @@ class PdfWorkshop {
     this.elements.textToolHint.textContent =
       "文字已加入，可再次準備放置，或直接拖曳文字調整位置。";
     this.renderAnnotations();
-    this.toast("文字已加入，可拖曳調整位置。", "success");
+    this.toast("文字已加入，可拖曳移動並使用控制點調整大小。", "success");
   }
 
   handleAnnotationPointerDown(event) {
     if (!this.currentViewport) return;
+    const resizeHandle = event.target.closest("[data-resize-handle]");
+    if (resizeHandle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const page = this.pages.find((item) => item.id === this.activePageId);
+      const annotation = page?.annotations.find(
+        (item) => item.id === resizeHandle.dataset.annotationId
+      );
+      const selectionBox = resizeHandle.closest(".annotation-selection-box");
+      if (!annotation || !selectionBox) return;
+      const layerRect = this.elements.annotationLayer.getBoundingClientRect();
+      const boxRect = selectionBox.getBoundingClientRect();
+      this.selectedAnnotationId = annotation.id;
+      this.annotationResize = {
+        annotationId: annotation.id,
+        pageId: this.activePageId,
+        handle: resizeHandle.dataset.resizeHandle,
+        original: clonePages([annotation])[0],
+        bounds: {
+          left: boxRect.left - layerRect.left,
+          top: boxRect.top - layerRect.top,
+          width: boxRect.width,
+          height: boxRect.height,
+        },
+        layerRect,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      };
+      this.elements.annotationLayer.setPointerCapture?.(event.pointerId);
+      return;
+    }
     const annotationTarget = event.target.closest("[data-annotation-id]");
     if (
       !annotationTarget &&
@@ -4535,6 +4637,39 @@ class PdfWorkshop {
       return;
     }
 
+    const resize = this.annotationResize;
+    if (resize) {
+      const deltaX = event.clientX - resize.startClientX;
+      const deltaY = event.clientY - resize.startClientY;
+      if (!resize.moved && Math.hypot(deltaX, deltaY) < 3) return;
+      if (!resize.moved) {
+        this.pushHistory();
+        resize.moved = true;
+      }
+      const layer = this.elements.annotationLayer;
+      const pointer = {
+        x: Math.min(
+          layer.clientWidth,
+          Math.max(0, event.clientX - resize.layerRect.left)
+        ),
+        y: Math.min(
+          layer.clientHeight,
+          Math.max(0, event.clientY - resize.layerRect.top)
+        ),
+      };
+      const targetBounds = resizeRectFromHandle({
+        bounds: resize.bounds,
+        handle: resize.handle,
+        pointer,
+        minWidth: 20,
+        minHeight: 18,
+        lockAspect: ["text", "image"].includes(resize.original.type),
+      });
+      this.resizeAnnotationToBounds(resize, targetBounds);
+      this.renderAnnotations();
+      return;
+    }
+
     const drag = this.annotationDrag;
     if (!drag || !drag.item?.isConnected) return;
     const deltaX = event.clientX - drag.startClientX;
@@ -4561,6 +4696,18 @@ class PdfWorkshop {
       this.elements.annotationLayer.hasPointerCapture?.(event.pointerId)
     ) {
       this.elements.annotationLayer.releasePointerCapture(event.pointerId);
+    }
+    const resize = this.annotationResize;
+    if (resize) {
+      if (resize.moved) {
+        this.redoStack = [];
+        this.dirty = true;
+        this.updateUI();
+        this.scheduleAutosave();
+      }
+      this.annotationResize = null;
+      this.renderAnnotations();
+      return;
     }
     if (this.drawingDraft) {
       const draft = this.drawingDraft;
@@ -4618,12 +4765,64 @@ class PdfWorkshop {
   }
 
   renderAnnotationsSelectionOnly() {
-    $$("[data-annotation-id]").forEach((item) => {
+    $$(
+      ".annotation-item[data-annotation-id], .vector-annotation[data-annotation-id]",
+    ).forEach((item) => {
       item.classList.toggle(
         "selected",
         item.dataset.annotationId === this.selectedAnnotationId
       );
     });
+  }
+
+  resizeAnnotationToBounds(resize, targetBounds) {
+    if (!this.currentViewport) return;
+    const page = this.pages.find((item) => item.id === resize.pageId);
+    const annotation = page?.annotations.find(
+      (item) => item.id === resize.annotationId
+    );
+    if (!annotation) return;
+    const original = resize.original;
+
+    if (original.type === "image") {
+      annotation.width = targetBounds.width / this.currentViewport.scale;
+      annotation.height = targetBounds.height / this.currentViewport.scale;
+      [annotation.x, annotation.y] = this.currentViewport.convertToPdfPoint(
+        targetBounds.left,
+        targetBounds.top + targetBounds.height
+      );
+      return;
+    }
+
+    if (original.type === "text") {
+      const scale = targetBounds.width / Math.max(1, resize.bounds.width);
+      annotation.fontSize = Math.min(
+        240,
+        Math.max(4, original.fontSize * scale)
+      );
+      const metrics = this.getAnnotationMetrics(annotation);
+      [annotation.x, annotation.y] = this.currentViewport.convertToPdfPoint(
+        targetBounds.left,
+        targetBounds.top + metrics.height * this.currentViewport.scale
+      );
+      return;
+    }
+
+    if (Array.isArray(original.points)) {
+      annotation.points = original.points.map(([x, y]) => {
+        const [screenX, screenY] =
+          this.currentViewport.convertToViewportPoint(x, y);
+        const transformed = transformPointBetweenRects(
+          { x: screenX, y: screenY },
+          resize.bounds,
+          targetBounds
+        );
+        return this.currentViewport.convertToPdfPoint(
+          transformed.x,
+          transformed.y
+        );
+      });
+    }
   }
 
   eventToPdfPoint(event) {
@@ -5508,7 +5707,6 @@ class PdfWorkshop {
       this.hideSelectedPageText({ clearSelection: true });
     }
     if (
-      tool !== "select" &&
       this.elements.searchControls &&
       !this.elements.searchControls.hidden
     ) {
@@ -5537,15 +5735,18 @@ class PdfWorkshop {
       }
     }
     const buttonMap = {
+      select: this.elements.selectToolButton,
       text: this.elements.textToolButton,
       pen: this.elements.penToolButton,
       highlight: this.elements.highlightToolButton,
       rect: this.elements.rectToolButton,
       arrow: this.elements.arrowToolButton,
     };
-    Object.entries(buttonMap).forEach(([name, button]) =>
-      button.classList.toggle("active", name === tool)
-    );
+    Object.entries(buttonMap).forEach(([name, button]) => {
+      const active = name === tool;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
     this.renderAnnotations();
   }
 
@@ -5564,24 +5765,29 @@ class PdfWorkshop {
       this.activeTool = "text";
       this.elements.drawingControls.hidden = true;
       [
+        this.elements.selectToolButton,
         this.elements.penToolButton,
         this.elements.highlightToolButton,
         this.elements.rectToolButton,
         this.elements.arrowToolButton,
       ].forEach((button) => button.classList.remove("active"));
+      this.elements.selectToolButton.setAttribute("aria-pressed", "false");
+      this.elements.textToolButton.setAttribute("aria-pressed", "true");
       this.elements.annotationText.focus();
     } else {
-      this.activeTool = "select";
-      this.textPlacementArmed = false;
-      this.elements.armTextButton.textContent = "準備放置";
-      this.renderAnnotations();
+      this.activateDrawingTool("select");
     }
   }
 
   closeTextControls() {
     this.elements.textControls.hidden = true;
     this.elements.textToolButton.classList.remove("active");
-    if (this.activeTool === "text") this.activeTool = "select";
+    if (this.activeTool === "text") {
+      this.activeTool = "select";
+      this.elements.selectToolButton.classList.add("active");
+      this.elements.selectToolButton.setAttribute("aria-pressed", "true");
+      this.elements.textToolButton.setAttribute("aria-pressed", "false");
+    }
     this.textPlacementArmed = false;
     this.elements.armTextButton.textContent = "準備放置";
     this.elements.textToolHint.textContent =
@@ -5855,7 +6061,7 @@ class PdfWorkshop {
       },
       { sidebar: false }
     );
-    this.toast("圖片已加入，可拖曳調整位置。", "success");
+    this.toast("圖片已加入，可拖曳移動並使用控制點調整大小。", "success");
   }
 
   getAnnotationImageData(annotation) {
