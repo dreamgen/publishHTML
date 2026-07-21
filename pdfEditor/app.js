@@ -104,6 +104,8 @@ class PdfWorkshop {
     this.annotationFontBytesPromise = null;
     this.signatureDrawing = false;
     this.signatureHasInk = false;
+    this.signatureColor = "#172033";
+    this.signatureLineWidth = 5;
     this.textIndex = new Map();
     this.thumbnailCache = new Map();
     this.annotationImages = new Map();
@@ -384,6 +386,14 @@ class PdfWorkshop {
       signatureCanvas: $("#signatureCanvas"),
       clearSignatureButton: $("#clearSignatureButton"),
       saveSignatureButton: $("#saveSignatureButton"),
+      storeSignatureButton: $("#storeSignatureButton"),
+      savedSignaturesSection: $("#savedSignaturesSection"),
+      savedSignaturesGrid: $("#savedSignaturesGrid"),
+      sigDivider: $("#sigDivider"),
+      sigColorSwatches: $$(".sig-color-swatch"),
+      sigColorCustom: $("#sigColorCustom"),
+      sigColorCustomLabel: $(".sig-color-custom"),
+      sigWidthButtons: $$(".sig-width-btn"),
       formDialog: $("#formDialog"),
       formFieldList: $("#formFieldList"),
       applyFormButton: $("#applyFormButton"),
@@ -833,6 +843,42 @@ class PdfWorkshop {
     this.elements.saveSignatureButton.addEventListener("click", () =>
       this.saveSignature()
     );
+    this.elements.storeSignatureButton.addEventListener("click", () =>
+      this.storeSignatureToLocalStorage()
+    );
+
+    // Color swatches
+    this.elements.sigColorSwatches.forEach((swatch) => {
+      swatch.addEventListener("click", () => {
+        this.signatureColor = swatch.dataset.color;
+        this._applySignatureStyle();
+        this.elements.sigColorSwatches.forEach((s) =>
+          s.classList.remove("sig-color-active")
+        );
+        this.elements.sigColorCustomLabel.classList.remove("sig-color-active");
+        swatch.classList.add("sig-color-active");
+      });
+    });
+    // Custom color picker
+    this.elements.sigColorCustom.addEventListener("input", (event) => {
+      this.signatureColor = event.target.value;
+      this._applySignatureStyle();
+      this.elements.sigColorSwatches.forEach((s) =>
+        s.classList.remove("sig-color-active")
+      );
+      this.elements.sigColorCustomLabel.classList.add("sig-color-active");
+    });
+    // Stroke width buttons
+    this.elements.sigWidthButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.signatureLineWidth = Number(btn.dataset.width);
+        this._applySignatureStyle();
+        this.elements.sigWidthButtons.forEach((b) =>
+          b.classList.remove("sig-width-active")
+        );
+        btn.classList.add("sig-width-active");
+      });
+    });
     this.elements.applyFormButton.addEventListener("click", () =>
       this.applyFormValues()
     );
@@ -6090,8 +6136,167 @@ class PdfWorkshop {
 
   openSignatureDialog() {
     this.clearSignaturePad();
+    this.renderSavedSignatures();
     this.openDialog(this.elements.signatureDialog);
   }
+
+  // ── Saved Signatures (localStorage) ──────────────────────────────────
+
+  /** Key used for localStorage persistence */
+  get _sigStorageKey() {
+    return "pdfeditor_saved_signatures";
+  }
+
+  /** Load the saved signatures array from localStorage */
+  _loadStoredSignatures() {
+    try {
+      return JSON.parse(localStorage.getItem(this._sigStorageKey) || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  /** Persist the saved signatures array to localStorage */
+  _saveStoredSignatures(list) {
+    try {
+      localStorage.setItem(this._sigStorageKey, JSON.stringify(list));
+    } catch {
+      this.toast("無法儲存簽名：本機儲存空間不足或受限。", "error");
+    }
+  }
+
+  /**
+   * Crop the current canvas drawing (same logic as saveSignature) and
+   * return { dataUrl, width, height } or null if nothing is drawn.
+   */
+  _cropCurrentSignature() {
+    if (!this.signatureHasInk) return null;
+    const source = this.elements.signatureCanvas;
+    const context = source.getContext("2d");
+    const pixels = context.getImageData(0, 0, source.width, source.height);
+    let minX = source.width;
+    let minY = source.height;
+    let maxX = 0;
+    let maxY = 0;
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        if (pixels.data[(y * source.width + x) * 4 + 3] > 20) {
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    const padding = 12;
+    const width = Math.max(1, maxX - minX + padding * 2);
+    const height = Math.max(1, maxY - minY + padding * 2);
+    const cropped = document.createElement("canvas");
+    cropped.width = width;
+    cropped.height = height;
+    cropped.getContext("2d").drawImage(
+      source,
+      minX - padding, minY - padding,
+      width, height,
+      0, 0, width, height
+    );
+    return { dataUrl: cropped.toDataURL("image/png"), width, height };
+  }
+
+  /** Save the current signature to localStorage for future reuse */
+  storeSignatureToLocalStorage() {
+    if (!this.signatureHasInk) {
+      this.toast("請先在簽名區手寫簽名。", "error");
+      return;
+    }
+    const cropped = this._cropCurrentSignature();
+    if (!cropped) return;
+    const list = this._loadStoredSignatures();
+    // Limit to 12 saved signatures
+    if (list.length >= 12) {
+      this.toast("最多可儲存 12 個簽名，請先刪除舊簽名。", "error");
+      return;
+    }
+    list.push({
+      id: `sig_${Date.now()}`,
+      dataUrl: cropped.dataUrl,
+      width: cropped.width,
+      height: cropped.height,
+      createdAt: new Date().toISOString(),
+    });
+    this._saveStoredSignatures(list);
+    this.toast("簽名已儲存，下次可直接調用。");
+    this.renderSavedSignatures();
+  }
+
+  /** Delete a saved signature by its id */
+  deleteSavedSignature(id) {
+    const list = this._loadStoredSignatures().filter((s) => s.id !== id);
+    this._saveStoredSignatures(list);
+    this.renderSavedSignatures();
+  }
+
+  /**
+   * Apply a saved signature directly to the document
+   * (same as saveSignature but uses stored data)
+   */
+  applySavedSignature(dataUrl, width, height) {
+    this.closeDialog(this.elements.signatureDialog);
+    this.addImageAnnotationData(dataUrl, width, height, {
+      label: "手寫簽名",
+      preferredWidth: 170,
+    });
+  }
+
+  /** Render the saved signatures gallery in the dialog */
+  renderSavedSignatures() {
+    const list = this._loadStoredSignatures();
+    const section = this.elements.savedSignaturesSection;
+    const grid = this.elements.savedSignaturesGrid;
+    const divider = this.elements.sigDivider;
+    const hasAny = list.length > 0;
+
+    if (hasAny) {
+      section.classList.add("has-signatures");
+      divider.classList.add("has-signatures");
+    } else {
+      section.classList.remove("has-signatures");
+      divider.classList.remove("has-signatures");
+    }
+
+    grid.innerHTML = "";
+    for (const sig of list) {
+      const item = document.createElement("div");
+      item.className = "saved-sig-item";
+      item.title = `建立於 ${new Date(sig.createdAt).toLocaleString("zh-TW")}`;
+
+      const img = document.createElement("img");
+      img.src = sig.dataUrl;
+      img.alt = "已儲存的簽名";
+      item.appendChild(img);
+
+      // Delete button (×)
+      const del = document.createElement("button");
+      del.className = "saved-sig-delete";
+      del.type = "button";
+      del.title = "刪除此簽名";
+      del.textContent = "×";
+      del.setAttribute("aria-label", "刪除此簽名");
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.deleteSavedSignature(sig.id);
+      });
+      item.appendChild(del);
+
+      // Click thumbnail → apply to document
+      item.addEventListener("click", () =>
+        this.applySavedSignature(sig.dataUrl, sig.width, sig.height)
+      );
+
+      grid.appendChild(item);
+    }
+  }
+
 
   bindSignaturePad() {
     const canvas = this.elements.signatureCanvas;
@@ -6107,6 +6312,7 @@ class PdfWorkshop {
       this.signatureDrawing = true;
       this.signatureHasInk = true;
       const context = canvas.getContext("2d");
+      this._applySignatureStyle(context);
       const [x, y] = getPoint(event);
       context.beginPath();
       context.moveTo(x, y);
@@ -6126,14 +6332,20 @@ class PdfWorkshop {
     canvas.addEventListener("pointercancel", finish);
   }
 
+  /** Apply the current color + line-width settings to the canvas context (or the live canvas if none given) */
+  _applySignatureStyle(context) {
+    const ctx = context ?? this.elements.signatureCanvas.getContext("2d");
+    ctx.strokeStyle = this.signatureColor;
+    ctx.lineWidth = this.signatureLineWidth;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }
+
   clearSignaturePad() {
     const canvas = this.elements.signatureCanvas;
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = "#172033";
-    context.lineWidth = 5;
-    context.lineCap = "round";
-    context.lineJoin = "round";
+    this._applySignatureStyle(context);
     this.signatureHasInk = false;
   }
 

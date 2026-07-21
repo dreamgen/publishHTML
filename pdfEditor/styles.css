@@ -3070,10 +3070,299 @@ dialog.dialog-fallback-open {
   touch-action: none;
 }
 
+/* ── Signature Style Toolbar ── */
+.sig-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--surface-raised, #f4f6f9);
+  border: 1px solid var(--line-base, #d8dee7);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+[data-theme="dark"] .sig-toolbar {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.sig-color-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sig-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  background: var(--swatch);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+  padding: 0;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.sig-color-swatch:hover {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.sig-color-swatch.sig-color-active {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px var(--bg-base, #fff), 0 0 0 4px var(--accent, #3b82f6);
+}
+
+[data-theme="dark"] .sig-color-swatch.sig-color-active {
+  box-shadow: 0 0 0 2px var(--bg-base, #1a1f2e), 0 0 0 4px var(--accent, #3b82f6);
+}
+
+/* Custom color picker */
+.sig-color-custom {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px dashed var(--line-strong, #a3adb8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s;
+  position: relative;
+  color: var(--text-secondary, #5a6474);
+  flex-shrink: 0;
+}
+
+.sig-color-custom:hover {
+  transform: scale(1.18);
+  border-color: var(--accent, #3b82f6);
+  color: var(--accent, #3b82f6);
+}
+
+.sig-color-custom.sig-color-active {
+  border-style: solid;
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px var(--bg-base, #fff), 0 0 0 4px var(--accent, #3b82f6);
+}
+
+[data-theme="dark"] .sig-color-custom.sig-color-active {
+  box-shadow: 0 0 0 2px var(--bg-base, #1a1f2e), 0 0 0 4px var(--accent, #3b82f6);
+}
+
+.sig-color-custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+/* Vertical divider between color and width groups */
+.sig-divider-v {
+  width: 1px;
+  height: 22px;
+  background: var(--line-base, #d8dee7);
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .sig-divider-v {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Stroke width buttons */
+.sig-width-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sig-width-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  min-width: 40px;
+}
+
+.sig-width-btn:hover {
+  background: var(--surface-hover, rgba(59, 130, 246, 0.08));
+  border-color: var(--line-base, #d8dee7);
+}
+
+.sig-width-btn.sig-width-active {
+  background: var(--accent-subtle, rgba(59, 130, 246, 0.1));
+  border-color: var(--accent, #3b82f6);
+}
+
+.sig-width-preview {
+  display: block;
+  width: 28px;
+  border-radius: 99px;
+  background: var(--text-primary, #172033);
+  transition: background 0.15s;
+}
+
+[data-theme="dark"] .sig-width-preview {
+  background: #e2e8f0;
+}
+
+.sig-width-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-secondary, #5a6474);
+  line-height: 1;
+}
+
+/* ── Saved Signatures Gallery ── */
+
+.saved-signatures-section {
+  display: none; /* hidden when empty */
+}
+
+.saved-signatures-section.has-signatures {
+  display: block;
+}
+
+.saved-signatures-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.saved-signatures-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary, #5a6474);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.saved-signatures-hint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #8a94a6);
+}
+
+.saved-signatures-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.saved-sig-item {
+  position: relative;
+  border: 1.5px solid var(--line-base, #d8dee7);
+  border-radius: 10px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+  overflow: hidden;
+  width: 130px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .saved-sig-item {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.saved-sig-item:hover {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  transform: translateY(-1px);
+}
+
+.saved-sig-item:active {
+  transform: translateY(0);
+}
+
+.saved-sig-item img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  padding: 4px;
+  /* Show dark ink on light bg */
+}
+
+[data-theme="dark"] .saved-sig-item img {
+  filter: invert(1);
+}
+
+.saved-sig-delete {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.45);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+}
+
+.saved-sig-item:hover .saved-sig-delete {
+  opacity: 1;
+}
+
+.saved-sig-delete:hover {
+  background: rgba(220, 38, 38, 0.85);
+}
+
+.sig-divider {
+  display: none;
+  height: 1px;
+  background: var(--line-base, #d8dee7);
+  margin: 2px 0 12px;
+}
+
+.sig-divider.has-signatures {
+  display: block;
+}
+
+/* "儲存簽名" button with save-icon */
+#storeSignatureButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .split-actions {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
 }
+
+
 
 .form-dialog {
   width: min(620px, calc(100% - 28px));

@@ -831,10 +831,54 @@
           <h2>建立簽名</h2>
         </div>
       </div>
+      <!-- Signature toolbar: color + stroke width -->
+      <div class="sig-toolbar" role="toolbar" aria-label="簽名樣式設定">
+        <div class="sig-color-group" role="group" aria-label="簽名顏色">
+          <button class="sig-color-swatch sig-color-active" id="sigColor0" type="button" data-color="#172033" aria-label="深藍黑" title="深藍黑" style="--swatch:#172033"></button>
+          <button class="sig-color-swatch" id="sigColor1" type="button" data-color="#1a5cbe" aria-label="藍色" title="藍色" style="--swatch:#1a5cbe"></button>
+          <button class="sig-color-swatch" id="sigColor2" type="button" data-color="#b91c1c" aria-label="紅色" title="紅色" style="--swatch:#b91c1c"></button>
+          <button class="sig-color-swatch" id="sigColor3" type="button" data-color="#15803d" aria-label="綠色" title="綠色" style="--swatch:#15803d"></button>
+          <button class="sig-color-swatch" id="sigColor4" type="button" data-color="#7c3aed" aria-label="紫色" title="紫色" style="--swatch:#7c3aed"></button>
+          <label class="sig-color-custom" title="自訂顏色">
+            <input type="color" id="sigColorCustom" value="#172033" aria-label="自訂顏色">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+          </label>
+        </div>
+        <div class="sig-divider-v"></div>
+        <div class="sig-width-group" role="group" aria-label="筆劃粗細">
+          <button class="sig-width-btn" id="sigWidthThin" type="button" data-width="2" aria-label="細" title="細筆劃">
+            <span class="sig-width-preview" style="height:2px"></span>
+            <span class="sig-width-label">細</span>
+          </button>
+          <button class="sig-width-btn sig-width-active" id="sigWidthMid" type="button" data-width="5" aria-label="中" title="中等筆劃">
+            <span class="sig-width-preview" style="height:5px"></span>
+            <span class="sig-width-label">中</span>
+          </button>
+          <button class="sig-width-btn" id="sigWidthThick" type="button" data-width="9" aria-label="粗" title="粗筆劃">
+            <span class="sig-width-preview" style="height:9px"></span>
+            <span class="sig-width-label">粗</span>
+          </button>
+        </div>
+      </div>
+      <!-- Saved signatures gallery -->
+      <div class="saved-signatures-section" id="savedSignaturesSection">
+        <div class="saved-signatures-header">
+          <span class="saved-signatures-label">已儲存的簽名</span>
+          <span class="saved-signatures-hint">點擊直接加入文件</span>
+        </div>
+        <div class="saved-signatures-grid" id="savedSignaturesGrid" aria-label="已儲存的簽名清單">
+          <!-- populated by JS -->
+        </div>
+      </div>
+      <div class="sig-divider" id="sigDivider"></div>
       <canvas id="signatureCanvas" width="720" height="260" aria-label="手寫簽名區"></canvas>
       <p class="dialog-note">可使用滑鼠、觸控或觸控筆。透明背景會保留。</p>
       <div class="dialog-actions split-actions">
         <button class="button button-ghost" id="clearSignatureButton" type="button">清除</button>
+        <button class="button button-ghost" id="storeSignatureButton" type="button" title="儲存此簽名以便日後重複使用">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          儲存簽名
+        </button>
         <span></span>
         <button class="button button-ghost" value="cancel">取消</button>
         <button class="button button-primary" id="saveSignatureButton" type="button">加入文件</button>
