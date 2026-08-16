@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  document.documentElement.dataset.pureReaderBridgeVersion = '0.5.0';
+  if (document.documentElement) document.documentElement.dataset.pureReaderBridgeVersion = '0.5.0';
 
   const DEFAULT_PWA_URL = 'https://dreamgen.github.io/publishHTML/pureReader/';
   const PWA_URL_STORAGE_KEY = 'pureReader.bridgePwaUrl';
@@ -801,17 +801,23 @@
     return Boolean(toolbar);
   }
 
-  window.addEventListener('message', handleBridgeMessage);
-  installStyle();
-  if (!installSaveButton()) {
-    const observer = new MutationObserver(() => {
-      const floating = document.querySelector('#pure-reader-save-pwa.pure-reader-bridge-floating');
-      const toolbar = document.querySelector('#pure-reader-toolbar');
-      if (!floating || !toolbar) return;
-      floating.classList.remove('pure-reader-bridge-floating');
-      toolbar.prepend(floating);
-      observer.disconnect();
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+  function startBridge() {
+    document.documentElement.dataset.pureReaderBridgeVersion = '0.5.0';
+    window.addEventListener('message', handleBridgeMessage);
+    installStyle();
+    if (!installSaveButton()) {
+      const observer = new MutationObserver(() => {
+        const floating = document.querySelector('#pure-reader-save-pwa.pure-reader-bridge-floating');
+        const toolbar = document.querySelector('#pure-reader-toolbar');
+        if (!floating || !toolbar) return;
+        floating.classList.remove('pure-reader-bridge-floating');
+        toolbar.prepend(floating);
+        observer.disconnect();
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
   }
+
+  if (document.body) startBridge();
+  else document.addEventListener('DOMContentLoaded', startBridge, { once: true });
 })();

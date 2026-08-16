@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         PureReader - 快速小說模式
 // @namespace    https://github.com/pure-reader
-// @version      1.10.0
+// @version      1.12.2
 // @description  多站全螢幕閱讀、背景預抓，並可將 10、50 或 100 章預存到 PWA 或本地檔案。
 // @match        https://m.biquge.tw/book/*/*.html
 // @match        https://look.thisiscm.com/*
 // @match        https://look.twword.com/*
 // @match        https://czbooks.net/n/*/*
-// @run-at       document-end
+// @run-at       document-start
 // @inject-into  content
 // @noframes
 // @grant        none
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  document.documentElement.dataset.pureReaderVersion = '1.10.0';
+  if (document.documentElement) document.documentElement.dataset.pureReaderVersion = '1.12.2';
 
   const SITE_PROFILES = [
     {
@@ -62,6 +62,9 @@
   const SELECTORS = SITE_PROFILE.selectors;
 
   const CACHE_LIMIT = 4;
+  const TOC_CACHE_LIMIT = 240;
+  const TOC_COUNTS = [10, 30, 50, 100];
+  const TOC_PREFETCH_COUNT = 10;
   const FONT_MIN = 16;
   const FONT_MAX = 34;
   const FONT_STEP = 2;
@@ -78,14 +81,20 @@
     { id: 'rose', name: '胭脂粉', background: '#f6e8ec', text: '#422a30', panel: 'rgba(246, 232, 236, .94)', surface: '#ead1d8', accent: '#704854', accentText: '#ffffff', border: 'rgba(66, 42, 48, .16)', scheme: 'light' },
     { id: 'amber', name: '暖黃紙', background: '#f5e7c8', text: '#3b2b14', panel: 'rgba(245, 231, 200, .94)', surface: '#e9d5aa', accent: '#6b4d20', accentText: '#ffffff', border: 'rgba(59, 43, 20, .17)', scheme: 'light' },
     { id: 'night', name: '夜間黑', background: '#171613', text: '#e9e2d6', panel: 'rgba(23, 22, 19, .94)', surface: '#2b2924', accent: '#e5dccd', accentText: '#211f1b', border: 'rgba(255, 255, 255, .14)', scheme: 'dark' },
+    { id: 'ide', name: 'IDE 程式碼', background: '#0d1117', text: '#c9d1d9', panel: 'rgba(13, 17, 23, .96)', surface: '#161b22', accent: '#58a6ff', accentText: '#0d1117', border: 'rgba(139, 148, 158, .42)', scheme: 'dark' },
   ];
   const chapterCache = new Map();
+  const tocChapterCache = new Map();
   const inFlight = new Map();
   const originalPageState = new Map();
   let currentURL = canonicalURL(location.href);
   let navigationToken = 0;
   let bootstrapped = false;
   let readerShell = null;
+  let currentChapter = null;
+  let tocRequestToken = 0;
+  let tocEntries = [];
+  let tocCount = TOC_COUNTS.includes(readNumberPreference('tocCount', 10)) ? readNumberPreference('tocCount', 10) : 10;
   let readerFontSize = readNumberPreference('fontSize', 20);
   let themeIndex = readNumberPreference('themeIndex', preferredThemeIndex());
   let layoutIndex = readNumberPreference('layoutIndex', 0);
@@ -253,6 +262,44 @@
     return request;
   }
 
+  function cacheTocChapter(chapter) {
+    tocChapterCache.delete(chapter.url);
+    tocChapterCache.set(chapter.url, chapter);
+    while (tocChapterCache.size > TOC_CACHE_LIMIT) {
+      tocChapterCache.delete(tocChapterCache.keys().next().value);
+    }
+    return chapter;
+  }
+
+  async function loadTocChapter(url) {
+    const normalized = canonicalURL(url);
+    const cached = tocChapterCache.get(normalized);
+    if (cached) return cached;
+    return cacheTocChapter(await loadChapter(normalized));
+  }
+
+  async function prefetchTocDirection(url, direction, count = TOC_PREFETCH_COUNT) {
+    const visited = new Set();
+    let nextURL = url;
+    let loaded = 0;
+    while (nextURL && loaded < count && !visited.has(nextURL)) {
+      visited.add(nextURL);
+      const chapter = await loadTocChapter(nextURL);
+      nextURL = direction === 'previous' ? chapter.previousURL : chapter.nextURL;
+      loaded += 1;
+    }
+  }
+
+  function prefetchTocAround(chapter) {
+    if (!chapter) return;
+    cacheTocChapter(chapter);
+    // 目錄尚未開啟時，先各備妥 10 章；失敗不影響正常閱讀或之後再取。
+    Promise.all([
+      prefetchTocDirection(chapter.previousURL, 'previous'),
+      prefetchTocDirection(chapter.nextURL, 'next'),
+    ]).catch(() => {});
+  }
+
   function preload(url) {
     if (!url || chapterCache.has(url) || inFlight.has(url)) return;
     loadChapter(url).catch(() => {});
@@ -286,7 +333,7 @@
     readerShell = document.createElement('main');
     readerShell.id = 'pure-reader-shell';
     readerShell.setAttribute('aria-label', 'PureReader 小說閱讀模式');
-    readerShell.setAttribute('aria-keyshortcuts', 'Space');
+    readerShell.setAttribute('aria-keyshortcuts', 'Space ArrowRight ArrowLeft Escape');
     readerShell.tabIndex = -1;
     readerShell.innerHTML = `
       <button type="button" id="pure-reader-show" aria-label="顯示 PureReader 閱讀模式" title="顯示閱讀模式">
@@ -311,16 +358,47 @@
         <div id="pure-reader-content"></div>
       </article>
       <nav id="pure-reader-actions" aria-label="章節導覽">
-        <a id="pure-reader-index" rel="index" aria-label="目錄" title="目錄">
+        <button type="button" id="pure-reader-index" aria-label="章節目錄" title="開啟目前章節前後的章節目錄" aria-haspopup="dialog">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h14v17H5zM8 8h8M8 12h8M8 16h6"/></svg>
+        </button>
+        <a id="pure-reader-previous" rel="prev" aria-label="上一章" title="上一章">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5M9 12h8"/></svg>
         </a>
         <a id="pure-reader-next" rel="next">下一章</a>
       </nav>
+      <section id="pure-reader-toc" role="dialog" aria-modal="true" aria-labelledby="pure-reader-toc-title" hidden>
+        <div class="pure-reader-toc-backdrop" data-toc-action="close"></div>
+        <div class="pure-reader-toc-panel">
+          <header class="pure-reader-toc-header">
+            <div>
+              <h2 id="pure-reader-toc-title">章節目錄</h2>
+              <p id="pure-reader-toc-status" aria-live="polite">載入目前章節前後各 10 章</p>
+            </div>
+            <label class="pure-reader-toc-count">每次載入
+              <select id="pure-reader-toc-count" data-toc-action="count" aria-label="每次載入章節數">
+                <option value="10">10 章</option>
+                <option value="30">30 章</option>
+                <option value="50">50 章</option>
+                <option value="100">100 章</option>
+              </select>
+            </label>
+            <button type="button" class="pure-reader-toc-close" data-toc-action="close" aria-label="關閉章節目錄">×</button>
+          </header>
+          <ol id="pure-reader-toc-list"></ol>
+          <footer class="pure-reader-toc-actions">
+            <button type="button" data-toc-action="previous">向前</button>
+            <button type="button" data-toc-action="more">更多</button>
+          </footer>
+        </div>
+      </section>
     `;
 
     document.body.append(readerShell);
     readerShell.querySelector('#pure-reader-toolbar').addEventListener('click', handleToolbarClick);
     readerShell.querySelector('#pure-reader-show').addEventListener('click', () => setReaderOpen(true));
+    readerShell.querySelector('#pure-reader-index').addEventListener('click', openTableOfContents);
+    readerShell.querySelector('#pure-reader-toc').addEventListener('click', handleTableOfContentsClick);
+    readerShell.querySelector('#pure-reader-toc-count').addEventListener('change', handleTocCountChange);
     applyReaderPreferences();
     setReaderOpen(readerOpen, { persist: false });
     return readerShell;
@@ -426,20 +504,214 @@
     applyReaderPreferences();
   }
 
+  function tocElements() {
+    return {
+      dialog: readerShell?.querySelector('#pure-reader-toc'),
+      list: readerShell?.querySelector('#pure-reader-toc-list'),
+      status: readerShell?.querySelector('#pure-reader-toc-status'),
+      count: readerShell?.querySelector('#pure-reader-toc-count'),
+      previous: readerShell?.querySelector('[data-toc-action="previous"]'),
+      more: readerShell?.querySelector('[data-toc-action="more"]'),
+    };
+  }
+
+  function setTocLoading(loading, message = '') {
+    const { status, count, previous, more } = tocElements();
+    if (status && message) status.textContent = message;
+    [count, previous, more].forEach((button) => {
+      if (button) button.disabled = loading;
+    });
+  }
+
+  function renderTableOfContents({ message = '' } = {}) {
+    const { list, status, count, previous, more } = tocElements();
+    if (!list || !status || !count || !previous || !more) return;
+    list.replaceChildren(...tocEntries.map((chapter) => {
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = chapter.url;
+      link.dataset.tocChapterUrl = chapter.url;
+      link.textContent = chapter.heading || chapter.url;
+      if (chapter.url === currentChapter?.url) link.setAttribute('aria-current', 'page');
+      item.append(link);
+      return item;
+    }));
+    count.value = String(tocCount);
+    status.textContent = message || `已列出 ${tocEntries.length} 章`;
+    previous.disabled = !tocEntries[0]?.previousURL;
+    more.disabled = !tocEntries.at(-1)?.nextURL;
+  }
+
+  async function collectTocChapters(startURL, direction, requestToken, count = tocCount) {
+    const chapters = [];
+    const visited = new Set();
+    let url = startURL;
+    while (url && chapters.length < count && !visited.has(url)) {
+      visited.add(url);
+      const chapter = await loadTocChapter(url);
+      if (requestToken !== tocRequestToken) return null;
+      chapters.push(chapter);
+      url = direction === 'previous' ? chapter.previousURL : chapter.nextURL;
+      const { status } = tocElements();
+      if (status) status.textContent = `正在載入目錄… ${chapters.length} / ${count}`;
+    }
+    return { chapters: direction === 'previous' ? chapters.reverse() : chapters, hasMore: Boolean(url) };
+  }
+
+  async function appendTocChapters(startURL, direction) {
+    if (!startURL || !readerShell) return;
+    const requestToken = ++tocRequestToken;
+    setTocLoading(true, `正在載入目錄… 0 / ${tocCount}`);
+    try {
+      const result = await collectTocChapters(startURL, direction, requestToken);
+      if (!result || requestToken !== tocRequestToken) return;
+      tocEntries = direction === 'previous'
+        ? [...result.chapters, ...tocEntries]
+        : [...tocEntries, ...result.chapters];
+      const edge = direction === 'previous' && !result.hasMore
+        ? '已到第一章'
+        : direction === 'next' && !result.hasMore
+          ? '已到最後一章'
+          : '';
+      renderTableOfContents({ message: `新增 ${result.chapters.length} 章，已累積 ${tocEntries.length} 章${edge ? `（${edge}）` : ''}` });
+    } catch (error) {
+      if (requestToken !== tocRequestToken) return;
+      renderTableOfContents({ message: `目錄載入失敗：${error.message}` });
+    }
+  }
+
+  async function initializeTableOfContents() {
+    if (!currentChapter || !readerShell) return;
+    const requestToken = ++tocRequestToken;
+    setTocLoading(true, `正在載入目前章節前後各 ${tocCount} 章…`);
+    try {
+      const [previous, next] = await Promise.all([
+        collectTocChapters(currentChapter.previousURL, 'previous', requestToken),
+        collectTocChapters(currentChapter.nextURL, 'next', requestToken),
+      ]);
+      if (requestToken !== tocRequestToken || !previous || !next) return;
+      tocEntries = [...previous.chapters, currentChapter, ...next.chapters];
+      renderTableOfContents({ message: `目前章節前 ${previous.chapters.length} 章、後 ${next.chapters.length} 章（共 ${tocEntries.length} 章）` });
+    } catch (error) {
+      if (requestToken !== tocRequestToken) return;
+      tocEntries = [currentChapter];
+      renderTableOfContents({ message: `部分目錄載入失敗：${error.message}` });
+    }
+  }
+
+  function openTableOfContents() {
+    if (!currentChapter || !readerShell) return;
+    const { dialog, list, count } = tocElements();
+    if (!dialog || !list || !count) return;
+    if (!dialog.hidden) return;
+    dialog.hidden = false;
+    count.value = String(tocCount);
+    list.replaceChildren();
+    tocEntries = [];
+    initializeTableOfContents();
+  }
+
+  function closeTableOfContents() {
+    const { dialog, list } = tocElements();
+    tocRequestToken += 1;
+    if (dialog) dialog.hidden = true;
+    if (list) list.replaceChildren();
+    tocEntries = [];
+  }
+
+  function handleTocCountChange(event) {
+    const count = Number(event.target.value);
+    if (!TOC_COUNTS.includes(count)) return;
+    tocCount = count;
+    savePreference('tocCount', tocCount);
+    const { status } = tocElements();
+    if (status) status.textContent = `後續「向前／更多」每次載入 ${tocCount} 章；重新開啟時會顯示目前章節前後各 ${tocCount} 章`;
+  }
+
+  function handleTableOfContentsClick(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    const action = target?.closest('[data-toc-action]')?.dataset.tocAction;
+    if (action === 'close') {
+      closeTableOfContents();
+      return;
+    }
+    if (action === 'more') {
+      appendTocChapters(tocEntries.at(-1)?.nextURL, 'next');
+      return;
+    }
+    if (action === 'previous') {
+      appendTocChapters(tocEntries[0]?.previousURL, 'previous');
+      return;
+    }
+
+    const link = target?.closest('a[data-toc-chapter-url]');
+    if (!link?.href) return;
+    event.preventDefault();
+    closeTableOfContents();
+    navigate(link.href);
+  }
+
+  function decorateCodeLikeContent(container) {
+    // 僅在閱讀器複本加入 span，原始網站正文不會被修改；非 IDE 配色下會維持原樣。
+    const textNodes = [];
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue.trim() || node.parentElement?.closest('script, style, pre, code, .pure-reader-code-token')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    const tokenTypes = ['variable', 'plain', 'entity', 'plain', 'parameter', 'plain', 'keyword'];
+    let tokenIndex = 0;
+    let tokenBudget = 1800;
+    for (const textNode of textNodes) {
+      if (tokenBudget <= 0) break;
+      const fragments = textNode.nodeValue.split(/(「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"|'[^']*'|[，。！？；：、…—（）「」『』【】])/u);
+      const replacement = document.createDocumentFragment();
+      for (const fragmentText of fragments) {
+        if (!fragmentText) continue;
+        if (/^\s+$/u.test(fragmentText)) {
+          replacement.append(document.createTextNode(fragmentText));
+          continue;
+        }
+        const isString = /^(「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"|'[^']*')$/u.test(fragmentText);
+        const isSymbol = /^[，。！？；：、…—（）「」『』【】]$/u.test(fragmentText);
+        const chunks = (isString || isSymbol ? [fragmentText] : fragmentText.match(/[\s\S]{1,6}/gu)) || [fragmentText];
+        for (const chunk of chunks) {
+          if (tokenBudget-- <= 0) {
+            replacement.append(document.createTextNode(chunk));
+            continue;
+          }
+          const token = document.createElement('span');
+          const type = isString ? 'string' : isSymbol ? 'symbol' : tokenTypes[tokenIndex++ % tokenTypes.length];
+          token.className = `pure-reader-code-token pure-reader-code-${type}`;
+          token.textContent = chunk;
+          replacement.append(token);
+        }
+      }
+      textNode.replaceWith(replacement);
+    }
+  }
+
   function renderReaderShell(chapter) {
     const shell = ensureReaderShell();
     shell.querySelector('#pure-reader-title').textContent = chapter.heading;
-    shell.querySelector('#pure-reader-content').innerHTML = chapter.contentHTML;
+    const readerContent = shell.querySelector('#pure-reader-content');
+    readerContent.innerHTML = chapter.contentHTML;
+    decorateCodeLikeContent(readerContent);
 
-    const index = shell.querySelector('#pure-reader-index');
-    if (chapter.indexURL) {
-      index.href = chapter.indexURL;
-      index.removeAttribute('aria-disabled');
-      index.classList.remove('pure-reader-disabled');
+    const previous = shell.querySelector('#pure-reader-previous');
+    if (chapter.previousURL) {
+      previous.href = chapter.previousURL;
+      previous.removeAttribute('aria-disabled');
+      previous.classList.remove('pure-reader-disabled');
     } else {
-      index.removeAttribute('href');
-      index.setAttribute('aria-disabled', 'true');
-      index.classList.add('pure-reader-disabled');
+      previous.removeAttribute('href');
+      previous.setAttribute('aria-disabled', 'true');
+      previous.classList.add('pure-reader-disabled');
     }
 
     const next = shell.querySelector('#pure-reader-next');
@@ -465,14 +737,16 @@
     content.innerHTML = chapter.contentHTML;
     document.title = chapter.documentTitle || chapter.heading;
     updateNavigationLinks(chapter);
+    currentURL = chapter.url;
+    currentChapter = chapter;
     renderReaderShell(chapter);
 
-    currentURL = chapter.url;
     if (push) history.pushState({ pureReader: true, url: chapter.url }, '', chapter.url);
     document.documentElement.classList.remove('pure-reader-loading');
     readerShell?.scrollTo({ top: 0, behavior: 'auto' });
 
     preload(chapter.nextURL);
+    prefetchTocAround(chapter);
     dispatchEvent(new CustomEvent('purereader:chapter', { detail: { ...chapter, contentHTML: undefined } }));
   }
 
@@ -495,7 +769,7 @@
   function interceptNavigation(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const target = event.target instanceof Element ? event.target : null;
-    const link = target?.closest(`#pure-reader-next, ${SELECTORS.next}, ${SELECTORS.previous}, ${SELECTORS.navigation} a[rel="next"], ${SELECTORS.navigation} #next_url, ${SELECTORS.navigation} #prev_url, ${SELECTORS.navigation} > a:first-child`);
+    const link = target?.closest(`#pure-reader-previous, #pure-reader-next, ${SELECTORS.next}, ${SELECTORS.previous}, ${SELECTORS.navigation} a[rel="next"], ${SELECTORS.navigation} #next_url, ${SELECTORS.navigation} #prev_url, ${SELECTORS.navigation} > a:first-child`);
     if (!link?.href || link.getAttribute('aria-disabled') === 'true') return;
 
     const destination = canonicalURL(link.href);
@@ -505,11 +779,33 @@
   }
 
   function handleReaderKeydown(event) {
-    if (!readerOpen) return;
-    if (event.code !== 'Space' && event.key !== ' ') return;
+    if (!readerOpen || !readerShell) return;
+    if (event.code !== 'Space' && event.key !== ' ' && event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'Escape') return;
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
 
     const target = event.target instanceof Element ? event.target : null;
+    if (event.key === 'Escape') {
+      const toc = readerShell?.querySelector('#pure-reader-toc');
+      if (toc && !toc.hidden) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeTableOfContents();
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      // 站方往往會在頁面上保留自己的方向鍵導覽；它使用初始頁面的連結，
+      // 因而可能把閱讀器送回舊章節。由閱讀器以目前章節資料接管方向鍵。
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.repeat || !readerShell || document.documentElement.classList.contains('pure-reader-loading')) return;
+      const destination = event.key === 'ArrowRight' ? currentChapter?.nextURL : currentChapter?.previousURL;
+      if (destination) navigate(destination);
+      return;
+    }
+
     if (target?.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
 
     event.preventDefault();
@@ -741,6 +1037,7 @@
       }
 
       #pure-reader-index,
+      #pure-reader-previous,
       #pure-reader-next {
         display: flex;
         box-sizing: border-box;
@@ -750,18 +1047,22 @@
         border-radius: clamp(10px, 1.1vw, 14px);
         background: var(--reader-accent, #343027);
         color: var(--reader-accent-text, #fff);
+        border: 0;
         font: 700 clamp(15px, 1.35vw, 18px)/1 ui-sans-serif, system-ui, sans-serif;
         text-decoration: none;
+        cursor: pointer;
         touch-action: manipulation;
         -webkit-tap-highlight-color: transparent;
       }
 
-      #pure-reader-index {
+      #pure-reader-index,
+      #pure-reader-previous {
         width: clamp(40px, 4.2vw, 52px);
         flex: 0 0 clamp(40px, 4.2vw, 52px);
       }
 
-      #pure-reader-index svg {
+      #pure-reader-index svg,
+      #pure-reader-previous svg {
         width: 21px;
         height: 21px;
         fill: none;
@@ -775,6 +1076,158 @@
         width: auto;
         flex: 1 1 auto;
       }
+
+      #pure-reader-toc[hidden] { display: none; }
+
+      #pure-reader-toc {
+        position: fixed;
+        z-index: 2;
+        inset: 0;
+        display: grid;
+        place-items: end center;
+        color: var(--reader-text, #27231d);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+
+      .pure-reader-toc-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, .48);
+      }
+
+      .pure-reader-toc-panel {
+        position: relative;
+        box-sizing: border-box;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        width: min(760px, 100%);
+        max-height: min(78dvh, 760px);
+        border: 1px solid var(--reader-border, rgba(70, 58, 40, .16));
+        border-radius: 20px 20px 0 0;
+        background: var(--reader-background, #f7f3e8);
+        box-shadow: 0 -12px 42px rgba(0, 0, 0, .3);
+      }
+
+      .pure-reader-toc-header,
+      .pure-reader-toc-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 15px 18px;
+      }
+
+      .pure-reader-toc-header { border-bottom: 1px solid var(--reader-border, rgba(70, 58, 40, .16)); }
+      .pure-reader-toc-header h2 { margin: 0; font-size: 18px; }
+      .pure-reader-toc-header p { margin: 4px 0 0; font-size: 13px; opacity: .72; }
+      .pure-reader-toc-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .pure-reader-toc-count select {
+        min-height: 34px;
+        border: 1px solid var(--reader-border, rgba(70, 58, 40, .16));
+        border-radius: 8px;
+        background: var(--reader-surface, #e8e0d1);
+        color: var(--reader-text, #27231d);
+        font: inherit;
+      }
+
+      .pure-reader-toc-close,
+      .pure-reader-toc-actions button {
+        min-height: 38px;
+        border: 1px solid var(--reader-border, rgba(70, 58, 40, .16));
+        border-radius: 10px;
+        background: var(--reader-surface, #e8e0d1);
+        color: var(--reader-text, #27231d);
+        font: 700 15px/1 ui-sans-serif, system-ui, sans-serif;
+        cursor: pointer;
+      }
+
+      .pure-reader-toc-close { width: 38px; font-size: 24px; }
+      .pure-reader-toc-actions { border-top: 1px solid var(--reader-border, rgba(70, 58, 40, .16)); }
+      .pure-reader-toc-actions button { min-width: 86px; padding: 0 14px; }
+      .pure-reader-toc-actions button:disabled { cursor: not-allowed; opacity: .42; }
+
+      #pure-reader-toc-list {
+        min-height: 80px;
+        margin: 0;
+        padding: 8px 18px 14px 42px;
+        overflow: auto;
+      }
+
+      #pure-reader-toc-list li { padding: 0; }
+      #pure-reader-toc-list a {
+        display: block;
+        padding: 11px 4px;
+        border-bottom: 1px solid var(--reader-border, rgba(70, 58, 40, .12));
+        color: var(--reader-text, #27231d);
+        font-size: 16px;
+        line-height: 1.45;
+        text-decoration: none;
+      }
+
+      #pure-reader-toc-list a[aria-current="page"] {
+        color: var(--reader-accent, #343027);
+        font-weight: 800;
+      }
+
+      #pure-reader-shell[data-theme="ide"] {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      }
+
+      #pure-reader-shell[data-theme="ide"] #pure-reader-title::before { content: '// '; color: #8b949e; }
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content {
+        line-height: 1.95;
+        letter-spacing: 0;
+        counter-reset: pure-reader-code-line;
+      }
+
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content::before,
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content::after {
+        display: block;
+        color: #8b949e;
+        font: .8em/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content::before { content: '/* chapter.render() */'; margin-bottom: 1.1em; }
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content::after { content: '// EOF'; margin-top: .5em; }
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content p {
+        position: relative;
+        padding-left: 3.7em;
+        text-indent: 0;
+      }
+
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content p::before {
+        position: absolute;
+        left: 0;
+        width: 2.7em;
+        color: #8b949e;
+        content: counter(pure-reader-code-line, decimal-leading-zero);
+        counter-increment: pure-reader-code-line;
+        text-align: right;
+        user-select: none;
+      }
+
+      #pure-reader-shell[data-theme="ide"] #pure-reader-content p::after {
+        color: #ff7b72;
+        content: ';';
+        padding-left: .08em;
+      }
+
+      /* GitHub Dark / IDE 類型的語法色彩；一般配色不會顯示這些覆寫。 */
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-plain { color: #c9d1d9; }
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-keyword { color: #ff7b72; }
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-variable { color: #79c0ff; }
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-entity { color: #7ee787; }
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-parameter { color: #d2a8ff; }
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-string { color: #a5d6ff; }
+      #pure-reader-shell[data-theme="ide"] .pure-reader-code-symbol { color: #ff7b72; }
 
       html.pure-reader-loading #pure-reader-shell {
         cursor: progress;
@@ -808,6 +1261,13 @@
         #pure-reader-layout {
           min-width: 100px;
         }
+
+        .pure-reader-toc-header {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .pure-reader-toc-count { margin-left: 0; }
       }
     `;
     (document.head || document.documentElement).append(style);
@@ -820,16 +1280,18 @@
     if (!chapter || !content) return false;
 
     bootstrapped = true;
+    document.documentElement.dataset.pureReaderVersion = '1.12.2';
     cacheChapter(chapter);
+    currentChapter = chapter;
     content.innerHTML = chapter.contentHTML;
     updateNavigationLinks(chapter);
     installStyle();
     renderReaderShell(chapter);
     cleanLiveContent(content);
     document.addEventListener('click', interceptNavigation, true);
-    document.addEventListener('keydown', handleReaderKeydown, true);
     addEventListener('popstate', () => navigate(location.href, { push: false }));
     preload(chapter.nextURL);
+    prefetchTocAround(chapter);
     return true;
   }
 
@@ -845,5 +1307,7 @@
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
+  // 在 document-start 於 window 捕獲階段先註冊，才能先於網站自己的方向鍵導覽攔截事件。
+  window.addEventListener('keydown', handleReaderKeydown, true);
   if (!bootstrap()) watchForChapter();
 })();

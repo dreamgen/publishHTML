@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="htmlShareBg512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22d3ee;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0891b2;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="htmlShareCloud512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#e0f2fe;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" ry="100" fill="url(#htmlShareBg512)"/>
+
+  <!-- Cloud shape -->
+  <path d="M150 315 a64 64 0 0 1 10.6-127 A85.3 85.3 0 0 1 325.3 165 a58.6 58.6 0 0 1 37.3 108.3 a53.3 53.3 0 0 1 -16 41 Z"
+        fill="url(#htmlShareCloud512)" opacity="0.95"/>
+
+  <!-- Upload arrow -->
+  <path d="M256 267 V160 M256 160 L208 208 M256 160 L304 208"
+        fill="none" stroke="#0891b2" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Base line under arrow (representing the shared page) -->
+  <rect x="208" y="299" width="96" height="21" rx="10.5" fill="#0891b2" opacity="0.85"/>
+</svg>

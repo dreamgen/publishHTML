@@ -2,5 +2,9 @@ name = "purereader-proxy-cf"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
 
+[[r2_buckets]]
+binding = "HTML_BUCKET"
+bucket_name = "htmlshare-uploads"
+
 [observability]
 enabled = true

@@ -133,6 +133,23 @@
 
 ---
 
+### ☁️ htmlShare — 單頁 HTML 分享工具 (`htmlShare/`)
+
+> 上傳一份 HTML 檔案（例如 AI 產生的網頁），取得一個網址即可分享給其他人瀏覽
+
+**功能：**
+- 拖放或選擇 `.html` 檔案上傳，也可直接貼上 HTML 原始碼
+- 上傳後立即取得一個短網址（`.../s/xxxxxxxx`）與對應 QR Code，方便手機掃描分享
+- 一鍵複製連結、開啟新分頁預覽
+- 本機瀏覽器保留上傳紀錄（僅存在自己裝置上，不會上傳到任何地方）
+- 單檔上限 5MB，任何人只要有連結就能上傳與瀏覽
+
+**安裝：** 開啟 `/htmlShare/` 後，點選「加入主畫面」即可安裝為獨立 App。
+
+**後端：** 沿用 `pureReader` 既有的 `purereader-proxy-cf` Worker（同一個 Cloudflare Worker 身兼 CORS 代理與 htmlShare 上傳／分享，不用另外部署）。首次啟用 htmlShare 功能，只需在 `purereader-proxy-cf/` 建立一次 R2 bucket 並重新部署（見 `purereader-proxy-cf/README.md`），htmlShare 前端已預設指向這個 Worker 的網址。
+
+---
+
 ## 技術架構
 
 | 項目 | 說明 |

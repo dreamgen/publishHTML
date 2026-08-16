@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="htmlShareBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22d3ee;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0891b2;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="htmlShareCloud" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#e0f2fe;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="192" height="192" rx="38" ry="38" fill="url(#htmlShareBg)"/>
+
+  <!-- Cloud shape -->
+  <path d="M56 118 a24 24 0 0 1 4-47.6 A32 32 0 0 1 122 62 a22 22 0 0 1 14 40.6 a20 20 0 0 1 -6 15.4 Z"
+        fill="url(#htmlShareCloud)" opacity="0.95"/>
+
+  <!-- Upload arrow -->
+  <path d="M96 100 V60 M96 60 L78 78 M96 60 L114 78"
+        fill="none" stroke="#0891b2" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Base line under arrow (representing the shared page) -->
+  <rect x="78" y="112" width="36" height="8" rx="4" fill="#0891b2" opacity="0.85"/>
+</svg>

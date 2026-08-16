@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>htmlShare — 上傳單一 HTML 並分享</title>
+  <meta name="description" content="上傳單一 HTML 檔案（例如 AI 產生的網頁），取得一個網址即可分享給其他人瀏覽">
+
+  <!-- PWA Setup -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/htmlShare-192.svg">
+  <link rel="apple-touch-icon" href="./icons/htmlShare-192.svg">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0891b2">
+
+  <!-- React & Babel via CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- QR Code generator -->
+  <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+
+  <style>
+    body {
+      background: linear-gradient(135deg, #0f172a 0%, #164e63 100%);
+      color: #f8fafc;
+      min-height: 100vh;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      overflow-x: hidden;
+    }
+
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    .glass-card {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.2s ease;
+    }
+
+    .bg-gradient-text {
+      background: linear-gradient(135deg, #22d3ee 0%, #67e8f9 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .drop-zone {
+      border: 2px dashed rgba(148, 163, 184, 0.4);
+      transition: all 0.2s ease;
+    }
+    .drop-zone.dragging {
+      border-color: #22d3ee;
+      background: rgba(34, 211, 238, 0.08);
+    }
+
+    .fade-in {
+      animation: fadeIn 0.4s ease-out forwards;
+      opacity: 0;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+    ::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.8); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 1); }
+
+    textarea, input { font-family: inherit; }
+  </style>
+</head>
+<body class="relative">
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const STORAGE_WORKER_URL = 'htmlShare_workerUrl';
+    const STORAGE_HISTORY = 'htmlShare_history';
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const HISTORY_LIMIT = 50;
+    // 沿用 pureReader 既有的 purereader-proxy-cf Worker（同一次部署身兼代理 + htmlShare 後端）
+    const DEFAULT_WORKER_URL = 'https://purereader-proxy-cf.dreamgen-dev.workers.dev';
+
+    // ── Icons ────────────────────────────────────────────────────────────
+    const IconUpload = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+    );
+    const IconCopy = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+    );
+    const IconExternalLink = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+    );
+    const IconSettings = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    );
+    const IconCheck = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    );
+    const IconTrash = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+    );
+    const IconFileText = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+    );
+
+    function formatSize(bytes) {
+      if (!bytes) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return iso;
+      }
+    }
+
+    function loadHistory() {
+      try {
+        const raw = localStorage.getItem(STORAGE_HISTORY);
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveHistory(list) {
+      try {
+        localStorage.setItem(STORAGE_HISTORY, JSON.stringify(list.slice(0, HISTORY_LIMIT)));
+      } catch {}
+    }
+
+    // ── Settings panel ───────────────────────────────────────────────────
+    function SettingsPanel({ workerUrl, onSave, onClose }) {
+      const [value, setValue] = useState(workerUrl || '');
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
+          <div className="glass-panel rounded-2xl p-6 max-w-lg w-full fade-in" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-bold mb-2">後端網址設定</h2>
+            <p className="text-sm text-slate-400 mb-4">
+              預設已指向 pureReader 共用的 <code className="text-cyan-300">purereader-proxy-cf</code> Worker（見 <code className="text-cyan-300">purereader-proxy-cf/README.md</code>）。
+              如果你改了 workers.dev 子網域或改用自訂網域，再到這裡更新：
+              <br /><code className="text-cyan-300 break-all">https://purereader-proxy-cf.你的-subdomain.workers.dev</code>
+            </p>
+            <input
+              type="text"
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              placeholder="https://htmlshare-cf.xxxx.workers.dev"
+              className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-3 outline-none mb-4"
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-700/50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => { onSave(value.trim().replace(/\/+$/, '')); onClose(); }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-cyan-600 hover:bg-cyan-500 transition-colors"
+              >
+                儲存
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── QR Code ──────────────────────────────────────────────────────────
+    function QrCode({ text }) {
+      const canvasRef = useRef(null);
+      useEffect(() => {
+        if (canvasRef.current && window.QRCode && text) {
+          window.QRCode.toCanvas(canvasRef.current, text, { width: 168, margin: 1, color: { dark: '#0f172a', light: '#f0fdfa' } }, () => {});
+        }
+      }, [text]);
+      return <canvas ref={canvasRef} className="rounded-xl" />;
+    }
+
+    // ── Result panel ─────────────────────────────────────────────────────
+    function ResultPanel({ result, onReset }) {
+      const [copied, setCopied] = useState(false);
+
+      const copyUrl = async () => {
+        try {
+          await navigator.clipboard.writeText(result.url);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {
+          // 部分瀏覽器 clipboard API 需要 https / 使用者互動，失敗就靜默略過
+        }
+      };
+
+      return (
+        <div className="glass-panel rounded-2xl p-6 fade-in">
+          <div className="flex items-center gap-2 mb-4 text-emerald-400">
+            <IconCheck className="w-5 h-5" />
+            <h2 className="text-lg font-bold">上傳成功！</h2>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="flex-shrink-0 flex items-start justify-center">
+              <div className="bg-white p-2 rounded-xl">
+                <QrCode text={result.url} />
+              </div>
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-slate-400 mb-1">分享網址</p>
+              <div className="flex gap-2 mb-4">
+                <input
+                  readOnly
+                  value={result.url}
+                  onFocus={e => e.target.select()}
+                  className="flex-1 min-w-0 bg-slate-800/50 border border-slate-700 text-cyan-300 text-sm rounded-xl p-2.5 outline-none font-mono"
+                />
+                <button
+                  onClick={copyUrl}
+                  className="px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 transition-colors flex items-center gap-1.5 text-sm font-semibold whitespace-nowrap"
+                >
+                  {copied ? <IconCheck className="w-4 h-4" /> : <IconCopy className="w-4 h-4" />}
+                  {copied ? '已複製' : '複製'}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-3 text-sm">
+                <a
+                  href={result.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl glass-card hover:border-cyan-500/40 transition-colors flex items-center gap-1.5"
+                >
+                  <IconExternalLink className="w-4 h-4" /> 在新分頁開啟預覽
+                </a>
+                <button
+                  onClick={onReset}
+                  className="px-4 py-2 rounded-xl glass-card hover:border-cyan-500/40 transition-colors"
+                >
+                  再上傳一個
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 mt-4">
+                {result.title} · {formatSize(result.size)} · {formatDate(result.uploadedAt)}
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Upload form ──────────────────────────────────────────────────────
+    function UploadForm({ workerUrl, onUploaded, onNeedSettings }) {
+      const [mode, setMode] = useState('file'); // 'file' | 'paste'
+      const [fileName, setFileName] = useState('');
+      const [htmlContent, setHtmlContent] = useState('');
+      const [title, setTitle] = useState('');
+      const [dragging, setDragging] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const fileInputRef = useRef(null);
+
+      const extractTitle = (html) => {
+        const m = html.match(/<title>(.*?)<\/title>/is);
+        return m && m[1] ? m[1].trim() : '';
+      };
+
+      const readFile = useCallback((file) => {
+        if (!file) return;
+        if (!/\.(html?|htm)$/i.test(file.name) && file.type !== 'text/html') {
+          setError('請選擇 .html 檔案');
+          return;
+        }
+        if (file.size > MAX_BYTES) {
+          setError(`檔案過大（${formatSize(file.size)}），上限為 ${formatSize(MAX_BYTES)}`);
+          return;
+        }
+        setError(null);
+        setFileName(file.name);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const content = e.target.result;
+          setHtmlContent(content);
+          if (!title) {
+            const extracted = extractTitle(content);
+            setTitle(extracted || file.name.replace(/\.(html?|htm)$/i, ''));
+          }
+        };
+        reader.readAsText(file);
+      }, [title]);
+
+      const handleUpload = async () => {
+        if (!workerUrl) { onNeedSettings(); return; }
+        if (!htmlContent.trim()) { setError('請先選擇檔案或貼上 HTML 內容'); return; }
+
+        setLoading(true);
+        setError(null);
+        try {
+          const res = await fetch(`${workerUrl}/api/upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ html: htmlContent, title: title || fileName || '未命名分享' }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `上傳失敗（HTTP ${res.status}）`);
+          onUploaded(data);
+        } catch (err) {
+          setError(err.message === 'Failed to fetch'
+            ? '無法連上後端，請確認 Worker 網址是否正確、已成功部署'
+            : err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="glass-panel rounded-2xl p-6 fade-in">
+          <div className="flex gap-2 mb-5">
+            <button
+              onClick={() => setMode('file')}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === 'file' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
+            >
+              選擇檔案
+            </button>
+            <button
+              onClick={() => setMode('paste')}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === 'paste' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
+            >
+              貼上原始碼
+            </button>
+          </div>
+
+          {mode === 'file' ? (
+            <div
+              className={`drop-zone rounded-2xl p-8 text-center cursor-pointer ${dragging ? 'dragging' : ''}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => {
+                e.preventDefault();
+                setDragging(false);
+                readFile(e.dataTransfer.files?.[0]);
+              }}
+            >
+              <IconUpload className="w-10 h-10 mx-auto mb-3 text-slate-400" />
+              {fileName ? (
+                <p className="text-slate-200 font-medium flex items-center justify-center gap-2">
+                  <IconFileText className="w-4 h-4" /> {fileName}
+                </p>
+              ) : (
+                <>
+                  <p className="text-slate-300 mb-1">拖放 .html 檔案到這裡，或點擊選擇</p>
+                  <p className="text-xs text-slate-500">單檔上限 {formatSize(MAX_BYTES)}</p>
+                </>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".html,.htm,text/html"
+                className="hidden"
+                onChange={e => readFile(e.target.files?.[0])}
+              />
+            </div>
+          ) : (
+            <textarea
+              value={htmlContent}
+              onChange={e => setHtmlContent(e.target.value)}
+              placeholder="貼上完整的 HTML 原始碼（<!DOCTYPE html> ... </html>）"
+              rows={10}
+              className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-3 outline-none font-mono resize-y"
+            />
+          )}
+
+          <div className="mt-4">
+            <label className="text-sm text-slate-400 block mb-1">標題（選填，會顯示在分享頁與紀錄裡）</label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="例如：AI 產生的計算機小工具"
+              className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none"
+            />
+          </div>
+
+          {error && (
+            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-900/10 p-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={handleUpload}
+            disabled={loading || !htmlContent.trim()}
+            className="mt-5 w-full py-3 rounded-xl font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                上傳中…
+              </>
+            ) : (
+              <>
+                <IconUpload className="w-4 h-4" /> 上傳並取得分享網址
+              </>
+            )}
+          </button>
+        </div>
+      );
+    }
+
+    // ── History ──────────────────────────────────────────────────────────
+    function HistoryList({ history, onRemove }) {
+      if (history.length === 0) return null;
+      return (
+        <div className="mt-8 fade-in">
+          <h2 className="text-sm font-semibold text-slate-400 mb-3">本機上傳紀錄（僅存在這個裝置的瀏覽器）</h2>
+          <div className="space-y-2">
+            {history.map(item => (
+              <div key={item.id} className="glass-card rounded-xl p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{item.title}</p>
+                  <p className="text-xs text-slate-500 font-mono truncate">{item.url}</p>
+                  <p className="text-xs text-slate-600">{formatDate(item.uploadedAt)} · {formatSize(item.size)}</p>
+                </div>
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="開啟"
+                  className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-300 transition-colors"
+                >
+                  <IconExternalLink className="w-4 h-4" />
+                </a>
+                <button
+                  title="複製連結"
+                  onClick={() => navigator.clipboard?.writeText(item.url).catch(() => {})}
+                  className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-300 transition-colors"
+                >
+                  <IconCopy className="w-4 h-4" />
+                </button>
+                <button
+                  title="從紀錄移除（不會刪除伺服器上的檔案）"
+                  onClick={() => onRemove(item.id)}
+                  className="p-2 rounded-lg hover:bg-slate-700/50 text-red-400 transition-colors"
+                >
+                  <IconTrash className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── App ──────────────────────────────────────────────────────────────
+    function App() {
+      const [workerUrl, setWorkerUrl] = useState(() => localStorage.getItem(STORAGE_WORKER_URL) || DEFAULT_WORKER_URL);
+      const [showSettings, setShowSettings] = useState(false);
+      const [result, setResult] = useState(null);
+      const [history, setHistory] = useState(loadHistory);
+
+      const handleSaveWorkerUrl = (url) => {
+        setWorkerUrl(url);
+        try { localStorage.setItem(STORAGE_WORKER_URL, url); } catch {}
+      };
+
+      const handleUploaded = (data) => {
+        setResult(data);
+        const entry = { id: data.id, url: data.url, title: data.title, size: data.size, uploadedAt: data.uploadedAt };
+        const next = [entry, ...history.filter(h => h.id !== data.id)];
+        setHistory(next);
+        saveHistory(next);
+      };
+
+      const handleRemoveHistory = (id) => {
+        const next = history.filter(h => h.id !== id);
+        setHistory(next);
+        saveHistory(next);
+      };
+
+      return (
+        <div className="container mx-auto px-4 py-8 max-w-3xl">
+          <header className="mb-8 fade-in flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-2">
+                <span className="bg-gradient-text">htmlShare</span>
+              </h1>
+              <p className="text-slate-400 text-sm max-w-md">
+                上傳一份 HTML 檔案（例如 AI 產生的網頁），拿到一個網址就能分享給別人瀏覽。
+              </p>
+            </div>
+            <button
+              onClick={() => setShowSettings(true)}
+              title="後端網址設定"
+              className="p-2.5 rounded-xl glass-card hover:border-cyan-500/40 transition-colors flex-shrink-0"
+            >
+              <IconSettings className="w-5 h-5 text-slate-300" />
+            </button>
+          </header>
+
+          {result ? (
+            <ResultPanel result={result} onReset={() => setResult(null)} />
+          ) : (
+            <UploadForm
+              workerUrl={workerUrl}
+              onUploaded={handleUploaded}
+              onNeedSettings={() => setShowSettings(true)}
+            />
+          )}
+
+          <HistoryList history={history} onRemove={handleRemoveHistory} />
+
+          {showSettings && (
+            <SettingsPanel
+              workerUrl={workerUrl}
+              onSave={handleSaveWorkerUrl}
+              onClose={() => setShowSettings(false)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+
+  <!-- Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(registration => {
+            console.log('SW registered: ', registration);
+          })
+          .catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+          });
+      });
+    }
+  </script>
+</body>
+</html>
