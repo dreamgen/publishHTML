@@ -161,7 +161,7 @@ class PdfWorkshop {
     } catch {
       savedViewMode = null;
     }
-    this.viewMode = savedViewMode === "continuous" ? "continuous" : "single";
+    this.viewMode = savedViewMode === "single" ? "single" : "continuous";
     this.lastPageViewMode = this.viewMode;
     let savedBrowseZoom = NaN;
     try {
