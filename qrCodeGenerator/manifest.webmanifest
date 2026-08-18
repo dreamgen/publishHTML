@@ -1,0 +1,59 @@
+{
+  "id": "qrCodeGenerator",
+  "name": "QRCode 產生器",
+  "short_name": "QRCode產生器",
+  "description": "輸入或貼上任意網址／文字，即可產生可美化（標題、色彩、中央圖示）的 QR Code 圖片，並支援下載與分享",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#0d9488",
+  "lang": "zh-TW",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/qrCodeGenerator-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/qrCodeGenerator-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/qrCodeGenerator-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "產生 QRCode",
+      "short_name": "產生",
+      "description": "快速開啟 QRCode 產生器",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./icons/qrCodeGenerator-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": {
+      "title": "st_title",
+      "text": "st_text",
+      "url": "st_url"
+    }
+  }
+}

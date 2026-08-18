@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QRCode 產生器</title>
+    <meta name="description" content="輸入或貼上任意網址／文字，即可產生可美化的 QR Code 圖片，並支援下載與分享（含 LINE）">
+
+    <!-- PWA Setup -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="./icons/qrCodeGenerator-192.svg">
+    <link rel="apple-touch-icon" href="./icons/qrCodeGenerator-192.svg">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0d9488">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- QRious：純前端 QR Code 產生引擎 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+
+    <style>
+        html, body { height: 100%; }
+        body {
+            background: linear-gradient(180deg, #f0fdfa 0%, #f8fafc 60%);
+            min-height: 100dvh;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* QRCode 美化選項的可選取小方塊／色塊 */
+        .qrtool-chip { border: 2px solid transparent; transition: box-shadow .15s ease, border-color .15s ease; }
+        .qrtool-chip.active { border-color: #059669; box-shadow: 0 0 0 3px rgba(5,150,105,0.18); }
+
+        #toast {
+            transition: opacity .25s ease, transform .25s ease;
+        }
+    </style>
+</head>
+<body class="relative flex flex-col items-center px-4 pb-10 pt-6">
+
+    <div class="w-full max-w-md">
+        <!-- Header -->
+        <header class="flex items-center gap-3 mb-5">
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center shadow-md shadow-teal-900/20 flex-shrink-0">
+                <i data-lucide="qr-code" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-gray-800">QRCode 產生器</h1>
+                <p class="text-xs text-gray-500">獨立 PWA・可離線使用</p>
+            </div>
+        </header>
+
+        <!-- Main Card -->
+        <main class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+            <div class="flex flex-col items-center text-center w-full">
+                <p class="text-xs text-gray-500 mb-3">輸入或貼上網址／文字，即可產生 QR Code 圖片並分享（含 LINE）</p>
+
+                <div class="w-full flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2 mb-3">
+                    <input type="text" id="qrtool-input" placeholder="https://..." inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                        class="bg-transparent border-none text-sm text-gray-700 flex-grow px-2 py-1 outline-none w-full"
+                        oninput="scheduleQrToolRender()">
+                    <button onclick="pasteQrToolInput()" class="bg-gray-200 text-gray-600 text-xs font-bold px-3 py-2 rounded-md hover:bg-gray-300 transition-colors active:scale-95 flex-shrink-0 flex items-center gap-1">
+                        <i data-lucide="clipboard-paste" class="w-3.5 h-3.5"></i>貼上
+                    </button>
+                </div>
+
+                <button type="button" onclick="toggleQrToolDecoPanel()" class="w-full flex items-center justify-between px-3 py-2 mb-3 bg-pink-50 text-pink-700 rounded-lg text-xs font-bold">
+                    <span class="flex items-center gap-1.5"><i data-lucide="palette" class="w-3.5 h-3.5"></i>美化選項（選填）</span>
+                    <i id="qrtool-deco-chevron" data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform"></i>
+                </button>
+                <div id="qrtool-deco-panel" class="w-full hidden mb-3 text-left space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <div>
+                        <label class="flex items-center gap-2 text-xs font-bold text-gray-600 mb-1">
+                            <input type="checkbox" id="qrtool-deco-title-enable" onchange="onQrToolDecoFieldChange()"> 標題
+                        </label>
+                        <input type="text" id="qrtool-deco-title-text" maxlength="30" placeholder="標題文字"
+                            class="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-emerald-400 mb-1.5" oninput="onQrToolDecoFieldChange()">
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <button type="button" data-title-style="header" onclick="selectQrToolTitleStyle('header')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">頁首色塊</button>
+                            <button type="button" data-title-style="below" onclick="selectQrToolTitleStyle('below')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">純文字（QR下方）</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="flex items-center gap-2 text-xs font-bold text-gray-600 mb-1">
+                            <input type="checkbox" id="qrtool-deco-subtitle-enable" onchange="onQrToolDecoFieldChange()"> 副標題
+                        </label>
+                        <input type="text" id="qrtool-deco-subtitle-text" maxlength="40" placeholder="副標題文字"
+                            class="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-emerald-400" oninput="onQrToolDecoFieldChange()">
+                    </div>
+                    <div>
+                        <p class="text-xs font-bold text-gray-600 mb-1">中央內容（用於快速辨識，最多覆蓋中央一小塊）</p>
+                        <div class="grid grid-cols-3 gap-1.5 mb-2">
+                            <button type="button" data-center-mode="none" onclick="setQrToolCenterMode('none')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">無</button>
+                            <button type="button" data-center-mode="text" onclick="setQrToolCenterMode('text')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">文字</button>
+                            <button type="button" data-center-mode="image" onclick="setQrToolCenterMode('image')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">圖片</button>
+                        </div>
+                        <div id="qrtool-center-text-wrap" class="hidden">
+                            <input type="text" id="qrtool-center-text" maxlength="4" placeholder="最多 4 個字"
+                                class="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-emerald-400" oninput="onQrToolCenterTextInput()">
+                        </div>
+                        <div id="qrtool-center-image-wrap" class="hidden">
+                            <div class="grid grid-cols-2 gap-1.5 mb-2">
+                                <button type="button" data-img-source="icon" onclick="setQrToolImageSource('icon')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">常用圖示</button>
+                                <button type="button" data-img-source="upload" onclick="setQrToolImageSource('upload')" class="qrtool-chip text-xs font-bold py-1.5 rounded-md bg-white border border-gray-200">上傳圖片</button>
+                            </div>
+                            <div id="qrtool-icon-wrap" class="grid grid-cols-3 gap-1.5 hidden">
+                                <button type="button" data-icon="line" onclick="selectQrToolIcon('line')" class="qrtool-chip text-xs font-bold py-2 rounded-md text-white" style="background:#06C755;">LINE</button>
+                                <button type="button" data-icon="fb" onclick="selectQrToolIcon('fb')" class="qrtool-chip text-xs font-bold py-2 rounded-md text-white" style="background:#1877F2;">FB</button>
+                                <button type="button" data-icon="ig" onclick="selectQrToolIcon('ig')" class="qrtool-chip text-xs font-bold py-2 rounded-md text-white" style="background:linear-gradient(45deg,#FFDC80,#F56040,#C13584,#5851DB);">IG</button>
+                                <button type="button" data-icon="youtube" onclick="selectQrToolIcon('youtube')" class="qrtool-chip text-xs font-bold py-2 rounded-md text-white" style="background:#FF0000;">YouTube</button>
+                                <button type="button" data-icon="tiktok" onclick="selectQrToolIcon('tiktok')" class="qrtool-chip text-xs font-bold py-2 rounded-md text-white" style="background:#000000;">TikTok</button>
+                                <button type="button" data-icon="url" onclick="selectQrToolIcon('url')" class="qrtool-chip text-xs font-bold py-2 rounded-md text-white" style="background:#374151;">URL</button>
+                            </div>
+                            <div id="qrtool-upload-wrap" class="hidden">
+                                <label class="w-full flex items-center justify-center gap-1.5 bg-white border border-dashed border-gray-300 rounded-md py-2.5 text-xs font-bold text-gray-500 cursor-pointer hover:border-emerald-400">
+                                    <i data-lucide="image-up" class="w-3.5 h-3.5"></i><span id="qrtool-upload-label">選擇圖片</span>
+                                    <input type="file" accept="image/*" class="hidden" onchange="onQrToolImageUpload(event)">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-xs font-bold text-gray-600 mb-1">QRCode 顏色</p>
+                        <div class="grid grid-cols-4 gap-1.5 mb-3">
+                            <button type="button" data-qr-color="black" onclick="selectQrToolQrColor('black')" class="qrtool-chip py-2 rounded-md" style="background:#000000;"></button>
+                            <button type="button" data-qr-color="green" onclick="selectQrToolQrColor('green')" class="qrtool-chip py-2 rounded-md" style="background:#065f46;"></button>
+                            <button type="button" data-qr-color="blue" onclick="selectQrToolQrColor('blue')" class="qrtool-chip py-2 rounded-md" style="background:#1e3a8a;"></button>
+                            <button type="button" data-qr-color="maroon" onclick="selectQrToolQrColor('maroon')" class="qrtool-chip py-2 rounded-md" style="background:#7f1d1d;"></button>
+                        </div>
+                        <p class="text-xs font-bold text-gray-600 mb-1">頁首色塊／中央 LOGO 顏色</p>
+                        <div class="grid grid-cols-4 gap-1.5">
+                            <button type="button" data-logo-color="black" onclick="selectQrToolLogoColor('black')" class="qrtool-chip py-2 rounded-md" style="background:#111827;"></button>
+                            <button type="button" data-logo-color="green" onclick="selectQrToolLogoColor('green')" class="qrtool-chip py-2 rounded-md" style="background:#059669;"></button>
+                            <button type="button" data-logo-color="blue" onclick="selectQrToolLogoColor('blue')" class="qrtool-chip py-2 rounded-md" style="background:#2563eb;"></button>
+                            <button type="button" data-logo-color="maroon" onclick="selectQrToolLogoColor('maroon')" class="qrtool-chip py-2 rounded-md" style="background:#b91c1c;"></button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="qrtool-qr-wrap" class="w-full bg-white rounded-xl flex items-center justify-center mb-2 border border-gray-200 shadow-sm p-4" style="min-height:220px;">
+                    <span id="qrtool-placeholder" class="text-xs text-gray-400">請輸入網址或文字以產生 QR Code</span>
+                    <canvas id="qrtool-canvas" class="max-w-full h-auto hidden"></canvas>
+                </div>
+                <p id="qrtool-degraded-hint" class="text-xs text-orange-500 mb-2 hidden">⚠️ 內容過長，已自動移除中央美化內容以確保可正常掃描</p>
+                <div id="qrtool-actions" class="w-full grid grid-cols-2 gap-2 hidden">
+                    <button onclick="downloadQrToolImage()" class="flex items-center justify-center gap-1.5 bg-gray-700 text-white text-sm font-bold py-2.5 rounded-lg hover:bg-gray-800 transition-colors active:scale-95">
+                        <i data-lucide="download" class="w-4 h-4"></i>下載圖片
+                    </button>
+                    <button onclick="copyQrToolUrl()" class="flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 text-sm font-bold py-2.5 rounded-lg hover:bg-gray-200 transition-colors active:scale-95">
+                        <i data-lucide="copy" class="w-4 h-4"></i>複製網址
+                    </button>
+                    <button onclick="shareQrTool()" class="col-span-2 flex items-center justify-center gap-1.5 text-white text-sm font-bold py-3 rounded-lg hover:brightness-95 transition-colors active:scale-95" style="background:#06C755;">
+                        <i data-lucide="share-2" class="w-4 h-4"></i>分享 QRCode
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <p class="text-center text-xs text-gray-400 mt-4">所有 QR Code 皆在裝置本機產生，內容不會上傳到任何伺服器</p>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg opacity-0 translate-y-10 pointer-events-none z-50"></div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════
+        // 共用小工具
+        // ═══════════════════════════════════════════════════════════
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.remove('opacity-0', 'translate-y-10');
+            toast.classList.add('opacity-100', 'translate-y-0');
+            clearTimeout(showToast._t);
+            showToast._t = setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-10');
+                toast.classList.remove('opacity-100', 'translate-y-0');
+            }, 3000);
+        }
+
+        function copyToClipboard(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text)
+                    .then(() => showToast('✅ 網址已複製！'))
+                    .catch(() => _legacyCopy(text));
+            } else {
+                _legacyCopy(text);
+            }
+        }
+        function _legacyCopy(text) {
+            // fallback：使用已棄用的 execCommand（僅在不支援 Clipboard API 的舊瀏覽器）
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                document.body.appendChild(ta); ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('✅ 網址已複製！');
+            } catch (e) {
+                showToast('⚠️ 複製失敗，請手動選取網址複製');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // QR 美化引擎：QRCode 產生器唯一呼叫此處的 renderDecoratedQr()
+        // ═══════════════════════════════════════════════════════════
+
+        // QR Code byte-mode 容量上限（各容錯等級，version 40 上限，
+        // 已用 pyzbar／opencv 實際解碼驗證過的數字，非理論值）
+        const QR_CAPACITY_BYTES = { L: 2953, M: 2331, Q: 1663, H: 1273 };
+
+        // QRCode 本身的顏色，與下面「頁首色塊／中央 LOGO」的顏色是兩組獨立
+        // 設定、互不影響。僅提供已驗證「深色前景／白色背景」可安全掃描的組合，
+        // 不開放自訂顏色 —— 淺色前景／深色背景等組合實測會導致掃描失敗。
+        const QR_MODULE_COLORS = {
+            black: '#000000', green: '#065f46', blue: '#1e3a8a', maroon: '#7f1d1d'
+        };
+
+        // 頁首色塊與中央 LOGO 徽章共用的顏色，與上面的 QR 本身顏色分開設定。
+        const QR_LOGO_COLORS = {
+            black: '#111827', green: '#059669', blue: '#2563eb', maroon: '#b91c1c'
+        };
+
+        // QRious 不會自行做 UTF-8 編碼，中文等非 ASCII 內容需先轉成 UTF-8
+        // 位元組再逐位元組交給它，掃描器才能正確還原
+        function qrUtf8Payload(str) {
+            const bytes = new TextEncoder().encode(str || '');
+            let payload = '';
+            for (let i = 0; i < bytes.length; i++) payload += String.fromCharCode(bytes[i]);
+            return { payload, byteLength: bytes.length };
+        }
+
+        // 是否有「中央內容」需求（文字，或圖示／上傳圖片）
+        function hasCenterContent(deco) {
+            if (!deco) return false;
+            if (deco.centerMode === 'text') return !!(deco.centerText && deco.centerText.trim());
+            if (deco.centerMode === 'image') {
+                return deco.centerImageSource === 'upload' ? !!deco.centerImageData : !!deco.centerIcon;
+            }
+            return false;
+        }
+
+        // 決定容錯等級：
+        // - 中央有內容時「必須」用 H，否則覆蓋中央模組會讓掃描失敗；
+        //   若內容位元組數超過 H 的容量上限，回傳 null，由呼叫端優雅降級
+        //   （拿掉中央內容改走一般流程），絕不讓 QRious 靜默截斷內容。
+        function resolveQrLevel(byteLength, wantsCenter, preferHigh) {
+            if (wantsCenter) {
+                return byteLength <= QR_CAPACITY_BYTES.H ? 'H' : null;
+            }
+            const order = preferHigh ? ['H', 'Q', 'M', 'L'] : ['M', 'Q', 'L'];
+            for (const lvl of order) {
+                if (byteLength <= QR_CAPACITY_BYTES[lvl]) return lvl;
+            }
+            return null; // 超過 L 上限（2953 bytes），完全裝不下
+        }
+
+        function roundRectPath(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
+
+        // 6 個常用圖示：品牌色實心方塊（squircle）＋白色圖示，僅重繪常見圖示
+        // 外觀供「分享至指定服務」的功能性識別用途，非直接複製各品牌官方向量檔。
+        const QR_ICON_BRAND_COLOR = {
+            line: '#06C755', fb: '#1877F2', ig: '#C13584',
+            youtube: '#FF0000', tiktok: '#000000', url: '#374151'
+        };
+        function drawQrPresetIcon(ctx, iconKey, cx, cy, r) {
+            ctx.save();
+
+            if (iconKey === 'ig') {
+                const grad = ctx.createLinearGradient(cx - r, cy + r, cx + r, cy - r);
+                grad.addColorStop(0, '#FFDC80');
+                grad.addColorStop(0.35, '#F56040');
+                grad.addColorStop(0.65, '#C13584');
+                grad.addColorStop(1, '#5851DB');
+                ctx.fillStyle = grad;
+            } else {
+                ctx.fillStyle = QR_ICON_BRAND_COLOR[iconKey] || '#374151';
+            }
+            roundRectPath(ctx, cx - r, cy - r, r * 2, r * 2, r * 0.32);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            const s = r * 0.55;
+
+            if (iconKey === 'line') {
+                roundRectPath(ctx, cx - s, cy - s * 0.75, s * 2, s * 1.3, s * 0.35);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(cx - s * 0.3, cy + s * 0.5);
+                ctx.lineTo(cx - s * 0.55, cy + s * 1.05);
+                ctx.lineTo(cx + s * 0.05, cy + s * 0.5);
+                ctx.closePath();
+                ctx.fill();
+            } else if (iconKey === 'fb') {
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = `900 ${r * 1.5}px Georgia, "Times New Roman", serif`;
+                ctx.fillText('f', cx + r * 0.02, cy + r * 0.08);
+            } else if (iconKey === 'ig') {
+                ctx.lineWidth = Math.max(2, r * 0.14);
+                roundRectPath(ctx, cx - s, cy - s * 0.75, s * 2, s * 1.5, s * 0.4);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(cx, cy + s * 0.05, s * 0.42, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(cx + s * 0.62, cy - s * 0.42, s * 0.09, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (iconKey === 'youtube') {
+                ctx.beginPath();
+                ctx.moveTo(cx - s * 0.42, cy - s * 0.62);
+                ctx.lineTo(cx - s * 0.42, cy + s * 0.62);
+                ctx.lineTo(cx + s * 0.68, cy);
+                ctx.closePath();
+                ctx.fill();
+            } else if (iconKey === 'tiktok') {
+                ctx.beginPath();
+                ctx.arc(cx - s * 0.28, cy + s * 0.55, s * 0.32, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.lineWidth = Math.max(2, r * 0.16);
+                ctx.beginPath();
+                ctx.moveTo(cx + s * 0.04, cy + s * 0.55);
+                ctx.lineTo(cx + s * 0.04, cy - s * 0.85);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(cx + s * 0.04, cy - s * 0.85);
+                ctx.quadraticCurveTo(cx + s * 0.55, cy - s * 0.85, cx + s * 0.62, cy - s * 0.4);
+                ctx.stroke();
+            } else {
+                // 'url'：通用「鏈結」圖示（非品牌）
+                ctx.lineWidth = Math.max(3, r * 0.22);
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(-Math.PI / 4);
+                roundRectPath(ctx, -s * 0.95, -s * 0.35, s * 0.85, s * 0.7, s * 0.32);
+                ctx.stroke();
+                roundRectPath(ctx, s * 0.1, -s * 0.35, s * 0.85, s * 0.7, s * 0.32);
+                ctx.stroke();
+                ctx.restore();
+            }
+            ctx.restore();
+        }
+
+        // 中央文字排版（皆以 badgeSize 為單位的相對座標／字級）：
+        // 1 字置中最大；2 字並排；3 字上兩下一；4 字 2×2 緊靠中心
+        function centerTextLayout(chars) {
+            const n = chars.length;
+            if (n <= 1) {
+                return [{ ch: chars[0] || '', dx: 0, dy: 0, fontSize: 0.50 }];
+            }
+            if (n === 2) {
+                return [
+                    { ch: chars[0], dx: -0.20, dy: 0, fontSize: 0.36 },
+                    { ch: chars[1], dx: 0.20, dy: 0, fontSize: 0.36 }
+                ];
+            }
+            if (n === 3) {
+                return [
+                    { ch: chars[0], dx: -0.17, dy: -0.19, fontSize: 0.25 },
+                    { ch: chars[1], dx: 0.17, dy: -0.19, fontSize: 0.25 },
+                    { ch: chars[2], dx: 0, dy: 0.20, fontSize: 0.34 }
+                ];
+            }
+            return [
+                { ch: chars[0], dx: -0.145, dy: -0.145, fontSize: 0.27 },
+                { ch: chars[1], dx: 0.145, dy: -0.145, fontSize: 0.27 },
+                { ch: chars[2], dx: -0.145, dy: 0.145, fontSize: 0.27 },
+                { ch: chars[3], dx: 0.145, dy: 0.145, fontSize: 0.27 }
+            ];
+        }
+
+        // accentColor：頁首色塊／中央 LOGO 共用的顏色，與 QR 本身顏色分開設定
+        function drawQrCenterBadge(ctx, deco, cx, cy, badgeSize, accentColor) {
+            const haloSize = badgeSize * 1.16;
+            ctx.save();
+            ctx.fillStyle = '#ffffff';
+            roundRectPath(ctx, cx - haloSize / 2, cy - haloSize / 2, haloSize, haloSize, haloSize * 0.22);
+            ctx.fill();
+            ctx.restore();
+
+            if (deco.centerMode === 'text' && deco.centerText && deco.centerText.trim()) {
+                const chars = Array.from(deco.centerText.trim()).slice(0, 4);
+                ctx.save();
+                ctx.fillStyle = accentColor;
+                roundRectPath(ctx, cx - badgeSize / 2, cy - badgeSize / 2, badgeSize, badgeSize, badgeSize * 0.16);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                centerTextLayout(chars).forEach(({ ch, dx, dy, fontSize }) => {
+                    const fs = badgeSize * fontSize;
+                    ctx.font = `bold ${fs}px "Noto Sans TC", "PingFang TC", sans-serif`;
+                    ctx.fillText(ch, cx + dx * badgeSize, cy + dy * badgeSize + fs * 0.05);
+                });
+                ctx.restore();
+            } else if (deco.centerMode === 'image' && deco.centerImageSource !== 'upload' && deco.centerIcon) {
+                drawQrPresetIcon(ctx, deco.centerIcon, cx, cy, badgeSize / 2);
+            }
+        }
+
+        // 上傳圖片的中央美化內容：以圓形裁切、填滿裁切方式置中繪製，避免變形
+        function drawQrCenterImageBadge(ctx, dataUrl, cx, cy, size) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, size / 2, 0, Math.PI * 2);
+                        ctx.closePath();
+                        ctx.clip();
+                        const scale = Math.max(size / img.width, size / img.height);
+                        const dw = img.width * scale, dh = img.height * scale;
+                        ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
+                        ctx.restore();
+                    } catch (e) { console.warn('[QRTool] 繪製上傳圖片失敗', e); }
+                    resolve();
+                };
+                img.onerror = () => resolve();
+                img.src = dataUrl;
+            });
+        }
+
+        // 上傳圖片壓縮：置中裁切成正方形後縮放到 maxSize×maxSize 的 JPEG
+        function compressImageToDataUrl(file, maxSize = 240, quality = 0.85) {
+            return new Promise((resolve, reject) => {
+                if (!file || !file.type || !file.type.startsWith('image/')) { reject(new Error('not_image')); return; }
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const side = Math.min(img.width, img.height);
+                        const sx = (img.width - side) / 2;
+                        const sy = (img.height - side) / 2;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = maxSize; canvas.height = maxSize;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, maxSize, maxSize);
+                        ctx.drawImage(img, sx, sy, side, side, 0, 0, maxSize, maxSize);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = () => reject(new Error('image_load_failed'));
+                    img.src = reader.result;
+                };
+                reader.onerror = () => reject(new Error('file_read_failed'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // 中央覆蓋面積比例：實測 30～1273 bytes（H 等級上限）區間內、多種內容
+        // 長度／中央文字（1～4 字）／四種常用圖示，覆蓋率 5% 時 150 組測試
+        // 有 149 組正確掃描（99.3%），為實測中整體表現最佳的保守值
+        const QR_CENTER_COVER_FRAC = 0.05;
+
+        // 將美化版面實際畫到 targetCanvas 上
+        async function composeQrCanvas(targetCanvas, cfg) {
+            const { payload, level, fg, accentColor, effectiveDeco, title, includeCenter } = cfg;
+
+            // 1) 先在暫存畫布畫出基礎 QR（固定高解析度，縮小顯示才不會糊）
+            const QR_PX = 800;
+            const offscreen = document.createElement('canvas');
+            new QRious({ element: offscreen, value: payload, size: QR_PX, level, foreground: fg, background: '#ffffff' });
+
+            // 2) 版面：標題／副標題皆為選填，只有實際填寫時才保留版面空間
+            const showTitle = !!(effectiveDeco.enableTitle && title);
+            const titleStyle = effectiveDeco.titleStyle === 'below' ? 'below' : 'header';
+            const showHeaderTitle = showTitle && titleStyle === 'header';
+            const showBelowTitle = showTitle && titleStyle === 'below';
+            const showSubtitle = !!(effectiveDeco.enableSubtitle && effectiveDeco.subtitleText && effectiveDeco.subtitleText.trim());
+            const QUIET = Math.round(QR_PX * 0.06);
+            const headerFontSize = Math.round(QR_PX * 0.06);
+            const headerH = showHeaderTitle ? Math.round(QR_PX * 0.135) : 0;
+            const belowTitleFontSize = Math.round(QR_PX * 0.058);
+            const subtitleFontSize = Math.round(QR_PX * 0.05);
+            const bandPadding = Math.round(QR_PX * 0.05);
+
+            const belowTitleHeight = showBelowTitle ? (belowTitleFontSize + bandPadding * 0.8) : 0;
+            const subtitleHeight = showSubtitle ? (subtitleFontSize + bandPadding * 1.1) : 0;
+            const bandHeight = belowTitleHeight + subtitleHeight;
+
+            const canvasW = QR_PX + QUIET * 2;
+            const qrTop = headerH + QUIET;
+            const canvasH = qrTop + QR_PX + QUIET + bandHeight;
+            targetCanvas.width = canvasW;
+            targetCanvas.height = canvasH;
+            const ctx = targetCanvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            // 3) 頁首色塊
+            if (showHeaderTitle) {
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(0, 0, canvasW, headerH);
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = `bold ${headerFontSize}px "Noto Sans TC", "PingFang TC", sans-serif`;
+                ctx.fillText(title, canvasW / 2, headerH / 2);
+            }
+
+            ctx.drawImage(offscreen, QUIET, qrTop, QR_PX, QR_PX);
+
+            // 4) 中央美化內容
+            if (includeCenter && hasCenterContent(effectiveDeco)) {
+                const centerX = QUIET + QR_PX / 2;
+                const centerY = qrTop + QR_PX / 2;
+                const badgeSize = Math.round(Math.sqrt(QR_CENTER_COVER_FRAC) * QR_PX);
+                if (effectiveDeco.centerMode === 'image' && effectiveDeco.centerImageSource === 'upload' && effectiveDeco.centerImageData) {
+                    await drawQrCenterImageBadge(ctx, effectiveDeco.centerImageData, centerX, centerY, badgeSize);
+                } else {
+                    drawQrCenterBadge(ctx, effectiveDeco, centerX, centerY, badgeSize, accentColor);
+                }
+            }
+
+            // 5) 標題（below 樣式）與副標題文字帶（QR 下方，由上而下堆疊）
+            let bandY = qrTop + QR_PX + bandPadding * 0.6;
+            if (showBelowTitle) {
+                ctx.fillStyle = '#1f2937';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.font = `bold ${belowTitleFontSize}px "Noto Sans TC", "PingFang TC", sans-serif`;
+                ctx.fillText(title, canvasW / 2, bandY);
+                bandY += belowTitleHeight;
+            }
+            if (showSubtitle) {
+                ctx.fillStyle = '#6b7280';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.font = `${subtitleFontSize}px "Noto Sans TC", "PingFang TC", sans-serif`;
+                ctx.fillText(effectiveDeco.subtitleText.trim(), canvasW / 2, bandY);
+            }
+        }
+
+        // 主入口：依 value（QR 內容）與 deco（美化設定）畫出最終 QR 圖片到
+        // targetCanvas。回傳 { ok, level, degraded, byteLength, reason }：
+        // - ok=false 時（reason='too_long'）內容連純 QR 都放不下；
+        // - degraded=true 時代表中央美化因容量不足被自動拿掉。
+        async function renderDecoratedQr(targetCanvas, opts) {
+            const { value, deco = {}, title = '', preferHigh = false } = opts;
+            const { payload, byteLength } = qrUtf8Payload(value);
+            const wantsCenter = hasCenterContent(deco);
+            let level = resolveQrLevel(byteLength, wantsCenter, preferHigh);
+            let effectiveDeco = deco;
+            let degraded = false;
+
+            if (level === null && wantsCenter) {
+                effectiveDeco = { ...deco, centerMode: 'none' };
+                level = resolveQrLevel(byteLength, false, preferHigh);
+                degraded = true;
+            }
+            if (level === null) {
+                return { ok: false, reason: 'too_long', byteLength };
+            }
+
+            const fg = QR_MODULE_COLORS[effectiveDeco.qrColor] || QR_MODULE_COLORS.black;
+            const accentColor = QR_LOGO_COLORS[effectiveDeco.logoColor] || QR_LOGO_COLORS.black;
+            const wantsCenterNow = hasCenterContent(effectiveDeco);
+
+            await composeQrCanvas(targetCanvas, { payload, level, fg, accentColor, effectiveDeco, title, includeCenter: wantsCenterNow });
+
+            return { ok: true, level, degraded, byteLength };
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // QRCode 產生器：輸入／貼上任意網址或文字 → 產生 QR Code 圖片，
+        // 可下載圖片或分享（含 LINE）。也支援作為「分享目標」被其他
+        // App（瀏覽器、LINE 等）的分享選單呼叫（見 manifest 的 share_target）。
+        // ═══════════════════════════════════════════════════════════
+        let qrToolDebounceTimer = null;
+
+        function defaultQrToolDeco() {
+            return {
+                enableTitle: false, titleText: '', titleStyle: 'header',
+                enableSubtitle: false, subtitleText: '',
+                centerMode: 'none', centerText: '',
+                centerImageSource: 'icon', centerIcon: '', centerImageData: null,
+                qrColor: 'black', logoColor: 'black'
+            };
+        }
+        let qrToolDeco = defaultQrToolDeco();
+
+        function toggleQrToolDecoPanel() {
+            const panel = document.getElementById('qrtool-deco-panel');
+            const chevron = document.getElementById('qrtool-deco-chevron');
+            if (!panel) return;
+            const willShow = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden');
+            if (chevron) chevron.style.transform = willShow ? 'rotate(180deg)' : '';
+        }
+
+        function onQrToolDecoFieldChange() {
+            qrToolDeco.enableTitle = !!document.getElementById('qrtool-deco-title-enable')?.checked;
+            qrToolDeco.titleText = document.getElementById('qrtool-deco-title-text')?.value.trim() || '';
+            qrToolDeco.enableSubtitle = !!document.getElementById('qrtool-deco-subtitle-enable')?.checked;
+            qrToolDeco.subtitleText = document.getElementById('qrtool-deco-subtitle-text')?.value.trim() || '';
+            scheduleQrToolRender();
+        }
+
+        // 標題顯示方式：'header'＝頁首色塊（QR上方）／'below'＝純文字（QR下方）
+        function selectQrToolTitleStyle(style) {
+            qrToolDeco.titleStyle = style;
+            updateQrToolTitleStyleUI();
+            scheduleQrToolRender();
+        }
+
+        function updateQrToolTitleStyleUI() {
+            document.querySelectorAll('#qrtool-deco-panel [data-title-style]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.titleStyle === (qrToolDeco.titleStyle || 'header'));
+            });
+        }
+
+        function setQrToolCenterMode(mode) {
+            qrToolDeco.centerMode = mode;
+            updateQrToolCenterModeUI();
+            scheduleQrToolRender();
+        }
+
+        function updateQrToolCenterModeUI() {
+            document.querySelectorAll('[data-center-mode]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.centerMode === qrToolDeco.centerMode);
+            });
+            const textWrap = document.getElementById('qrtool-center-text-wrap');
+            const imageWrap = document.getElementById('qrtool-center-image-wrap');
+            if (textWrap) textWrap.classList.toggle('hidden', qrToolDeco.centerMode !== 'text');
+            if (imageWrap) imageWrap.classList.toggle('hidden', qrToolDeco.centerMode !== 'image');
+            if (qrToolDeco.centerMode === 'image') updateQrToolImageSourceUI();
+        }
+
+        function onQrToolCenterTextInput() {
+            const el = document.getElementById('qrtool-center-text');
+            if (el && Array.from(el.value).length > 4) el.value = Array.from(el.value).slice(0, 4).join('');
+            qrToolDeco.centerText = el ? el.value.trim() : '';
+            scheduleQrToolRender();
+        }
+
+        function setQrToolImageSource(source) {
+            qrToolDeco.centerImageSource = source;
+            updateQrToolImageSourceUI();
+            scheduleQrToolRender();
+        }
+
+        function updateQrToolImageSourceUI() {
+            document.querySelectorAll('[data-img-source]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.imgSource === qrToolDeco.centerImageSource);
+            });
+            const iconWrap = document.getElementById('qrtool-icon-wrap');
+            const uploadWrap = document.getElementById('qrtool-upload-wrap');
+            if (iconWrap) iconWrap.classList.toggle('hidden', qrToolDeco.centerImageSource !== 'icon');
+            if (uploadWrap) uploadWrap.classList.toggle('hidden', qrToolDeco.centerImageSource !== 'upload');
+        }
+
+        function selectQrToolIcon(icon) {
+            qrToolDeco.centerIcon = icon;
+            updateQrToolIconUI();
+            scheduleQrToolRender();
+        }
+
+        function updateQrToolIconUI() {
+            document.querySelectorAll('[data-icon]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.icon === qrToolDeco.centerIcon);
+            });
+        }
+
+        async function onQrToolImageUpload(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            const labelEl = document.getElementById('qrtool-upload-label');
+            if (labelEl) labelEl.textContent = '處理中...';
+            try {
+                qrToolDeco.centerImageData = await compressImageToDataUrl(file);
+                if (labelEl) labelEl.textContent = '✅ 已選擇圖片（點擊可更換）';
+                scheduleQrToolRender();
+            } catch (e) {
+                console.warn('[QRTool] 圖片處理失敗', e);
+                showToast('⚠️ 圖片處理失敗，請改選其他圖片');
+                if (labelEl) labelEl.textContent = '選擇圖片';
+            }
+        }
+
+        function selectQrToolQrColor(color) {
+            qrToolDeco.qrColor = color;
+            updateQrToolColorUI();
+            scheduleQrToolRender();
+        }
+
+        function selectQrToolLogoColor(color) {
+            qrToolDeco.logoColor = color;
+            updateQrToolColorUI();
+            scheduleQrToolRender();
+        }
+
+        function updateQrToolColorUI() {
+            document.querySelectorAll('[data-qr-color]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.qrColor === qrToolDeco.qrColor);
+            });
+            document.querySelectorAll('[data-logo-color]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.logoColor === qrToolDeco.logoColor);
+            });
+        }
+
+        function scheduleQrToolRender() {
+            clearTimeout(qrToolDebounceTimer);
+            qrToolDebounceTimer = setTimeout(renderQrToolPreview, 300);
+        }
+
+        function getQrToolValue() {
+            const input = document.getElementById('qrtool-input');
+            return input ? input.value.trim() : '';
+        }
+
+        async function renderQrToolPreview() {
+            const value = getQrToolValue();
+            const canvas = document.getElementById('qrtool-canvas');
+            const placeholder = document.getElementById('qrtool-placeholder');
+            const actions = document.getElementById('qrtool-actions');
+            const degradedHint = document.getElementById('qrtool-degraded-hint');
+            if (!canvas) return;
+            if (!value) {
+                canvas.classList.add('hidden');
+                if (placeholder) { placeholder.textContent = '請輸入網址或文字以產生 QR Code'; placeholder.classList.remove('hidden'); }
+                if (actions) actions.classList.add('hidden');
+                if (degradedHint) degradedHint.classList.add('hidden');
+                return;
+            }
+
+            // 固定以高解析度產生（renderDecoratedQr 內部使用 800px 基礎 QR
+            // 再依標題／副標題加高），縮小顯示才不會糊，下載的 PNG 也才夠清晰。
+            const result = await renderDecoratedQr(canvas, {
+                value, deco: qrToolDeco, title: qrToolDeco.titleText, preferHigh: false
+            });
+
+            if (!result.ok) {
+                canvas.classList.add('hidden');
+                if (placeholder) {
+                    placeholder.textContent = `⚠️ 內容過長（${result.byteLength} 位元組），無法完整產生 QR Code，請改用短網址`;
+                    placeholder.classList.remove('hidden');
+                }
+                if (actions) actions.classList.add('hidden');
+                if (degradedHint) degradedHint.classList.add('hidden');
+                return;
+            }
+
+            canvas.style.width = Math.min(window.innerWidth - 100, 280) + 'px';
+            canvas.style.height = 'auto';
+            canvas.classList.remove('hidden');
+            if (placeholder) placeholder.classList.add('hidden');
+            if (actions) actions.classList.remove('hidden');
+            if (degradedHint) degradedHint.classList.toggle('hidden', !result.degraded);
+        }
+
+        async function pasteQrToolInput() {
+            try {
+                if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('unsupported');
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                    const input = document.getElementById('qrtool-input');
+                    if (input) { input.value = text.trim(); renderQrToolPreview(); }
+                } else {
+                    showToast('剪貼簿是空的');
+                }
+            } catch (e) {
+                showToast('⚠️ 無法讀取剪貼簿，請手動貼上');
+            }
+        }
+
+        function downloadQrToolImage() {
+            const canvas = document.getElementById('qrtool-canvas');
+            if (!canvas || canvas.classList.contains('hidden')) { showToast('請先輸入網址或文字'); return; }
+            const link = document.createElement('a');
+            link.download = `QRCode_${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            showToast('✅ QRCode 圖片已下載');
+        }
+
+        function copyQrToolUrl() {
+            const value = getQrToolValue();
+            if (!value) { showToast('請先輸入網址或文字'); return; }
+            copyToClipboard(value);
+        }
+
+        // 嘗試將目前的 QR Code 畫布包成可分享的圖片檔；裝置不支援分享檔案
+        // 時回傳 null（呼叫端再自行決定要不要退回純文字分享）
+        async function buildQrToolShareFile() {
+            const canvas = document.getElementById('qrtool-canvas');
+            if (!canvas || canvas.classList.contains('hidden') || !navigator.canShare) return null;
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            if (!blob) return null;
+            const file = new File([blob], 'QRCode.png', { type: 'image/png' });
+            return navigator.canShare({ files: [file] }) ? file : null;
+        }
+
+        // 統一的「分享 QRCode」：不特別區分 LINE 或其他 App，一顆按鈕即可，
+        // 讓使用者在原生分享清單自己選要分享到哪個 App（LINE 也在清單裡）。
+        async function shareQrTool() {
+            const value = getQrToolValue();
+            if (!value) { showToast('請先輸入網址或文字'); return; }
+
+            if (navigator.share) {
+                try {
+                    const file = await buildQrToolShareFile();
+                    const shareData = file ? { files: [file], title: 'QR Code', text: value } : { title: 'QR Code', text: value };
+                    await navigator.share(shareData);
+                    return;
+                } catch (e) {
+                    if (e.name === 'AbortError') return; // 使用者自行取消分享
+                    console.warn('[QRTool] 分享失敗，改用 LINE 文字連結', e);
+                }
+            }
+
+            // Fallback：裝置完全不支援 Web Share（例如桌面版瀏覽器）時，
+            // 改用 LINE 網址格式分享純文字連結
+            showToast('⚠️ 此裝置不支援原生分享，僅會分享網址文字（可到 LINE 貼上）');
+            const lineUrl = 'https://line.me/R/msg/text/?' + encodeURIComponent(value);
+            window.open(lineUrl, '_blank');
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // 作為「分享目標」被叫起：解析 manifest share_target 帶入的參數
+        // （st_url／st_text／st_title），自動帶入並產生 QR Code
+        // ─────────────────────────────────────────────────────────
+        function checkShareTargetUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const stUrl = urlParams.get('st_url');
+            const stText = urlParams.get('st_text');
+            const stTitle = urlParams.get('st_title');
+
+            if (!(stUrl || stText || stTitle)) return;
+
+            window.history.replaceState({}, document.title, window.location.pathname);
+            let extracted = (stUrl || '').trim();
+            if (!extracted && stText) {
+                const m = stText.match(/https?:\/\/\S+/);
+                extracted = m ? m[0] : stText.trim();
+            }
+            if (!extracted && stTitle) extracted = stTitle.trim();
+
+            if (extracted) {
+                const inputEl = document.getElementById('qrtool-input');
+                if (inputEl) inputEl.value = extracted;
+                renderQrToolPreview();
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // 初始化
+        // ─────────────────────────────────────────────────────────
+        function initQrToolUI() {
+            updateQrToolCenterModeUI();
+            updateQrToolIconUI();
+            updateQrToolColorUI();
+            updateQrToolTitleStyleUI();
+            if (window.lucide) lucide.createIcons();
+            checkShareTargetUrl();
+        }
+
+        document.addEventListener('DOMContentLoaded', initQrToolUI);
+    </script>
+
+    <!-- Service Worker 註冊 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () =>
+                navigator.serviceWorker.register('./sw.js')
+                    .catch(err => console.warn('[SW] Registration failed:', err))
+            );
+        }
+    </script>
+</body>
+</html>

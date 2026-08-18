@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="qrCodeGeneratorBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#14b8a6;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0f766e;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="192" height="192" rx="38" ry="38" fill="url(#qrCodeGeneratorBg)"/>
+
+  <!-- QR finder squares (top-left, top-right, bottom-left) -->
+  <g fill="#ffffff">
+    <rect x="34" y="34" width="44" height="44" rx="6"/>
+    <rect x="46" y="46" width="20" height="20" rx="3" fill="#0f766e"/>
+
+    <rect x="114" y="34" width="44" height="44" rx="6"/>
+    <rect x="126" y="46" width="20" height="20" rx="3" fill="#0f766e"/>
+
+    <rect x="34" y="114" width="44" height="44" rx="6"/>
+    <rect x="46" y="126" width="20" height="20" rx="3" fill="#0f766e"/>
+  </g>
+
+  <!-- Scattered modules bottom-right, suggesting QR data + scan target -->
+  <g fill="#ffffff" opacity="0.95">
+    <rect x="114" y="114" width="16" height="16" rx="3"/>
+    <rect x="136" y="114" width="16" height="16" rx="3"/>
+    <rect x="114" y="136" width="16" height="16" rx="3"/>
+    <rect x="136" y="136" width="16" height="16" rx="3"/>
+  </g>
+</svg>
