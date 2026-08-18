@@ -90,8 +90,9 @@
                         <label class="flex items-center gap-2 text-xs font-bold text-gray-600 mb-1">
                             <input type="checkbox" id="qrtool-deco-subtitle-enable" onchange="onQrToolDecoFieldChange()"> 副標題
                         </label>
-                        <input type="text" id="qrtool-deco-subtitle-text" maxlength="40" placeholder="副標題文字"
-                            class="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-emerald-400" oninput="onQrToolDecoFieldChange()">
+                        <textarea id="qrtool-deco-subtitle-text" maxlength="500" rows="3" placeholder="副標題文字（最多 500 字，QR 圖片會自動換行）"
+                            class="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-emerald-400 resize-none" oninput="onQrToolDecoFieldChange()"></textarea>
+                        <p class="text-[10px] text-gray-400 text-right mt-0.5"><span id="qrtool-deco-subtitle-count">0</span>/500</p>
                     </div>
                     <div>
                         <p class="text-xs font-bold text-gray-600 mb-1">中央內容（用於快速辨識，最多覆蓋中央一小塊）</p>
@@ -470,6 +471,54 @@
         // 有 149 組正確掃描（99.3%），為實測中整體表現最佳的保守值
         const QR_CENTER_COVER_FRAC = 0.05;
 
+        // 依可用寬度將副標題文字自動換行（最多 500 字，支援中英文混排）：
+        // CJK 逐字元換行（不需要空白也能斷行），其餘依空白／非空白分段，
+        // 盡量保留英文單字完整不被硬切開。也支援使用者手動輸入換行（\n）
+        // 分段，每段各自換行。
+        function wrapSubtitleLines(ctx, text, maxWidth) {
+            const isCJK = (ch) => /[⺀-鿿豈-﫿＀-￯　-〿]/.test(ch);
+            const outLines = [];
+            const paragraphs = String(text).split('\n');
+
+            paragraphs.forEach((para) => {
+                if (para.trim() === '') { outLines.push(''); return; }
+
+                // 拆解成 tokens：CJK 逐字元、其餘依空白／非空白分段
+                const tokens = [];
+                let buf = '';
+                for (const ch of para) {
+                    if (isCJK(ch)) {
+                        if (buf) { tokens.push(...(buf.match(/\s+|\S+/g) || [])); buf = ''; }
+                        tokens.push(ch);
+                    } else {
+                        buf += ch;
+                    }
+                }
+                if (buf) tokens.push(...(buf.match(/\s+|\S+/g) || []));
+
+                let line = '';
+                tokens.forEach((tok) => {
+                    const candidate = line + tok;
+                    if (line && ctx.measureText(candidate).width > maxWidth) {
+                        outLines.push(line.replace(/\s+$/, ''));
+                        line = tok.replace(/^\s+/, '');
+                    } else {
+                        line = candidate;
+                    }
+                });
+                outLines.push(line.replace(/\s+$/, ''));
+            });
+
+            // 安全上限：避免極端情況（例如極窄寬度＋500 字）撐出過大的圖片
+            const MAX_LINES = 40;
+            if (outLines.length > MAX_LINES) {
+                const trimmed = outLines.slice(0, MAX_LINES);
+                trimmed[MAX_LINES - 1] = trimmed[MAX_LINES - 1].replace(/\s+$/, '') + '…';
+                return trimmed;
+            }
+            return outLines;
+        }
+
         // 將美化版面實際畫到 targetCanvas 上
         async function composeQrCanvas(targetCanvas, cfg) {
             const { payload, level, fg, accentColor, effectiveDeco, title, includeCenter } = cfg;
@@ -490,10 +539,23 @@
             const headerH = showHeaderTitle ? Math.round(QR_PX * 0.135) : 0;
             const belowTitleFontSize = Math.round(QR_PX * 0.058);
             const subtitleFontSize = Math.round(QR_PX * 0.05);
+            const subtitleLineGap = Math.round(subtitleFontSize * 0.32);
+            const subtitleLineHeight = subtitleFontSize + subtitleLineGap;
             const bandPadding = Math.round(QR_PX * 0.05);
 
+            // 副標題最多 500 字，依畫布可用寬度（與 QR 本身同寬）自動換行，
+            // 換行後的實際行數決定要保留的版面高度
+            let subtitleLines = [];
+            if (showSubtitle) {
+                const measureCtx = document.createElement('canvas').getContext('2d');
+                measureCtx.font = `${subtitleFontSize}px "Noto Sans TC", "PingFang TC", sans-serif`;
+                subtitleLines = wrapSubtitleLines(measureCtx, effectiveDeco.subtitleText.trim(), QR_PX);
+            }
+
             const belowTitleHeight = showBelowTitle ? (belowTitleFontSize + bandPadding * 0.8) : 0;
-            const subtitleHeight = showSubtitle ? (subtitleFontSize + bandPadding * 1.1) : 0;
+            const subtitleHeight = showSubtitle
+                ? (subtitleLines.length * subtitleLineHeight - subtitleLineGap + bandPadding * 1.1)
+                : 0;
             const bandHeight = belowTitleHeight + subtitleHeight;
 
             const canvasW = QR_PX + QUIET * 2;
@@ -545,7 +607,9 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'top';
                 ctx.font = `${subtitleFontSize}px "Noto Sans TC", "PingFang TC", sans-serif`;
-                ctx.fillText(effectiveDeco.subtitleText.trim(), canvasW / 2, bandY);
+                subtitleLines.forEach((line, i) => {
+                    ctx.fillText(line, canvasW / 2, bandY + i * subtitleLineHeight);
+                });
             }
         }
 
@@ -610,7 +674,10 @@
             qrToolDeco.enableTitle = !!document.getElementById('qrtool-deco-title-enable')?.checked;
             qrToolDeco.titleText = document.getElementById('qrtool-deco-title-text')?.value.trim() || '';
             qrToolDeco.enableSubtitle = !!document.getElementById('qrtool-deco-subtitle-enable')?.checked;
-            qrToolDeco.subtitleText = document.getElementById('qrtool-deco-subtitle-text')?.value.trim() || '';
+            const subtitleEl = document.getElementById('qrtool-deco-subtitle-text');
+            qrToolDeco.subtitleText = subtitleEl?.value.trim() || '';
+            const subtitleCountEl = document.getElementById('qrtool-deco-subtitle-count');
+            if (subtitleCountEl) subtitleCountEl.textContent = String(subtitleEl ? subtitleEl.value.length : 0);
             scheduleQrToolRender();
         }
 
