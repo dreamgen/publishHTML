@@ -2007,6 +2007,40 @@
             return false;
         }
 
+        // ─── 反爬蟲「整段文字反排」修復 ──────────────────────────────────────────
+        // 部分小說站（例如 oop.tw）偵測到請求疑似來自代理/爬蟲時，會把某幾段內文
+        // 整段字元順序反過來寫進 HTML，靠瀏覽器端的機制在真人瀏覽器上「轉正」顯示，
+        // 但我們的解析器是直接讀 DOM 文字內容，遇到這種反排段落就會照單全收，
+        // 顯示出亂序文字（例如「】級者王/符行疾【」，正常應為「【疾行符/王者級】」）。
+        //
+        // 偵測邏輯：正常中文句子幾乎不會以「收尾標點」開頭（。，、；：！？」』）】》〉
+        // 等），也不會以「起頭標點」結尾（「『（【《〈等）。只要一個段落符合其中
+        // 任一特徵，幾乎可以肯定整段被反著寫了，直接把字元順序反轉回來即可修復，
+        // 不需要依賴特定網站的規則。
+        const _REVERSED_TRAILING_AS_HEAD = '。，、；：！？」』）】》〉,.;:!?)]}';
+        const _REVERSED_LEADING_AS_TAIL  = '「『（【《〈([{';
+        function _looksLikeReversedText(text) {
+            if (!text) return false;
+            const trimmed = text.trim();
+            if (trimmed.length < 4) return false;
+            const first = trimmed[0];
+            const last  = trimmed[trimmed.length - 1];
+            return _REVERSED_TRAILING_AS_HEAD.includes(first) || _REVERSED_LEADING_AS_TAIL.includes(last);
+        }
+        function unscrambleReversedText(doc) {
+            try {
+                doc.querySelectorAll('p, li, td, blockquote, h1, h2, h3, h4, h5, h6').forEach(el => {
+                    if (el.children.length > 0) return; // 只處理純文字葉節點，避免破壞巢狀標籤
+                    const text = el.textContent;
+                    if (_looksLikeReversedText(text)) {
+                        el.textContent = Array.from(text).reverse().join('');
+                    }
+                });
+            } catch (e) {
+                console.warn('[pureReader] unscrambleReversedText failed:', e);
+            }
+        }
+
         async function processRawHtml(url, html) {
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const arts = Array.from(doc.querySelectorAll('article'));
@@ -2023,6 +2057,7 @@
                 '[class*="sponsor"]','[class*="promo"]','[class*="advertorial"]','[class*="commercial"]',
                 '.ext-reading','.extend-reading','[class*="bottom-article"]','.next-article'];
             doc.querySelectorAll(sel.join(',')).forEach(el => el.remove());
+            unscrambleReversedText(doc);
             const article = new Readability(doc).parse();
             if (!article?.content) throw new Error('無法從背景擷取的頁面提取正文');
             let domain = ''; try { domain = new URL(url).hostname; } catch (e) {}
@@ -2294,6 +2329,7 @@
                     '[class*="popup"]', '[class*="modal"]', '.related-posts', '.recommendations'
                 ];
                 doc.querySelectorAll(unwantedSelectors.join(',')).forEach(el => el.remove());
+                unscrambleReversedText(doc);
 
                 const reader = new Readability(doc);
                 const article = reader.parse();
@@ -3068,6 +3104,7 @@
                             if (s) img.setAttribute('src', s);
                         });
                         doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
+                        unscrambleReversedText(doc);
                         const article = new Readability(doc).parse();
 
                         if (!article?.content) {
@@ -3813,6 +3850,7 @@
                             });
                             // Clean scripts/ads
                             doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads').forEach(el => el.remove());
+                            unscrambleReversedText(doc);
                             const article = new Readability(doc).parse();
                             if (article?.content) {
                                 const cleanContent = DOMPurify.sanitize(article.content, {
@@ -3930,6 +3968,7 @@
                             if (s) img.setAttribute('src', s);
                         });
                         doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
+                        unscrambleReversedText(doc);
                         const article = new Readability(doc).parse();
 
                         if (!article?.content) break;
