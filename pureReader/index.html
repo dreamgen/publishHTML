@@ -665,6 +665,25 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                             <span class="text-xs">失敗</span>
                         </button>
+                        <div class="relative inline-block">
+                            <button onclick="toggleUnscramblePanel(event)" id="unscramble-btn" title="修復反排文字（部分小說站的反爬蟲手法：內文整段字元反過來寫）" class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                                <span class="text-xs">反排文字</span>
+                            </button>
+                            <div id="unscramble-panel" class="hidden absolute right-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 w-60 text-sm">
+                                <div class="px-2 py-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500">反排文字修復方式</div>
+                                <button onclick="setUnscrambleMode('auto')" class="unscramble-option w-full text-left px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between text-gray-700 dark:text-gray-200" data-mode="auto">
+                                    <span>自動判斷（依標點符號）</span><span class="unscramble-check hidden">✓</span>
+                                </button>
+                                <button onclick="setUnscrambleMode('full')" class="unscramble-option w-full text-left px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between text-gray-700 dark:text-gray-200" data-mode="full">
+                                    <span>全文反排（不看標點）</span><span class="unscramble-check hidden">✓</span>
+                                </button>
+                                <button onclick="setUnscrambleMode('off')" class="unscramble-option w-full text-left px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between text-gray-700 dark:text-gray-200" data-mode="off">
+                                    <span>不處理（顯示原文）</span><span class="unscramble-check hidden">✓</span>
+                                </button>
+                                <div class="px-2 pt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">部分小說站會對偵測到的代理請求，把內文整段文字反過來寫。若某段沒有標點導致「自動判斷」抓不到，可切換「全文反排」試試；選擇會立即套用到目前畫面，並記住做為之後章節的預設值。</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1357,6 +1376,7 @@
         let currentArticleUrl   = null;
         let currentArticleTitle = null;
         let currentArticleDomain = null;
+        let _currentArticleData = null; // 目前顯示這篇文章的「原始擷取內容」，供反排文字工具重新套用用
 
         function normalizeUrl(urlStr) {
             if (!urlStr || typeof urlStr !== 'string') return urlStr;
@@ -2013,12 +2033,22 @@
         // 但我們的解析器是直接讀 DOM 文字內容，遇到這種反排段落就會照單全收，
         // 顯示出亂序文字（例如「】級者王/符行疾【」，正常應為「【疾行符/王者級】」）。
         //
-        // 偵測邏輯：正常中文句子幾乎不會以「收尾標點」開頭（。，、；：！？」』）】》〉
-        // 等），也不會以「起頭標點」結尾（「『（【《〈等）。只要一個段落符合其中
-        // 任一特徵，幾乎可以肯定整段被反著寫了，直接把字元順序反轉回來即可修復，
-        // 不需要依賴特定網站的規則。
+        // 偵測邏輯（自動模式）：正常中文句子幾乎不會以「收尾標點」開頭（。，、；：
+        // ！？」』）】》〉等），也不會以「起頭標點」結尾（「『（【《〈等）。只要一
+        // 個段落符合其中任一特徵，幾乎可以肯定整段被反著寫了，直接把字元順序反轉
+        // 回來即可修復。但有些反排段落完全沒有標點符號，自動判斷會漏掉，所以額外
+        // 提供「全文反排」（不管標點，整段一律反轉）與「不處理」兩種模式，讓使用
+        // 者從工具列自行選擇 —— 這 3 種模式都只在「渲染畫面時」套用在目前顯示的
+        // 內容上，永遠是從原始擷取內容重新套用，不會疊加，可以放心來回切換比較。
+        const STORAGE_KEY_UNSCRAMBLE_MODE = 'pr-unscramble-mode'; // 'auto' | 'full' | 'off'
         const _REVERSED_TRAILING_AS_HEAD = '。，、；：！？」』）】》〉,.;:!?)]}';
         const _REVERSED_LEADING_AS_TAIL  = '「『（【《〈([{';
+
+        function getUnscrambleMode() {
+            const m = localStorage.getItem(STORAGE_KEY_UNSCRAMBLE_MODE);
+            return (m === 'full' || m === 'off') ? m : 'auto';
+        }
+
         function _looksLikeReversedText(text) {
             if (!text) return false;
             const trimmed = text.trim();
@@ -2027,18 +2057,66 @@
             const last  = trimmed[trimmed.length - 1];
             return _REVERSED_TRAILING_AS_HEAD.includes(first) || _REVERSED_LEADING_AS_TAIL.includes(last);
         }
-        function unscrambleReversedText(doc) {
+
+        // node：可傳入 Document（解析階段）或已渲染的 Element（畫面上的 #article-content）。
+        // mode：'auto' 依標點判斷、'full' 不管標點整段一律反轉、'off' 不處理。省略則
+        // 使用使用者透過工具列選擇並存起來的預設值。
+        function unscrambleReversedText(node, mode) {
+            mode = mode || getUnscrambleMode();
+            if (mode === 'off') return;
             try {
-                doc.querySelectorAll('p, li, td, blockquote, h1, h2, h3, h4, h5, h6').forEach(el => {
+                node.querySelectorAll('p, li, td, blockquote, h1, h2, h3, h4, h5, h6').forEach(el => {
                     if (el.children.length > 0) return; // 只處理純文字葉節點，避免破壞巢狀標籤
                     const text = el.textContent;
-                    if (_looksLikeReversedText(text)) {
+                    if (!text || !text.trim()) return;
+                    if (mode === 'full' || _looksLikeReversedText(text)) {
                         el.textContent = Array.from(text).reverse().join('');
                     }
                 });
             } catch (e) {
                 console.warn('[pureReader] unscrambleReversedText failed:', e);
             }
+        }
+
+        // ─── 反排文字工具列面板 ──────────────────────────────────────────────────
+        function toggleUnscramblePanel(e) {
+            if (e) e.stopPropagation();
+            const panel = document.getElementById('unscramble-panel');
+            if (!panel) return;
+            const willShow = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden');
+            if (willShow) {
+                updateUnscramblePanelUI();
+                setTimeout(() => document.addEventListener('click', _closeUnscramblePanelOnce, { once: true }), 0);
+            }
+        }
+
+        function _closeUnscramblePanelOnce() {
+            const panel = document.getElementById('unscramble-panel');
+            if (panel) panel.classList.add('hidden');
+        }
+
+        function updateUnscramblePanelUI() {
+            const mode = getUnscrambleMode();
+            document.querySelectorAll('.unscramble-option').forEach(btn => {
+                const active = btn.dataset.mode === mode;
+                const check  = btn.querySelector('.unscramble-check');
+                if (check) check.classList.toggle('hidden', !active);
+                btn.classList.toggle('text-indigo-600', active);
+                btn.classList.toggle('dark:text-indigo-400', active);
+                btn.classList.toggle('font-semibold', active);
+            });
+        }
+
+        function setUnscrambleMode(mode) {
+            localStorage.setItem(STORAGE_KEY_UNSCRAMBLE_MODE, mode);
+            updateUnscramblePanelUI();
+            // 立即套用到目前畫面上顯示的內容（永遠從原始擷取內容重新套用，可放心切換）
+            if (_currentArticleData && currentArticleUrl) {
+                applyArticleContentToDom(_currentArticleData, currentArticleUrl);
+            }
+            const panel = document.getElementById('unscramble-panel');
+            if (panel) panel.classList.add('hidden');
         }
 
         async function processRawHtml(url, html) {
@@ -2057,7 +2135,6 @@
                 '[class*="sponsor"]','[class*="promo"]','[class*="advertorial"]','[class*="commercial"]',
                 '.ext-reading','.extend-reading','[class*="bottom-article"]','.next-article'];
             doc.querySelectorAll(sel.join(',')).forEach(el => el.remove());
-            unscrambleReversedText(doc);
             const article = new Readability(doc).parse();
             if (!article?.content) throw new Error('無法從背景擷取的頁面提取正文');
             let domain = ''; try { domain = new URL(url).hostname; } catch (e) {}
@@ -2329,7 +2406,6 @@
                     '[class*="popup"]', '[class*="modal"]', '.related-posts', '.recommendations'
                 ];
                 doc.querySelectorAll(unwantedSelectors.join(',')).forEach(el => el.remove());
-                unscrambleReversedText(doc);
 
                 const reader = new Readability(doc);
                 const article = reader.parse();
@@ -2363,11 +2439,60 @@
             }
         }
 
+        // 把「原始擷取內容」(articleData.content，永遠是未經反排修復的乾淨版本)
+        // 套用到畫面上的 #article-content。反排文字工具切換模式時會重新呼叫這個
+        // 函式，每次都從原始內容重新套用，因此可以放心來回切換不同模式比較效果。
+        function applyArticleContentToDom(articleData, originalUrl) {
+            const contentEl = document.getElementById('article-content');
+            if (!contentEl) return;
+
+            const cleanHTML = DOMPurify.sanitize(articleData.content, {
+                USE_PROFILES: { html: true },
+                ADD_TAGS: ['img', 'figure', 'figcaption'],
+                FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
+            });
+
+            contentEl.innerHTML = cleanHTML;
+
+            // Fix relative image URLs & add lazy loading
+            try {
+                const baseUri = new URL(originalUrl).origin;
+                contentEl.querySelectorAll('img').forEach(img => {
+                    const src = img.getAttribute('src');
+                    if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+                        try { img.src = new URL(src, baseUri).href; } catch (e) {}
+                    }
+                    img.setAttribute('loading', 'lazy');
+                    img.removeAttribute('width');
+                    img.removeAttribute('height');
+                });
+            } catch (e) {}
+
+            // 反排文字修復：依使用者在工具列選擇的模式套用（自動判斷／全文反排／不處理）
+            unscrambleReversedText(contentEl, getUnscrambleMode());
+
+            // 深度解析按鈕（改為直接開新分頁，避免 Vercel Timeout 沒有 CORS 標頭的問題）
+            let deepContainer = document.getElementById('deep-fetch-container');
+            if (deepContainer) deepContainer.remove();
+
+            const deepUrl = `https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(originalUrl)}`;
+
+            contentEl.insertAdjacentHTML('afterend', `
+                <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺？此網頁可能需要 JS 渲染</p>
+                    <a href="${deepUrl}" target="_blank" rel="noopener noreferrer" class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 mx-auto">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        深度解析 (開新分頁讀取完整內容)
+                    </a>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">將透過無頭瀏覽器伺服器完整渲染 JS。</p>
+                </div>
+            `);
+        }
+
         function renderArticle(articleData, originalUrl, isFromCache) {
             const titleEl      = document.getElementById('article-title');
             const authorEl     = document.getElementById('article-author');
             const sourceLinkEl = document.getElementById('article-source-link');
-            const contentEl    = document.getElementById('article-content');
             const cacheBadge   = document.getElementById('cache-badge');
 
             titleEl.textContent = articleData.title || '無標題';
@@ -2396,42 +2521,8 @@
                 cacheBadge.classList.add('hidden');
             }
 
-            const cleanHTML = DOMPurify.sanitize(articleData.content, {
-                USE_PROFILES: { html: true },
-                ADD_TAGS: ['img', 'figure', 'figcaption'],
-                FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
-            });
-
-            contentEl.innerHTML = cleanHTML;
-
-            // Fix relative image URLs & add lazy loading
-            const baseUri = new URL(originalUrl).origin;
-            contentEl.querySelectorAll('img').forEach(img => {
-                const src = img.getAttribute('src');
-                if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-                    try { img.src = new URL(src, baseUri).href; } catch (e) {}
-                }
-                img.setAttribute('loading', 'lazy');
-                img.removeAttribute('width');
-                img.removeAttribute('height');
-            });
-
-            // 深度解析按鈕（改為直接開新分頁，避免 Vercel Timeout 沒有 CORS 標頭的問題）
-            let deepContainer = document.getElementById('deep-fetch-container');
-            if (deepContainer) deepContainer.remove();
-
-            const deepUrl = `https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(originalUrl)}`;
-
-            contentEl.insertAdjacentHTML('afterend', `
-                <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺？此網頁可能需要 JS 渲染</p>
-                    <a href="${deepUrl}" target="_blank" rel="noopener noreferrer" class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 mx-auto">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                        深度解析 (開新分頁讀取完整內容)
-                    </a>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">將透過無頭瀏覽器伺服器完整渲染 JS。</p>
-                </div>
-            `);
+            _currentArticleData = articleData;
+            applyArticleContentToDom(articleData, originalUrl);
 
             currentArticleUrl = originalUrl;
             currentArticleTitle = articleData.title;
@@ -3104,7 +3195,6 @@
                             if (s) img.setAttribute('src', s);
                         });
                         doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
-                        unscrambleReversedText(doc);
                         const article = new Readability(doc).parse();
 
                         if (!article?.content) {
@@ -3850,7 +3940,6 @@
                             });
                             // Clean scripts/ads
                             doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads').forEach(el => el.remove());
-                            unscrambleReversedText(doc);
                             const article = new Readability(doc).parse();
                             if (article?.content) {
                                 const cleanContent = DOMPurify.sanitize(article.content, {
@@ -3968,7 +4057,6 @@
                             if (s) img.setAttribute('src', s);
                         });
                         doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
-                        unscrambleReversedText(doc);
                         const article = new Readability(doc).parse();
 
                         if (!article?.content) break;
