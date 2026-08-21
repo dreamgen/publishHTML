@@ -2060,8 +2060,11 @@
         // 者從工具列自行選擇 —— 這 3 種模式都只在「渲染畫面時」套用在目前顯示的
         // 內容上，永遠是從原始擷取內容重新套用，不會疊加，可以放心來回切換比較。
         const STORAGE_KEY_UNSCRAMBLE_MODE = 'pr-unscramble-mode'; // 'auto' | 'full' | 'off'
-        const _REVERSED_TRAILING_AS_HEAD = '。，、；：！？」』）】》〉,.;:!?)]}';
-        const _REVERSED_LEADING_AS_TAIL  = '「『（【《〈([{';
+        const _REVERSED_TRAILING_AS_HEAD = '。，、；：！？」』）】》〉”’,.;:!?)]}';
+        const _REVERSED_LEADING_AS_TAIL  = '「『（【《〈“‘([{';
+        // 直式引號（" 與 '）本身沒有方向性，正常文字、反排文字的開頭/結尾都可能出現，
+        // 光看它自己沒辦法判斷，要往內多抓一個字元才看得出破綻。
+        const _AMBIGUOUS_QUOTE_CHARS = '"\'';
 
         function getUnscrambleMode() {
             const m = localStorage.getItem(STORAGE_KEY_UNSCRAMBLE_MODE);
@@ -2072,8 +2075,10 @@
             if (!text) return false;
             const trimmed = text.trim();
             if (trimmed.length < 4) return false;
-            const first = trimmed[0];
-            const last  = trimmed[trimmed.length - 1];
+            let first = trimmed[0];
+            let last  = trimmed[trimmed.length - 1];
+            if (_AMBIGUOUS_QUOTE_CHARS.includes(first)) first = trimmed[1] || first;
+            if (_AMBIGUOUS_QUOTE_CHARS.includes(last))  last  = trimmed[trimmed.length - 2] || last;
             return _REVERSED_TRAILING_AS_HEAD.includes(first) || _REVERSED_LEADING_AS_TAIL.includes(last);
         }
 
@@ -2895,12 +2900,17 @@
                     };
                 }
 
-                // Save current page content to novel-pages
+                // Save current page content to novel-pages —— 優先使用 _currentArticleData
+                // 的原始擷取內容（未經反排修復），跟其他章節（prefetch 存的也是原始內容）
+                // 保持一致，這樣之後切換反排文字模式時才不會在已經修好的文字上重複套用。
                 const contentEl = document.getElementById('article-content');
+                const pristineContent = (_currentArticleData && currentArticleUrl === currentUrl)
+                    ? _currentArticleData.content
+                    : (contentEl?.innerHTML || '');
                 await idbPut('novel-pages', {
                     url:       currentUrl,
                     title:     document.getElementById('article-title')?.textContent || '',
-                    content:   contentEl?.innerHTML || '',
+                    content:   pristineContent,
                     fetchedAt: Date.now(),
                     sessionId: _session.id
                 });
@@ -3524,25 +3534,27 @@
                 _session.currentUrl  = url;
                 await _saveSession();
 
-                // Render in article area
-                const contentEl = document.getElementById('article-content');
-                const titleEl   = document.getElementById('article-title');
+                // Render in article area — 透過共用的 applyArticleContentToDom()，同時
+                // 更新 _currentArticleData / currentArticleUrl 成「目前這一頁」，這樣之
+                // 後在這一頁切換反排文字模式時，套用的才是正確的章節，而不是回到舊資料
+                // （修正：切換反排選項時文章跳回開始 App 後第一個章節的 bug）。
+                const titleEl    = document.getElementById('article-title');
                 const sourceLink = document.getElementById('article-source-link');
 
                 if (pageData.title && titleEl) titleEl.textContent = pageData.title;
-                if (contentEl) {
-                    contentEl.innerHTML = pageData.content;
-                    try {
-                        const baseUri = new URL(url).origin;
-                        contentEl.querySelectorAll('img').forEach(img => {
-                            const src = img.getAttribute('src');
-                            if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-                                try { img.src = new URL(src, baseUri).href; } catch (e) {}
-                            }
-                            img.setAttribute('loading', 'lazy');
-                        });
-                    } catch (e) {}
-                }
+
+                _currentArticleData = {
+                    title:   pageData.title || '',
+                    byline:  pageData.byline || '',
+                    content: pageData.content || '',
+                    domain:  (() => { try { return new URL(url).hostname; } catch (e) { return ''; } })()
+                };
+                currentArticleUrl    = url;
+                currentArticleTitle  = _currentArticleData.title;
+                currentArticleDomain = _currentArticleData.domain;
+
+                applyArticleContentToDom(_currentArticleData, url);
+
                 if (sourceLink) {
                     sourceLink.href = url;
                     try { sourceLink.textContent = new URL(url).hostname; } catch(e) {}
