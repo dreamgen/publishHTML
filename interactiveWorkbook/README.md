@@ -54,10 +54,13 @@ firebase deploy --only database --project pwa-boardgame
 跟其他 PWA 一樣，把 `publishHTML` 推上 `main` 即可自動部署：
 
 ```
-https://dreamgen.github.io/publishHTML/interactiveWorkbook/
+https://dreamgen.github.io/publishHTML/interactiveWorkbook/     ← GitHub Pages（實測可用）
+https://publish-html.vercel.app/interactiveWorkbook/            ← Vercel 鏡像
 ```
 
 在手機或電腦瀏覽器開啟後，選「加入主畫面」／安裝圖示即可當成 App 使用。
+
+> **推上去後若停在「載入中…」**：多半是部署尚未完成就開啟，或瀏覽器留著壞掉的舊快取。頁面等待 12 秒後會自動顯示原因與「清除快取並重新載入」按鈕；也可以直接強制重新整理（Mac：Cmd+Shift+R）。
 
 ---
 

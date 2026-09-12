@@ -38,9 +38,16 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
 
-const authReady = new Promise((resolve) => {
+/**
+ * 匿名登入。務必要有「會失敗」的出口：若登入被拒仍讓 Promise 永遠 pending，
+ * 畫面就會停在「載入中…」而使用者不知道發生什麼事。
+ * 逾時不在這裡處理 —— 逾時只用來「先顯示訊息」，登入本身繼續嘗試，
+ * 這樣教室網路慢一點或短暫斷線時，連上後可以自動恢復，不必要求學員重新整理。
+ */
+const AUTH_SLOW_MS = 12000;
+const authReady = new Promise((resolve, reject) => {
   onAuthStateChanged(auth, (user) => { if (user) resolve(user); });
-  signInAnonymously(auth).catch((e) => notify('無法連線到資料庫：' + e.message));
+  signInAnonymously(auth).catch((e) => reject(Error('無法登入資料庫：' + (e && e.message ? e.message : e))));
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -583,6 +590,7 @@ const myGroup = () => (course && session && session.gid ? course.groups[session.
 const fieldsOf = (i) => ((course && course.exercises[i] && course.exercises[i].fields) || []);
 
 function shell(body, options = {}) {
+  window.__iwBooted = true; // 告訴 index.html 的看門狗：程式已經正常啟動
   document.body.classList.toggle('projection', projection);
   const subtitle = options.subtitle ?? (course ? course.name : '線上小組練習');
   document.querySelector('#app').innerHTML = `<header><div><b>互動題本</b><small>${E(subtitle)}</small></div>${
@@ -1158,6 +1166,7 @@ function renderTeacher() {
         <button id="dl-template">下載題目範本 JSON</button>
         <button id="import-questions">匯入題目 JSON</button>
         <input id="import-questions-file" type="file" accept=".json,application/json" hidden>
+        <button class="danger" id="delete-course">刪除整個課程</button>
       </div>
       <p class="muted">匯入題目會取代目前全部練習內容；已存在的組別答案中，欄位不符者將會清空。${
     hasEx ? `目前共 ${course.exercises.length} 個練習：${course.exercises.map((e2) => E(e2.title)).join('、')}` : ''
@@ -1192,7 +1201,6 @@ function renderTeacher() {
         <button class="danger" id="clear">清除${groupFilter === 'all' ? '所有組別' : '所選組別'}本題答案</button>
         <button class="danger" id="delete-group" ${groupFilter === 'all' ? 'disabled' : ''}>刪除所選小組</button>
         <button class="danger" id="reset">重置本場課程</button>
-        <button class="danger" id="delete-course">刪除整個課程</button>
       </div>
     </section>
     <h1>${exLabel(ex)}｜${E(course.exercises[ex].title)}</h1>
@@ -1203,6 +1211,17 @@ function renderTeacher() {
   document.querySelector('#import-questions').onclick = () => document.querySelector('#import-questions-file').click();
   document.querySelector('#import-questions-file').onchange = importQuestionsFile;
   document.querySelector('#join-qr').onclick = openJoinQR;
+  // 刪除課程放在最上層區塊並在這裡綁定：還沒匯入題目的課程也必須刪得掉。
+  document.querySelector('#delete-course').onclick = async () => {
+    if (prompt(`這會永久刪除整個課程「${course.name}」，包含題目與所有組別答案，無法復原。請輸入課程名稱確認。`) !== course.name) return;
+    // 先留存代碼：課程一被刪除，onValue 會立刻收到 null 並把 session 清空。
+    const code = session.code;
+    try {
+      await remove(courseRef(code));
+      forgetCourse(code);
+      notify('課程已刪除。');
+    } catch (e) { notify(e.message); }
+  };
   if (!hasEx) return;
 
   bindTabs();
@@ -1256,15 +1275,6 @@ function renderTeacher() {
       await update(courseRef(session.code), updates);
       groupFilter = 'all';
       notify('課程已重置，全部組別與答案已清空。');
-    } catch (e) { notify(e.message); }
-  };
-
-  document.querySelector('#delete-course').onclick = async () => {
-    if (prompt(`這會永久刪除整個課程「${course.name}」，包含題目與所有組別答案，無法復原。請輸入課程名稱確認。`) !== course.name) return;
-    try {
-      await remove(courseRef(session.code));
-      forgetCourse(session.code);
-      notify('課程已刪除。');
     } catch (e) { notify(e.message); }
   };
 }
@@ -1459,16 +1469,42 @@ function openJoinQR() {
 // ──────────────────────────────────────────────────────────────────────────────
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
-(async function boot() {
-  try {
-    await authReady;
-  } catch (e) {
-    notify('無法連線到資料庫，請檢查網路後重新整理。');
-  }
+function renderBootError(message) {
+  shell(`<div class="login"><div class="card">
+      <div class="eyebrow">載入失敗</div>
+      <h1>沒辦法連上即時資料庫</h1>
+      <p>${E(message)}</p>
+      <p>常見原因：目前沒有網路；校內／公司網路或擋廣告擴充功能封鎖了 <code>gstatic.com</code>、<code>googleapis.com</code>；或之前存下的舊版快取壞掉。</p>
+      <div class="toolbar">
+        <button class="primary" id="boot-retry">重新整理</button>
+        <button id="boot-reset">清除快取並重新載入</button>
+      </div>
+      <p class="muted">若在教室 Wi-Fi 下反覆失敗，請改用手機網路，或請網管放行 Google 服務網域。</p>
+    </div></div>`, { subtitle: '線上小組練習' });
+  document.querySelector('#boot-retry').onclick = () => location.reload();
+  document.querySelector('#boot-reset').onclick = () => {
+    if (window.__iwReset) window.__iwReset(); else location.reload();
+  };
+}
+
+function enterApp() {
   const saved = loadSession();
-  if (saved && saved.code && saved.role) {
-    startSession(saved);
+  if (saved && saved.code && saved.role) startSession(saved);
+  else renderEntry('student');
+}
+
+(async function boot() {
+  const slow = new Promise((_, rejectSlow) => setTimeout(
+    () => rejectSlow(Error('連線逾時。可能是網路不通，或有擴充功能／網路政策封鎖了 Google 服務。')),
+    AUTH_SLOW_MS,
+  ));
+  try {
+    await Promise.race([authReady, slow]);
+  } catch (e) {
+    renderBootError(e && e.message ? e.message : '連線失敗。');
+    // 只是慢或暫時斷線的話，登入仍在背景進行；連上後自動進入，不必請使用者重新整理。
+    authReady.then(() => { if (!session) enterApp(); }).catch(() => { /* 已顯示錯誤畫面 */ });
     return;
   }
-  renderEntry('student');
+  enterApp();
 }());

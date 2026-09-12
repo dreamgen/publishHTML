@@ -305,7 +305,7 @@
     </header>
     <main class="wrap">
       <div class="card">
-        <p>載入中…</p>
+        <p id="boot-status">載入中…</p>
       </div>
     </main>
   </div>
@@ -315,6 +315,38 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => { }));
     }
+
+    // 看門狗：app.js 若因為 CDN 被擋、網路不通或快取損毀而沒能啟動，
+    // 不要讓畫面永遠停在「載入中…」，改為顯示原因與自救按鈕。
+    window.__iwBooted = false;
+    window.__iwReset = async function () {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+        if (window.caches) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch (e) { /* 清不掉就直接重載 */ }
+      location.reload();
+    };
+    setTimeout(function () {
+      if (window.__iwBooted) return;
+      var el = document.querySelector('#boot-status');
+      if (!el) return;
+      el.parentElement.innerHTML =
+        '<div class="eyebrow">載入失敗</div>'
+        + '<h1>沒辦法啟動互動題本</h1>'
+        + '<p>程式已下載，但連不上即時資料庫，常見原因有：</p>'
+        + '<ul><li>目前沒有網路，或校內／公司網路擋住了 Google 服務</li>'
+            + '<li>瀏覽器的擋廣告或隱私擴充功能封鎖了 <code>gstatic.com</code>、<code>googleapis.com</code></li>'
+            + '<li>之前存下的舊版快取壞掉了</li></ul>'
+        + '<div class="toolbar"><button class="primary" onclick="location.reload()">重新整理</button>'
+        + '<button onclick="window.__iwReset()">清除快取並重新載入</button></div>'
+        + '<p class="muted">若在教室 Wi-Fi 下反覆失敗，請改用手機網路或請網管放行 Google 服務網域。</p>';
+    }, 12000);
   </script>
 </body>
 
