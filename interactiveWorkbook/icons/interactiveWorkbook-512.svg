@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="iwBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1d6d9c;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#123c58;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="iwPaper" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#e2eef6;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="102" ry="102" fill="url(#iwBg)"/>
+
+  <rect x="108" y="92" width="296" height="328" rx="26" ry="26" fill="url(#iwPaper)"/>
+  <rect x="108" y="92" width="44" height="328" rx="26" ry="26" fill="#9fc4d8"/>
+  <circle cx="130" cy="156" r="11" fill="#123c58" opacity="0.55"/>
+  <circle cx="130" cy="256" r="11" fill="#123c58" opacity="0.55"/>
+  <circle cx="130" cy="356" r="11" fill="#123c58" opacity="0.55"/>
+
+  <rect x="186" y="150" width="170" height="24" rx="12" fill="#1d6d9c" opacity="0.75"/>
+  <rect x="186" y="208" width="176" height="24" rx="12" fill="#5b8ba6" opacity="0.5"/>
+  <rect x="186" y="266" width="118" height="24" rx="12" fill="#5b8ba6" opacity="0.5"/>
+
+  <circle cx="336" cy="340" r="62" fill="#d0911d"/>
+  <path d="M306 340 l21 21 l43 -45" fill="none" stroke="#ffffff" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

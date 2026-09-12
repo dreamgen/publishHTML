@@ -165,6 +165,26 @@
 
 **安裝：** 開啟 `/qrCodeGenerator/` 後，點選「加入主畫面」即可安裝為獨立 App。
 
+### 📝 互動題本 (`interactiveWorkbook/`)
+
+> 講師開課程、匯入題目（JSON），學員以六碼代碼加入分組作答，講師端即時比較與投影各組答案
+
+**功能：**
+- 講師自訂課程名稱與密碼建立課程，系統產生**六碼加入代碼**（密碼以 PBKDF2-SHA256 加鹽雜湊儲存，不存明文）
+- 題目完全由 **JSON 匯入**，可先下載範本；支援單行／多行文字、數字、日期、單選、多選（可限定恰好選 N 項）、可增減的清單、可增減列數的表格
+- 學員輸入代碼 → 選（或新增）組別 → 填姓名即可作答；同課程相同組別共用一份答案（已取消原本的「單位」欄位）
+- 依課程進度**逐題開放／關閉**練習，未開放的題目學員無法進入或查看
+- 講師端**即時**看到各組答案（Firebase onValue，不需重新整理），可依欄位對齊比較、切換單組、簡潔投影模式
+- 儲存採 revision 交易比對，多台裝置同時作答不會互相覆寫
+- 學員加入 QR Code 全螢幕投影；匯出全部答案 JSON／CSV，JSON 可再匯入還原
+- 清除單題答案、刪除小組、重置課程、刪除整個課程
+
+**安裝：** 開啟 `/interactiveWorkbook/` 後，點選「加入主畫面」即可安裝為獨立 App。
+
+**後端：** Firebase Realtime Database（與 `liveInteraction` 共用 `pwa-boardgame` 專案），匿名登入，資料路徑 `artifacts/interactiveWorkbook/public/data/courses/<六碼代碼>`。**首次使用前必須在 Firebase 主控台設定資料庫規則**，內容見 `interactiveWorkbook/database.rules.json`，詳細說明見該資料夾的 `README.md`。
+
+---
+
 ---
 
 ## 技術架構

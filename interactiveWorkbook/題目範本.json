@@ -1,0 +1,69 @@
+{
+  "courseTitle": "範例課程（下載後可依需求增刪練習與欄位）",
+  "exercises": [
+    {
+      "title": "練習一．把名詞講定",
+      "time": "8 分鐘｜小組 5 分鐘 ＋ 回報 3 分鐘",
+      "goal": "讓同一單位的人對關鍵名詞有一致的認定。",
+      "notice": "以自己單位的實際情形填寫；遇到爭議時先取得一致，不必追求最正確的定義。",
+      "fields": [
+        { "key": "definition", "label": "我們單位的定義", "type": "textarea", "required": true },
+        { "key": "decision", "label": "誰決定的／何時生效", "type": "text", "required": true },
+        { "key": "dispute", "label": "我們這組最容易吵起來的名詞", "type": "text", "required": true },
+        { "key": "final", "label": "最後我們決定", "type": "textarea", "required": true }
+      ]
+    },
+    {
+      "title": "練習二．六個月的出席，你看到什麼",
+      "time": "25 分鐘｜小組 15 分鐘 ＋ 發表 10 分鐘",
+      "goal": "練習不把總數當成唯一答案，學會拆開資料看。",
+      "reference": {
+        "caption": "某研究班六個月出席紀錄",
+        "columns": ["月份", "應到", "實到", "出席率"],
+        "rows": [
+          ["1 月", "50", "43", "86%"],
+          ["2 月", "50", "42", "84%"],
+          ["3 月", "51", "39", "76%"]
+        ]
+      },
+      "fields": [
+        { "key": "see", "label": "看到的資料與變化", "type": "textarea", "required": true },
+        { "key": "questions", "label": "想知道的問題（至少四個）", "type": "list", "itemType": "textarea", "itemLabel": "問題", "minItems": 4, "required": true },
+        { "key": "action", "label": "我們的一個行動", "type": "textarea", "required": true }
+      ]
+    },
+    {
+      "title": "練習三．盤點只有一個人會做的事",
+      "time": "12 分鐘｜小組 8 分鐘 ＋ 回報 4 分鐘",
+      "goal": "把「人力不夠」換成看得見的能力分布與單點風險。",
+      "notice": "至少列出 8 項工作。",
+      "fields": [
+        {
+          "key": "rows", "label": "能力盤點", "type": "table", "itemLabel": "工作", "minRows": 8, "required": true,
+          "columns": [
+            { "key": "name", "label": "工作項目", "type": "text" },
+            { "key": "count", "label": "會做的人（人）", "type": "number" },
+            { "key": "senior", "label": "其中 60 歲以上（人）", "type": "number" }
+          ]
+        },
+        { "key": "trainee", "label": "三個月內要培養的人", "type": "text", "required": true },
+        { "key": "coach", "label": "由誰帶、怎麼帶", "type": "textarea", "required": true }
+      ]
+    },
+    {
+      "title": "練習四．下個月只追三個數字",
+      "time": "12 分鐘｜個人／單位 8 分鐘 ＋ 交表 4 分鐘",
+      "goal": "把課程變成下個月真的會發生的事。",
+      "notice": "只挑 3 個你們單位下個月真的會去看的指標。",
+      "fields": [
+        {
+          "key": "items", "label": "選擇的三個指標", "type": "checkbox", "required": true,
+          "options": ["平均出席", "新參與人數", "新人二次參與", "活躍志工", "高負荷志工", "一個月未參與"],
+          "minSelect": 3, "maxSelect": 3
+        },
+        { "key": "day", "label": "每月檢視日期（1–31）", "type": "number", "required": true },
+        { "key": "report", "label": "一個月後回報日期", "type": "date", "required": true }
+      ]
+    }
+  ]
+}

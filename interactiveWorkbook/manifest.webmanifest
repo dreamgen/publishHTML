@@ -1,0 +1,50 @@
+{
+  "id": "interactiveWorkbook",
+  "name": "互動題本 — 線上小組練習",
+  "short_name": "互動題本",
+  "description": "講師開課程並匯入題目（JSON），學員以六碼代碼加入、分組即時作答，講師可逐題投影比較各組答案",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f1f5f9",
+  "theme_color": "#123c58",
+  "lang": "zh-TW",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/interactiveWorkbook-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/interactiveWorkbook-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/interactiveWorkbook-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "輸入加入代碼",
+      "short_name": "加入課程",
+      "description": "以六碼代碼加入課程並開始作答",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./icons/interactiveWorkbook-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

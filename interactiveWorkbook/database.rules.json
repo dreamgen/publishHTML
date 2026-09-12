@@ -1,0 +1,26 @@
+{
+  "rules": {
+    "artifacts": {
+      "interactiveWorkbook": {
+        "public": {
+          "data": {
+            "courses": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null"
+              }
+            }
+          }
+        }
+      },
+      "liveInteraction": {
+        "public": {
+          "data": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+          }
+        }
+      }
+    }
+  }
+}
