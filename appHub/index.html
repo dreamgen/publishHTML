@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PWA 總覽</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/appHub-192.svg">
+  <link rel="apple-touch-icon" href="./icons/appHub-192.svg">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PWA總覽">
+  <meta name="description" content="快速搜尋並開啟本專案所有可安裝的 PWA 工具">
+
+  <!-- Tailwind CSS (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      height: 100%;
+      height: 100dvh;
+      margin: 0;
+      background: #f1f5f9;
+      overflow: hidden;
+    }
+
+    #root {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #app-list {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .app-card-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .app-desc {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <!-- Header -->
+    <header class="shrink-0 bg-white border-b border-slate-200 px-4 pt-[calc(env(safe-area-inset-top)+16px)] pb-4 sm:px-6">
+      <div class="max-w-5xl mx-auto">
+        <div class="flex items-center gap-3">
+          <img src="./icons/appHub-192.svg" alt="" class="w-10 h-10 rounded-xl shrink-0">
+          <div>
+            <h1 class="text-lg font-bold text-slate-900 leading-tight">PWA 總覽</h1>
+            <p class="text-xs text-slate-500 leading-tight">快速搜尋並開啟本專案的所有工具</p>
+          </div>
+        </div>
+
+        <div class="mt-4 relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            id="search-input"
+            type="search"
+            inputmode="search"
+            placeholder="搜尋工具名稱、說明或分類..."
+            class="w-full pl-9 pr-9 py-2.5 rounded-xl border border-slate-300 bg-slate-50 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            autocomplete="off"
+          >
+          <button
+            id="clear-btn"
+            type="button"
+            class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-slate-300 text-white text-xs leading-5 text-center"
+            aria-label="清除搜尋"
+          >✕</button>
+        </div>
+
+        <p id="result-count" class="mt-2 text-xs text-slate-400"></p>
+      </div>
+    </header>
+
+    <!-- List -->
+    <main id="app-list" class="flex-1 px-4 py-4 sm:px-6">
+      <div class="max-w-5xl mx-auto">
+        <div id="loading" class="text-center text-sm text-slate-400 py-16">載入工具清單中...</div>
+        <div id="error" class="hidden text-center text-sm text-red-500 py-16 px-6">
+          <p class="mb-2">無法載入工具清單。</p>
+          <p class="text-xs text-slate-400">請確認本頁是以本機伺服器（http/https）開啟，而非直接以檔案總管開啟 index.html。</p>
+          <button id="retry-btn" type="button" class="mt-4 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm">重新載入</button>
+        </div>
+        <div id="empty" class="hidden text-center text-sm text-slate-400 py-16">找不到符合的工具，換個關鍵字試試？</div>
+        <div id="grid" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var searchInput = document.getElementById('search-input');
+      var clearBtn = document.getElementById('clear-btn');
+      var resultCount = document.getElementById('result-count');
+      var loadingEl = document.getElementById('loading');
+      var errorEl = document.getElementById('error');
+      var emptyEl = document.getElementById('empty');
+      var gridEl = document.getElementById('grid');
+      var retryBtn = document.getElementById('retry-btn');
+
+      var allApps = [];
+
+      function escapeHtml(str) {
+        return String(str || '').replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function initialOf(name) {
+        var trimmed = (name || '').trim();
+        return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
+      }
+
+      function renderCard(app) {
+        var color = app.themeColor || '#667eea';
+        var iconHtml = app.icon
+          ? '<img src="' + escapeHtml(app.icon) + '" alt="" class="app-card-icon" ' +
+            'onerror="this.outerHTML=\'<div class=&quot;app-card-icon flex items-center justify-center text-white font-bold text-lg&quot; style=&quot;background:' + escapeHtml(color) + '&quot;>' + escapeHtml(initialOf(app.shortName || app.name)) + '</div>\'">'
+          : '<div class="app-card-icon flex items-center justify-center text-white font-bold text-lg" style="background:' + escapeHtml(color) + '">' + escapeHtml(initialOf(app.shortName || app.name)) + '</div>';
+
+        var tagsHtml = (app.categories || []).slice(0, 3).map(function (c) {
+          return '<span class="inline-block px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px]">' + escapeHtml(c) + '</span>';
+        }).join('');
+
+        return (
+          '<a href="' + escapeHtml(app.path) + '" class="flex gap-3 p-3.5 bg-white rounded-2xl shadow-sm border border-slate-200 active:scale-[0.98] transition-transform">' +
+            iconHtml +
+            '<div class="min-w-0 flex-1">' +
+              '<h2 class="font-semibold text-slate-900 text-sm truncate">' + escapeHtml(app.shortName || app.name) + '</h2>' +
+              (app.description ? '<p class="app-desc mt-0.5 text-xs text-slate-500 leading-snug">' + escapeHtml(app.description) + '</p>' : '') +
+              (tagsHtml ? '<div class="mt-1.5 flex flex-wrap gap-1">' + tagsHtml + '</div>' : '') +
+            '</div>' +
+          '</a>'
+        );
+      }
+
+      function normalize(str) {
+        return (str || '').toLowerCase();
+      }
+
+      function matches(app, keyword) {
+        if (!keyword) return true;
+        var haystack = normalize(
+          app.name + ' ' + app.shortName + ' ' + app.description + ' ' + (app.categories || []).join(' ')
+        );
+        return haystack.indexOf(keyword) !== -1;
+      }
+
+      function render() {
+        var keyword = normalize(searchInput.value.trim());
+        var filtered = allApps.filter(function (app) { return matches(app, keyword); });
+
+        clearBtn.classList.toggle('hidden', !searchInput.value);
+
+        if (allApps.length === 0) {
+          gridEl.classList.add('hidden');
+          emptyEl.classList.add('hidden');
+          resultCount.textContent = '';
+          return;
+        }
+
+        resultCount.textContent = keyword
+          ? '找到 ' + filtered.length + ' / ' + allApps.length + ' 個工具'
+          : '共 ' + allApps.length + ' 個工具';
+
+        if (filtered.length === 0) {
+          gridEl.classList.add('hidden');
+          emptyEl.classList.remove('hidden');
+          return;
+        }
+
+        emptyEl.classList.add('hidden');
+        gridEl.classList.remove('hidden');
+        gridEl.innerHTML = filtered.map(renderCard).join('');
+      }
+
+      function load() {
+        loadingEl.classList.remove('hidden');
+        errorEl.classList.add('hidden');
+        gridEl.classList.add('hidden');
+        emptyEl.classList.add('hidden');
+
+        // 加上 cache-buster，避免瀏覽器快取住舊的工具清單
+        fetch('./apps.json?t=' + Date.now())
+          .then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
+          .then(function (data) {
+            allApps = (data && data.apps) || [];
+            loadingEl.classList.add('hidden');
+            render();
+          })
+          .catch(function (err) {
+            console.warn('[appHub] 載入 apps.json 失敗：', err);
+            loadingEl.classList.add('hidden');
+            errorEl.classList.remove('hidden');
+          });
+      }
+
+      searchInput.addEventListener('input', render);
+      clearBtn.addEventListener('click', function () {
+        searchInput.value = '';
+        render();
+        searchInput.focus();
+      });
+      retryBtn.addEventListener('click', load);
+
+      load();
+    })();
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./sw.js').catch(function (err) {
+          console.warn('[SW] Registration failed:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+{
+  "generatedAt": "2026-09-13T07:39:48.017Z",
+  "count": 12,
+  "apps": [
+    {
+      "id": "bridgeGame",
+      "name": "橋牌單機遊戲",
+      "shortName": "橋牌",
+      "description": "橋牌單人練習版，含競叫、打牌、橡皮橋計分，支援離線遊玩",
+      "path": "../bridgeGame/",
+      "icon": "../bridgeGame/icons/bridgeGame-192.svg",
+      "themeColor": "#15803d",
+      "categories": [
+        "games"
+      ]
+    },
+    {
+      "id": "htmlShare",
+      "name": "htmlShare — 單頁 HTML 分享工具",
+      "shortName": "htmlShare",
+      "description": "上傳單一 HTML 檔案（例如 AI 產生的網頁），取得一個網址即可分享給其他人瀏覽",
+      "path": "../htmlShare/",
+      "icon": "../htmlShare/icons/htmlShare-192.png",
+      "themeColor": "#0891b2",
+      "categories": [
+        "utilities",
+        "productivity"
+      ]
+    },
+    {
+      "id": "interactiveWorkbook",
+      "name": "互動題本 — 線上小組練習",
+      "shortName": "互動題本",
+      "description": "講師開課程並匯入題目（JSON），學員以六碼代碼加入、分組即時作答，講師可逐題投影比較各組答案",
+      "path": "../interactiveWorkbook/",
+      "icon": "../interactiveWorkbook/icons/interactiveWorkbook-192.svg",
+      "themeColor": "#123c58",
+      "categories": [
+        "education",
+        "productivity"
+      ]
+    },
+    {
+      "id": "liveInteraction",
+      "name": "即時互動大廳 - Live Interaction",
+      "shortName": "即時互動",
+      "description": "親友聚會即時互動平台，支援多人房間、即時表情反應",
+      "path": "../liveInteraction/",
+      "icon": "../liveInteraction/icons/liveInteraction-192.png",
+      "themeColor": "#4338ca",
+      "categories": [
+        "social",
+        "entertainment"
+      ]
+    },
+    {
+      "id": "mahjongPractice",
+      "name": "台灣麻將練習 - Mahjong Practice",
+      "shortName": "麻將練習",
+      "description": "台灣麻將 16 張單機練習版，支援吃、碰、胡，含 AI 對手",
+      "path": "../mahjongPractice/",
+      "icon": "../mahjongPractice/icons/mahjongPractice-192.svg",
+      "themeColor": "#f59e0b",
+      "categories": [
+        "games"
+      ]
+    },
+    {
+      "id": "myBadge",
+      "name": "我的名牌",
+      "shortName": "我的名牌",
+      "description": "掃描並儲存 QR Code 名牌，隨時展示給他人掃描",
+      "path": "../myBadge/",
+      "icon": "../myBadge/icon.svg",
+      "themeColor": "#667eea",
+      "categories": []
+    },
+    {
+      "id": "pdfEditor",
+      "name": "PDF 工坊 - 本機 PDF 編輯器",
+      "shortName": "PDF 工坊",
+      "description": "完全在裝置本機處理的 PDF 編輯器，支援 Excel Sheet 轉 PDF、密碼文件、OCR、文字搜尋、頁面整理、手寫標註、簽名與表單。",
+      "path": "../pdfEditor/",
+      "icon": "../pdfEditor/icons/pdfEditor-192.png",
+      "themeColor": "#f8fafc",
+      "categories": [
+        "productivity",
+        "utilities"
+      ]
+    },
+    {
+      "id": "playDices",
+      "name": "物理 3D 骰子 - Play Dices",
+      "shortName": "骰子搖搖",
+      "description": "使用物理引擎模擬的 3D 骰子，支援搖動裝置投擲骰子",
+      "path": "../playDices/",
+      "icon": "../playDices/icons/playDices-192.svg",
+      "themeColor": "#667eea",
+      "categories": [
+        "games",
+        "utilities"
+      ]
+    },
+    {
+      "id": "pureReader",
+      "name": "淨讀器 PureReader",
+      "shortName": "淨讀器",
+      "description": "過濾廣告，還原乾淨的網頁閱讀體驗。支援 Web Share，可直接從瀏覽器分享網址至此閱讀。",
+      "path": "../pureReader/",
+      "icon": "../pureReader/icons/pureReader-192.svg",
+      "themeColor": "#3b82f6",
+      "categories": [
+        "utilities",
+        "productivity"
+      ]
+    },
+    {
+      "id": "qrCodeGenerator",
+      "name": "QRCode 產生器",
+      "shortName": "QRCode產生器",
+      "description": "輸入或貼上任意網址／文字，即可產生可美化（標題、色彩、中央圖示）的 QR Code 圖片，並支援下載與分享",
+      "path": "../qrCodeGenerator/",
+      "icon": "../qrCodeGenerator/icons/qrCodeGenerator-192.png",
+      "themeColor": "#0d9488",
+      "categories": [
+        "utilities",
+        "productivity"
+      ]
+    },
+    {
+      "id": "scoreBoard",
+      "name": "萬用計分板 - ScoreBoard",
+      "shortName": "計分板",
+      "description": "適用於球類、牌局、比賽的萬用計分工具，支援多人對戰、自訂步距與勝利條件",
+      "path": "../scoreBoard/",
+      "icon": "../scoreBoard/icons/scoreBoard-192.svg",
+      "themeColor": "#667eea",
+      "categories": [
+        "games",
+        "utilities"
+      ]
+    },
+    {
+      "id": "shareHTML",
+      "name": "網頁分享平台",
+      "shortName": "網頁分享",
+      "description": "快速發佈單一 HTML 的 PWA 工具，提供列表展示與快速篩選功能。",
+      "path": "../shareHTML/",
+      "icon": "../shareHTML/icons/shareHTML-192.svg",
+      "themeColor": "#3b82f6",
+      "categories": []
+    }
+  ]
+}

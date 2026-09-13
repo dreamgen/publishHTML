@@ -1,0 +1,50 @@
+{
+  "id": "appHub",
+  "name": "PWA 總覽 - App Hub",
+  "short_name": "PWA總覽",
+  "description": "快速搜尋並開啟本專案所有可安裝的 PWA 工具，新增工具時清單會自動更新",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "lang": "zh-TW",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/appHub-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/appHub-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/appHub-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "搜尋工具",
+      "short_name": "搜尋",
+      "description": "開啟總覽並搜尋工具",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./icons/appHub-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

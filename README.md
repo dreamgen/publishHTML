@@ -186,6 +186,22 @@
 
 ---
 
+### 🧭 PWA 總覽 App Hub (`appHub/`)
+
+> 快速搜尋並開啟本專案所有已安裝／可安裝的 PWA 工具，新增工具時清單會自動更新
+
+**功能：**
+- 列出目前所有 PWA 工具，附圖示與簡短說明
+- 即時搜尋（工具名稱、說明、分類皆可比對）
+- 點選卡片直接開啟該工具
+- 清單資料來自 `apps.json`，由 `scripts/generate-apps-index.mjs` 掃描 `publishHTML/` 下每個子目錄的 `manifest.webmanifest`（或退回解析 `index.html` 的 `<title>`／`<meta name="description">`）自動產生，**不需要手動維護**
+- GitHub Actions 部署流程（`.github/workflows/deploy.yml`）會在每次推送到 `main` 時自動重新產生 `apps.json`，因此正式站台上的總覽一律反映當下 repo 的最新工具清單
+- 完整離線支援（Service Worker 快取；`apps.json` 採 Network First，連線時優先取得最新清單）
+
+**安裝：** 開啟 `/appHub/` 後，點選「加入主畫面」即可安裝為獨立 App。
+
+**本機重新產生清單：** `node scripts/generate-apps-index.mjs`
+
 ---
 
 ## 技術架構
@@ -335,6 +351,14 @@ publishHTML/
      }
    </script>
    ```
+
+### 新工具會自動出現在「PWA 總覽」嗎？
+
+會。只要新目錄有 `manifest.webmanifest`（建議）或至少 `index.html` 有 `<title>`／`<meta name="description">`，
+`appHub/` 的清單就會在下次部署時自動包含它，不需要另外手動編輯任何清單檔案。想在本機先看到效果，
+執行一次 `node scripts/generate-apps-index.mjs` 重新產生 `appHub/apps.json` 即可。
+
+---
 
 ### 為何每個工具需要獨立 Scope？
 

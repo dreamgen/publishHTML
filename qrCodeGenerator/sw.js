@@ -7,7 +7,7 @@
  * - Scope: /qrCodeGenerator/
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_NAME = `qrCodeGenerator-${SW_VERSION}`;
 const SHARED_CACHE = `qrCodeGenerator-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
