@@ -533,6 +533,39 @@ async function joinGroup(code, groupName, author) {
 const revisionOf = (groupRaw, index) => Number(((groupRaw || {}).revision || {})[index] || 0);
 
 /**
+ * 刪除單一練習：題目本身、題目開關，以及所有組別在這一題的答案都要一起移除，
+ * 後面的練習往前遞補（索引整體前移），因此必須一次改寫每組的 answers/complete/updated/revision。
+ * 受影響題號的 revision 一律加一，讓還停在舊畫面的裝置在儲存時得到衝突提示，而不是覆蓋掉別題的答案。
+ */
+async function deleteExercise(code, courseData, index) {
+  const remaining = courseData.exercises.filter((_, i) => i !== index);
+  const before = courseData.exercises.length;
+  const last = before - 1;
+  const updates = { exercisesJson: JSON.stringify(remaining) };
+
+  for (let i = 0; i < remaining.length; i += 1) {
+    updates[`locks/${i}`] = !!courseData.locks[i < index ? i : i + 1];
+  }
+  updates[`locks/${last}`] = null;
+
+  Object.entries(courseData.groups).forEach(([gid, g]) => {
+    for (let i = 0; i < remaining.length; i += 1) {
+      const src = i < index ? i : i + 1;
+      updates[`groups/${gid}/answers/${i}`] = JSON.stringify(g.answers[src] || {});
+      updates[`groups/${gid}/complete/${i}`] = !!g.complete[src];
+      updates[`groups/${gid}/updated/${i}`] = g.updated[src] || 0;
+      updates[`groups/${gid}/revision/${i}`] = Math.max(g.revision[i] || 0, g.revision[src] || 0) + 1;
+    }
+    updates[`groups/${gid}/answers/${last}`] = null;
+    updates[`groups/${gid}/complete/${last}`] = null;
+    updates[`groups/${gid}/updated/${last}`] = null;
+    updates[`groups/${gid}/revision/${last}`] = null;
+  });
+
+  await update(courseRef(code), updates);
+}
+
+/**
  * 以 transaction 比對 revision 後寫入，避免覆蓋其他裝置較新的答案。
  * 注意：RTDB 第一次呼叫回呼時可能給 null（本機尚無快取），若直接中止會誤判成「組別已刪除」，
  * 因此中止後會再向伺服器確認一次，真的不存在才回報錯誤。
@@ -679,7 +712,9 @@ function renderStudentEntry(prefill = {}) {
       if (!groupName || !author) throw Error('請填寫組別與姓名。');
       const { gid, name } = await joinGroup(code2, groupName, author);
       saveJSON(LS.LAST, { code: code2, group: groupName, name: author });
-      startSession({ role: 'student', code: code2, gid, courseName: name });
+      startSession({
+        role: 'student', code: code2, gid, courseName: name, author,
+      });
     } catch (err) { notify(err.message); } finally { busy = false; }
   };
 }
@@ -818,10 +853,17 @@ function applySnapshot(raw) {
     return;
   }
   const previousExercises = course ? course.exercises.length : -1;
+  const previousTitle = (course && course.exercises[ex]) ? course.exercises[ex].title : null;
   course = normalizeCourse(raw);
   if (session.courseName !== course.name) {
     session = { ...session, courseName: course.name };
     saveSession(session);
+  }
+  // 題目數量有變動時（例如講師刪了某一題），以標題把畫面留在原本那一題；
+  // 原本那一題被刪掉才回到第一題，避免使用者被默默換到另一題。
+  if (previousTitle !== null && course.exercises.length !== previousExercises) {
+    const moved = course.exercises.findIndex((item) => item.title === previousTitle);
+    ex = moved >= 0 ? moved : 0;
   }
   if (ex >= course.exercises.length) ex = 0;
 
@@ -858,6 +900,11 @@ function applySnapshot(raw) {
   const structural = previousExercises !== course.exercises.length;
   if (signature === lastStudentSignature && !structural) return;
   lastStudentSignature = signature;
+  if (structural && previousExercises >= 0) {
+    notify(dirty
+      ? '講師調整了題目，題號可能已變動；請確認畫面內容仍屬於這一題，再按儲存。'
+      : '講師調整了題目。');
+  }
 
   const remoteRevision = group.revision[ex] || 0;
   if (!dirty && (remoteRevision !== revision || structural)) {
@@ -974,24 +1021,55 @@ function noQuestionsNotice() {
   }</p></section>`;
 }
 
+/**
+ * 學員身分列：清楚顯示「我在哪一組、我是誰」，方便當場確認有沒有打錯字。
+ * 姓名取自這台裝置加入時輸入的值（session.author），而不是組別上最後一位操作者，
+ * 這樣同組多人各自看到的都是自己的名字。
+ */
+function identityBar() {
+  const group = myGroup();
+  const myName = (session && session.author) || (group && group.author) || '';
+  return `<div class="identity">
+      <div class="identity-item"><span class="identity-label">組別</span><b>${E(group ? group.name : '')}</b></div>
+      <div class="identity-item"><span class="identity-label">我的姓名</span><b>${E(myName)}</b></div>
+      <button type="button" class="small" id="fix-identity">更正</button>
+    </div>`;
+}
+
+function bindIdentityBar() {
+  const button = document.querySelector('#fix-identity');
+  if (!button) return;
+  button.onclick = () => {
+    if (busy) return;
+    if (dirty && !confirm('尚有未儲存的答案，確定離開並重新填寫組別／姓名？')) return;
+    const { code } = session;
+    if (unwatch) { unwatch(); unwatch = null; }
+    session = null; course = null; draft = {}; dirty = false; ex = 0; lastStudentSignature = '';
+    clearSession();
+    renderStudentEntry({ code });
+  };
+}
+
 function renderStudent() {
   const group = myGroup();
   if (!group) return;
   if (!course.exercises.length) {
-    shell(`<div class="eyebrow">${E(group.name)} · 填表人 ${E(group.author)}</div>${noQuestionsNotice()}`);
+    shell(`${identityBar()}${noQuestionsNotice()}`);
+    bindIdentityBar();
     return;
   }
   const exDef = course.exercises[ex];
   if (course.locks[ex]) {
-    shell(`<div class="eyebrow">${E(group.name)}</div>${tabs()}<section class="card waiting">
+    shell(`${identityBar()}${tabs()}<section class="card waiting">
       <div class="eyebrow">依課程進度開放</div><h1>${exLabel(ex)}尚未開放</h1>
       <p>請等候講師開放，再進入本題作答。</p><p>其他已開放的練習，可從上方按鈕進入。</p>
       ${dirty ? '<div class="notice warn">本題未儲存的修改暫留在此頁；請勿重新整理或離開，待講師重新開放後儲存。</div>' : ''}
       <p id="save-state" role="status" class="muted">開放狀態會即時更新，不需重新整理。</p></section>`);
     bindTabs();
+    bindIdentityBar();
     return;
   }
-  shell(`<div class="eyebrow">${E(group.name)} · 填表人 ${E(group.author)}</div>${tabs()}
+  shell(`${identityBar()}${tabs()}
     <div class="card">
       <span class="badge">${exLabel(ex)}${exDef.time ? ' · ' + E(exDef.time) : ''}</span>
       <h1>${E(exDef.title)}</h1>
@@ -1011,6 +1089,7 @@ function renderStudent() {
       <button class="primary" id="complete">標記完成並儲存</button>
     </div>`);
   bindTabs();
+  bindIdentityBar();
   bindFieldEvents();
   document.querySelector('#save').onclick = () => saveDraft(false);
   document.querySelector('#complete').onclick = () => saveDraft(true);
@@ -1100,7 +1179,9 @@ async function saveDraft(complete) {
   try {
     const cleaned = validateAnswer(course.exercises, ex, draft, complete);
     const group = myGroup();
-    const newRevision = await saveAnswer(session.code, session.gid, ex, cleaned, revision, complete, group.author);
+    // 記下「這次是誰存的」：同組多人輪流操作時，講師匯出才看得出最後由誰送出。
+    const savedBy = (session && session.author) || group.author;
+    const newRevision = await saveAnswer(session.code, session.gid, ex, cleaned, revision, complete, savedBy);
     revision = newRevision;
     draft = structuredClone(cleaned);
     applyDefaults();
@@ -1153,6 +1234,23 @@ function compare() {
   }</tbody></table></div>`;
 }
 
+/** 判斷一個答案值是否真的有填（空字串、空清單、整列空白的表格都不算） */
+function hasContent(value) {
+  if (value == null) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => (item && typeof item === 'object'
+      ? Object.values(item).some((cell) => String(cell ?? '').trim())
+      : String(item ?? '').trim()));
+  }
+  return !!String(value).trim();
+}
+
+/** 某一題目前有幾組填過（用來在刪除前提醒講師） */
+function answeredCount(index) {
+  return Object.values(course.groups)
+    .filter((g) => Object.values(g.answers[index] || {}).some(hasContent)).length;
+}
+
 function renderTeacher() {
   const hasEx = course.exercises.length > 0;
   const groupCount = Object.keys(course.groups).length;
@@ -1185,12 +1283,12 @@ function renderTeacher() {
     </div>
     <section class="manage card" style="margin-top:24px">
       <h2>課程進度｜練習開關</h2>
-      <p>未開放的練習，學員無法進入或查看。可依進度逐題開放，關閉不會刪除答案。</p>
+      <p>未開放的練習，學員無法進入或查看。可依進度逐題開放，關閉不會刪除答案。「刪除」則會連同各組在該題的答案一起移除。</p>
       <div class="exercise-gates">${course.exercises.map((t, i) => `<div class="gate-row"><div><b>${exLabel(i)}｜${E(t.title)}</b><div class="muted">${
     course.locks[i] ? '未開放' : '已開放，學員可進入'
-  }</div></div><button type="button" role="switch" aria-checked="${!course.locks[i]}" data-gate="${i}" class="${
+  }${answeredCount(i) ? ` · ${answeredCount(i)} 組已作答` : ''}</div></div><div class="toolbar"><button type="button" role="switch" aria-checked="${!course.locks[i]}" data-gate="${i}" class="${
     course.locks[i] ? '' : 'primary'
-  }">${course.locks[i] ? '開放' : '關閉'}${exLabel(i)}</button></div>`).join('')}</div>
+  }">${course.locks[i] ? '開放' : '關閉'}${exLabel(i)}</button><button type="button" class="danger" data-del-ex="${i}" aria-label="刪除${exLabel(i)}">刪除</button></div></div>`).join('')}</div>
       <div class="toolbar">
         <button id="export-json">匯出全部答案 JSON</button>
         <button id="export-csv">匯出全部答案 CSV</button>
@@ -1230,6 +1328,24 @@ function renderTeacher() {
       const i = Number(button.dataset.gate);
       button.disabled = true;
       try { await set(courseRef(session.code, `locks/${i}`), !course.locks[i]); } catch (e) { notify(e.message); button.disabled = false; }
+    };
+  });
+  document.querySelectorAll('[data-del-ex]').forEach((button) => {
+    button.onclick = async () => {
+      const i = Number(button.dataset.delEx);
+      const target = course.exercises[i];
+      if (!target) return;
+      const answered = answeredCount(i);
+      const warning = answered ? `目前有 ${answered} 組在這一題已經作答，答案會一併永久刪除。\n` : '';
+      if (!confirm(`確定刪除「${exLabel(i)}｜${target.title}」？\n\n${warning}後面的練習會自動往前遞補題號，其他練習的答案保留。此操作無法復原。`)) return;
+      button.disabled = true;
+      try {
+        await deleteExercise(session.code, course, i);
+        notify(`已刪除「${target.title}」。`);
+      } catch (e) {
+        notify(e.message);
+        button.disabled = false;
+      }
     };
   });
   document.querySelector('#exercise-select').onchange = (e) => { ex = Number(e.target.value); renderTeacher(); };
@@ -1277,6 +1393,7 @@ function renderTeacher() {
       notify('課程已重置，全部組別與答案已清空。');
     } catch (e) { notify(e.message); }
   };
+
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1408,7 +1525,7 @@ function exportData(format) {
         'application/json',
       );
     } else {
-      const rows = [['組別', '填表人', '練習', '狀態', '更新時間', '欄位', '答案']];
+      const rows = [['組別', '最後儲存者', '練習', '狀態', '更新時間', '欄位', '答案']];
       Object.values(course.groups).forEach((g) => {
         g.answers.forEach((a, i) => {
           answerRows(fieldsOf(i), a).forEach(([k, v]) => {

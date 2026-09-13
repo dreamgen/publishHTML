@@ -196,6 +196,24 @@
       text-transform: uppercase
     }
 
+    /* 學員身分列：讓學員一眼確認自己的組別與姓名有沒有打錯 */
+    .identity {
+      display: flex;
+      align-items: center;
+      gap: 12px 28px;
+      flex-wrap: wrap;
+      background: #e9f1f6;
+      border: 1px solid #bfd4e0;
+      border-radius: 11px;
+      padding: 14px 20px;
+      margin-bottom: 20px
+    }
+
+    .identity-item { display: flex; align-items: baseline; gap: 10px; min-width: 0 }
+    .identity-label { color: #4a687d; font-size: .85rem; white-space: nowrap }
+    .identity-item b { font-size: 1.15rem; overflow-wrap: anywhere }
+    .identity #fix-identity { margin-left: auto }
+
     .course-list { display: grid; gap: 10px; margin: 14px 0 }
 
     .course-item {
@@ -346,7 +364,7 @@
         + '<div class="toolbar"><button class="primary" onclick="location.reload()">重新整理</button>'
         + '<button onclick="window.__iwReset()">清除快取並重新載入</button></div>'
         + '<p class="muted">若在教室 Wi-Fi 下反覆失敗，請改用手機網路或請網管放行 Google 服務網域。</p>';
-    }, 12000);
+    }, 20000);   // 最後一道防線：app.js 自己會在 12 秒先報告連線問題，這裡只處理「app.js 根本沒跑起來」
   </script>
 </body>
 
