@@ -11,8 +11,9 @@
  *      - 每日 10 萬次免費額度，足夠個人使用
  *
  * 2. htmlShare 上傳／分享後端（新增功能）
- *    - POST /api/upload   接收 { html, title }，存進 R2，回傳短網址
- *    - GET  /s/:id         讀取並顯示已上傳的 HTML（就是分享出去的網址）
+ *    - POST /api/upload       接收 { html, title }，存進 R2，回傳短網址與 editToken
+ *    - POST /api/upload/:id   接收 { html, title?, editToken }，更新同一個分享（要對得上 editToken）
+ *    - GET  /s/:id            讀取並顯示已上傳的 HTML（就是分享出去的網址）
  *    需要 wrangler.toml 有 R2 binding：HTML_BUCKET
  */
 
@@ -101,6 +102,9 @@ function withCors(response, extraHeaders = {}) {
 const HTML_SHARE_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 const HTML_SHARE_ID_LENGTH = 8;
 const HTML_SHARE_ID_ALPHABET = '23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'; // 移除易混淆字元 0/O/1/l/i
+const HTML_SHARE_EDIT_TOKEN_LENGTH = 32;
+const HTML_SHARE_EDIT_TOKEN_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 function htmlShareErrorPage(title, message, status) {
   const html = `<!DOCTYPE html>
@@ -129,6 +133,21 @@ function generateHtmlShareId() {
     id += HTML_SHARE_ID_ALPHABET[bytes[i] % HTML_SHARE_ID_ALPHABET.length];
   }
   return id;
+}
+
+/**
+ * 產生「編輯權杖」：只有上傳當下拿到這組權杖的人，之後才能用它更新同一個分享。
+ * 不會出現在分享網址（/s/:id）裡，只在上傳／更新成功的回應中回傳一次，
+ * 前端會把它存進本機的上傳紀錄（localStorage），所以只有原本上傳的那個瀏覽器能更新。
+ */
+function generateHtmlShareEditToken() {
+  const bytes = new Uint8Array(HTML_SHARE_EDIT_TOKEN_LENGTH);
+  crypto.getRandomValues(bytes);
+  let token = '';
+  for (let i = 0; i < HTML_SHARE_EDIT_TOKEN_LENGTH; i++) {
+    token += HTML_SHARE_EDIT_TOKEN_ALPHABET[bytes[i] % HTML_SHARE_EDIT_TOKEN_ALPHABET.length];
+  }
+  return token;
 }
 
 async function handleHtmlShareUpload(request, env) {
@@ -172,18 +191,102 @@ async function handleHtmlShareUpload(request, env) {
   }
 
   const uploadedAt = new Date().toISOString();
+  const editToken = generateHtmlShareEditToken();
 
   await env.HTML_BUCKET.put(`${id}.html`, html, {
     httpMetadata: { contentType: 'text/html; charset=utf-8' },
-    customMetadata: { title, uploadedAt, size: String(byteLength) },
+    customMetadata: { title, uploadedAt, size: String(byteLength), editToken },
   });
 
   const url = new URL(request.url);
   const shareUrl = `${url.origin}/s/${id}`;
 
   return new Response(
-    JSON.stringify({ id, url: shareUrl, title, size: byteLength, uploadedAt }),
+    JSON.stringify({ id, url: shareUrl, title, size: byteLength, uploadedAt, editToken }),
     { status: 201, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' } }
+  );
+}
+
+/**
+ * 更新已上傳的分享內容（同一個 id、同一個網址，換掉裡面的 HTML）。
+ * 必須帶上當初上傳時拿到的 editToken 才能更新，防止其他知道分享網址的人亂改內容。
+ */
+async function handleHtmlShareUpdate(id, request, env) {
+  if (!env.HTML_BUCKET) {
+    return errorResponse('後端尚未設定 R2 bucket（HTML_BUCKET），請檢查 wrangler.toml 並重新部署', 500);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('請求格式錯誤，需為 JSON', 400);
+  }
+
+  const html = typeof body?.html === 'string' ? body.html : null;
+  const editToken = typeof body?.editToken === 'string' ? body.editToken : null;
+  const titleInput = typeof body?.title === 'string' && body.title.trim()
+    ? body.title.trim().slice(0, 200)
+    : null;
+
+  if (!editToken) {
+    return errorResponse('缺少編輯權杖，無法更新', 401);
+  }
+  if (!html || !html.trim()) {
+    return errorResponse('沒有收到 HTML 內容', 400);
+  }
+
+  const byteLength = new TextEncoder().encode(html).length;
+  if (byteLength > HTML_SHARE_MAX_BYTES) {
+    return errorResponse(
+      `檔案過大（${(byteLength / 1024 / 1024).toFixed(2)}MB），上限為 ${HTML_SHARE_MAX_BYTES / 1024 / 1024}MB`,
+      413
+    );
+  }
+
+  if (!/<\s*html|<!doctype\s+html|<\s*body|<\s*head/i.test(html)) {
+    return errorResponse('內容看起來不是 HTML，請確認上傳的檔案', 400);
+  }
+
+  const key = `${id}.html`;
+  const existing = await env.HTML_BUCKET.head(key);
+  if (!existing) {
+    return errorResponse('找不到這個分享，無法更新（可能已被刪除）', 404);
+  }
+
+  const existingMeta = existing.customMetadata || {};
+  if (!existingMeta.editToken || existingMeta.editToken !== editToken) {
+    return errorResponse('編輯權杖不正確，無法更新這個分享', 403);
+  }
+
+  const updatedAt = new Date().toISOString();
+  const finalTitle = titleInput || existingMeta.title || '未命名分享';
+
+  await env.HTML_BUCKET.put(key, html, {
+    httpMetadata: { contentType: 'text/html; charset=utf-8' },
+    customMetadata: {
+      title: finalTitle,
+      uploadedAt: existingMeta.uploadedAt || updatedAt,
+      updatedAt,
+      size: String(byteLength),
+      editToken: existingMeta.editToken,
+    },
+  });
+
+  const url = new URL(request.url);
+  const shareUrl = `${url.origin}/s/${id}`;
+
+  return new Response(
+    JSON.stringify({
+      id,
+      url: shareUrl,
+      title: finalTitle,
+      size: byteLength,
+      uploadedAt: existingMeta.uploadedAt || updatedAt,
+      updatedAt,
+      editToken: existingMeta.editToken,
+    }),
+    { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' } }
   );
 }
 
@@ -282,18 +385,24 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
-    // 2. htmlShare：上傳
+    // 2. htmlShare：上傳（建立新分享）
     if (pathname === '/api/upload' && request.method === 'POST') {
       return handleHtmlShareUpload(request, env);
     }
 
-    // 3. htmlShare：讀取分享頁面
+    // 3. htmlShare：更新既有分享的內容（同一個 id、同一個網址，換掉裡面的 HTML）
+    const updateMatch = pathname.match(/^\/api\/upload\/([A-Za-z0-9]+)$/);
+    if (updateMatch && request.method === 'POST') {
+      return handleHtmlShareUpdate(updateMatch[1], request, env);
+    }
+
+    // 4. htmlShare：讀取分享頁面
     const serveMatch = pathname.match(/^\/s\/([A-Za-z0-9]+)$/);
     if (serveMatch && request.method === 'GET') {
       return handleHtmlShareServe(serveMatch[1], env);
     }
 
-    // 4. 其餘路徑：維持原本的 PureReader CORS 代理行為（GET/HEAD + ?url=）
+    // 5. 其餘路徑：維持原本的 PureReader CORS 代理行為（GET/HEAD + ?url=）
     const result = await handlePureReaderProxy(request);
     if (result instanceof Response) {
       return result; // 錯誤回應（errorResponse 已內含 CORS）
