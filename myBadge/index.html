@@ -649,7 +649,7 @@
     }
     .btn-danger:hover { filter: brightness(1.1); }
   </style>
-<link rel="stylesheet" href="designer.css?v=4.1">
+<link rel="stylesheet" href="designer.css?v=4.2">
 </head>
 <body>
 
@@ -792,6 +792,13 @@
     </div>
   </div>
 
+  <dialog id="qr-zoom" aria-labelledby="qr-zoom-title">
+    <header><h2 id="qr-zoom-title">放大 QR Code</h2><button type="button" onclick="closeQRZoom()" aria-label="關閉放大 QR Code" autofocus>✕</button></header>
+    <p id="qr-zoom-name"></p>
+    <div class="qr-zoom-paper"><canvas id="qr-zoom-canvas"></canvas></div>
+    <p class="qr-zoom-hint">請對準 QR Code 掃碼報到</p>
+    <button type="button" class="qr-zoom-done" onclick="closeQRZoom()">返回名牌</button>
+  </dialog>
   <dialog id="badge-editor" aria-labelledby="editor-title">
     <form id="badge-editor-form">
       <header class="editor-header"><div><small>BADGE STUDIO</small><h2 id="editor-title">編輯名牌</h2></div><button type="button" onclick="closeBadgeEditor()" aria-label="關閉編輯器">✕</button></header>
@@ -1110,7 +1117,7 @@
 
       // Keyboard shortcuts
       document.addEventListener('keydown', e => {
-        if (document.getElementById('badge-editor').open) return;
+        if (document.getElementById('badge-editor').open || document.getElementById('qr-zoom').open) return;
         if (e.key === 'Escape') {
           if (document.getElementById('display-modal').classList.contains('active')) { closeDisplayModal(); return; }
           if (document.getElementById('scanner-overlay').classList.contains('active')) { stopScanner(); return; }
@@ -1784,10 +1791,31 @@
       const fields = badge.fields.map(f => ({...f, result:BadgeDesign.resolve(collection,badge,f.key)})).filter(f => f.result.value);
       return `<article class="identity-card layout-${d.layout} ${compact ? 'compact' : ''}" style="--card-background:${background};--card-accent:${colors[0]}">
         <header class="identity-header"><span>道場 · 識別證</span><strong>${escHtml(badge.name)}</strong></header>
-        <div class="identity-body"><div class="identity-fields">${fields.length ? fields.map((f,i) => `<div class="identity-field ${i===0?'primary-field':''}"><span>${escHtml(f.label)}</span><strong>${escHtml(f.result.value)}</strong></div>`).join('') : '<div class="identity-field primary-field"><span>數位名牌</span><strong>歡迎參與</strong></div>'}</div>
-        <div class="identity-code"><canvas id="${canvasId}"></canvas><small>掃描此碼 · 身分識別</small></div></div>
+        <div class="identity-body"><div class="identity-fields">${fields.length ? fields.map((f,i) => `<div class="identity-field ${i===0?'primary-field':''}"><span>${escHtml(f.label)}</span><strong>${escHtml(f.result.value)}</strong></div>`).join('') : '<div class="identity-field primary-field"><span>數位名牌</span><strong>掃碼報到</strong></div>'}</div>
+        <button type="button" class="identity-code" onclick="event.stopPropagation(); openQRZoom('${badge.id}')" onkeydown="event.stopPropagation()" aria-label="放大 ${escHtml(badge.name)} 的 QR Code"><canvas id="${canvasId}"></canvas><small>點擊放大 · 掃碼報到</small></button></div>
         <footer class="identity-footer"><span>MEMBER IDENTIFICATION</span><span>●</span></footer></article>`;
     }
+    let qrZoomReturnFocus = null;
+    window.openQRZoom = function(id) {
+      const badge = badges.find(b => b.id === id) || (editorDraft?.id === id ? editorDraft : null);
+      if (!badge) return;
+      qrZoomReturnFocus = document.activeElement;
+      document.getElementById('qr-zoom-name').textContent = badge.name;
+      renderQR('qr-zoom-canvas', badge.content, {size: 560, bg: '#ffffff', fg: '#000000'});
+      document.getElementById('qr-zoom').showModal();
+    };
+    window.closeQRZoom = function() {
+      document.getElementById('qr-zoom').close();
+      qrZoomReturnFocus?.focus({preventScroll:true});
+    };
+    document.getElementById('qr-zoom').addEventListener('cancel', e => {
+      e.preventDefault(); closeQRZoom();
+    });
+    document.getElementById('qr-zoom').addEventListener('click', e => {
+      if (e.target !== e.currentTarget) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeQRZoom();
+    });
     function editorCollection() { return badges.map(b => b.id === editorDraft.id ? editorDraft : b); }
     function previewEditor() {
       if (!editorDraft) return;

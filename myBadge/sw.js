@@ -3,7 +3,7 @@
  * Stale-While-Revalidate caching strategy
  */
 
-const SW_VERSION = 'v4';
+const SW_VERSION = 'v4.2';
 const CACHE_NAME = `myBadge-${SW_VERSION}`;
 const SHARED_CACHE = `myBadge-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
