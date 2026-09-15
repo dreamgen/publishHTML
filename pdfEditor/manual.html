@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF 工坊 操作手冊</title>
+<style>
+  :root{
+    --brand:#0e7c86;
+    --brand-dark:#0a5b63;
+    --brand-light:#e6f5f6;
+    --ink:#1f2937;
+    --sub:#5b6472;
+    --line:#e3e8ea;
+    --bg:#f6f9fa;
+    --card:#ffffff;
+    --warn-bg:#fff7e6;
+    --warn-line:#f0c36d;
+    --ok-bg:#eefaf0;
+    --ok-line:#8fd3a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    padding:0 16px 48px;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei",Helvetica,Arial,sans-serif;
+    line-height:1.7;
+  }
+  .wrap{max-width:720px;margin:0 auto;}
+  header.hero{
+    padding:36px 0 20px;
+    text-align:center;
+  }
+  header.hero img{
+    width:72px;height:72px;border-radius:18px;
+    box-shadow:0 6px 18px rgba(14,124,134,.25);
+    margin-bottom:14px;
+  }
+  header.hero h1{
+    margin:0 0 6px;
+    font-size:1.7rem;
+    color:var(--brand-dark);
+  }
+  header.hero p.tagline{
+    margin:0;
+    color:var(--sub);
+    font-size:.98rem;
+  }
+  .cta{
+    display:block;
+    background:linear-gradient(135deg,var(--brand),var(--brand-dark));
+    color:#fff;
+    text-decoration:none;
+    text-align:center;
+    padding:16px 20px;
+    border-radius:16px;
+    font-size:1.05rem;
+    font-weight:600;
+    margin:20px 0 8px;
+    box-shadow:0 8px 20px rgba(14,124,134,.28);
+  }
+  .cta span.small{
+    display:block;
+    font-weight:400;
+    font-size:.8rem;
+    opacity:.9;
+    margin-top:4px;
+  }
+  .url-box{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:10px 14px;
+    font-size:.85rem;
+    color:var(--sub);
+    word-break:break-all;
+    text-align:center;
+    margin-bottom:28px;
+  }
+  section{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:22px 20px;
+    margin-bottom:20px;
+  }
+  section h2{
+    margin:0 0 14px;
+    font-size:1.15rem;
+    color:var(--brand-dark);
+    display:flex;align-items:center;gap:8px;
+  }
+  .steps{list-style:none;margin:0;padding:0;}
+  .steps li{
+    display:flex;gap:14px;align-items:flex-start;
+    padding:12px 0;
+    border-bottom:1px dashed var(--line);
+  }
+  .steps li:last-child{border-bottom:none;padding-bottom:0;}
+  .steps li:first-child{padding-top:0;}
+  .num{
+    flex:none;
+    width:28px;height:28px;border-radius:50%;
+    background:var(--brand-light);
+    color:var(--brand-dark);
+    font-weight:700;font-size:.9rem;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .steps b{display:block;margin-bottom:2px;}
+  .steps span.note{color:var(--sub);font-size:.92rem;}
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:12px;
+  }
+  @media (max-width:480px){.grid{grid-template-columns:1fr;}}
+  .feature{
+    background:var(--brand-light);
+    border-radius:12px;
+    padding:12px 14px;
+    font-size:.92rem;
+  }
+  .feature b{display:block;color:var(--brand-dark);margin-bottom:3px;font-size:.95rem;}
+  .callout{
+    border-radius:12px;
+    padding:14px 16px;
+    font-size:.92rem;
+    margin:14px 0 0;
+  }
+  .callout.ok{background:var(--ok-bg);border:1px solid var(--ok-line);}
+  .callout.warn{background:var(--warn-bg);border:1px solid var(--warn-line);}
+  details{
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px 16px;
+    margin-bottom:10px;
+    background:#fbfdfd;
+  }
+  details+details{margin-top:10px;}
+  summary{
+    cursor:pointer;
+    font-weight:600;
+    color:var(--ink);
+  }
+  details p{margin:10px 0 2px;color:var(--sub);font-size:.94rem;}
+  ol.sub, ul.sub{margin:8px 0 2px;padding-left:20px;color:var(--sub);font-size:.94rem;}
+  footer{
+    text-align:center;
+    color:var(--sub);
+    font-size:.82rem;
+    margin-top:24px;
+  }
+  code{
+    background:var(--brand-light);
+    padding:1px 6px;
+    border-radius:6px;
+    font-size:.85em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <img src="./icons/pdfEditor-512.png" alt="PDF 工坊 圖示" onerror="this.style.display='none'">
+    <h1>PDF 工坊 操作手冊</h1>
+    <p class="tagline">合併、編輯、標註、簽名、OCR 辨識——所有處理都在你的手機或電腦本機完成，文件不會上傳到任何伺服器。</p>
+  </header>
+
+  <a class="cta" href="https://dreamgen.github.io/publishHTML/pdfEditor?openExternalBrowser=1" target="_blank" rel="noopener">
+    🚀 立即開啟 PDF 工坊
+    <span class="small">從 LINE 或其他聊天 App 點這個連結，會自動用系統瀏覽器開啟</span>
+  </a>
+  <div class="url-box">https://dreamgen.github.io/publishHTML/pdfEditor?openExternalBrowser=1</div>
+
+  <section>
+    <h2>⚡ 快速上手（5 步驟）</h2>
+    <ol class="steps">
+      <li><span class="num">1</span><div><b>開啟網址</b><span class="note">點上方按鈕，或用手機瀏覽器（Chrome / Safari）開啟網址。</span></div></li>
+      <li><span class="num">2</span><div><b>開啟或拖曳 PDF</b><span class="note">支援一次選取多份 PDF 直接合併成一份；有密碼保護的 PDF 也能開啟（密碼只留在這次操作，不會被儲存）。</span></div></li>
+      <li><span class="num">3</span><div><b>編輯內容</b><span class="note">排序 / 旋轉 / 刪除頁面，或加上文字、畫筆、螢光筆、簽名、印章、圖片等標註；也可以填寫並送出 PDF 表單。</span></div></li>
+      <li><span class="num">4</span><div><b>（需要時）掃描檔辨識文字</b><span class="note">用左上角「OCR」功能，把掃描的中文／英文 PDF 轉成可搜尋、可複製的文字，也能用 <code>Ctrl/⌘+F</code> 直接搜尋內容。</span></div></li>
+      <li><span class="num">5</span><div><b>匯出成果</b><span class="note">完成後點「匯出 PDF」下載、另存新檔，或用系統「分享」直接傳給別人、存到雲端硬碟。</span></div></li>
+    </ol>
+    <div class="callout ok">✅ 編輯到一半不小心關掉頁面也不用擔心：系統會自動保存草稿，下次開啟會問你要不要繼續上次的內容。</div>
+  </section>
+
+  <section>
+    <h2>🧰 常用功能一覽</h2>
+    <div class="grid">
+      <div class="feature"><b>多檔合併與頁面管理</b>拖曳排序、旋轉、刪除、擷取所選頁面成新檔</div>
+      <div class="feature"><b>標註工具</b>文字、畫筆、螢光筆、矩形、箭頭、圖片、手寫簽名</div>
+      <div class="feature"><b>表單填寫</b>文字框、勾選框、下拉選單，填完可直接扁平化定案</div>
+      <div class="feature"><b>OCR 文字辨識</b>支援繁體中文＋英文，辨識後可搜尋、可複製</div>
+      <div class="feature"><b>Excel 轉 PDF</b>選擇要轉換的工作表，可設定紙張、方向、邊界等</div>
+      <div class="feature"><b>插入內容</b>空白頁、圖片轉 PDF 頁面</div>
+      <div class="feature"><b>三種檢視模式</b>單頁 / 連續捲動預覽 / 縮圖網格瀏覽</div>
+      <div class="feature"><b>深色模式與離線使用</b>安裝成 APP 後無網路也能開啟使用</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>📲 安裝成手機 APP（建議）</h2>
+    <p style="margin-top:0;color:var(--sub);font-size:.94rem;">安裝後可離線使用，也能從手機的「分享」選單直接把 PDF 傳進 PDF 工坊處理。</p>
+    <ol class="steps">
+      <li><span class="num">📱</span><div><b>iPhone / iPad（Safari）</b><span class="note">開啟網址 → 點下方工具列的「分享」圖示 → 選「加入主畫面」。</span></div></li>
+      <li><span class="num">🤖</span><div><b>Android（Chrome）</b><span class="note">開啟網址 → 點頁面上方「安裝 APP」按鈕，或點 Chrome 選單中的「安裝應用程式」。</span></div></li>
+    </ol>
+    <div class="callout warn">⚠️ 若要用「分享」功能把手機裡的 PDF 直接傳給 PDF 工坊處理，Android 手機務必用上述方式完整安裝成 APP，單純加書籤或捷徑無法出現在分享清單中。</div>
+  </section>
+
+  <section>
+    <h2>❓ 常見問題</h2>
+
+    <details>
+      <summary>從 LINE 點連結打不開，或畫面跑版、無法操作？</summary>
+      <p>連結已加上參數讓 LINE 自動改用手機的系統瀏覽器開啟。如果還是遇到問題，可以長按連結選擇「用瀏覽器開啟」，或直接複製網址貼到 Safari／Chrome 開啟。</p>
+    </details>
+
+    <details>
+      <summary>Android 手機「分享 PDF」時，分享清單找不到 PDF 工坊？</summary>
+      <ol class="sub">
+        <li>先從主畫面或「設定 → 應用程式」移除舊的 PDF 工坊。</li>
+        <li>用 Chrome 重新開啟 PDF 工坊網址。</li>
+        <li>點頁首「安裝 APP」，或 Chrome 選單的「安裝應用程式」。</li>
+        <li>安裝完成後重新開啟一次 PDF 工坊。</li>
+        <li>之後從檔案管理員或其他 APP 分享 PDF，就能選到 PDF 工坊。</li>
+      </ol>
+    </details>
+
+    <details>
+      <summary>忘記密碼的 PDF 可以打開嗎？</summary>
+      <p>不行，開啟有密碼保護的 PDF 仍需要輸入正確密碼；密碼只保留在這次操作的記憶體中，不會被儲存或上傳。</p>
+    </details>
+
+    <details>
+      <summary>手機上匯出 PDF 後，要去哪裡找檔案？</summary>
+      <p>沒有檔案選擇器的手機（例如 iPhone、部分 Android）會改用系統「分享」，可在分享面板選擇「儲存到檔案」、雲端硬碟，或直接傳給其他 APP。若畫面顯示「PDF 已建立」視窗，再點一次「開啟系統分享」即可，不會重新產生檔案。</p>
+    </details>
+
+    <details>
+      <summary>OCR 辨識很久／很卡，怎麼辦？</summary>
+      <p>可以只針對目前頁、所選頁面做辨識，不用整份都跑，能明顯縮短等待時間。已經有可搜尋文字的頁面系統會自動略過。</p>
+    </details>
+
+    <details>
+      <summary>我的 PDF 內容會不會被上傳到網路上？</summary>
+      <p>不會。所有解析、編輯與匯出都在你自己的瀏覽器裡完成，文件內容不會傳送到任何後端伺服器。</p>
+    </details>
+
+  </section>
+
+  <footer>PDF 工坊・本機處理・不上傳文件</footer>
+</div>
+</body>
+</html>
