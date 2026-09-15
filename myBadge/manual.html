@@ -159,6 +159,10 @@
     border-radius:6px;
     font-size:.85em;
   }
+  .manual-nav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;}
+  .manual-nav a{color:var(--brand-dark);background:var(--brand-light);padding:8px 12px;border-radius:10px;text-decoration:none;font-size:.9rem;}
+  .manual-nav a:focus-visible{outline:2px solid var(--brand);outline-offset:3px;}
+  section{scroll-margin-top:16px;}
   .badge-gold{color:var(--gold);}
 </style>
 </head>
@@ -168,7 +172,7 @@
   <header class="hero">
     <img src="./icon.png" alt="道場名牌 圖示" onerror="this.style.display='none'">
     <h1>道場名牌 操作手冊</h1>
-    <p class="tagline">把別人給你的 QR Code 名牌掃描收藏起來，之後不用翻照片、不用找紙本，隨時打開手機就能展示給對方掃描。</p>
+    <p class="tagline">收藏 QR Code 名牌，自訂姓名、班級與識別證版面；報到時點一下放大 QR Code，方便對方掃描。</p>
   </header>
 
   <a class="cta" href="https://dreamgen.github.io/publishHTML/myBadge/" target="_blank" rel="noopener">
@@ -177,14 +181,18 @@
   </a>
   <div class="url-box">https://dreamgen.github.io/publishHTML/myBadge/</div>
 
-  <section>
+  <nav class="manual-nav" aria-label="手冊章節">
+    <a href="#quick-start">快速上手</a><a href="#edit-badge">編輯名牌</a><a href="#field-sources">文字引用</a><a href="#appearance">版面配色</a><a href="#enlarge-qr">放大掃碼</a>
+  </nav>
+
+  <section id="quick-start">
     <h2>⚡ 快速上手（5 步驟）</h2>
     <ol class="steps">
       <li><span class="num">1</span><div><b>開啟網址</b><span class="note">建議用手機瀏覽器（Chrome / Safari）開啟，並先「加入主畫面」安裝成 APP（步驟見下方）。</span></div></li>
       <li><span class="num">2</span><div><b>掃描新增名牌</b><span class="note">點「掃描新增名牌」，允許相機權限後，把鏡頭對準要收藏的 QR Code 名牌；需要的話可開手電筒或放大畫面。</span></div></li>
       <li><span class="num">3</span><div><b>命名並儲存</b><span class="note">掃描成功後幫這張名牌取個好記的名字（例如：天達堂志工證、○○活動入場證），點「儲存名牌」。</span></div></li>
-      <li><span class="num">4</span><div><b>需要時直接展示</b><span class="note">打開 APP 就會顯示你的名牌畫面，讓對方掃描即可；有多張名牌時，用「上一個 / 下一個」左右切換。</span></div></li>
-      <li><span class="num">5</span><div><b>管理你的名牌</b><span class="note">點「管理名牌」可以重新命名、刪除、設為預設（下次開啟自動顯示這張），或匯出／匯入備份。</span></div></li>
+      <li><span class="num">4</span><div><b>需要時直接展示</b><span class="note">打開 APP 就會顯示你的名牌畫面，點擊 QR Code 可放大供對方掃描；有多張名牌時，用下方顯示名牌名稱的箭頭按鈕切換。</span></div></li>
+      <li><span class="num">5</span><div><b>管理你的名牌</b><span class="note">點「編輯此名牌」設定文字與版面；「管理名牌」可編輯、刪除、設為預設，或匯出／匯入備份。</span></div></li>
     </ol>
     <div class="callout ok">✅ 常用的那張名牌可以設為「預設」，之後打開 APP 就直接秀出來，不用每次都選。</div>
   </section>
@@ -195,11 +203,59 @@
       <div class="feature"><b>QR Code 掃描</b>內建手電筒、放大縮小，方便在較暗或較遠的情況掃描</div>
       <div class="feature"><b>多張名牌收納</b>可同時保存好幾張，隨時左右切換展示</div>
       <div class="feature"><b>設為預設</b>指定常用的一張，開啟 APP 自動顯示</div>
-      <div class="feature"><b>重新命名 / 刪除</b>在「管理名牌」隨時整理你的收藏</div>
+      <div class="feature"><b>單張名牌編輯</b>自訂姓名、班級、學號與其他欄位，調整順序與名牌名稱</div>
+      <div class="feature"><b>欄位文字引用</b>預設使用預設名牌文字，也能自行輸入或引用其他名牌</div>
+      <div class="feature"><b>識別證版面與配色</b>三種版面、四組配色、自訂純色／漸層及自動輪換</div>
       <div class="feature"><b>備份匯出 / 匯入</b>換手機前先匯出成檔案，新手機再匯入即可轉移</div>
-      <div class="feature"><b>點擊 QR 放大</b>點擊名牌上的 QR Code 可全螢幕放大，方便對方遠距或快速掃碼報到</div>
+      <div class="feature"><b>點擊 QR 放大</b>點擊名牌上的 QR Code 可開啟大尺寸黑白掃碼畫面，掃完按「返回名牌」</div>
       <div class="feature"><b>分享此 APP</b>「關於與分享」可複製網址，或掃描 QR 分享給其他人使用</div>
     </div>
+  </section>
+
+  <section id="edit-badge">
+    <h2>✏️ 編輯單張名牌</h2>
+    <ol class="steps">
+      <li><span class="num">1</span><div><b>開啟編輯器</b><span class="note">在展示畫面點「編輯此名牌」，或在名牌列表／「管理名牌」點該張名牌的鉛筆圖示。</span></div></li>
+      <li><span class="num">2</span><div><b>設定名稱與文字</b><span class="note">「名牌名稱」是卡片抬頭，也是切換名牌時的名稱。下方預先提供「姓名」「班級名稱」「學號」，每個欄位都可修改名稱與文字來源。</span></div></li>
+      <li><span class="num">3</span><div><b>增加或整理欄位</b><span class="note">點「＋ 新增自訂欄位」加入職務、組別等資料；用 ↑／↓ 調整順序，或按「移除」。每張最多 20 個欄位，第一個有值的欄位會以較大文字呈現。</span></div></li>
+      <li><span class="num">4</span><div><b>預覽並儲存</b><span class="note">修改時會即時預覽，確認後按「儲存版面」。按「取消」或關閉編輯器，不會保存這次修改。</span></div></li>
+    </ol>
+    <div class="callout ok">每張名牌各自保存版面設定。文字欄位沒有值時不會顯示；全部沒有值時，卡片會顯示「掃碼報到」。編輯文字、版面或配色都不會改變原本的 QR Code 內容。</div>
+  </section>
+
+  <section id="field-sources">
+    <h2>🔗 文字來源：自行輸入或引用</h2>
+    <div class="grid">
+      <div class="feature"><b>預設名牌</b>新名牌的姓名、班級名稱、學號預設使用預設名牌的對應欄位。編輯預設名牌本身時，可直接填入「顯示文字」。</div>
+      <div class="feature"><b>自行輸入</b>將「文字來源」改為「自行輸入」，填寫這張名牌專用的文字，不跟隨其他名牌更新。</div>
+      <div class="feature"><b>引用其他名牌</b>將「文字來源」改為「引用其他名牌」，再選「來源名牌」與「來源欄位」。來源儲存新文字後，引用者會跟著更新。</div>
+    </div>
+    <p>例如：先在預設名牌輸入姓名「王小明」，其他名牌即可共用姓名；志工證的「班級名稱」則可切換為「自行輸入」，改填「服務組」。兩張名牌仍各自保有原本的 QR Code。</p>
+    <ul class="sub">
+      <li>在「管理名牌」點星號可更換預設名牌。使用「預設名牌」來源的欄位會改跟隨新預設；明確引用某張名牌的欄位仍跟隨該張。</li>
+      <li>新預設名牌原先使用預設引用的欄位，會先保留當時文字並轉為自行輸入。</li>
+      <li>若來源欄位不存在，或 A 引用 B、B 又引用 A 形成循環，畫面會提示並阻止儲存。請改成自行輸入，或選擇有效的來源欄位。</li>
+      <li>移除被其他名牌引用的欄位前，請先調整引用者的文字來源；否則無法儲存。更換預設名牌若造成無效引用，也不會套用。</li>
+    </ul>
+  </section>
+
+  <section id="appearance">
+    <h2>🎨 設計識別證版面與背景</h2>
+    <ol class="steps">
+      <li><span class="num">1</span><div><b>選擇版面</b><span class="note">在編輯器的「版面與配色」選擇「經典直式」「左右分欄」或「簡約識別證」。</span></div></li>
+      <li><span class="num">2</span><div><b>選擇配色與背景</b><span class="note">可選「靛藍商務」「翡翠典雅」「暖金禮賓」「莓紫雅緻」，或選「自訂顏色」。背景可設為「純色」或「漸層色」；純色使用主色，漸層使用主色與漸層尾色。</span></div></li>
+      <li><span class="num">3</span><div><b>需要時開啟自動切換</b><span class="note">勾選「每 8 秒自動切換四組配色」，即可輪換四組內建配色。關閉後恢復所選配色；最後按「儲存版面」。</span></div></li>
+    </ol>
+    <div class="callout ok">經典直式與左右分欄在卡片抬頭呈現背景色；簡約識別證採白色卡面與主色邊線。QR Code 區域保持黑白與白色留邊，配色輪換不會切換 QR Code。</div>
+  </section>
+
+  <section id="enlarge-qr">
+    <h2>🔍 點擊 QR Code 放大掃碼</h2>
+    <ol class="steps">
+      <li><span class="num">1</span><div><b>點擊名牌上的 QR Code</b><span class="note">在名牌列表、展示畫面或編輯預覽中，點擊標示「點擊放大 · 掃碼報到」的 QR Code。</span></div></li>
+      <li><span class="num">2</span><div><b>展示放大畫面</b><span class="note">放大視窗會顯示名牌名稱與大尺寸黑白 QR Code，大小隨螢幕調整，方便對方對準掃描。</span></div></li>
+      <li><span class="num">3</span><div><b>返回原畫面</b><span class="note">掃完點「返回名牌」或右上角 ✕；使用鍵盤時也可按 Esc 關閉。</span></div></li>
+    </ol>
   </section>
 
   <section>
@@ -235,23 +291,24 @@
       <ol class="sub">
         <li>在舊手機開啟「管理名牌」→ 點「匯出備份」，會得到一個備份檔案。</li>
         <li>在新手機安裝好道場名牌 APP 後，開啟「管理名牌」→ 點「匯入備份」，選擇剛剛的檔案。</li>
-        <li>已存在的名牌會自動略過，不會重複匯入。</li>
+        <li>備份包含各張名牌的 QR Code、文字欄位、引用關係、版面與配色；舊版備份也可匯入。</li>
+        <li>相同識別 ID 的名牌會自動略過，不會覆蓋現有資料；匯入不是用來更新同一張名牌。</li>
       </ol>
     </details>
 
     <details>
       <summary>不小心刪除名牌了，還能救回來嗎？</summary>
-      <p>目前沒有復原功能，刪除前建議先用「管理名牌 → 匯出備份」保留一份檔案，之後需要的話可以再匯入回來。</p>
+      <p>目前沒有復原功能，刪除前建議先用「管理名牌 → 匯出備份」保留一份檔案，之後需要的話可以再匯入回來。其他名牌若直接引用被刪除名牌的欄位，會保留刪除當時的文字並轉為自行輸入；重新匯入來源名牌後，不會自動恢復這些引用。</p>
     </details>
 
     <details>
       <summary>可以存好幾張不同的名牌嗎？</summary>
-      <p>可以，掃描新增沒有數量限制，所有名牌都會列在「管理名牌」裡，展示畫面可用「上一個／下一個」切換查看。</p>
+      <p>可以，所有名牌都會列在「管理名牌」裡，展示畫面可用下方箭頭按鈕切換查看；可保存的數量受瀏覽器可用儲存空間影響。</p>
     </details>
 
   </section>
 
-  <footer>道場名牌・隨身數位名牌夾・資料只存在你的手機裡</footer>
+  <footer>本次更新：單張版面編輯、文字引用、配色與 QR Code 放大<br>道場名牌・隨身數位名牌夾・資料只存在你的手機裡</footer>
 </div>
 </body>
 </html>
