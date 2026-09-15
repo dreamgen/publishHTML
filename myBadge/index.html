@@ -649,6 +649,7 @@
     }
     .btn-danger:hover { filter: brightness(1.1); }
   </style>
+<link rel="stylesheet" href="designer.css?v=4.1">
 </head>
 <body>
 
@@ -791,6 +792,27 @@
     </div>
   </div>
 
+  <dialog id="badge-editor" aria-labelledby="editor-title">
+    <form id="badge-editor-form">
+      <header class="editor-header"><div><small>BADGE STUDIO</small><h2 id="editor-title">編輯名牌</h2></div><button type="button" onclick="closeBadgeEditor()" aria-label="關閉編輯器">✕</button></header>
+      <div class="editor-columns"><section class="editor-preview"><div id="editor-preview"></div><p>即時預覽 · QR Code 維持原始內容</p></section>
+      <section class="editor-controls">
+        <label>名牌名稱<input id="editor-name" maxlength="100" required></label>
+        <h3>文字欄位</h3><p class="editor-help">預設引用預設名牌的同名欄位。預設名牌本身可直接輸入；引用文字會隨來源更新。</p>
+        <div id="editor-fields"></div><button type="button" id="add-field">＋ 新增自訂欄位</button>
+        <h3>版面與配色</h3>
+        <div class="editor-pair"><label>識別證版面<select id="editor-layout"><option value="classic">經典直式</option><option value="split">左右分欄</option><option value="minimal">簡約識別證</option></select></label>
+        <label>配色<select id="editor-theme"><option value="0">靛藍商務</option><option value="1">翡翠典雅</option><option value="2">暖金禮賓</option><option value="3">莓紫雅緻</option><option value="custom">自訂顏色</option></select></label></div>
+        <label>背景<select id="editor-background"><option value="gradient">漸層色</option><option value="solid">純色</option></select></label>
+        <div class="editor-pair"><label>主色<input type="color" id="editor-color1"></label><label>漸層尾色<input type="color" id="editor-color2"></label></div>
+        <label class="editor-check"><input type="checkbox" id="editor-rotate">每 8 秒自動切換四組配色</label>
+        <p class="editor-help">自動切換只變更配色，QR Code 保持黑白與白色留邊。關閉後使用所選配色。</p>
+        <p id="editor-error" role="alert"></p>
+      </section></div>
+      <footer class="editor-footer"><button type="button" onclick="closeBadgeEditor()">取消</button><button type="submit" class="btn-primary">儲存版面</button></footer>
+    </form>
+  </dialog>
+
   <!-- ════════════════════════════════════════════════════════════════════
        DISPLAY MODAL (Full Screen)
        ════════════════════════════════════════════════════════════════ -->
@@ -802,11 +824,8 @@
       <div style="width:44px;"></div>
     </div>
 
-    <p class="display-badge-name" id="display-badge-name"></p>
-    <div class="display-qr-container" id="display-qr-container">
-      <canvas id="display-qr-canvas"></canvas>
-    </div>
-    <p class="display-content-text" id="display-content-text"></p>
+    <button class="design-edit-display" onclick="editDisplayedBadge()">✎ 編輯此名牌</button>
+    <div id="display-card-host"></div>
 
     <!-- Navigation (prev/next badge) -->
     <div class="display-nav">
@@ -947,6 +966,7 @@
   <!-- ════════════════════════════════════════════════════════════════════
        JAVASCRIPT
        ════════════════════════════════════════════════════════════════ -->
+  <script src="badge-design.js?v=4.1"></script>
   <script>
   (() => {
     'use strict';
@@ -1090,6 +1110,7 @@
 
       // Keyboard shortcuts
       document.addEventListener('keydown', e => {
+        if (document.getElementById('badge-editor').open) return;
         if (e.key === 'Escape') {
           if (document.getElementById('display-modal').classList.contains('active')) { closeDisplayModal(); return; }
           if (document.getElementById('scanner-overlay').classList.contains('active')) { stopScanner(); return; }
@@ -1131,19 +1152,22 @@
       if (!storageAvailable) { badges = []; return; }
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        badges = raw ? JSON.parse(raw) : [];
+        badges = BadgeDesign.normalize(raw ? JSON.parse(raw) : []);
+        if (badges.length && !badges.some(b => b.isDefault)) badges[0].isDefault = true;
       } catch { badges = []; }
     }
 
     function saveBadgesToStorage() {
       if (!storageAvailable) {
         showToast('⚠️ 此環境無法儲存資料，請點右上角「在新分頁開啟」後使用');
-        return;
+        return false;
       }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(badges));
+        return true;
       } catch (e) {
         showToast('⚠️ 儲存失敗：' + (e.message || '儲存空間不足'));
+        return false;
       }
     }
 
@@ -1179,18 +1203,14 @@
         card.innerHTML = `
           <div class="badge-card-color-bar" style="background: linear-gradient(90deg, ${badge.color}, ${shiftColor(badge.color)});"></div>
           <div class="badge-card-actions">
-            <button class="card-action-btn edit" onclick="openRenameModal('${badge.id}'); event.stopPropagation();" aria-label="重新命名" title="重新命名">
+            <button class="card-action-btn edit" onclick="openBadgeEditor('${badge.id}'); event.stopPropagation();" aria-label="編輯名牌版面" title="編輯名牌版面">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
             <button class="card-action-btn" onclick="confirmDeleteBadge('${badge.id}'); event.stopPropagation();" aria-label="刪除" title="刪除">
               <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
             </button>
           </div>
-          <div class="badge-qr-wrapper">
-            <canvas id="card-qr-${badge.id}" width="120" height="120"></canvas>
-          </div>
-          <p class="badge-name">${escHtml(badge.name)}</p>
-          <p class="badge-content-preview">${escHtml(badge.content)}</p>
+          ${badgeMarkup(badge, `card-qr-${badge.id}`, true)}
         `;
 
         card.addEventListener('click', () => openDisplayModal(idx));
@@ -1424,10 +1444,13 @@
         name,
         content: pendingQRContent,
         color: selectedColor,
-        createdAt: Date.now()
+        fields: BadgeDesign.defaultFields(),
+        design: BadgeDesign.design(),
+        createdAt: Date.now(),
+        isDefault: badges.length === 0
       };
       badges.unshift(badge);
-      saveBadgesToStorage();
+      if (!saveBadgesToStorage()) { badges.shift(); return; }
       closeSaveModal();
       renderBadges();
       showToast('✅ 名牌已儲存！');
@@ -1458,8 +1481,7 @@
       const badge = badges[displayIndex];
       if (!badge) return;
 
-      document.getElementById('display-badge-name').textContent = badge.name;
-      document.getElementById('display-content-text').textContent = badge.content;
+      document.getElementById('display-card-host').innerHTML = badgeMarkup(badge, 'display-qr-canvas');
       const prevBtn = document.getElementById('display-prev-btn');
       const nextBtn = document.getElementById('display-next-btn');
 
@@ -1470,26 +1492,18 @@
         prevBtn.style.display = 'none';
         nextBtn.style.display = 'flex';
         const nextIdx = (displayIndex + 1) % badges.length;
-        nextBtn.innerHTML = `<span class="nav-text">${badges[nextIdx].name}</span><i data-lucide="chevron-right" style="width:20px;height:20px;"></i>`;
+        nextBtn.innerHTML = `<span class="nav-text">${escHtml(badges[nextIdx].name)}</span><i data-lucide="chevron-right" style="width:20px;height:20px;"></i>`;
       } else {
         prevBtn.style.display = 'flex';
         nextBtn.style.display = 'flex';
         const prevIdx = (displayIndex - 1 + badges.length) % badges.length;
         const nextIdx = (displayIndex + 1) % badges.length;
-        prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:20px;height:20px;"></i><span class="nav-text">${badges[prevIdx].name}</span>`;
-        nextBtn.innerHTML = `<span class="nav-text">${badges[nextIdx].name}</span><i data-lucide="chevron-right" style="width:20px;height:20px;"></i>`;
+        prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:20px;height:20px;"></i><span class="nav-text">${escHtml(badges[prevIdx].name)}</span>`;
+        nextBtn.innerHTML = `<span class="nav-text">${escHtml(badges[nextIdx].name)}</span><i data-lucide="chevron-right" style="width:20px;height:20px;"></i>`;
       }
       if (window.lucide) lucide.createIcons();
 
-      // Compute QR size based on viewport
-      const size = Math.min(window.innerWidth - 80, window.innerHeight - 280, 300);
-      const container = document.getElementById('display-qr-container');
-      container.style.width = size + 24 + 'px';
-      container.style.height = size + 24 + 'px';
-
-      const canvas = document.getElementById('display-qr-canvas');
-      canvas.width = size; canvas.height = size;
-      renderQR('display-qr-canvas', badge.content, { size, bg: '#ffffff', fg: '#111111' });
+      renderQR('display-qr-canvas', badge.content, { size: 220, bg: '#ffffff', fg: '#111111' });
     }
 
     // ─── Manage Drawer ──────────────────────────────────────────────────────
@@ -1572,7 +1586,7 @@
             <button class="mini-action-btn edit-name" onclick="setDefaultBadge('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="設為預設" title="設為預設">
               <i data-lucide="star" style="width:14px;height:14px; ${badge.isDefault ? 'fill:var(--accent-1);color:var(--accent-1);' : ''}"></i>
             </button>
-            <button class="mini-action-btn edit-name" onclick="openRenameModal('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="重新命名 ${escHtml(badge.name)}" title="重新命名">
+            <button class="mini-action-btn edit-name" onclick="openBadgeEditor('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="編輯 ${escHtml(badge.name)}" title="編輯名牌版面">
               <i data-lucide="pencil" style="width:14px;height:14px;"></i>
             </button>
             <button class="mini-action-btn delete" onclick="confirmDeleteBadge('${badge.id}'); closeManageDrawer(); event.stopPropagation();" aria-label="刪除 ${escHtml(badge.name)}" title="刪除">
@@ -1660,15 +1674,27 @@
     };
 
     function deleteBadge(id) {
+      const previous = JSON.parse(JSON.stringify(badges));
+      BadgeDesign.detachReferences(badges, id);
       badges = badges.filter(b => b.id !== id);
-      saveBadgesToStorage();
+      if (badges.length && !badges.some(b => b.isDefault)) badges[0].isDefault = true;
+      if (!saveBadgesToStorage()) { badges = previous; return; }
       renderBadges();
       showToast('🗑️ 名牌已刪除');
     }
 
     window.setDefaultBadge = function (id) {
+      const previous = JSON.parse(JSON.stringify(badges));
+      const selected = badges.find(b => b.id === id);
+      if (!selected) return;
+      selected.fields.forEach(f => {
+        if (f.mode === 'default') { f.value = BadgeDesign.resolve(badges, selected, f.key).value; f.mode = 'own'; }
+      });
       badges = badges.map(b => ({ ...b, isDefault: b.id === id }));
-      saveBadgesToStorage();
+      if (badges.some(b => b.fields.some(f => BadgeDesign.resolve(badges,b,f.key).error))) {
+        badges = previous; showToast('⚠️ 此預設變更會產生無效引用，請先調整欄位來源'); return;
+      }
+      if (!saveBadgesToStorage()) { badges = previous; return; }
       renderBadges();
       showToast('⭐ 已設為預設名牌，下次開啟將自動顯示');
     };
@@ -1677,7 +1703,7 @@
     window.exportBadges = function () {
       if (badges.length === 0) { showToast('⚠️ 目前沒有任何名牌可以匯出'); return; }
       try {
-        const data = JSON.stringify({ version: 1, badges }, null, 2);
+        const data = JSON.stringify({ version: 2, badges }, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
@@ -1704,12 +1730,17 @@
           if (!imported) throw new Error('格式錯誤');
           // Merge: skip duplicates by id
           const existingIds = new Set(badges.map(b => b.id));
-          const newOnes = imported.filter(b => b.id && b.name && b.content && !existingIds.has(b.id));
+          const newOnes = BadgeDesign.normalize(imported).filter(b => {
+            if (existingIds.has(b.id)) return false;
+            existingIds.add(b.id); return true;
+          });
           if (newOnes.length === 0) {
             showToast('ℹ️ 沒有新的名牌可匯入（已全部存在）');
           } else {
-            badges = [...newOnes, ...badges];
-            saveBadgesToStorage();
+            const previous = badges;
+            const defaultId = (badges.find(b => b.isDefault) || newOnes.find(b => b.isDefault) || newOnes[0]).id;
+            badges = [...newOnes, ...badges].map(b => ({...b,isDefault:b.id===defaultId}));
+            if (!saveBadgesToStorage()) { badges = previous; return; }
             renderBadges();
             closeManageDrawer();
             showToast(`✅ 已匯入 ${newOnes.length} 張名牌`);
@@ -1740,6 +1771,120 @@
         toast.addEventListener('animationend', () => toast.remove());
       }, duration);
     };
+
+    // Independent badge presentation and live field references.
+    let editorDraft = null;
+    let editorReturnFocus = null;
+    let paletteTick = 0;
+    function badgeMarkup(badge, canvasId, compact = false, collection = badges) {
+      const d = badge.design;
+      const theme = d.rotate ? paletteTick % BadgeDesign.presets.length : Number(d.theme);
+      const colors = d.theme === 'custom' && !d.rotate ? [d.color1, d.color2] : BadgeDesign.presets[theme].slice(1);
+      const background = d.background === 'solid' ? colors[0] : `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`;
+      const fields = badge.fields.map(f => ({...f, result:BadgeDesign.resolve(collection,badge,f.key)})).filter(f => f.result.value);
+      return `<article class="identity-card layout-${d.layout} ${compact ? 'compact' : ''}" style="--card-background:${background};--card-accent:${colors[0]}">
+        <header class="identity-header"><span>道場 · 識別證</span><strong>${escHtml(badge.name)}</strong></header>
+        <div class="identity-body"><div class="identity-fields">${fields.length ? fields.map((f,i) => `<div class="identity-field ${i===0?'primary-field':''}"><span>${escHtml(f.label)}</span><strong>${escHtml(f.result.value)}</strong></div>`).join('') : '<div class="identity-field primary-field"><span>數位名牌</span><strong>歡迎參與</strong></div>'}</div>
+        <div class="identity-code"><canvas id="${canvasId}"></canvas><small>掃描此碼 · 身分識別</small></div></div>
+        <footer class="identity-footer"><span>MEMBER IDENTIFICATION</span><span>●</span></footer></article>`;
+    }
+    function editorCollection() { return badges.map(b => b.id === editorDraft.id ? editorDraft : b); }
+    function previewEditor() {
+      if (!editorDraft) return;
+      const collection = editorCollection();
+      document.getElementById('editor-preview').innerHTML = badgeMarkup(editorDraft,'editor-qr',false,collection);
+      renderQR('editor-qr',editorDraft.content,{size:180});
+      const errors = editorDraft.fields.map(f => {
+        const result = BadgeDesign.resolve(collection,editorDraft,f.key);
+        return result.error ? `${f.label}：${result.error}` : '';
+      }).filter(Boolean);
+      document.getElementById('editor-error').textContent = errors.join('；');
+    }
+    function renderEditorFields() {
+      const host = document.getElementById('editor-fields'); host.replaceChildren();
+      const defaultBadge = badges.find(b => b.isDefault) || badges[0];
+      editorDraft.fields.forEach((field, index) => {
+        const row = document.createElement('fieldset'); row.className = 'editor-field';
+        const legend = document.createElement('legend'); legend.textContent = `欄位 ${index+1}`; row.appendChild(legend);
+        function control(labelText, el) { const label=document.createElement('label'); label.append(labelText,el); row.appendChild(label); return el; }
+        const labelInput = control('欄位名稱',document.createElement('input')); labelInput.value=field.label; labelInput.maxLength=40; labelInput.required=true;
+        labelInput.oninput=()=>{field.label=labelInput.value;previewEditor();};
+        const mode=control('文字來源',document.createElement('select'));
+        [['default','預設名牌'],['own','自行輸入'],['reference','引用其他名牌']].forEach(([value,text])=>mode.add(new Option(text,value)));
+        mode.value=field.mode; mode.onchange=()=>{field.mode=mode.value; if(field.mode==='reference'&&!field.sourceId) field.sourceId=badges.find(b=>b.id!==editorDraft.id)?.id || '';renderEditorFields();previewEditor();};
+        if(field.mode==='own'||(field.mode==='default'&&defaultBadge?.id===editorDraft.id)) {
+          const value=control('顯示文字',document.createElement('input')); value.value=field.value; value.maxLength=200;
+          value.oninput=()=>{field.value=value.value;previewEditor();};
+        } else {
+          let source=defaultBadge;
+          if(field.mode==='reference') {
+            const pick=control('來源名牌',document.createElement('select')); pick.add(new Option('選擇來源名牌',''));
+            badges.filter(b=>b.id!==editorDraft.id).forEach(b=>pick.add(new Option(b.name,b.id)));
+            pick.value=field.sourceId; source=badges.find(b=>b.id===field.sourceId);
+            pick.onchange=()=>{field.sourceId=pick.value;field.sourceKey=badges.find(b=>b.id===pick.value)?.fields[0]?.key||'';renderEditorFields();previewEditor();};
+          }
+          const key=control('來源欄位',document.createElement('select')); key.add(new Option('選擇來源欄位',''));
+          source?.fields.forEach(f=>key.add(new Option(f.label,f.key))); key.value=field.sourceKey;
+          key.onchange=()=>{field.sourceKey=key.value;previewEditor();};
+        }
+        const actions=document.createElement('div');actions.className='field-actions';
+        [['↑',-1],['↓',1],['移除',0]].forEach(([text,dir])=>{const button=document.createElement('button');button.type='button';button.textContent=text;button.setAttribute('aria-label',`${text} ${field.label}`);button.disabled=dir!==0&&(index+dir<0||index+dir>=editorDraft.fields.length);button.onclick=()=>{if(dir) [editorDraft.fields[index],editorDraft.fields[index+dir]]=[editorDraft.fields[index+dir],field];else editorDraft.fields.splice(index,1);renderEditorFields();previewEditor();};actions.appendChild(button);});
+        row.appendChild(actions);host.appendChild(row);
+      });
+      document.getElementById('add-field').disabled=editorDraft.fields.length>=20;
+    }
+    window.openBadgeEditor = function(id) {
+      const badge=badges.find(b=>b.id===id);if(!badge)return;
+      editorReturnFocus=document.activeElement;
+      editorDraft=JSON.parse(JSON.stringify(badge));
+      document.getElementById('editor-name').value=badge.name;
+      for(const key of ['layout','theme','background','color1','color2','rotate']) {
+        const el=document.getElementById('editor-'+key);
+        if(key==='rotate')el.checked=badge.design[key];else el.value=badge.design[key];
+      }
+      renderEditorFields();previewEditor();document.getElementById('badge-editor').showModal();
+    };
+    window.editDisplayedBadge = () => openBadgeEditor(badges[displayIndex]?.id);
+    window.closeBadgeEditor = () => {document.getElementById('badge-editor').close();editorDraft=null;editorReturnFocus?.focus();};
+    document.getElementById('badge-editor').addEventListener('cancel',e=>{e.preventDefault();closeBadgeEditor();});
+    document.getElementById('editor-name').oninput=e=>{editorDraft.name=e.target.value;previewEditor();};
+    for(const key of ['layout','theme','background','color1','color2','rotate']) {
+      document.getElementById('editor-'+key).oninput=e=>{
+        editorDraft.design[key]=key==='rotate'?e.target.checked:e.target.value;
+        if(key.startsWith('color')) {editorDraft.design.theme='custom';document.getElementById('editor-theme').value='custom';}
+        if(key==='theme'&&e.target.value!=='custom') {const p=BadgeDesign.presets[Number(e.target.value)];editorDraft.design.color1=p[1];editorDraft.design.color2=p[2];document.getElementById('editor-color1').value=p[1];document.getElementById('editor-color2').value=p[2];}
+        previewEditor();
+      };
+    }
+    document.getElementById('add-field').onclick=()=>{editorDraft.fields.push({key:genId(),label:'自訂欄位',mode:'own',value:'',sourceId:'',sourceKey:''});renderEditorFields();previewEditor();};
+    document.getElementById('badge-editor-form').onsubmit=e=>{
+      e.preventDefault();
+      if(!editorDraft.name.trim())return;
+      const collection=editorCollection();
+      const errors=collection.flatMap(b=>b.fields.map(f=>BadgeDesign.resolve(collection,b,f.key).error)).filter(Boolean);
+      if(errors.length){document.getElementById('editor-error').textContent='無法儲存：'+[...new Set(errors)].join('；')+'。請檢查引用，包含其他名牌引用的欄位。';return;}
+      const previous=badges;badges=collection;
+      if(!saveBadgesToStorage()){badges=previous;return;}
+      closeBadgeEditor();renderBadges();renderManageList();
+      if(document.getElementById('display-modal').classList.contains('active'))updateDisplayModal();
+      showToast('✅ 名牌版面已儲存');
+    };
+    setInterval(()=>{
+      if(document.hidden)return;
+      paletteTick++;
+      if(editorDraft?.design.rotate)previewEditor();
+      // Update only the background to avoid interrupting focus or regenerating QR codes.
+      document.querySelectorAll('.identity-card').forEach(card=>{
+        let badge;
+        if(card.closest('#editor-preview'))badge=editorDraft;
+        else if(card.closest('#display-card-host'))badge=badges[displayIndex];
+        else badge=badges.find(b=>b.id===card.closest('.badge-card')?.dataset.id);
+        if(!badge?.design.rotate)return;
+        const p=BadgeDesign.presets[paletteTick%4];
+        card.style.setProperty('--card-background',badge.design.background==='solid'?p[1]:`linear-gradient(135deg, ${p[1]}, ${p[2]})`);
+        card.style.setProperty('--card-accent',p[1]);
+      });
+    },8000);
 
     // ─── Expose globals ──────────────────────────────────────────────────────
     window.startScanner = startScanner;

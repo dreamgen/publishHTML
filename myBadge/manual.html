@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>道場名牌 操作手冊</title>
+<style>
+  :root{
+    --brand:#6a4fb6;
+    --brand-dark:#4d3789;
+    --brand-light:#efe9fb;
+    --gold:#c99a3e;
+    --ink:#1f2937;
+    --sub:#5b6472;
+    --line:#e6e2ef;
+    --bg:#f7f6fb;
+    --card:#ffffff;
+    --warn-bg:#fff7e6;
+    --warn-line:#f0c36d;
+    --ok-bg:#eefaf0;
+    --ok-line:#8fd3a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    padding:0 16px 48px;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei",Helvetica,Arial,sans-serif;
+    line-height:1.7;
+  }
+  .wrap{max-width:720px;margin:0 auto;}
+  header.hero{
+    padding:36px 0 20px;
+    text-align:center;
+  }
+  header.hero img{
+    width:72px;height:72px;border-radius:18px;
+    box-shadow:0 6px 18px rgba(106,79,182,.28);
+    margin-bottom:14px;
+  }
+  header.hero h1{
+    margin:0 0 6px;
+    font-size:1.7rem;
+    color:var(--brand-dark);
+  }
+  header.hero p.tagline{
+    margin:0;
+    color:var(--sub);
+    font-size:.98rem;
+  }
+  .cta{
+    display:block;
+    background:linear-gradient(135deg,var(--brand),var(--brand-dark));
+    color:#fff;
+    text-decoration:none;
+    text-align:center;
+    padding:16px 20px;
+    border-radius:16px;
+    font-size:1.05rem;
+    font-weight:600;
+    margin:20px 0 8px;
+    box-shadow:0 8px 20px rgba(106,79,182,.3);
+  }
+  .cta span.small{
+    display:block;
+    font-weight:400;
+    font-size:.8rem;
+    opacity:.9;
+    margin-top:4px;
+  }
+  .url-box{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:10px 14px;
+    font-size:.85rem;
+    color:var(--sub);
+    word-break:break-all;
+    text-align:center;
+    margin-bottom:28px;
+  }
+  section{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:22px 20px;
+    margin-bottom:20px;
+  }
+  section h2{
+    margin:0 0 14px;
+    font-size:1.15rem;
+    color:var(--brand-dark);
+    display:flex;align-items:center;gap:8px;
+  }
+  .steps{list-style:none;margin:0;padding:0;}
+  .steps li{
+    display:flex;gap:14px;align-items:flex-start;
+    padding:12px 0;
+    border-bottom:1px dashed var(--line);
+  }
+  .steps li:last-child{border-bottom:none;padding-bottom:0;}
+  .steps li:first-child{padding-top:0;}
+  .num{
+    flex:none;
+    width:28px;height:28px;border-radius:50%;
+    background:var(--brand-light);
+    color:var(--brand-dark);
+    font-weight:700;font-size:.9rem;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .steps b{display:block;margin-bottom:2px;}
+  .steps span.note{color:var(--sub);font-size:.92rem;}
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:12px;
+  }
+  @media (max-width:480px){.grid{grid-template-columns:1fr;}}
+  .feature{
+    background:var(--brand-light);
+    border-radius:12px;
+    padding:12px 14px;
+    font-size:.92rem;
+  }
+  .feature b{display:block;color:var(--brand-dark);margin-bottom:3px;font-size:.95rem;}
+  .callout{
+    border-radius:12px;
+    padding:14px 16px;
+    font-size:.92rem;
+    margin:14px 0 0;
+  }
+  .callout.ok{background:var(--ok-bg);border:1px solid var(--ok-line);}
+  .callout.warn{background:var(--warn-bg);border:1px solid var(--warn-line);}
+  details{
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px 16px;
+    margin-bottom:10px;
+    background:#fbfaff;
+  }
+  details+details{margin-top:10px;}
+  summary{
+    cursor:pointer;
+    font-weight:600;
+    color:var(--ink);
+  }
+  details p{margin:10px 0 2px;color:var(--sub);font-size:.94rem;}
+  ol.sub, ul.sub{margin:8px 0 2px;padding-left:20px;color:var(--sub);font-size:.94rem;}
+  footer{
+    text-align:center;
+    color:var(--sub);
+    font-size:.82rem;
+    margin-top:24px;
+  }
+  code{
+    background:var(--brand-light);
+    padding:1px 6px;
+    border-radius:6px;
+    font-size:.85em;
+  }
+  .badge-gold{color:var(--gold);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <img src="./icon.png" alt="道場名牌 圖示" onerror="this.style.display='none'">
+    <h1>道場名牌 操作手冊</h1>
+    <p class="tagline">把別人給你的 QR Code 名牌掃描收藏起來，之後不用翻照片、不用找紙本，隨時打開手機就能展示給對方掃描。</p>
+  </header>
+
+  <a class="cta" href="https://dreamgen.github.io/publishHTML/myBadge/" target="_blank" rel="noopener">
+    🪪 立即開啟 道場名牌
+    <span class="small">建議安裝成手機 APP，開啟速度更快、可離線使用</span>
+  </a>
+  <div class="url-box">https://dreamgen.github.io/publishHTML/myBadge/</div>
+
+  <section>
+    <h2>⚡ 快速上手（5 步驟）</h2>
+    <ol class="steps">
+      <li><span class="num">1</span><div><b>開啟網址</b><span class="note">建議用手機瀏覽器（Chrome / Safari）開啟，並先「加入主畫面」安裝成 APP（步驟見下方）。</span></div></li>
+      <li><span class="num">2</span><div><b>掃描新增名牌</b><span class="note">點「掃描新增名牌」，允許相機權限後，把鏡頭對準要收藏的 QR Code 名牌；需要的話可開手電筒或放大畫面。</span></div></li>
+      <li><span class="num">3</span><div><b>命名並儲存</b><span class="note">掃描成功後幫這張名牌取個好記的名字（例如：天達堂志工證、○○活動入場證），點「儲存名牌」。</span></div></li>
+      <li><span class="num">4</span><div><b>需要時直接展示</b><span class="note">打開 APP 就會顯示你的名牌畫面，讓對方掃描即可；有多張名牌時，用「上一個 / 下一個」左右切換。</span></div></li>
+      <li><span class="num">5</span><div><b>管理你的名牌</b><span class="note">點「管理名牌」可以重新命名、刪除、設為預設（下次開啟自動顯示這張），或匯出／匯入備份。</span></div></li>
+    </ol>
+    <div class="callout ok">✅ 常用的那張名牌可以設為「預設」，之後打開 APP 就直接秀出來，不用每次都選。</div>
+  </section>
+
+  <section>
+    <h2>🧰 常用功能一覽</h2>
+    <div class="grid">
+      <div class="feature"><b>QR Code 掃描</b>內建手電筒、放大縮小，方便在較暗或較遠的情況掃描</div>
+      <div class="feature"><b>多張名牌收納</b>可同時保存好幾張，隨時左右切換展示</div>
+      <div class="feature"><b>設為預設</b>指定常用的一張，開啟 APP 自動顯示</div>
+      <div class="feature"><b>重新命名 / 刪除</b>在「管理名牌」隨時整理你的收藏</div>
+      <div class="feature"><b>備份匯出 / 匯入</b>換手機前先匯出成檔案，新手機再匯入即可轉移</div>
+      <div class="feature"><b>分享此 APP</b>「關於與分享」可複製網址，或掃描 QR 分享給其他人使用</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>📲 安裝成手機 APP（建議）</h2>
+    <p style="margin-top:0;color:var(--sub);font-size:.94rem;">安裝後開啟速度更快，也能離線展示已存好的名牌。</p>
+    <ol class="steps">
+      <li><span class="num">📱</span><div><b>iPhone / iPad（Safari）</b><span class="note">開啟網址 → 點下方工具列的「分享」圖示 → 選「加入主畫面」。</span></div></li>
+      <li><span class="num">🤖</span><div><b>Android（Chrome）</b><span class="note">開啟網址 → 點 Chrome 選單中的「安裝應用程式」或「加入主畫面」。</span></div></li>
+    </ol>
+    <div class="callout warn">⚠️ 如果是從 LINE 或其他 App 內建的瀏覽器點連結進來，畫面可能會出現「此環境無法儲存資料」的提示——這是正常現象，請點畫面右上角「新分頁」，改用手機正常的瀏覽器開啟後再安裝、掃描與儲存。</div>
+  </section>
+
+  <section>
+    <h2>❓ 常見問題</h2>
+
+    <details>
+      <summary>掃描完卻儲存不了名牌，或出現「此環境無法儲存資料」？</summary>
+      <p>通常是因為在 LINE 或其他聊天 App 內建的瀏覽器裡開啟。請點畫面右上角的「新分頁」按鈕，改用手機系統瀏覽器（Chrome／Safari）開啟這個網址即可正常使用。</p>
+    </details>
+
+    <details>
+      <summary>相機打不開，或一直顯示「找不到相機裝置」？</summary>
+      <p>請確認已允許瀏覽器使用相機的權限（可在手機設定或瀏覽器的「網站設定」中檢查），並確定沒有其他 App 正在佔用相機。</p>
+    </details>
+
+    <details>
+      <summary>我存進去的名牌資料安全嗎？會不會被別人看到？</summary>
+      <p>名牌資料只會保存在你自己手機瀏覽器的本機儲存空間中，不會上傳到任何伺服器，其他人也無法從網路上讀取到。</p>
+    </details>
+
+    <details>
+      <summary>換新手機了，怎麼把名牌搬過去？</summary>
+      <ol class="sub">
+        <li>在舊手機開啟「管理名牌」→ 點「匯出備份」，會得到一個備份檔案。</li>
+        <li>在新手機安裝好道場名牌 APP 後，開啟「管理名牌」→ 點「匯入備份」，選擇剛剛的檔案。</li>
+        <li>已存在的名牌會自動略過，不會重複匯入。</li>
+      </ol>
+    </details>
+
+    <details>
+      <summary>不小心刪除名牌了，還能救回來嗎？</summary>
+      <p>目前沒有復原功能，刪除前建議先用「管理名牌 → 匯出備份」保留一份檔案，之後需要的話可以再匯入回來。</p>
+    </details>
+
+    <details>
+      <summary>可以存好幾張不同的名牌嗎？</summary>
+      <p>可以，掃描新增沒有數量限制，所有名牌都會列在「管理名牌」裡，展示畫面可用「上一個／下一個」切換查看。</p>
+    </details>
+
+  </section>
+
+  <footer>道場名牌・隨身數位名牌夾・資料只存在你的手機裡</footer>
+</div>
+</body>
+</html>
