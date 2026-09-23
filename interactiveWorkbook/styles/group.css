@@ -1,0 +1,132 @@
+/*
+ * 功能一：小組管理。
+ * 顏色、圓角、間距一律沿用 base.css 的既有值（卡片 #d7e0e7 / 淺底 #eef4f8 / 主色 #124e73），
+ * 讓這一區塊看起來就是同一套介面的一部分。不要把這裡的規則搬進 base.css。
+ */
+
+/* 講師控制台：小組清單 */
+.group-rows { display: grid; gap: 12px; margin: 18px 0 24px }
+
+.group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px;
+  background: #eef4f8;
+  border-radius: 9px
+}
+
+.group-row-main { min-width: 0 }
+.group-row-main b { overflow-wrap: anywhere }
+.group-row .toolbar { flex-shrink: 0 }
+
+/* 新增小組：一個名稱 / 一次 N 組，兩種方式並存 */
+.group-add { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 8px }
+.group-add-item { min-width: 0 }
+.group-add-item label { margin-top: 0 }
+.group-add-item .toolbar { flex-wrap: nowrap }
+.group-add-item input { min-width: 0; flex: 1 }
+.group-add-item button { flex-shrink: 0 }
+.group-add-item input[type=number] { max-width: 140px }
+
+/* 允許學員自訂組名的開關：沿用 .choice 的外觀，只補上區塊間距 */
+.group-allow { margin: 20px 0 0 }
+.group-allow span { line-height: 1.55 }
+
+.group-merge-tools {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #d7e0e7
+}
+
+.group-merge-tools h3 { margin: 0 0 8px }
+.group-merge-tools select { width: auto; max-width: 100%; flex: 1 1 200px }
+
+/* 浮動視窗（展開內容、封存內容、合併確認）共用外觀 */
+.float-window {
+  width: min(860px, 94vw);
+  max-width: none;
+  max-height: 88dvh;
+  border: 1px solid #bccbd6;
+  border-radius: 13px;
+  padding: 0;
+  background: white;
+  color: #163047;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden
+}
+
+.float-window::backdrop { background: #0b1c2a99 }
+
+.float-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 22px;
+  background: #123c58;
+  color: white;
+  flex-shrink: 0
+}
+
+.float-top strong { font-size: 1.15rem }
+.float-top button { flex-shrink: 0 }
+.float-body { padding: 22px; overflow: auto; flex: 1 1 auto; min-height: 0 }
+.float-body h3 { margin: 22px 0 10px }
+.float-body > h3:first-child { margin-top: 0 }
+
+.float-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  margin: 10px 0;
+  padding: 14px 16px;
+  background: #f3f7fa;
+  border: 1px solid #d7e0e7;
+  border-radius: 8px
+}
+
+.float-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding: 14px 22px;
+  border-top: 1px solid #d7e0e7;
+  background: #f7fafc;
+  flex-shrink: 0
+}
+
+/* 封存內容視窗 */
+.archive-record { border: 1px solid #cad8e1; border-radius: 9px; padding: 16px 18px; margin: 16px 0 }
+.archive-record h3 { margin: 0; overflow-wrap: anywhere }
+.archive-notice .toolbar { margin-top: 12px }
+
+/* 合併小組的逐題選擇 */
+.merge-window .merge-name, .merge-window .merge-conflict {
+  border: 1px solid #cad8e1;
+  border-radius: 9px;
+  padding: 8px 18px 16px;
+  margin: 16px 0;
+  min-width: 0
+}
+
+.merge-window legend { font-weight: 700; padding: 0 8px; overflow-wrap: anywhere }
+.merge-window .choice { margin: 10px 0 }
+.merge-window .choice small { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere }
+.merge-auto ul { margin: 10px 0 0; padding-left: 1.4em }
+.merge-auto li { margin: 6px 0; overflow-wrap: anywhere }
+
+@media(max-width:700px) {
+  .group-row { flex-direction: column; align-items: stretch }
+  .group-add { grid-template-columns: minmax(0, 1fr); gap: 14px }
+  .group-add-item .toolbar { flex-wrap: wrap }
+  .group-add-item input[type=number] { max-width: none }
+  .float-window { width: 100vw; max-width: none; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; margin: 0 }
+  .float-body { padding: 16px }
+  .float-top { padding: 14px 16px }
+  .float-actions { padding: 12px 16px }
+  .float-actions button { flex: 1 1 140px }
+}

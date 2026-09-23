@@ -9,6 +9,12 @@
                 ".read": "auth != null",
                 ".write": "auth != null"
               }
+            },
+            "live": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null"
+              }
             }
           }
         }

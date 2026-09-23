@@ -1,0 +1,57 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   組內編輯權（一組一台裝置）。只寫這個檔案，勿寫入 base.css。
+   配色沿用 base.css 的既有語彙：藍底＝一般提示（.notice）、黃底＝需要注意（.warn）。
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.editlock {
+  background: #eef5fa;
+  border: 1px solid #bfd4e0;
+  border-left: 5px solid #26799d;
+  border-radius: 11px;
+  padding: 16px 20px;
+  margin-bottom: 20px
+}
+
+.editlock-headline { margin: 0 0 6px; font-weight: 700 }
+.editlock-status { margin: 0 0 12px; color: #526b7b; font-size: .9rem }
+.editlock .toolbar { margin: 0 }
+
+/* 自己持有：低調，只是告訴他「現在是你在填」 */
+.editlock-mine { background: #eef5fa }
+.editlock-mine .editlock-headline { font-size: 1.02rem }
+
+/* 別人持有：畫面是唯讀的，要明顯，讓學員不會對著不能打字的欄位發呆 */
+.editlock-locked {
+  background: #fff6e5;
+  border-color: #e2c489;
+  border-left-color: #d0911d
+}
+
+.editlock-locked .editlock-headline { font-size: 1.15rem }
+
+/* 沒有人持有：邀請他按一下就開始填 */
+.editlock-open { background: #eef5fa }
+.editlock-open .editlock-headline { font-size: 1.05rem }
+
+/* 唯讀的作答欄位：讓「不能打字」看得出來，不要只靠瀏覽器預設的 disabled 淡化 */
+#fields[disabled] input,
+#fields[disabled] textarea,
+#fields[disabled] select {
+  background: #f2f5f8;
+  color: #4a5c68;
+  border-color: #c2cfd8
+}
+
+#fields[disabled] label { color: #46606f }
+
+@media (max-width: 700px) {
+  .editlock { padding: 14px 16px }
+  .editlock .toolbar button { flex: 1 1 100% }
+}
+
+/* 投影／列印時不需要編輯權提示 */
+.projection .editlock { display: none }
+
+@media print {
+  .editlock { display: none !important }
+}
