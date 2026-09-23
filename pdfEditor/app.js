@@ -55,6 +55,21 @@ const SKIM_SETTLE_DELAY_MS = 160;
 const BLOB_URL_LIFETIME_MS = 10 * 60 * 1000;
 const FEEDBACK_LOG_LIMIT = 40;
 const FEEDBACK_ERROR_INVITE_COOLDOWN_MS = 60 * 1000;
+const OCR_LANGUAGE_KEY = "pdfEditor.ocrLanguage";
+const OCR_LANGUAGE_MODES = {
+  "chi_tra+eng": {
+    langs: ["chi_tra", "eng"],
+    label: "繁體中文與英文",
+    vertical: false,
+  },
+  "chi_tra_vert+chi_tra": {
+    langs: ["chi_tra_vert", "chi_tra"],
+    label: "繁體中文直排",
+    vertical: true,
+    psm: "3",
+  },
+};
+const OCR_LANGUAGE_DEFAULT = "chi_tra+eng";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -401,6 +416,7 @@ class PdfWorkshop {
       ocrCloseButton: $("#ocrCloseButton"),
       ocrScope: $("#ocrScope"),
       ocrLanguage: $("#ocrLanguage"),
+      ocrLanguageHint: $("#ocrLanguageHint"),
       ocrSkipTextPages: $("#ocrSkipTextPages"),
       ocrProgressPanel: $("#ocrProgressPanel"),
       ocrProgressTitle: $("#ocrProgressTitle"),
@@ -900,6 +916,15 @@ class PdfWorkshop {
     closeSearchButton?.addEventListener("click", () =>
       this.closeSearchControls()
     );
+    this.elements.ocrLanguage?.addEventListener("change", () => {
+      const key = this.getOcrLanguageMode();
+      try {
+        localStorage.setItem(OCR_LANGUAGE_KEY, key);
+      } catch {
+        /* localStorage 不可用時忽略 */
+      }
+      this.updateOcrLanguageHint();
+    });
     this.elements.startOcrButton?.addEventListener("click", () =>
       this.startOcr()
     );
@@ -3480,12 +3505,29 @@ class PdfWorkshop {
       span.style.top = `${adjusted.y0 * this.currentViewport.height}px`;
       span.style.width = `${width}px`;
       span.style.height = `${height}px`;
-      span.style.fontSize = `${height}px`;
-      if (measureContext) {
-        measureContext.font = `${height}px sans-serif`;
-        const measuredWidth = measureContext.measureText(span.textContent).width;
-        if (measuredWidth > 0) {
-          span.style.transform = `scaleX(${width / measuredWidth})`;
+      const isVerticalWord = ocr.vertical && height > width;
+      if (isVerticalWord) {
+        // Vertical column word: scale along the box width (the reading
+        // axis's cross-dimension) and lay glyphs top-to-bottom so
+        // drag-selection/highlight stays aligned with the column.
+        span.style.writingMode = "vertical-rl";
+        span.style.fontSize = `${width}px`;
+        if (measureContext) {
+          measureContext.font = `${width}px sans-serif`;
+          const measuredHeight =
+            measureContext.measureText(span.textContent).width;
+          if (measuredHeight > 0) {
+            span.style.transform = `scaleY(${height / measuredHeight})`;
+          }
+        }
+      } else {
+        span.style.fontSize = `${height}px`;
+        if (measureContext) {
+          measureContext.font = `${height}px sans-serif`;
+          const measuredWidth = measureContext.measureText(span.textContent).width;
+          if (measuredWidth > 0) {
+            span.style.transform = `scaleX(${width / measuredWidth})`;
+          }
         }
       }
       layer.append(span);
@@ -4069,7 +4111,33 @@ class PdfWorkshop {
     this.elements.ocrProgressPanel.hidden = true;
     this.elements.ocrProgressBar.style.width = "0%";
     this.setOcrRunningState(false);
+    this.restoreOcrLanguage();
     this.openDialog(this.elements.ocrDialog);
+  }
+
+  restoreOcrLanguage() {
+    if (!this.elements.ocrLanguage) return;
+    let stored = null;
+    try {
+      stored = localStorage.getItem(OCR_LANGUAGE_KEY);
+    } catch {
+      stored = null;
+    }
+    if (stored && OCR_LANGUAGE_MODES[stored]) {
+      this.elements.ocrLanguage.value = stored;
+    }
+    this.updateOcrLanguageHint();
+  }
+
+  updateOcrLanguageHint() {
+    if (!this.elements.ocrLanguageHint) return;
+    const mode = OCR_LANGUAGE_MODES[this.getOcrLanguageMode()];
+    this.elements.ocrLanguageHint.hidden = !mode?.vertical;
+  }
+
+  getOcrLanguageMode() {
+    const value = this.elements.ocrLanguage?.value;
+    return OCR_LANGUAGE_MODES[value] ? value : OCR_LANGUAGE_DEFAULT;
   }
 
   getOcrPageRecords() {
@@ -4085,6 +4153,7 @@ class PdfWorkshop {
   setOcrRunningState(running) {
     this.ocrRunning = running;
     this.elements.ocrScope.disabled = running;
+    this.elements.ocrLanguage.disabled = running;
     this.elements.ocrSkipTextPages.disabled = running;
     this.elements.ocrCloseButton.disabled = running;
     this.elements.startOcrButton.disabled = running;
@@ -4092,20 +4161,34 @@ class PdfWorkshop {
     if (!running) this.elements.startOcrButton.textContent = "開始辨識";
   }
 
-  async ensureOcrWorker() {
+  async ensureOcrWorker(languageKey) {
     clearTimeout(this.ocrIdleTimer);
     this.ocrIdleTimer = null;
-    if (this.ocrWorker) return this.ocrWorker;
+    const key = OCR_LANGUAGE_MODES[languageKey]
+      ? languageKey
+      : this.getOcrLanguageMode();
+    const mode = OCR_LANGUAGE_MODES[key];
+    if (this.ocrWorker && this.ocrWorkerLanguage === key) {
+      return this.ocrWorker;
+    }
+    if (this.ocrWorker) {
+      const staleWorker = this.ocrWorker;
+      this.ocrWorker = null;
+      this.ocrWorkerLanguage = null;
+      // v7 worker.reinitialize() does not switch languages correctly;
+      // terminate and create a fresh worker instead.
+      await staleWorker.terminate().catch(() => {});
+    }
     if (!window.Tesseract?.createWorker) {
       throw new Error("Tesseract.js is unavailable");
     }
     this.elements.ocrProgressPanel.hidden = false;
     this.elements.ocrProgressTitle.textContent = "載入 OCR 引擎";
-    this.elements.ocrProgressDetail.textContent = "準備繁體中文與英文模型";
+    this.elements.ocrProgressDetail.textContent = `準備${mode.label}模型`;
     this.elements.ocrProgressBar.style.width = "3%";
 
-    this.ocrWorker = await window.Tesseract.createWorker(
-      ["chi_tra", "eng"],
+    const newWorker = await window.Tesseract.createWorker(
+      mode.langs,
       window.Tesseract.OEM?.LSTM_ONLY ?? 1,
       {
         workerPath: new URL(
@@ -4124,6 +4207,20 @@ class PdfWorkshop {
           console.error("[PDF Editor] OCR worker error", error),
       }
     );
+    if (mode.psm) {
+      try {
+        await newWorker.setParameters({
+          tessedit_pageseg_mode: String(mode.psm),
+        });
+      } catch (error) {
+        await newWorker.terminate().catch(() => {});
+        this.ocrWorker = null;
+        this.ocrWorkerLanguage = null;
+        throw error;
+      }
+    }
+    this.ocrWorker = newWorker;
+    this.ocrWorkerLanguage = key;
     return this.ocrWorker;
   }
 
@@ -4166,6 +4263,7 @@ class PdfWorkshop {
     this.ocrCancelled = false;
     this.ocrPageNumber = 0;
     this.ocrPageTotal = pageRecords.length;
+    const languageKey = this.getOcrLanguageMode();
     this.elements.ocrResultText.value = "";
     this.elements.ocrResultField.hidden = true;
     this.elements.copyOcrButton.hidden = true;
@@ -4181,10 +4279,11 @@ class PdfWorkshop {
     let skippedCount = 0;
 
     try {
-      const worker = await this.ensureOcrWorker();
+      const worker = await this.ensureOcrWorker(languageKey);
       if (this.ocrCancelled) {
         await worker.terminate().catch(() => {});
         this.ocrWorker = null;
+        this.ocrWorkerLanguage = null;
         return;
       }
 
@@ -4221,7 +4320,8 @@ class PdfWorkshop {
           recognition.data,
           canvas.width,
           canvas.height,
-          this.getPageRotation(pageRecord)
+          this.getPageRotation(pageRecord),
+          languageKey
         );
         const entry = this.textIndex.get(pageRecord.id) || {};
         entry.ocr = ocrIndex;
@@ -4293,6 +4393,7 @@ class PdfWorkshop {
       if (this.ocrRunning || !this.ocrWorker) return;
       const worker = this.ocrWorker;
       this.ocrWorker = null;
+      this.ocrWorkerLanguage = null;
       await worker.terminate().catch(() => {});
     }, 3 * 60 * 1000);
   }
@@ -4305,6 +4406,7 @@ class PdfWorkshop {
     this.elements.ocrProgressDetail.textContent = "保留已完成的辨識結果";
     const worker = this.ocrWorker;
     this.ocrWorker = null;
+    this.ocrWorkerLanguage = null;
     if (worker) await worker.terminate().catch(() => {});
     this.elements.cancelOcrButton.disabled = false;
   }
@@ -4339,7 +4441,11 @@ class PdfWorkshop {
     return canvas;
   }
 
-  buildOcrIndex(data, imageWidth, imageHeight, rotation) {
+  buildOcrIndex(data, imageWidth, imageHeight, rotation, languageKey) {
+    const key = OCR_LANGUAGE_MODES[languageKey]
+      ? languageKey
+      : OCR_LANGUAGE_DEFAULT;
+    const mode = OCR_LANGUAGE_MODES[key];
     const detectedWords = [];
     for (const block of data?.blocks || []) {
       for (const paragraph of block.paragraphs || []) {
@@ -4381,6 +4487,8 @@ class PdfWorkshop {
       words,
       rotation,
       indexedAt: Date.now(),
+      language: key,
+      vertical: !!mode.vertical,
     };
   }
 

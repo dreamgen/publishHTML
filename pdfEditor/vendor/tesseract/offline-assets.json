@@ -5,6 +5,7 @@
   "./vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
   "./vendor/tesseract/core/tesseract-core-relaxedsimd-lstm.wasm.js",
   "./vendor/tesseract/lang-data/chi_tra.traineddata.gz",
+  "./vendor/tesseract/lang-data/chi_tra_vert.traineddata.gz",
   "./vendor/tesseract/lang-data/eng.traineddata.gz",
   "./vendor/tesseract/LICENSE.md",
   "./vendor/tesseract/core/LICENSE",

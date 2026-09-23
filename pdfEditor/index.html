@@ -922,12 +922,14 @@
           </select>
         </label>
         <label class="field">
-          <span>辨識語言</span>
-          <select id="ocrLanguage" disabled>
-            <option value="chi_tra+eng">繁體中文＋英文</option>
+          <span>辨識方向</span>
+          <select id="ocrLanguage">
+            <option value="chi_tra+eng">橫書（繁體中文＋英文）</option>
+            <option value="chi_tra_vert+chi_tra">直書（繁體中文直排）</option>
           </select>
         </label>
       </div>
+      <p class="dialog-note" id="ocrLanguageHint" hidden>直書適用由上而下、由右至左排列的文件；標點符號可能辨識為半形。</p>
       <label class="check-label ocr-skip-option">
         <input id="ocrSkipTextPages" type="checkbox" checked>
         <span>跳過已有可搜尋文字的頁面</span>
