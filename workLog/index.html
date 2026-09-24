@@ -90,6 +90,12 @@
 <div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 pointer-events-none opacity-0 translate-y-2">
     <div class="bg-slate-900/90 text-white text-sm px-4 py-2 rounded-full shadow-lg" id="toastText"></div>
 </div>
+<div id="snackbar" class="fixed left-3 right-3 bottom-24 z-50 hidden">
+    <div class="max-w-xl mx-auto bg-slate-900 text-white text-sm rounded-xl shadow-xl flex items-center gap-3 px-4 py-3">
+        <span class="flex-1" id="snackText"></span>
+        <button class="font-bold text-amber-300 shrink-0" id="snackBtn"></button>
+    </div>
+</div>
 <input type="file" id="importFile" accept="application/json,.json" class="hidden">
 
 <script>
@@ -101,14 +107,20 @@
  * 資料結構：
  * {
  *   version: 1,
- *   settings: { name, mailTo, mailCc, subjectTpl, useGps },
+ *   settings: { name, mailTo, mailCc, subjectTpl, useGps, autoLeave, promptDist, autoDist },
  *   places:    [{ id, name, lat?, lng? }],           // 常用地點
  *   templates: [{ id, text }],                        // 常用工作內容
  *   days: {
  *     'YYYY-MM-DD': {
  *       todos:  [{ id, text, done }],                 // 本日待辦
  *       visits: [{ id, placeId, place, arriveAt, leaveAt|null, geo|null,
- *                  items: [{ id, text, todoId|null, result }], note }],
+ *                  items: [{ id, text, todoId|null, result }], note,
+ *                  // 自動離開偵測
+ *                  lastSeenAt,            // 最後一次確認在打卡點附近的時間
+ *                  leaveMode,             // 'manual' | 'auto' | 'prompt'（提示後確認）
+ *                  leavePending,          // 離開時間待確認（App 未開啟期間離開，時間為推算）
+ *                  leaveHints: { lastSeen, estimate } | null,
+ *                  outSince, outCount, lastOutT, snoozeUntil }],
  *       summary: '',                                  // 今日總結
  *       tomorrow: ''                                  // 明日計畫（每行一項）
  *     }
@@ -117,7 +129,12 @@
  * ════════════════════════════════════════════════════════════════════ */
 
 const STORE_KEY = 'workLog.v1';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
+const MAX_ACC = 150;               // 誤差大於此值的定位讀數直接忽略（公尺）
+const TRAVEL_KMH = 25;             // 推算交通時間用的市區平均時速
+const SNOOZE_MS = 30 * 60000;      // 「還沒離開」後暫停偵測時間
+const PRECISE_GAP = 3 * 60000;     // 最後在場到偵測離開 ≤ 3 分：視為連續監測，取第一次超出範圍的時間
+const TRUST_GAP = 15 * 60000;      // ≤ 15 分：直接採用最後在場時間；超過則需確認
 
 // ─── 小工具 ───────────────────────────────────────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -149,7 +166,8 @@ const splitLines = (s) => String(s || '').split(/\r?\n/).map((x) => x.replace(/^
 function defaults() {
     return {
         version: 1,
-        settings: { name: '', mailTo: '', mailCc: '', subjectTpl: '【工作日報】{date} {name}', useGps: true },
+        settings: { name: '', mailTo: '', mailCc: '', subjectTpl: '【工作日報】{date} {name}', useGps: true,
+            autoLeave: true, promptDist: 300, autoDist: 1000 },
         places: [
             { id: uid(), name: '公司' },
             { id: uid(), name: '在家（遠端）' },
@@ -292,6 +310,169 @@ function geoLineHtml() {
 }
 function updateGeoLine() { const el = $('#geoLine'); if (el) el.innerHTML = geoLineHtml(); }
 
+// ─── 自動離開偵測 ───────────────────────────────────────────────────────
+// PWA 只有在前景時能讀取定位：App 開著時持續監測；App 重新開啟時立即補判一次。
+// 規則：距打卡點 > 提示距離 → 提示是否離開；> 自動離開距離 → 自動結束打卡（可復原）。
+//      需連續 2 次（間隔 ≥ 10 秒）或持續 2 分鐘在範圍外才成立；誤差 > 150 m 的讀數忽略；
+//      以「距離 − 誤差」判斷是否確實在範圍外，避免 GPS 飄移誤判。
+const mon = { watchId: null, timer: null, busy: false, retry: null };
+const fromPos = (p) => ({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy), t: Math.min(p.timestamp || Date.now(), Date.now()) });
+const fmtDist = (d) => d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`;
+
+function visitRef(v) {
+    const p = data.places.find((x) => x.id === v.placeId);
+    if (p && typeof p.lat === 'number') return { lat: p.lat, lng: p.lng };
+    if (v.geo) return { lat: v.geo.lat, lng: v.geo.lng };
+    return null;
+}
+function monitorTarget() {
+    const s = data.settings;
+    if (!s.useGps || !s.autoLeave || !navigator.geolocation) return null;
+    const o = findOpenVisit();
+    if (!o) return null;
+    const ref = visitRef(o.v);
+    return ref ? { ...o, ref } : null;
+}
+function syncMonitor() {
+    const need = document.visibilityState === 'visible' && !!monitorTarget();
+    if (need && mon.watchId == null) {
+        mon.watchId = navigator.geolocation.watchPosition(
+            (p) => onReading(fromPos(p)),
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 }
+        );
+        mon.timer = setInterval(pollOnce, 60000);
+        pollOnce();
+    } else if (!need && mon.watchId != null) {
+        navigator.geolocation.clearWatch(mon.watchId);
+        clearInterval(mon.timer); clearTimeout(mon.retry);
+        mon.watchId = null; mon.timer = null;
+    }
+}
+function pollOnce() {
+    if (mon.busy || document.visibilityState !== 'visible' || !monitorTarget()) return;
+    mon.busy = true;
+    navigator.geolocation.getCurrentPosition(
+        (p) => { mon.busy = false; onReading(fromPos(p)); },
+        (e) => { mon.busy = false; ui.monNote = e.code === 1 ? '未授權定位，無法偵測離開' : '暫時無法取得定位'; updateMonLine(); },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    );
+}
+
+// 推算離開時間
+function estimateLeave(v, now, distFromRef) {
+    const lastSeen = Math.max(v.lastSeenAt || v.arriveAt, v.arriveAt);
+    const outAt = v.outSince || now;
+    const gap = outAt - lastSeen;
+    if (gap <= PRECISE_GAP) return { at: Math.max(outAt, v.arriveAt), precise: true };
+    if (gap <= TRUST_GAP) return { at: lastSeen, precise: true };
+    const travel = distFromRef != null ? Math.round(distFromRef / 1000 / TRAVEL_KMH * 60) * 60000 : 0;
+    const est = Math.min(now, Math.max(lastSeen, now - travel));
+    return { at: est, precise: false, hints: { lastSeen, estimate: est } };
+}
+function resetOut(v) { v.outSince = null; v.outCount = 0; v.lastOutT = null; }
+function applyLeave(v, est, mode) {
+    v.leaveAt = Math.max(est.at, v.arriveAt);
+    v.leaveMode = mode;
+    v.leavePending = !est.precise;
+    v.leaveHints = est.precise ? null : est.hints;
+    resetOut(v);
+}
+
+function onReading(r) {
+    const t = monitorTarget();
+    if (!t) return;
+    ui.geo = { lat: +r.lat.toFixed(6), lng: +r.lng.toFixed(6), acc: r.acc }; ui.geoAt = Date.now();
+    if ($('#modal').innerHTML) return;                 // 使用者正在操作對話框時不打擾
+    const v = t.v, s = data.settings;
+    if (r.t < (v.lastSeenAt || 0)) return;             // 過期的快取讀數
+    if (r.acc > MAX_ACC) { ui.monNote = `定位誤差過大（${r.acc} m），本次略過`; updateMonLine(); return; }
+    const d = distM(r, t.ref);
+    ui.monDist = d; ui.monNote = '';
+    if (d <= s.promptDist) {                            // 仍在打卡點附近
+        v.lastSeenAt = r.t; resetOut(v); save(); updateMonLine(); return;
+    }
+    if (d - r.acc <= s.promptDist) { updateMonLine(); return; }   // 誤差範圍內無法判斷
+    if (v.snoozeUntil && Date.now() < v.snoozeUntil) { updateMonLine(); return; }
+    if (!v.outSince) { v.outSince = r.t; v.outCount = 0; }
+    if (!v.lastOutT || r.t - v.lastOutT >= 10000) { v.outCount = (v.outCount || 0) + 1; v.lastOutT = r.t; }
+    save();
+    const confirmed = v.outCount >= 2 || r.t - v.outSince >= 120000;
+    if (!confirmed) {
+        clearTimeout(mon.retry); mon.retry = setTimeout(pollOnce, 20000);   // 20 秒後再確認一次
+        updateMonLine(); return;
+    }
+    const est = estimateLeave(v, r.t, d);
+    if (d > s.autoDist) autoLeave(t, est, d);
+    else promptLeave(t, est, d);
+}
+
+function autoLeave(t, est, d) {
+    const v = t.v;
+    applyLeave(v, est, 'auto');
+    save(); render();
+    try { navigator.vibrate && navigator.vibrate(200); } catch (e) {}
+    snackbar(`已自動結束「${v.place}」（距離 ${fmtDist(d)}）${v.leavePending ? '，離開時間待確認' : `，離開 ${hm(v.leaveAt)}`}`, '復原', () => {
+        const f = findVisit(v.id); if (!f) return;
+        Object.assign(f.v, { leaveAt: null, leaveMode: null, leavePending: false, leaveHints: null, snoozeUntil: Date.now() + SNOOZE_MS });
+        resetOut(f.v); save(); render(); toast('已復原，30 分鐘內不再自動偵測');
+    });
+}
+
+function promptLeave(t, est, d) {
+    const v = t.v;
+    openModal(`
+        <div id="leavePrompt" data-vid="${v.id}" data-key="${t.key}">
+            <h2 class="font-bold text-lg mb-1">你似乎已離開「${esc(v.place)}」</h2>
+            <p class="text-sm text-slate-600 mb-4">目前距打卡點約 ${fmtDist(d)}。要結束這次打卡嗎？</p>
+            <div class="flex items-center gap-2 mb-2">
+                <span class="label shrink-0">離開時間</span>
+                <input type="time" class="field !w-auto" id="lpTime" value="${hm(est.at)}">
+            </div>
+            ${est.precise ? '' : `
+            <p class="text-xs text-amber-700 mb-2">App 未開啟期間無法得知確切離開時間，請選擇或自行修改：</p>
+            <div class="flex flex-wrap gap-2 mb-2">${leaveHintChips(est.hints, 'lp-set')}</div>`}
+            <div class="flex gap-2 mt-5">
+                <button class="btn btn-ghost flex-1" data-act="lp-stay">還沒離開</button>
+                <button class="btn btn-primary flex-1" data-act="lp-leave">結束打卡</button>
+            </div>
+        </div>`);
+    try { navigator.vibrate && navigator.vibrate([120, 80, 120]); } catch (e) {}
+}
+function leaveHintChips(h, act, vid) {
+    if (!h) return '';
+    const opts = [['最後在場', h.lastSeen]];
+    if (h.estimate && Math.abs(h.estimate - h.lastSeen) >= 60000) opts.push(['推算', h.estimate]);
+    return opts.map(([label, at]) => `<button class="chip" data-act="${act}" ${vid ? `data-vid="${vid}"` : ''} data-at="${at}">${label} ${hm(at)}</button>`).join('');
+}
+function pendingBlock(v) {
+    if (!v.leavePending) return '';
+    return `
+        <div class="mt-2 rounded-lg bg-amber-50 border border-amber-300 p-2 text-xs text-amber-900">
+            <div class="mb-1.5">⚠️ 離開時間待確認（目前記為推算的 ${hm(v.leaveAt)}；App 未開啟期間無法得知確切時間），點選採用：</div>
+            <div class="flex flex-wrap gap-1.5">
+                ${leaveHintChips(v.leaveHints, 'fix-leave', v.id)}
+                ${v.leaveHints && [v.leaveHints.lastSeen, v.leaveHints.estimate].some((x) => x && hm(x) === hm(v.leaveAt)) ? '' : `<button class="chip" data-act="fix-leave" data-vid="${v.id}" data-at="${v.leaveAt}">✓ 就用 ${hm(v.leaveAt)}</button>`}
+                <button class="chip" data-act="edit-visit" data-vid="${v.id}">自訂…</button>
+            </div>
+        </div>`;
+}
+function monLineHtml(v) {
+    const s = data.settings;
+    if (!s.useGps || !s.autoLeave) return '<span class="text-slate-400">自動離開偵測已關閉（可在設定開啟）</span>';
+    if (!visitRef(v)) return '<span class="text-slate-400">📡 此行程沒有座標，無法自動偵測離開</span>';
+    const parts = ['📡 自動離開偵測中'];
+    if (ui.monDist != null) parts.push(`距打卡點 ${fmtDist(ui.monDist)}`);
+    parts.push(`最後在場 ${hm(v.lastSeenAt || v.arriveAt)}`);
+    if (v.snoozeUntil && Date.now() < v.snoozeUntil) parts.push(`暫停至 ${hm(v.snoozeUntil)}`);
+    return `<span class="text-slate-500">${parts.join(' · ')}</span>${ui.monNote ? `<div class="text-amber-700">${esc(ui.monNote)}</div>` : ''}`;
+}
+function updateMonLine() {
+    const el = $('#monLine'); if (!el) return;
+    const f = findVisit(el.dataset.vid); if (f) el.innerHTML = monLineHtml(f.v);
+}
+function pendingVisits(k) { return getDay(k).visits.filter((v) => v.leavePending); }
+
 // ─── UI 狀態 ───────────────────────────────────────────────────────────
 const ui = {
     tab: 'today',
@@ -302,6 +483,8 @@ const ui = {
     arriveNew: '',
     arriveTime: null,   // null = 跟著現在時間
     geo: null, geoAt: 0, geoBusy: false, geoErr: '',
+    monDist: null, monNote: '',
+    arriveWhileOpen: false,
 };
 try {
     const t = sessionStorage.getItem('workLog.tab');
@@ -316,6 +499,17 @@ function toast(msg) {
     t.style.opacity = '1'; t.style.transform = 'translate(-50%, 0)';
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, 8px)'; }, 2200);
+}
+let snackTimer;
+function snackbar(msg, btnText, onClick) {
+    const el = $('#snackbar');
+    $('#snackText').textContent = msg;
+    const b = $('#snackBtn');
+    b.textContent = btnText || '';
+    b.onclick = () => { el.classList.add('hidden'); onClick && onClick(); };
+    el.classList.remove('hidden');
+    clearTimeout(snackTimer);
+    snackTimer = setTimeout(() => el.classList.add('hidden'), 10000);
 }
 function openModal(html) {
     $('#modal').innerHTML = `
@@ -368,23 +562,26 @@ function viewToday() {
         </div>`;
     }
 
-    if (open && open.key === k) html += openVisitCard(open.v, k);
-    else if (isToday && !open) html += arriveCard();
+    if (open && open.key === k) {
+        if (isToday && ui.arriveWhileOpen) html += arriveCard(open.v);
+        html += openVisitCard(open.v, k);
+    } else if (isToday && !open) html += arriveCard();
 
     html += todoSection(k, d);
     html += timelineSection(k, d);
     return html;
 }
 
-function arriveCard() {
+function arriveCard(openV) {
     const places = sortedPlaces();
     const t = ui.arriveTime || nowHM();
     return `
     <section class="card mb-4 !border-indigo-200">
         <div class="flex items-center justify-between mb-3">
             <h2 class="font-bold text-lg">🚩 抵達打卡</h2>
-            <span class="text-xs text-slate-400">選擇地點後按下打卡</span>
+            ${openV ? '<button class="text-xs text-slate-500 underline" data-act="arrive-other-cancel">取消</button>' : '<span class="text-xs text-slate-400">選擇地點後按下打卡</span>'}
         </div>
+        ${openV ? `<p class="text-xs text-amber-700 mb-3">打卡後會自動結束「${esc(openV.place)}」，離開時間依最後在場時間推算。</p>` : ''}
         <div class="flex flex-wrap gap-2 mb-3">
             ${places.map((p) => `<button class="chip ${ui.arrivePlace === p.id && !ui.arriveNew ? 'on' : ''}" data-act="pick-place" data-id="${p.id}">${esc(p.name)}</button>`).join('')}
         </div>
@@ -424,7 +621,8 @@ function openVisitCard(v, k) {
             <button class="ml-auto text-xs text-slate-500 underline" data-act="edit-visit" data-vid="${v.id}">編輯</button>
         </div>
         <div class="text-2xl font-bold mb-1">${esc(v.place)}</div>
-        <div class="text-sm text-slate-600 mb-4">${hm(v.arriveAt)} 抵達 · 已停留 <b class="text-emerald-700" data-elapsed="${v.arriveAt}">${fmtDur(visitMin(v))}</b></div>
+        <div class="text-sm text-slate-600 mb-1">${hm(v.arriveAt)} 抵達 · 已停留 <b class="text-emerald-700" data-elapsed="${v.arriveAt}">${fmtDur(visitMin(v))}</b></div>
+        <div class="text-xs mb-4" id="monLine" data-vid="${v.id}">${monLineHtml(v)}</div>
 
         <h3 class="font-bold mb-2">工作內容</h3>
         ${v.items.length ? `<ul class="mb-3 space-y-1">${v.items.map((it) => `
@@ -440,6 +638,7 @@ function openVisitCard(v, k) {
                 <input type="time" class="field !w-auto" value="${isToday ? nowHM() : ''}" id="leaveTime-${v.id}">
             </div>
             <button class="btn btn-primary w-full !py-3 text-base" data-act="leave" data-vid="${v.id}">🏁 離開・計算時長</button>
+            ${isToday && !ui.arriveWhileOpen ? '<div class="text-center mt-2"><button class="text-xs text-slate-500 underline" data-act="arrive-other">已到下一個地點？直接在新地點打卡</button></div>' : ''}
         </div>
     </section>`;
 }
@@ -491,7 +690,7 @@ function timelineSection(k, d) {
             html += `<div class="text-center text-xs text-slate-400 py-1">┆ 移動／空檔 ${fmtDur(gap)} ┆</div>`;
         }
         html += `
-        <button class="card w-full text-left mb-1 block hover:border-indigo-300" data-act="edit-visit" data-vid="${v.id}">
+        <div role="button" tabindex="0" class="card w-full text-left mb-1 block cursor-pointer hover:border-indigo-300 ${v.leavePending ? '!border-amber-300' : ''}" data-act="edit-visit" data-vid="${v.id}">
             <div class="flex items-center gap-2">
                 <span class="font-mono text-sm text-slate-600">${hm(v.arriveAt)} – ${v.leaveAt ? hm(v.leaveAt) : '<span class="text-emerald-600">進行中</span>'}</span>
                 <span class="ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${v.leaveAt ? 'bg-indigo-50 text-indigo-700' : 'bg-emerald-50 text-emerald-700'}" ${v.leaveAt ? '' : `data-elapsed="${v.arriveAt}"`}>${fmtDur(visitMin(v))}</span>
@@ -500,7 +699,9 @@ function timelineSection(k, d) {
             ${v.items.length ? `<ul class="mt-1 text-sm text-slate-600 space-y-0.5">${v.items.map((it) => `
                 <li>・${esc(it.text)}${it.result ? `<div class="text-emerald-700 text-xs pl-3">→ ${esc(it.result)}</div>` : ''}</li>`).join('')}</ul>` : ''}
             ${v.note ? `<div class="text-xs text-slate-500 mt-1">備註：${esc(v.note)}</div>` : ''}
-        </button>`;
+            ${v.leaveMode === 'auto' && !v.leavePending ? '<div class="text-[11px] text-slate-400 mt-1">📡 自動偵測離開</div>' : ''}
+            ${pendingBlock(v)}
+        </div>`;
     });
     html += `</section>`;
     return html;
@@ -530,6 +731,8 @@ function openVisitEditor(vid) {
                 <div><div class="label mb-1">抵達</div><input type="time" class="field" id="vfArrive" value="${hm(v.arriveAt)}"></div>
                 <div><div class="label mb-1">離開 ${found && !v.leaveAt ? '<span class="text-emerald-600">（進行中，可留空）</span>' : ''}</div><input type="time" class="field" id="vfLeave" value="${v.leaveAt ? hm(v.leaveAt) : ''}"></div>
             </div>
+            ${v.leavePending ? `<div class="rounded-lg bg-amber-50 border border-amber-300 p-2 text-xs text-amber-900">⚠️ 離開時間為推算值，儲存即視為已確認。快速帶入：
+                <div class="flex flex-wrap gap-1.5 mt-1.5">${leaveHintChips(v.leaveHints, 'vf-set-leave')}</div></div>` : ''}
             <div>
                 <div class="label mb-1">工作內容</div>
                 <div id="vfItems">${v.items.map(itemRow).join('')}</div>
@@ -580,6 +783,10 @@ function saveVisitFromModal() {
     const p = resolvePlace(placeName);
     const d = ensureDay(k);
     const v = old || { id: uid(), geo: null };
+    if (old && leaveAt !== old.leaveAt) v.leaveMode = leaveAt ? 'manual' : null;
+    if (!old) v.leaveMode = 'manual';
+    if (!leaveAt || (old && leaveAt !== old.leaveAt) || !old || old.leavePending) { v.leavePending = false; v.leaveHints = null; }
+    if (!leaveAt) { resetOut(v); v.lastSeenAt = Math.max(v.lastSeenAt || 0, arriveAt); }
     Object.assign(v, { placeId: p.id, place: p.name, arriveAt, leaveAt, items, note: $('#vfNote').value.trim() });
     if (!old) d.visits.push(v);
     d.visits = sortVisits(d.visits);
@@ -617,6 +824,7 @@ function viewReview() {
                 <span class="text-xs text-slate-500 font-mono">${hm(v.arriveAt)}–${v.leaveAt ? hm(v.leaveAt) : '進行中'}</span>
                 <span class="ml-auto text-xs font-bold text-indigo-700">${fmtDur(visitMin(v))}</span>
             </div>
+            ${v.leavePending ? `<div class="mb-3">${pendingBlock(v)}</div>` : ''}
             ${v.items.map((it) => `
                 <div class="mb-3">
                     <div class="text-sm font-semibold mb-1">・${esc(it.text)}</div>
@@ -702,6 +910,10 @@ function buildDayReport(k) {
     }
     return L.join('\n');
 }
+function confirmPending() {
+    const n = pendingVisits(ui.date).length;
+    return !n || confirm(`仍有 ${n} 筆行程的離開時間待確認（為推算值），確定要直接送出嗎？`);
+}
 function mailSubject(k) {
     return (data.settings.subjectTpl || '【工作日報】{date} {name}')
         .replace(/\{date\}/g, dateLabel(k))
@@ -744,7 +956,14 @@ function viewDayReport() {
     const k = ui.date;
     const text = buildDayReport(k);
     const s = data.settings;
+    const pend = pendingVisits(k);
     return `
+    ${pend.length ? `
+    <section class="card mb-3 !bg-amber-50 !border-amber-300">
+        <div class="text-sm text-amber-900 font-semibold mb-1">⚠️ 有 ${pend.length} 筆行程的離開時間尚待確認</div>
+        <div class="text-xs text-amber-800 mb-2">這些時間是 App 未開啟期間推算的，建議確認後再寄出：</div>
+        ${pend.map((v) => `<div class="text-xs mb-2"><b>${esc(v.place)}</b> ${hm(v.arriveAt)}–${hm(v.leaveAt)}${pendingBlock(v)}</div>`).join('')}
+    </section>` : ''}
     <section class="card mb-3">
         <div class="label mb-1">主旨</div>
         <div class="text-sm font-semibold mb-3">${esc(mailSubject(k))}</div>
@@ -833,10 +1052,12 @@ function csvSummary(ym) {
 }
 function csvDetail(ym) {
     const st = monthStats(ym);
-    const rows = [['日期', '星期', '序', '地點', '抵達', '離開', '停留(分)', '停留(小時)', '工作內容', '工作成果', '備註', '緯度', '經度']];
+    const modeName = { manual: '手動', auto: '自動偵測', prompt: '偵測提示確認' };
+    const rows = [['日期', '星期', '序', '地點', '抵達', '離開', '停留(分)', '停留(小時)', '離開方式', '離開時間待確認', '工作內容', '工作成果', '備註', '緯度', '經度']];
     st.days.forEach((d) => d.vs.forEach((v, i) => rows.push([
         d.key, WD[parseKey(d.key).getDay()], i + 1, v.place, hm(v.arriveAt), v.leaveAt ? hm(v.leaveAt) : '',
         visitMin(v), hours2(visitMin(v)),
+        v.leaveAt ? (modeName[v.leaveMode] || '手動') : '進行中', v.leavePending ? '是' : '',
         v.items.map((it) => `・${it.text}`).join('\n'),
         v.items.filter((it) => (it.result || '').trim()).map((it) => `・${it.text}：${it.result.trim()}`).join('\n'),
         v.note || '', v.geo ? v.geo.lat : '', v.geo ? v.geo.lng : '',
@@ -888,6 +1109,24 @@ function viewSettings() {
             <span class="text-sm">抵達打卡時記錄 GPS 座標，並自動選取 300 公尺內的常用地點</span>
         </label>
         <p class="text-xs text-slate-400 mt-2">座標只存在本機。常用地點第一次打卡時會自動記住座標，之後到同一地點就會自動帶入。</p>
+        <div class="border-t border-slate-100 mt-4 pt-4 ${s.useGps ? '' : 'opacity-50 pointer-events-none'}">
+            <label class="flex items-center gap-3">
+                <input type="checkbox" class="w-5 h-5 accent-indigo-600" ${s.autoLeave ? 'checked' : ''} data-act="toggle-autoleave">
+                <span class="text-sm font-semibold">已打卡時自動偵測離開</span>
+            </label>
+            <div class="grid grid-cols-2 gap-3 mt-3">
+                <div><div class="label mb-1">超過此距離提示離開</div>
+                    <div class="flex items-center gap-1"><input type="number" inputmode="numeric" min="100" step="50" class="field" value="${s.promptDist}" data-bind="set-num-promptDist"><span class="text-sm text-slate-500">m</span></div></div>
+                <div><div class="label mb-1">超過此距離自動離開</div>
+                    <div class="flex items-center gap-1"><input type="number" inputmode="numeric" min="200" step="100" class="field" value="${s.autoDist}" data-bind="set-num-autoDist"><span class="text-sm text-slate-500">m</span></div></div>
+            </div>
+            <ul class="text-xs text-slate-400 mt-3 space-y-1 list-disc pl-4">
+                <li>只在 App 開著時能即時偵測；App 在背景或鎖屏期間離開，會在下次開啟 App 時補判。</li>
+                <li>補判時無法得知確切離開時間：15 分鐘內有確認在場則直接採用，否則以推算時間記錄並標示「待確認」，可在覆盤時修正。</li>
+                <li>在客戶處時常打開 App（例如記錄工作內容），能讓「最後在場時間」更準確。</li>
+                <li>誤差大於 150 m 的定位會略過，需連續 2 次在範圍外才判定離開。</li>
+            </ul>
+        </div>
     </section>
 
     <section class="card mb-4">
@@ -936,6 +1175,7 @@ function render() {
         `<datalist id="placeList">${data.places.map((p) => `<option value="${esc(p.name)}"></option>`).join('')}</datalist>`;
     $$('#nav .navbtn').forEach((b) => b.classList.toggle('on', b.dataset.tab === ui.tab));
     try { sessionStorage.setItem('workLog.tab', ui.tab); } catch (e) {}
+    syncMonitor();
 }
 function tickElapsed() {
     $$('[data-elapsed]').forEach((el) => { el.textContent = fmtDur(Math.max(0, Math.round((Date.now() - Number(el.dataset.elapsed)) / 60000))); });
@@ -976,7 +1216,7 @@ const actions = {
     'arrive': () => {
         const k = dayKey();
         const open = findOpenVisit();
-        if (open) return toast('請先處理尚未離開的行程');
+        if (open && open.key !== k) return toast('請先處理尚未離開的行程');
         let p = null;
         if (ui.arriveNew.trim()) p = resolvePlace(ui.arriveNew);
         else if (ui.arrivePlace) p = data.places.find((x) => x.id === ui.arrivePlace);
@@ -987,12 +1227,24 @@ const actions = {
             p.lat = geo.lat; p.lng = geo.lng;
             setTimeout(() => toast(`已記住「${p.name}」的座標`), 2300);
         }
+        const arriveAt = toMs(k, t);
+        let closedMsg = '';
+        if (open) {
+            // 在新地點打卡時，自動結束上一個行程（離開時間依最後在場時間推算）
+            if (arriveAt < open.v.arriveAt) return toast(`抵達時間需晚於「${open.v.place}」的抵達時間 ${hm(open.v.arriveAt)}`);
+            const ref = visitRef(open.v);
+            resetOut(open.v);
+            const est = estimateLeave(open.v, arriveAt, ref && geo ? distM(ref, geo) : null);
+            applyLeave(open.v, est, 'auto');
+            closedMsg = `，已結束「${open.v.place}」${open.v.leavePending ? '（離開時間待確認）' : ''}`;
+        }
         const d = ensureDay(k);
-        d.visits.push({ id: uid(), placeId: p.id, place: p.name, arriveAt: toMs(k, t), leaveAt: null, geo, items: [], note: '' });
+        d.visits.push({ id: uid(), placeId: p.id, place: p.name, arriveAt, leaveAt: null, geo, items: [], note: '', lastSeenAt: arriveAt });
         d.visits = sortVisits(d.visits);
-        ui.arrivePlace = null; ui.arriveNew = ''; ui.arriveTime = null; ui.date = k;
+        ui.arrivePlace = null; ui.arriveNew = ''; ui.arriveTime = null; ui.date = k; ui.arriveWhileOpen = false;
+        ui.monDist = null; ui.monNote = '';
         save(); render(); window.scrollTo(0, 0);
-        toast(`${t} 抵達 ${p.name}`);
+        toast(`${t} 抵達 ${p.name}${closedMsg}`);
     },
     'leave': (el) => {
         const f = findVisit(el.dataset.vid); if (!f) return;
@@ -1001,11 +1253,38 @@ const actions = {
         let leaveAt = toMs(f.key, t);
         if (leaveAt < f.v.arriveAt) leaveAt += 86400000;
         if (leaveAt - f.v.arriveAt > 24 * 3600000) return toast('停留時間超過 24 小時，請確認時間');
-        f.v.leaveAt = leaveAt;
+        f.v.leaveAt = leaveAt; f.v.leaveMode = 'manual'; f.v.leavePending = false; f.v.leaveHints = null; resetOut(f.v);
         save(); render();
         toast(`離開 ${f.v.place}，停留 ${fmtDur(visitMin(f.v))}`);
         if (ui.tab === 'today' && f.key === dayKey()) locate(true);
     },
+    'arrive-other': () => { ui.arriveWhileOpen = true; render(); window.scrollTo(0, 0); locate(); },
+    'arrive-other-cancel': () => { ui.arriveWhileOpen = false; render(); },
+    'fix-leave': (el) => {
+        const f = findVisit(el.dataset.vid); if (!f) return;
+        f.v.leaveAt = Math.max(Number(el.dataset.at), f.v.arriveAt);
+        f.v.leavePending = false; f.v.leaveHints = null;
+        save(); render(); toast(`離開時間已確認為 ${hm(f.v.leaveAt)}`);
+    },
+    'lp-set': (el) => { $('#lpTime').value = hm(Number(el.dataset.at)); },
+    'lp-stay': () => {
+        const f = findVisit($('#leavePrompt').dataset.vid); closeModal();
+        if (!f) return;
+        f.v.snoozeUntil = Date.now() + SNOOZE_MS; resetOut(f.v);
+        save(); render(); toast('好的，30 分鐘內不再提示');
+    },
+    'lp-leave': () => {
+        const box = $('#leavePrompt');
+        const f = findVisit(box.dataset.vid); if (!f) return closeModal();
+        const t = $('#lpTime').value;
+        if (!t) return toast('請輸入離開時間');
+        let at = toMs(f.key, t);
+        if (at < f.v.arriveAt) at += 86400000;
+        applyLeave(f.v, { at, precise: true }, 'prompt');
+        closeModal(); save(); render();
+        toast(`離開 ${f.v.place}，停留 ${fmtDur(visitMin(f.v))}`);
+    },
+    'toggle-autoleave': () => { data.settings.autoLeave = !data.settings.autoLeave; save(); render(); },
     'add-item': (el) => {
         const f = findVisit(el.dataset.vid); if (!f) return;
         if (el.dataset.todo) {
@@ -1076,6 +1355,7 @@ const actions = {
     },
     'modal-del-row': (el) => el.closest('[data-item-row]').remove(),
     'modal-save-visit': () => saveVisitFromModal(),
+    'vf-set-leave': (el) => { $('#vfLeave').value = hm(Number(el.dataset.at)); },
     'modal-del-visit': (el) => {
         const f = findVisit(el.dataset.vid); if (!f) return;
         if (!confirm(`確定刪除「${f.v.place} ${hm(f.v.arriveAt)}」這筆行程？`)) return;
@@ -1083,12 +1363,14 @@ const actions = {
         save(); closeModal(); render(); toast('已刪除');
     },
 
-    'copy-report': () => copyText(buildDayReport(ui.date)),
+    'copy-report': () => { if (confirmPending()) copyText(buildDayReport(ui.date)); },
     'share-report': async () => {
+        if (!confirmPending()) return;
         try { await navigator.share({ title: mailSubject(ui.date), text: buildDayReport(ui.date) }); }
         catch (e) { if (e.name !== 'AbortError') copyText(buildDayReport(ui.date)); }
     },
     'mail-report': () => {
+        if (!confirmPending()) return;
         const s = data.settings;
         const body = buildDayReport(ui.date).replace(/\n/g, '\r\n');
         const q = [];
@@ -1169,6 +1451,11 @@ document.addEventListener('input', (e) => {
         const it = f.v.items.find((i) => i.id === el.dataset.iid); if (it) { it.result = val; save(); }
         return;
     }
+    if (b.startsWith('set-num-')) {
+        const n = Math.round(Number(val));
+        if (n >= 100 && n <= 50000) { data.settings[b.slice(8)] = n; save(); }
+        return;
+    }
     if (b.startsWith('set-')) { data.settings[b.slice(4)] = val; save(); return; }
     if (b === 'place-name') {
         const p = data.places.find((x) => x.id === el.dataset.id);
@@ -1185,6 +1472,12 @@ document.addEventListener('change', (e) => {
     const c = e.target.dataset && e.target.dataset.change;
     if (c === 'date' && e.target.value) { ui.date = e.target.value; render(); }
     if (c === 'month' && e.target.value) { ui.month = e.target.value; render(); }
+    if (e.target.dataset && /^set-num-/.test(e.target.dataset.bind || '')) {
+        const st = data.settings;
+        st.promptDist = Math.max(100, st.promptDist || 300);
+        if (!(st.autoDist > st.promptDist)) { st.autoDist = st.promptDist + 500; toast('自動離開距離需大於提示距離，已自動調整'); }
+        save(); render();
+    }
 });
 
 // Enter 送出（textarea 需不按 Shift；中文輸入法組字中不觸發）
@@ -1230,7 +1523,9 @@ document.addEventListener('visibilitychange', () => {
     if (!$('#modal').innerHTML && !document.activeElement.matches('input, textarea')) render();
     else tickElapsed();
     if (ui.tab === 'today') locate();
+    pollOnce();   // 重新開啟 App：立即補判是否已離開
 });
+document.addEventListener('visibilitychange', syncMonitor);
 
 render();
 if (ui.tab === 'today') locate();

@@ -8,7 +8,7 @@
  * - 資料存在 localStorage，不經過 SW，不受快取影響
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_NAME = `workLog-${SW_VERSION}`;
 const SHARED_CACHE = `workLog-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
