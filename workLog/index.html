@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>工作行程記錄</title>
+    <meta name="description" content="記錄每天往返客戶的抵達／離開時間、地點、工作內容與成果；可預填本日待辦、套用常用工作內容，匯出單日報告寄給主管與每月工時統計 CSV">
+
+    <!-- PWA Setup -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="./icons/workLog-192.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/workLog-192.png">
+    <link rel="apple-touch-icon" href="./icons/workLog-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="工作行程">
+    <meta name="theme-color" content="#4f46e5">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        html, body { min-height: 100%; }
+        body {
+            background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 40%);
+            min-height: 100dvh;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+        .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .375rem .75rem; border-radius: 9999px; font-size: .875rem; border: 1px solid #cbd5e1; background: #fff; color: #334155; transition: all .12s ease; }
+        .chip:active { transform: scale(.96); }
+        .chip.on { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+        .chip.todo { border-color: #fbbf24; background: #fffbeb; color: #92400e; }
+        .chip.tpl { border-color: #c7d2fe; background: #eef2ff; color: #3730a3; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: .375rem; padding: .5rem .875rem; border-radius: .75rem; font-weight: 600; font-size: .9rem; transition: all .12s ease; }
+        .btn:active { transform: scale(.97); }
+        .btn-primary { background: #4f46e5; color: #fff; }
+        .btn-primary:hover { background: #4338ca; }
+        .btn-danger { background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; }
+        .btn-ghost { background: #f1f5f9; color: #334155; }
+        .btn-ghost:hover { background: #e2e8f0; }
+        .field { width: 100%; border: 1px solid #cbd5e1; border-radius: .625rem; padding: .5rem .625rem; font-size: 16px; background: #fff; }
+        .field:focus { outline: 2px solid #a5b4fc; border-color: #6366f1; }
+        textarea.field { resize: vertical; }
+        .label { font-size: .8rem; color: #64748b; font-weight: 600; }
+        .pulse { width: .625rem; height: .625rem; border-radius: 9999px; background: #22c55e; box-shadow: 0 0 0 0 rgba(34,197,94,.6); animation: pulse 1.6s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); } 70% { box-shadow: 0 0 0 10px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+        .navbtn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: .5rem 0 .375rem; font-size: .72rem; color: #64748b; }
+        .navbtn.on { color: #4f46e5; font-weight: 700; }
+        .navbtn svg { width: 22px; height: 22px; }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .report-pre { white-space: pre-wrap; word-break: break-word; font-family: ui-sans-serif, system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; font-size: .875rem; line-height: 1.65; }
+        #toast { transition: opacity .2s ease, transform .2s ease; }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .hide-scroll { scrollbar-width: none; }
+        input[type="time"], input[type="date"], input[type="month"] { min-height: 2.5rem; }
+    </style>
+</head>
+<body class="text-slate-800">
+
+<header class="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200" style="padding-top: env(safe-area-inset-top);">
+    <div class="max-w-xl mx-auto px-3 h-14 flex items-center gap-2" id="header"></div>
+</header>
+
+<main id="view" class="max-w-xl mx-auto px-4 pt-4 pb-32"></main>
+
+<nav class="fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-slate-200 safe-bottom">
+    <div class="max-w-xl mx-auto flex" id="nav">
+        <button class="navbtn" data-act="tab" data-tab="today">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+            今日行程
+        </button>
+        <button class="navbtn" data-act="tab" data-tab="review">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            每日覆盤
+        </button>
+        <button class="navbtn" data-act="tab" data-tab="report">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+            報告統計
+        </button>
+        <button class="navbtn" data-act="tab" data-tab="settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            設定
+        </button>
+    </div>
+</nav>
+
+<div id="modal"></div>
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 pointer-events-none opacity-0 translate-y-2">
+    <div class="bg-slate-900/90 text-white text-sm px-4 py-2 rounded-full shadow-lg" id="toastText"></div>
+</div>
+<input type="file" id="importFile" accept="application/json,.json" class="hidden">
+
+<script>
+'use strict';
+/* ════════════════════════════════════════════════════════════════════
+ * 工作行程記錄 (workLog)
+ * 資料僅存在本機 localStorage（key: workLog.v1），可匯出／匯入 JSON 備份。
+ *
+ * 資料結構：
+ * {
+ *   version: 1,
+ *   settings: { name, mailTo, mailCc, subjectTpl, useGps },
+ *   places:    [{ id, name, lat?, lng? }],           // 常用地點
+ *   templates: [{ id, text }],                        // 常用工作內容
+ *   days: {
+ *     'YYYY-MM-DD': {
+ *       todos:  [{ id, text, done }],                 // 本日待辦
+ *       visits: [{ id, placeId, place, arriveAt, leaveAt|null, geo|null,
+ *                  items: [{ id, text, todoId|null, result }], note }],
+ *       summary: '',                                  // 今日總結
+ *       tomorrow: ''                                  // 明日計畫（每行一項）
+ *     }
+ *   }
+ * }
+ * ════════════════════════════════════════════════════════════════════ */
+
+const STORE_KEY = 'workLog.v1';
+const APP_VERSION = '1.0.0';
+
+// ─── 小工具 ───────────────────────────────────────────────────────────
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const pad = (n) => String(n).padStart(2, '0');
+const WD = '日一二三四五六';
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseKey = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (k, n) => { const d = parseKey(k); d.setDate(d.getDate() + n); return dayKey(d); };
+const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const nowHM = () => hm(Date.now());
+const dateLabel = (k) => { const d = parseKey(k); return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}（${WD[d.getDay()]}）`; };
+const shortDate = (k) => { const d = parseKey(k); return `${d.getMonth() + 1}/${d.getDate()}（${WD[d.getDay()]}）`; };
+const toMs = (k, t) => { const [h, m] = String(t || '00:00').split(':').map(Number); const d = parseKey(k); d.setHours(h || 0, m || 0, 0, 0); return d.getTime(); };
+const fmtDur = (min) => {
+    if (min == null || isNaN(min)) return '';
+    const h = Math.floor(min / 60), m = min % 60;
+    if (!h) return `${m} 分`;
+    return m ? `${h} 小時 ${m} 分` : `${h} 小時`;
+};
+const hours2 = (min) => (Math.round(min / 60 * 100) / 100).toFixed(2);
+const visitMin = (v) => Math.max(0, Math.round(((v.leaveAt ?? Date.now()) - v.arriveAt) / 60000));
+const sortVisits = (vs) => vs.slice().sort((a, b) => a.arriveAt - b.arriveAt);
+const splitLines = (s) => String(s || '').split(/\r?\n/).map((x) => x.replace(/^\s*(?:[-*・•●▪︎]|\d+[.、)])\s*/, '').trim()).filter(Boolean);
+
+// ─── 資料存取 ─────────────────────────────────────────────────────────
+function defaults() {
+    return {
+        version: 1,
+        settings: { name: '', mailTo: '', mailCc: '', subjectTpl: '【工作日報】{date} {name}', useGps: true },
+        places: [
+            { id: uid(), name: '公司' },
+            { id: uid(), name: '在家（遠端）' },
+        ],
+        templates: ['需求訪談／確認', '測試案例撰寫', '測試執行', '缺陷追蹤與回歸測試', '會議', '文件／報告整理', '團隊管理與指導']
+            .map((text) => ({ id: uid(), text })),
+        days: {},
+    };
+}
+function normalize(d) {
+    const def = defaults();
+    return {
+        version: 1,
+        settings: { ...def.settings, ...(d && d.settings || {}) },
+        places: Array.isArray(d && d.places) ? d.places : def.places,
+        templates: Array.isArray(d && d.templates) ? d.templates : def.templates,
+        days: (d && typeof d.days === 'object' && d.days) ? d.days : {},
+    };
+}
+function load() {
+    try {
+        const raw = localStorage.getItem(STORE_KEY);
+        if (raw) return normalize(JSON.parse(raw));
+    } catch (e) { console.warn('[workLog] load failed', e); }
+    return defaults();
+}
+let data = load();
+let saveTimer = null;
+let persistAsked = false;
+function save(immediate) {
+    clearTimeout(saveTimer);
+    const run = () => {
+        // 清掉完全空白的日期，避免資料膨脹
+        for (const [k, d] of Object.entries(data.days)) {
+            if (!d.todos.length && !d.visits.length && !d.summary && !d.tomorrow) delete data.days[k];
+        }
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
+        catch (e) { toast('儲存失敗：' + e.message); }
+        if (!persistAsked && navigator.storage && navigator.storage.persist) {
+            persistAsked = true;
+            navigator.storage.persist().catch(() => {});
+        }
+    };
+    if (immediate) run(); else saveTimer = setTimeout(run, 300);
+}
+window.addEventListener('pagehide', () => save(true));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(true); });
+
+const EMPTY_DAY = () => ({ todos: [], visits: [], summary: '', tomorrow: '' });
+function getDay(k) { return data.days[k] || EMPTY_DAY(); }
+function ensureDay(k) {
+    if (!data.days[k]) data.days[k] = EMPTY_DAY();
+    const d = data.days[k];
+    d.todos ||= []; d.visits ||= []; d.summary ??= ''; d.tomorrow ??= '';
+    return d;
+}
+function findVisit(vid) {
+    for (const [k, d] of Object.entries(data.days)) {
+        const v = (d.visits || []).find((x) => x.id === vid);
+        if (v) return { key: k, day: d, v };
+    }
+    return null;
+}
+function findOpenVisit() {
+    let found = null;
+    for (const [k, d] of Object.entries(data.days)) {
+        for (const v of d.visits || []) if (!v.leaveAt && (!found || v.arriveAt > found.v.arriveAt)) found = { key: k, day: d, v };
+    }
+    return found;
+}
+function placeUsage() {
+    const c = {};
+    for (const d of Object.values(data.days)) for (const v of d.visits || []) c[v.placeId] = (c[v.placeId] || 0) + 1;
+    return c;
+}
+function sortedPlaces() {
+    const u = placeUsage();
+    return data.places.map((p, i) => ({ p, i, n: u[p.id] || 0 })).sort((a, b) => b.n - a.n || a.i - b.i).map((x) => x.p);
+}
+function resolvePlace(name) {
+    name = String(name || '').trim();
+    if (!name) return null;
+    let p = data.places.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (!p) { p = { id: uid(), name }; data.places.push(p); }
+    return p;
+}
+
+// ─── GPS ───────────────────────────────────────────────────────────────
+function distM(a, b) {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+}
+function nearestPlace(geo) {
+    if (!geo) return null;
+    let best = null;
+    for (const p of data.places) {
+        if (typeof p.lat !== 'number') continue;
+        const d = distM(geo, p);
+        if (!best || d < best.dist) best = { place: p, dist: d };
+    }
+    return best;
+}
+function getPosition() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) return reject(new Error('此裝置不支援定位'));
+        navigator.geolocation.getCurrentPosition(
+            (p) => resolve({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc: Math.round(p.coords.accuracy) }),
+            (err) => reject(new Error(err.code === 1 ? '未授權定位' : err.code === 3 ? '定位逾時' : '定位失敗')),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+    });
+}
+function locate(force) {
+    if (!data.settings.useGps) return;
+    if (!force && (ui.geoBusy || (ui.geo && Date.now() - ui.geoAt < 120000))) return;
+    ui.geoBusy = true; ui.geoErr = '';
+    updateGeoLine();
+    getPosition().then((g) => {
+        ui.geo = g; ui.geoAt = Date.now(); ui.geoBusy = false;
+        const n = nearestPlace(g);
+        if (n && n.dist <= 300 && !ui.arrivePlace && !ui.arriveNew) ui.arrivePlace = n.place.id;
+        if (ui.tab === 'today') render(); else updateGeoLine();
+    }).catch((e) => {
+        ui.geoBusy = false; ui.geoErr = e.message; updateGeoLine();
+    });
+}
+function geoLineHtml() {
+    if (!data.settings.useGps) return '';
+    let txt;
+    if (ui.geoBusy) txt = '<span class="text-slate-500">📍 定位中…</span>';
+    else if (ui.geoErr) txt = `<span class="text-rose-600">📍 ${esc(ui.geoErr)}</span>`;
+    else if (ui.geo) {
+        const n = nearestPlace(ui.geo);
+        txt = `<span class="text-emerald-700">📍 已定位（誤差約 ${ui.geo.acc} m）</span>` +
+            (n ? `<span class="text-slate-500"> · 最近：${esc(n.place.name)}（${n.dist < 1000 ? Math.round(n.dist) + ' m' : (n.dist / 1000).toFixed(1) + ' km'}）</span>` : '');
+    } else txt = '<span class="text-slate-500">📍 尚未定位</span>';
+    return `${txt} <button class="ml-1 text-indigo-600 underline" data-act="relocate">重新定位</button>`;
+}
+function updateGeoLine() { const el = $('#geoLine'); if (el) el.innerHTML = geoLineHtml(); }
+
+// ─── UI 狀態 ───────────────────────────────────────────────────────────
+const ui = {
+    tab: 'today',
+    date: dayKey(),
+    month: dayKey().slice(0, 7),
+    reportMode: 'day',
+    arrivePlace: null,
+    arriveNew: '',
+    arriveTime: null,   // null = 跟著現在時間
+    geo: null, geoAt: 0, geoBusy: false, geoErr: '',
+};
+try {
+    const t = sessionStorage.getItem('workLog.tab');
+    if (t) ui.tab = t;
+} catch (e) {}
+
+// ─── Toast / Modal ─────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+    const t = $('#toast');
+    $('#toastText').textContent = msg;
+    t.style.opacity = '1'; t.style.transform = 'translate(-50%, 0)';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, 8px)'; }, 2200);
+}
+function openModal(html) {
+    $('#modal').innerHTML = `
+        <div class="fixed inset-0 z-40 bg-slate-900/40 flex items-end sm:items-center justify-center" data-act="modal-bg">
+            <div class="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[90dvh] overflow-y-auto p-4 safe-bottom" data-modal-panel>${html}</div>
+        </div>`;
+}
+function closeModal() { $('#modal').innerHTML = ''; }
+
+// ─── Header ────────────────────────────────────────────────────────────
+function renderHeader() {
+    const h = $('#header');
+    if (ui.tab === 'settings') {
+        h.innerHTML = `<div class="flex-1 text-center font-bold text-lg">設定</div>`;
+        return;
+    }
+    if (ui.tab === 'report' && ui.reportMode === 'month') {
+        h.innerHTML = `
+            <button class="btn btn-ghost !px-3" data-act="month-shift" data-n="-1" aria-label="上個月">‹</button>
+            <label class="flex-1 relative text-center font-bold text-lg">
+                ${ui.month.replace('-', ' 年 ')} 月
+                <input type="month" class="absolute inset-0 opacity-0 w-full" value="${ui.month}" data-change="month">
+            </label>
+            <button class="btn btn-ghost !px-3" data-act="month-shift" data-n="1" aria-label="下個月">›</button>`;
+        return;
+    }
+    const isToday = ui.date === dayKey();
+    h.innerHTML = `
+        <button class="btn btn-ghost !px-3" data-act="date-shift" data-n="-1" aria-label="前一天">‹</button>
+        <label class="flex-1 relative text-center">
+            <div class="font-bold text-lg leading-tight">${dateLabel(ui.date)}</div>
+            <div class="text-[11px] ${isToday ? 'text-indigo-600' : 'text-amber-600'} leading-tight">${isToday ? '今天' : '點此切換日期'}</div>
+            <input type="date" class="absolute inset-0 opacity-0 w-full" value="${ui.date}" data-change="date">
+        </label>
+        <button class="btn btn-ghost !px-3" data-act="date-shift" data-n="1" aria-label="後一天">›</button>
+        ${isToday ? '' : '<button class="btn btn-primary !px-3 !py-1.5 text-sm" data-act="go-today">今天</button>'}`;
+}
+
+// ─── 今日行程 ─────────────────────────────────────────────────────────
+function viewToday() {
+    const k = ui.date, d = getDay(k), isToday = k === dayKey();
+    const open = findOpenVisit();
+    let html = '';
+
+    if (open && open.key !== k) {
+        html += `
+        <div class="card !bg-amber-50 !border-amber-300 mb-4 flex items-center gap-3">
+            <div class="flex-1 text-sm text-amber-900">⚠️ 尚未離開：<b>${esc(open.v.place)}</b>（${shortDate(open.key)} ${hm(open.v.arriveAt)} 抵達）</div>
+            <button class="btn btn-primary !py-1.5 text-sm" data-act="goto-date" data-key="${open.key}">前往處理</button>
+        </div>`;
+    }
+
+    if (open && open.key === k) html += openVisitCard(open.v, k);
+    else if (isToday && !open) html += arriveCard();
+
+    html += todoSection(k, d);
+    html += timelineSection(k, d);
+    return html;
+}
+
+function arriveCard() {
+    const places = sortedPlaces();
+    const t = ui.arriveTime || nowHM();
+    return `
+    <section class="card mb-4 !border-indigo-200">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="font-bold text-lg">🚩 抵達打卡</h2>
+            <span class="text-xs text-slate-400">選擇地點後按下打卡</span>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-3">
+            ${places.map((p) => `<button class="chip ${ui.arrivePlace === p.id && !ui.arriveNew ? 'on' : ''}" data-act="pick-place" data-id="${p.id}">${esc(p.name)}</button>`).join('')}
+        </div>
+        <input class="field mb-3" placeholder="或輸入新地點（會自動加入常用地點）" value="${esc(ui.arriveNew)}" data-bind="arriveNew" list="placeList">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="label shrink-0">抵達時間</span>
+            <input type="time" class="field !w-auto" value="${t}" data-bind="arriveTime">
+            ${ui.arriveTime ? '<button class="text-xs text-indigo-600 underline" data-act="arrive-now">改回現在</button>' : ''}
+        </div>
+        <div id="geoLine" class="text-xs mb-3">${geoLineHtml()}</div>
+        <button class="btn btn-primary w-full !py-3 text-base" data-act="arrive">抵達打卡</button>
+        <div class="text-center mt-2"><button class="text-xs text-slate-500 underline" data-act="new-visit">補登一筆完整行程</button></div>
+    </section>`;
+}
+
+function quickItemChips(d, v) {
+    const used = new Set(v.items.map((i) => i.todoId).filter(Boolean));
+    const todos = d.todos.filter((t) => !t.done && !used.has(t.id));
+    return `
+        ${todos.length ? `<div class="label mb-1">本日待辦</div>
+        <div class="flex flex-wrap gap-2 mb-2">${todos.map((t) => `<button class="chip todo" data-act="add-item" data-vid="${v.id}" data-todo="${t.id}">＋ ${esc(t.text)}</button>`).join('')}</div>` : ''}
+        ${data.templates.length ? `<div class="label mb-1">常用工作內容</div>
+        <div class="flex flex-wrap gap-2 mb-2">${data.templates.map((t) => `<button class="chip tpl" data-act="add-item" data-vid="${v.id}" data-tpl="${t.id}">＋ ${esc(t.text)}</button>`).join('')}</div>` : ''}
+        <div class="flex gap-2">
+            <input class="field" placeholder="自行輸入工作內容" data-enter="add-item-text" data-vid="${v.id}" id="itemText-${v.id}">
+            <button class="btn btn-ghost shrink-0" data-act="add-item-text" data-vid="${v.id}">加入</button>
+        </div>`;
+}
+
+function openVisitCard(v, k) {
+    const d = getDay(k);
+    const isToday = k === dayKey();
+    return `
+    <section class="card mb-4 !border-emerald-300 !bg-gradient-to-b from-emerald-50 to-white">
+        <div class="flex items-center gap-2 mb-1">
+            <span class="pulse"></span><span class="text-xs font-bold text-emerald-700">進行中</span>
+            <button class="ml-auto text-xs text-slate-500 underline" data-act="edit-visit" data-vid="${v.id}">編輯</button>
+        </div>
+        <div class="text-2xl font-bold mb-1">${esc(v.place)}</div>
+        <div class="text-sm text-slate-600 mb-4">${hm(v.arriveAt)} 抵達 · 已停留 <b class="text-emerald-700" data-elapsed="${v.arriveAt}">${fmtDur(visitMin(v))}</b></div>
+
+        <h3 class="font-bold mb-2">工作內容</h3>
+        ${v.items.length ? `<ul class="mb-3 space-y-1">${v.items.map((it) => `
+            <li class="flex items-start gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                <span class="flex-1 text-sm">${esc(it.text)}${it.todoId ? ' <span class="text-[10px] text-amber-600 border border-amber-300 rounded px-1">待辦</span>' : ''}</span>
+                <button class="text-slate-400 hover:text-rose-600" data-act="del-item" data-vid="${v.id}" data-iid="${it.id}" aria-label="移除">✕</button>
+            </li>`).join('')}</ul>` : '<p class="text-sm text-slate-400 mb-3">點下方項目快速加入本次的工作內容</p>'}
+        ${quickItemChips(d, v)}
+
+        <div class="border-t border-emerald-200 mt-4 pt-4">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="label shrink-0">離開時間</span>
+                <input type="time" class="field !w-auto" value="${isToday ? nowHM() : ''}" id="leaveTime-${v.id}">
+            </div>
+            <button class="btn btn-primary w-full !py-3 text-base" data-act="leave" data-vid="${v.id}">🏁 離開・計算時長</button>
+        </div>
+    </section>`;
+}
+
+function todoSection(k, d) {
+    const done = d.todos.filter((t) => t.done).length;
+    return `
+    <section class="card mb-4">
+        <div class="flex items-center justify-between mb-2">
+            <h2 class="font-bold text-lg">📝 本日待辦</h2>
+            <span class="text-xs text-slate-500">${d.todos.length ? `完成 ${done}/${d.todos.length}` : ''}</span>
+        </div>
+        ${d.todos.length ? `<ul class="mb-3 divide-y divide-slate-100">${d.todos.map((t) => `
+            <li class="flex items-center gap-3 py-2">
+                <input type="checkbox" class="w-5 h-5 accent-indigo-600 shrink-0" ${t.done ? 'checked' : ''} data-act="toggle-todo" data-key="${k}" data-id="${t.id}">
+                <span class="flex-1 text-sm ${t.done ? 'line-through text-slate-400' : ''}">${esc(t.text)}</span>
+                <button class="text-slate-300 hover:text-rose-600" data-act="del-todo" data-key="${k}" data-id="${t.id}" aria-label="刪除">✕</button>
+            </li>`).join('')}</ul>` : '<p class="text-sm text-slate-400 mb-3">先列出今天預計要做的事，抵達客戶時就能一鍵選取。</p>'}
+        <div class="flex gap-2 items-start">
+            <textarea class="field" rows="1" placeholder="新增待辦（可一次貼上多行）" id="todoInput" data-enter="add-todo"></textarea>
+            <button class="btn btn-ghost shrink-0" data-act="add-todo" data-key="${k}">新增</button>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3">
+            <button class="chip" data-act="carry-over" data-key="${k}">↪ 帶入前一工作日未完成＋明日計畫</button>
+            <button class="chip" data-act="toggle-tpl-todo">⭐ 從常用工作內容加入</button>
+        </div>
+        <div class="${ui.showTplTodo ? '' : 'hidden'} flex flex-wrap gap-2 mt-3" id="tplTodo">
+            ${data.templates.map((t) => `<button class="chip tpl" data-act="add-todo-tpl" data-key="${k}" data-tpl="${t.id}">＋ ${esc(t.text)}</button>`).join('')}
+        </div>
+    </section>`;
+}
+
+function timelineSection(k, d) {
+    const vs = sortVisits(d.visits);
+    const total = vs.reduce((s, v) => s + visitMin(v), 0);
+    let html = `
+    <section class="mb-4">
+        <div class="flex items-center gap-2 mb-2 px-1">
+            <h2 class="font-bold text-lg">🗓️ 行程</h2>
+            <span class="text-xs text-slate-500">${vs.length ? `駐點合計 ${fmtDur(total)} · ${vs.length} 段` : ''}</span>
+            <button class="ml-auto chip" data-act="new-visit">＋ 補登</button>
+        </div>`;
+    if (!vs.length) {
+        html += `<div class="card text-sm text-slate-400 text-center">尚無行程。${k === dayKey() ? '抵達客戶時按上方「抵達打卡」。' : '可按「補登」新增。'}</div>`;
+    }
+    vs.forEach((v, i) => {
+        if (i > 0 && vs[i - 1].leaveAt && v.arriveAt > vs[i - 1].leaveAt) {
+            const gap = Math.round((v.arriveAt - vs[i - 1].leaveAt) / 60000);
+            html += `<div class="text-center text-xs text-slate-400 py-1">┆ 移動／空檔 ${fmtDur(gap)} ┆</div>`;
+        }
+        html += `
+        <button class="card w-full text-left mb-1 block hover:border-indigo-300" data-act="edit-visit" data-vid="${v.id}">
+            <div class="flex items-center gap-2">
+                <span class="font-mono text-sm text-slate-600">${hm(v.arriveAt)} – ${v.leaveAt ? hm(v.leaveAt) : '<span class="text-emerald-600">進行中</span>'}</span>
+                <span class="ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${v.leaveAt ? 'bg-indigo-50 text-indigo-700' : 'bg-emerald-50 text-emerald-700'}" ${v.leaveAt ? '' : `data-elapsed="${v.arriveAt}"`}>${fmtDur(visitMin(v))}</span>
+            </div>
+            <div class="font-bold text-base mt-1">${esc(v.place)}${v.geo ? ' <span class="text-xs font-normal text-slate-400">📍</span>' : ''}</div>
+            ${v.items.length ? `<ul class="mt-1 text-sm text-slate-600 space-y-0.5">${v.items.map((it) => `
+                <li>・${esc(it.text)}${it.result ? `<div class="text-emerald-700 text-xs pl-3">→ ${esc(it.result)}</div>` : ''}</li>`).join('')}</ul>` : ''}
+            ${v.note ? `<div class="text-xs text-slate-500 mt-1">備註：${esc(v.note)}</div>` : ''}
+        </button>`;
+    });
+    html += `</section>`;
+    return html;
+}
+
+// ─── 行程編輯 Modal ───────────────────────────────────────────────────
+function openVisitEditor(vid) {
+    const found = vid ? findVisit(vid) : null;
+    const k = found ? found.key : ui.date;
+    const v = found ? found.v : { id: '', place: '', arriveAt: toMs(k, '09:00'), leaveAt: toMs(k, '12:00'), items: [], note: '' };
+    const itemRow = (it) => `
+        <div class="flex gap-2 mb-2" data-item-row data-iid="${it.id || ''}" data-todo="${it.todoId || ''}">
+            <input class="field" value="${esc(it.text)}" placeholder="工作內容" data-item-text>
+            <button class="btn btn-ghost !px-3 shrink-0" data-act="modal-del-row" aria-label="移除">✕</button>
+        </div>`;
+    openModal(`
+        <div class="flex items-center mb-4">
+            <h2 class="font-bold text-lg flex-1">${found ? '編輯行程' : '補登行程'}</h2>
+            <span class="text-sm text-slate-500">${dateLabel(k)}</span>
+        </div>
+        <div class="space-y-3" id="visitForm" data-vid="${v.id}" data-key="${k}">
+            <div>
+                <div class="label mb-1">地點</div>
+                <input class="field" id="vfPlace" value="${esc(v.place)}" list="placeList" placeholder="選擇或輸入地點">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><div class="label mb-1">抵達</div><input type="time" class="field" id="vfArrive" value="${hm(v.arriveAt)}"></div>
+                <div><div class="label mb-1">離開 ${found && !v.leaveAt ? '<span class="text-emerald-600">（進行中，可留空）</span>' : ''}</div><input type="time" class="field" id="vfLeave" value="${v.leaveAt ? hm(v.leaveAt) : ''}"></div>
+            </div>
+            <div>
+                <div class="label mb-1">工作內容</div>
+                <div id="vfItems">${v.items.map(itemRow).join('')}</div>
+                <div class="flex flex-wrap gap-2 mt-1">
+                    <button class="chip" data-act="modal-add-row">＋ 新增一列</button>
+                    ${data.templates.map((t) => `<button class="chip tpl" data-act="modal-add-row" data-text="${esc(t.text)}">＋ ${esc(t.text)}</button>`).join('')}
+                </div>
+            </div>
+            <div>
+                <div class="label mb-1">備註</div>
+                <textarea class="field" rows="2" id="vfNote" placeholder="交通、聯絡人、待追蹤事項…">${esc(v.note || '')}</textarea>
+            </div>
+            ${v.geo ? `<div class="text-xs text-slate-500">📍 打卡座標：<a class="text-indigo-600 underline" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${v.geo.lat},${v.geo.lng}">${v.geo.lat}, ${v.geo.lng}</a>（誤差 ${v.geo.acc} m）</div>` : ''}
+        </div>
+        <div class="flex gap-2 mt-5">
+            ${found ? `<button class="btn btn-danger" data-act="modal-del-visit" data-vid="${v.id}">刪除</button>` : ''}
+            <button class="btn btn-ghost ml-auto" data-act="modal-close">取消</button>
+            <button class="btn btn-primary" data-act="modal-save-visit">儲存</button>
+        </div>`);
+    window.__itemRow = itemRow;
+}
+
+function saveVisitFromModal() {
+    const form = $('#visitForm');
+    const k = form.dataset.key, vid = form.dataset.vid;
+    const placeName = $('#vfPlace').value.trim();
+    const a = $('#vfArrive').value, l = $('#vfLeave').value;
+    if (!placeName) return toast('請輸入地點');
+    if (!a) return toast('請輸入抵達時間');
+    const arriveAt = toMs(k, a);
+    let leaveAt = l ? toMs(k, l) : null;
+    if (leaveAt != null && leaveAt < arriveAt) leaveAt += 86400000; // 跨午夜
+    const found = vid ? findVisit(vid) : null;
+    const old = found ? found.v : null;
+    if (!l && !old) return toast('補登請填寫離開時間');
+    if (!l && old && old.leaveAt) return toast('請填寫離開時間');
+    if (leaveAt == null) {
+        const open = findOpenVisit();
+        if (open && open.v.id !== vid) return toast('已有其他進行中的行程');
+    }
+    const oldItems = old ? Object.fromEntries(old.items.map((i) => [i.id, i])) : {};
+    const items = $$('[data-item-row]').map((row) => {
+        const text = $('[data-item-text]', row).value.trim();
+        if (!text) return null;
+        const prev = oldItems[row.dataset.iid];
+        return { id: prev ? prev.id : uid(), text, todoId: row.dataset.todo || null, result: prev ? prev.result || '' : '' };
+    }).filter(Boolean);
+    const p = resolvePlace(placeName);
+    const d = ensureDay(k);
+    const v = old || { id: uid(), geo: null };
+    Object.assign(v, { placeId: p.id, place: p.name, arriveAt, leaveAt, items, note: $('#vfNote').value.trim() });
+    if (!old) d.visits.push(v);
+    d.visits = sortVisits(d.visits);
+    save(); closeModal(); render();
+    toast(old ? '已更新行程' : '已補登行程');
+}
+
+// ─── 每日覆盤 ─────────────────────────────────────────────────────────
+function daySpan(vs) {
+    if (!vs.length) return null;
+    const first = vs[0].arriveAt;
+    const closed = vs.filter((v) => v.leaveAt);
+    const last = closed.length ? Math.max(...closed.map((v) => v.leaveAt)) : null;
+    return { first, last, open: vs.some((v) => !v.leaveAt) };
+}
+function viewReview() {
+    const k = ui.date, d = getDay(k);
+    const vs = sortVisits(d.visits);
+    const total = vs.reduce((s, v) => s + visitMin(v), 0);
+    const span = daySpan(vs);
+    const done = d.todos.filter((t) => t.done).length;
+    let html = `
+    <section class="grid grid-cols-3 gap-2 mb-4 text-center">
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">工作時段</div><div class="font-bold text-[13px] mt-1 whitespace-nowrap">${span ? `${hm(span.first)}–${span.open ? '進行中' : hm(span.last)}` : '—'}</div></div>
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">駐點合計</div><div class="font-bold text-sm mt-1">${vs.length ? fmtDur(total) : '—'}</div></div>
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">待辦完成</div><div class="font-bold text-sm mt-1">${d.todos.length ? `${done}/${d.todos.length}` : '—'}</div></div>
+    </section>
+    <h2 class="font-bold text-lg px-1 mb-2">🧾 各行程工作成果</h2>`;
+    if (!vs.length) html += `<div class="card text-sm text-slate-400 text-center mb-4">這一天還沒有行程紀錄。</div>`;
+    vs.forEach((v) => {
+        html += `
+        <section class="card mb-3">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="font-bold">${esc(v.place)}</div>
+                <span class="text-xs text-slate-500 font-mono">${hm(v.arriveAt)}–${v.leaveAt ? hm(v.leaveAt) : '進行中'}</span>
+                <span class="ml-auto text-xs font-bold text-indigo-700">${fmtDur(visitMin(v))}</span>
+            </div>
+            ${v.items.map((it) => `
+                <div class="mb-3">
+                    <div class="text-sm font-semibold mb-1">・${esc(it.text)}</div>
+                    <textarea class="field text-sm" rows="2" placeholder="工作成果（例：完成 32 條測案、回報 3 個缺陷…）" data-bind="result" data-vid="${v.id}" data-iid="${it.id}">${esc(it.result || '')}</textarea>
+                </div>`).join('')}
+            <div class="flex gap-2">
+                <input class="field text-sm" placeholder="補上一項工作內容" id="itemText-${v.id}" data-enter="add-item-text" data-vid="${v.id}">
+                <button class="btn btn-ghost shrink-0" data-act="add-item-text" data-vid="${v.id}">加入</button>
+            </div>
+        </section>`;
+    });
+    if (d.todos.length) {
+        html += `
+        <section class="card mb-4">
+            <h2 class="font-bold mb-2">📝 待辦完成情況</h2>
+            <ul class="divide-y divide-slate-100">${d.todos.map((t) => `
+                <li class="flex items-center gap-3 py-2">
+                    <input type="checkbox" class="w-5 h-5 accent-indigo-600" ${t.done ? 'checked' : ''} data-act="toggle-todo" data-key="${k}" data-id="${t.id}">
+                    <span class="text-sm ${t.done ? 'line-through text-slate-400' : ''}">${esc(t.text)}</span>
+                </li>`).join('')}</ul>
+        </section>`;
+    }
+    html += `
+    <section class="card mb-4 space-y-3">
+        <div>
+            <div class="font-bold mb-1">💡 今日總結</div>
+            <textarea class="field" rows="3" placeholder="今天的重點成果、問題、需要主管協助的事項…" data-bind="summary">${esc(d.summary)}</textarea>
+        </div>
+        <div>
+            <div class="font-bold mb-1">➡️ 明日計畫</div>
+            <textarea class="field" rows="3" placeholder="每行一項；明天可在「本日待辦」一鍵帶入" data-bind="tomorrow">${esc(d.tomorrow)}</textarea>
+        </div>
+    </section>
+    <button class="btn btn-primary w-full !py-3 text-base" data-act="go-day-report">產生本日報告 →</button>`;
+    return html;
+}
+
+// ─── 報告 ──────────────────────────────────────────────────────────────
+function buildDayReport(k) {
+    const d = getDay(k);
+    const vs = sortVisits(d.visits);
+    const name = data.settings.name.trim();
+    const L = [];
+    L.push(`【工作日報】${dateLabel(k)}${name ? ' ' + name : ''}`);
+    L.push('');
+    if (vs.length) {
+        const total = vs.reduce((s, v) => s + visitMin(v), 0);
+        const span = daySpan(vs);
+        const places = [...new Set(vs.map((v) => v.place))];
+        L.push(`■ 工作時段：${hm(span.first)} – ${span.open ? '進行中' : hm(span.last)}`);
+        L.push(`■ 駐點合計：${fmtDur(total)}（${vs.length} 段行程；${places.join('、')}）`);
+        L.push('');
+        L.push('■ 行程與工作內容');
+        vs.forEach((v, i) => {
+            L.push(`${i + 1}. ${hm(v.arriveAt)}–${v.leaveAt ? hm(v.leaveAt) : '進行中'}（${fmtDur(visitMin(v))}）｜${v.place}`);
+            if (!v.items.length) L.push('   ・（未填寫工作內容）');
+            v.items.forEach((it) => {
+                L.push(`   ・${it.text}`);
+                const rs = String(it.result || '').trim();
+                if (rs) rs.split(/\r?\n/).forEach((line, j) => L.push(`${j ? '       ' : '     → 成果：'}${line}`));
+            });
+            if (v.note) L.push(`   備註：${v.note}`);
+        });
+    } else {
+        L.push('■ 本日無行程紀錄');
+    }
+    if (d.todos.length) {
+        const done = d.todos.filter((t) => t.done).length;
+        L.push('');
+        L.push(`■ 待辦完成情況（${done}/${d.todos.length}）`);
+        d.todos.forEach((t) => L.push(`   ${t.done ? '✔' : '☐'} ${t.text}${t.done ? '' : '（未完成）'}`));
+    }
+    if (d.summary.trim()) {
+        L.push('');
+        L.push('■ 今日總結');
+        d.summary.trim().split(/\r?\n/).forEach((x) => L.push(`   ${x}`));
+    }
+    const tm = splitLines(d.tomorrow);
+    if (tm.length) {
+        L.push('');
+        L.push('■ 明日計畫');
+        tm.forEach((x) => L.push(`   ・${x}`));
+    }
+    return L.join('\n');
+}
+function mailSubject(k) {
+    return (data.settings.subjectTpl || '【工作日報】{date} {name}')
+        .replace(/\{date\}/g, dateLabel(k))
+        .replace(/\{name\}/g, data.settings.name.trim())
+        .replace(/\s+$/, '');
+}
+
+function monthStats(ym) {
+    const keys = Object.keys(data.days).filter((k) => k.startsWith(ym + '-')).sort();
+    const days = [], byPlace = {};
+    let total = 0, visits = 0, todoDone = 0, todoAll = 0;
+    for (const k of keys) {
+        const d = data.days[k];
+        const vs = sortVisits(d.visits || []);
+        todoAll += d.todos.length; todoDone += d.todos.filter((t) => t.done).length;
+        if (!vs.length) continue;
+        const mins = vs.reduce((s, v) => s + visitMin(v), 0);
+        const span = daySpan(vs);
+        total += mins; visits += vs.length;
+        for (const v of vs) {
+            const p = byPlace[v.place] ||= { place: v.place, mins: 0, visits: 0, days: new Set() };
+            p.mins += visitMin(v); p.visits += 1; p.days.add(k);
+        }
+        days.push({ key: k, vs, mins, span, places: [...new Set(vs.map((v) => v.place))], todos: d.todos });
+    }
+    const places = Object.values(byPlace).sort((a, b) => b.mins - a.mins);
+    return { ym, days, places, total, visits, todoDone, todoAll };
+}
+
+function viewReport() {
+    const seg = `
+    <div class="flex bg-slate-200/70 rounded-xl p-1 mb-4">
+        <button class="flex-1 py-2 rounded-lg text-sm font-bold ${ui.reportMode === 'day' ? 'bg-white shadow text-indigo-700' : 'text-slate-600'}" data-act="report-mode" data-mode="day">單日報告</button>
+        <button class="flex-1 py-2 rounded-lg text-sm font-bold ${ui.reportMode === 'month' ? 'bg-white shadow text-indigo-700' : 'text-slate-600'}" data-act="report-mode" data-mode="month">每月統計</button>
+    </div>`;
+    return seg + (ui.reportMode === 'day' ? viewDayReport() : viewMonthReport());
+}
+
+function viewDayReport() {
+    const k = ui.date;
+    const text = buildDayReport(k);
+    const s = data.settings;
+    return `
+    <section class="card mb-3">
+        <div class="label mb-1">主旨</div>
+        <div class="text-sm font-semibold mb-3">${esc(mailSubject(k))}</div>
+        <div class="label mb-1">內容預覽</div>
+        <div class="report-pre bg-slate-50 border border-slate-200 rounded-lg p-3 max-h-[55dvh] overflow-y-auto">${esc(text)}</div>
+    </section>
+    <div class="text-xs text-slate-500 mb-3 px-1">
+        收件人：${s.mailTo ? esc(s.mailTo) : '<span class="text-amber-600">尚未設定</span>'}${s.mailCc ? `；副本：${esc(s.mailCc)}` : ''}
+        · <button class="text-indigo-600 underline" data-act="tab" data-tab="settings">修改</button>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+        <button class="btn btn-primary !py-3" data-act="mail-report">✉️ 寄信給主管</button>
+        <button class="btn btn-ghost !py-3" data-act="copy-report">📋 複製全文</button>
+        ${navigator.share ? '<button class="btn btn-ghost !py-3 col-span-2" data-act="share-report">📤 分享（LINE／Teams…）</button>' : ''}
+    </div>
+    <p class="text-xs text-slate-400 mt-3 px-1">若郵件 App 沒帶入完整內文（內容過長），請改用「複製全文」後貼上。</p>`;
+}
+
+function viewMonthReport() {
+    const st = monthStats(ui.month);
+    const maxP = Math.max(1, ...st.places.map((p) => p.mins));
+    const workDays = st.days.length;
+    return `
+    <section class="grid grid-cols-2 gap-2 mb-4">
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">出勤天數</div><div class="text-2xl font-bold">${workDays}<span class="text-sm font-normal"> 天</span></div></div>
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">駐點總時數</div><div class="text-2xl font-bold">${hours2(st.total)}<span class="text-sm font-normal"> 小時</span></div></div>
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">行程段數</div><div class="text-2xl font-bold">${st.visits}<span class="text-sm font-normal"> 段</span></div></div>
+        <div class="card !p-3"><div class="text-[11px] text-slate-500">平均每日駐點</div><div class="text-2xl font-bold">${workDays ? hours2(st.total / workDays) : '0.00'}<span class="text-sm font-normal"> 小時</span></div></div>
+    </section>
+    <section class="card mb-4">
+        <h2 class="font-bold mb-3">依地點統計</h2>
+        ${st.places.length ? st.places.map((p) => `
+            <div class="mb-3">
+                <div class="flex text-sm mb-1"><span class="font-semibold">${esc(p.place)}</span>
+                <span class="ml-auto text-slate-500">${p.days.size} 天 · ${p.visits} 段 · <b class="text-slate-800">${hours2(p.mins)} h</b>（${st.total ? Math.round(p.mins / st.total * 100) : 0}%）</span></div>
+                <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-indigo-500 rounded-full" style="width:${(p.mins / maxP * 100).toFixed(1)}%"></div></div>
+            </div>`).join('') : '<p class="text-sm text-slate-400">本月尚無資料</p>'}
+    </section>
+    <section class="card mb-4">
+        <h2 class="font-bold mb-2">每日明細</h2>
+        ${st.days.length ? `<div class="overflow-x-auto hide-scroll"><table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-slate-500 border-b"><th class="py-1.5 pr-2">日期</th><th class="pr-2">時段</th><th class="pr-2 text-right">駐點</th><th>地點</th></tr></thead>
+            <tbody>${st.days.map((d) => `
+                <tr class="border-b border-slate-100 align-top cursor-pointer hover:bg-indigo-50" data-act="goto-date" data-key="${d.key}">
+                    <td class="py-1.5 pr-2 whitespace-nowrap">${shortDate(d.key)}</td>
+                    <td class="pr-2 whitespace-nowrap font-mono text-xs pt-2">${hm(d.span.first)}–${d.span.open ? '…' : hm(d.span.last)}</td>
+                    <td class="pr-2 text-right whitespace-nowrap">${hours2(d.mins)}</td>
+                    <td class="text-xs pt-2">${esc(d.places.join('、'))}</td>
+                </tr>`).join('')}</tbody></table></div>` : '<p class="text-sm text-slate-400">本月尚無資料</p>'}
+    </section>
+    <div class="grid grid-cols-2 gap-2">
+        <button class="btn btn-primary !py-3" data-act="csv-summary">📊 匯出統計表 CSV</button>
+        <button class="btn btn-ghost !py-3" data-act="csv-detail">📄 匯出行程明細 CSV</button>
+    </div>
+    <p class="text-xs text-slate-400 mt-3 px-1">CSV 以 UTF-8（含 BOM）輸出，可直接用 Excel 開啟不會亂碼。</p>`;
+}
+
+const csvCell = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const toCsv = (rows) => '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+
+function csvSummary(ym) {
+    const st = monthStats(ym);
+    const rows = [];
+    rows.push([`${ym.replace('-', ' 年 ')} 月 工作行程統計表`]);
+    rows.push(['填表人', data.settings.name]);
+    rows.push(['出勤天數', st.days.length]);
+    rows.push(['駐點總時數(小時)', hours2(st.total)]);
+    rows.push(['行程段數', st.visits]);
+    rows.push(['平均每日駐點(小時)', st.days.length ? hours2(st.total / st.days.length) : '0.00']);
+    rows.push(['待辦完成', st.todoAll ? `${st.todoDone}/${st.todoAll}` : '']);
+    rows.push([]);
+    rows.push(['【依地點統計】']);
+    rows.push(['地點', '天數', '段數', '時數(小時)', '分鐘', '占比']);
+    st.places.forEach((p) => rows.push([p.place, p.days.size, p.visits, hours2(p.mins), p.mins, st.total ? (p.mins / st.total * 100).toFixed(1) + '%' : '']));
+    rows.push([]);
+    rows.push(['【每日統計】']);
+    rows.push(['日期', '星期', '首次抵達', '最後離開', '在外跨度(小時)', '駐點時數(小時)', '行程段數', '地點', '待辦完成']);
+    st.days.forEach((d) => rows.push([
+        d.key, WD[parseKey(d.key).getDay()], hm(d.span.first), d.span.open ? '' : hm(d.span.last),
+        d.span.last ? hours2(Math.round((d.span.last - d.span.first) / 60000)) : '',
+        hours2(d.mins), d.vs.length, d.places.join('、'),
+        d.todos.length ? `${d.todos.filter((t) => t.done).length}/${d.todos.length}` : '',
+    ]));
+    rows.push(['合計', '', '', '', '', hours2(st.total), st.visits, '', '']);
+    return toCsv(rows);
+}
+function csvDetail(ym) {
+    const st = monthStats(ym);
+    const rows = [['日期', '星期', '序', '地點', '抵達', '離開', '停留(分)', '停留(小時)', '工作內容', '工作成果', '備註', '緯度', '經度']];
+    st.days.forEach((d) => d.vs.forEach((v, i) => rows.push([
+        d.key, WD[parseKey(d.key).getDay()], i + 1, v.place, hm(v.arriveAt), v.leaveAt ? hm(v.leaveAt) : '',
+        visitMin(v), hours2(visitMin(v)),
+        v.items.map((it) => `・${it.text}`).join('\n'),
+        v.items.filter((it) => (it.result || '').trim()).map((it) => `・${it.text}：${it.result.trim()}`).join('\n'),
+        v.note || '', v.geo ? v.geo.lat : '', v.geo ? v.geo.lng : '',
+    ])));
+    return toCsv(rows);
+}
+
+async function exportFile(name, text, type) {
+    const blob = new Blob([text], { type });
+    const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+    if (coarse && navigator.canShare) {
+        try {
+            const file = new File([blob], name, { type });
+            if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+        } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    toast('已下載 ' + name);
+}
+async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); toast('已複製'); }
+    catch (e) {
+        const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); toast('已複製'); } catch (e2) { toast('複製失敗，請手動選取'); }
+        ta.remove();
+    }
+}
+
+// ─── 設定 ──────────────────────────────────────────────────────────────
+function viewSettings() {
+    const s = data.settings;
+    const dayCount = Object.keys(data.days).length;
+    return `
+    <section class="card mb-4 space-y-3">
+        <h2 class="font-bold text-lg">✉️ 報告與寄信</h2>
+        <div><div class="label mb-1">我的姓名（報告署名）</div><input class="field" value="${esc(s.name)}" data-bind="set-name" placeholder="例如：王小明"></div>
+        <div><div class="label mb-1">主管 Email（收件人，多位以逗號分隔）</div><input class="field" type="email" multiple value="${esc(s.mailTo)}" data-bind="set-mailTo" placeholder="boss@example.com"></div>
+        <div><div class="label mb-1">副本 CC（選填）</div><input class="field" type="email" multiple value="${esc(s.mailCc)}" data-bind="set-mailCc"></div>
+        <div><div class="label mb-1">主旨格式（可用 {date}、{name}）</div><input class="field" value="${esc(s.subjectTpl)}" data-bind="set-subjectTpl"></div>
+    </section>
+
+    <section class="card mb-4">
+        <h2 class="font-bold text-lg mb-2">📍 定位</h2>
+        <label class="flex items-center gap-3">
+            <input type="checkbox" class="w-5 h-5 accent-indigo-600" ${s.useGps ? 'checked' : ''} data-act="toggle-gps">
+            <span class="text-sm">抵達打卡時記錄 GPS 座標，並自動選取 300 公尺內的常用地點</span>
+        </label>
+        <p class="text-xs text-slate-400 mt-2">座標只存在本機。常用地點第一次打卡時會自動記住座標，之後到同一地點就會自動帶入。</p>
+    </section>
+
+    <section class="card mb-4">
+        <h2 class="font-bold text-lg mb-2">🏢 常用地點</h2>
+        <div class="space-y-2 mb-3">${data.places.map((p, i) => `
+            <div class="flex items-center gap-1.5">
+                <input class="field" value="${esc(p.name)}" data-bind="place-name" data-id="${p.id}">
+                <button class="btn btn-ghost !px-2 shrink-0 text-xs ${typeof p.lat === 'number' ? '!text-emerald-700' : ''}" data-act="place-geo" data-id="${p.id}" title="${typeof p.lat === 'number' ? '已記座標，點擊重新記錄目前位置' : '記錄目前位置為此地點座標'}">${typeof p.lat === 'number' ? '📍已記' : '📍記錄'}</button>
+                <button class="btn btn-ghost !px-2 shrink-0" data-act="move" data-list="places" data-i="${i}" ${i === 0 ? 'disabled style="opacity:.3"' : ''} aria-label="上移">↑</button>
+                <button class="btn btn-ghost !px-2 shrink-0 hover:!text-rose-600" data-act="del-entry" data-list="places" data-id="${p.id}" aria-label="刪除">✕</button>
+            </div>`).join('')}</div>
+        <div class="flex gap-2"><input class="field" id="newPlace" placeholder="新增地點（客戶名稱）" data-enter="add-place"><button class="btn btn-ghost shrink-0" data-act="add-place">新增</button></div>
+    </section>
+
+    <section class="card mb-4">
+        <h2 class="font-bold text-lg mb-2">⭐ 常用工作內容</h2>
+        <div class="space-y-2 mb-3">${data.templates.map((t, i) => `
+            <div class="flex items-center gap-1.5">
+                <input class="field" value="${esc(t.text)}" data-bind="tpl-text" data-id="${t.id}">
+                <button class="btn btn-ghost !px-2 shrink-0" data-act="move" data-list="templates" data-i="${i}" ${i === 0 ? 'disabled style="opacity:.3"' : ''} aria-label="上移">↑</button>
+                <button class="btn btn-ghost !px-2 shrink-0 hover:!text-rose-600" data-act="del-entry" data-list="templates" data-id="${t.id}" aria-label="刪除">✕</button>
+            </div>`).join('')}</div>
+        <div class="flex gap-2"><input class="field" id="newTpl" placeholder="新增常用工作內容" data-enter="add-tpl"><button class="btn btn-ghost shrink-0" data-act="add-tpl">新增</button></div>
+    </section>
+
+    <section class="card mb-4">
+        <h2 class="font-bold text-lg mb-1">💾 資料備份</h2>
+        <p class="text-xs text-slate-500 mb-3">所有紀錄只存在這台裝置的瀏覽器中（目前 ${dayCount} 天）。建議定期匯出 JSON 備份；換手機時匯入即可還原。</p>
+        <div class="grid grid-cols-1 gap-2">
+            <button class="btn btn-primary" data-act="export-json">⬇️ 匯出備份（JSON）</button>
+            <div class="grid grid-cols-2 gap-2">
+                <button class="btn btn-ghost" data-act="import-json" data-mode="merge">匯入並合併</button>
+                <button class="btn btn-ghost" data-act="import-json" data-mode="replace">匯入並取代</button>
+            </div>
+            <button class="btn btn-danger mt-2" data-act="clear-all">清除全部資料</button>
+        </div>
+    </section>
+    <p class="text-center text-xs text-slate-400">工作行程記錄 v${APP_VERSION}</p>`;
+}
+
+// ─── 主渲染 ────────────────────────────────────────────────────────────
+function render() {
+    renderHeader();
+    const views = { today: viewToday, review: viewReview, report: viewReport, settings: viewSettings };
+    $('#view').innerHTML = (views[ui.tab] || viewToday)() +
+        `<datalist id="placeList">${data.places.map((p) => `<option value="${esc(p.name)}"></option>`).join('')}</datalist>`;
+    $$('#nav .navbtn').forEach((b) => b.classList.toggle('on', b.dataset.tab === ui.tab));
+    try { sessionStorage.setItem('workLog.tab', ui.tab); } catch (e) {}
+}
+function tickElapsed() {
+    $$('[data-elapsed]').forEach((el) => { el.textContent = fmtDur(Math.max(0, Math.round((Date.now() - Number(el.dataset.elapsed)) / 60000))); });
+}
+setInterval(tickElapsed, 20000);
+
+// ─── 動作 ──────────────────────────────────────────────────────────────
+function addItem(vid, item) {
+    const f = findVisit(vid); if (!f) return;
+    f.v.items.push({ id: uid(), text: item.text, todoId: item.todoId || null, result: '' });
+    save(); render();
+}
+function addTodos(k, texts) {
+    const d = ensureDay(k);
+    const have = new Set(d.todos.map((t) => t.text));
+    let n = 0;
+    for (const t of texts) { if (t && !have.has(t)) { d.todos.push({ id: uid(), text: t, done: false }); have.add(t); n++; } }
+    save(); render();
+    return n;
+}
+
+const actions = {
+    'tab': (el) => { ui.tab = el.dataset.tab; if (ui.tab === 'today') locate(); render(); window.scrollTo(0, 0); },
+    'date-shift': (el) => { ui.date = addDays(ui.date, Number(el.dataset.n)); render(); },
+    'go-today': () => { ui.date = dayKey(); render(); if (ui.tab === 'today') locate(); },
+    'goto-date': (el) => { ui.date = el.dataset.key; ui.tab = 'today'; render(); window.scrollTo(0, 0); },
+    'month-shift': (el) => {
+        const [y, m] = ui.month.split('-').map(Number);
+        const d = new Date(y, m - 1 + Number(el.dataset.n), 1);
+        ui.month = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; render();
+    },
+    'report-mode': (el) => { ui.reportMode = el.dataset.mode; if (ui.reportMode === 'month') ui.month = ui.date.slice(0, 7); render(); },
+    'go-day-report': () => { ui.tab = 'report'; ui.reportMode = 'day'; render(); window.scrollTo(0, 0); },
+
+    'pick-place': (el) => { ui.arrivePlace = el.dataset.id; ui.arriveNew = ''; render(); },
+    'arrive-now': () => { ui.arriveTime = null; render(); },
+    'relocate': () => locate(true),
+    'arrive': () => {
+        const k = dayKey();
+        const open = findOpenVisit();
+        if (open) return toast('請先處理尚未離開的行程');
+        let p = null;
+        if (ui.arriveNew.trim()) p = resolvePlace(ui.arriveNew);
+        else if (ui.arrivePlace) p = data.places.find((x) => x.id === ui.arrivePlace);
+        if (!p) return toast('請選擇或輸入地點');
+        const t = ui.arriveTime || nowHM();
+        const geo = (data.settings.useGps && ui.geo && Date.now() - ui.geoAt < 10 * 60000) ? { ...ui.geo } : null;
+        if (geo && typeof p.lat !== 'number' && geo.acc <= 200) {
+            p.lat = geo.lat; p.lng = geo.lng;
+            setTimeout(() => toast(`已記住「${p.name}」的座標`), 2300);
+        }
+        const d = ensureDay(k);
+        d.visits.push({ id: uid(), placeId: p.id, place: p.name, arriveAt: toMs(k, t), leaveAt: null, geo, items: [], note: '' });
+        d.visits = sortVisits(d.visits);
+        ui.arrivePlace = null; ui.arriveNew = ''; ui.arriveTime = null; ui.date = k;
+        save(); render(); window.scrollTo(0, 0);
+        toast(`${t} 抵達 ${p.name}`);
+    },
+    'leave': (el) => {
+        const f = findVisit(el.dataset.vid); if (!f) return;
+        const t = $(`#leaveTime-${f.v.id}`).value;
+        if (!t) return toast('請輸入離開時間');
+        let leaveAt = toMs(f.key, t);
+        if (leaveAt < f.v.arriveAt) leaveAt += 86400000;
+        if (leaveAt - f.v.arriveAt > 24 * 3600000) return toast('停留時間超過 24 小時，請確認時間');
+        f.v.leaveAt = leaveAt;
+        save(); render();
+        toast(`離開 ${f.v.place}，停留 ${fmtDur(visitMin(f.v))}`);
+        if (ui.tab === 'today' && f.key === dayKey()) locate(true);
+    },
+    'add-item': (el) => {
+        const f = findVisit(el.dataset.vid); if (!f) return;
+        if (el.dataset.todo) {
+            const t = f.day.todos.find((x) => x.id === el.dataset.todo);
+            if (t) addItem(f.v.id, { text: t.text, todoId: t.id });
+        } else if (el.dataset.tpl) {
+            const t = data.templates.find((x) => x.id === el.dataset.tpl);
+            if (t) addItem(f.v.id, { text: t.text });
+        }
+    },
+    'add-item-text': (el) => {
+        const inp = $(`#itemText-${el.dataset.vid}`);
+        const text = inp && inp.value.trim();
+        if (!text) return toast('請輸入工作內容');
+        addItem(el.dataset.vid, { text });
+        const again = $(`#itemText-${el.dataset.vid}`); if (again) again.focus();
+    },
+    'del-item': (el) => {
+        const f = findVisit(el.dataset.vid); if (!f) return;
+        f.v.items = f.v.items.filter((i) => i.id !== el.dataset.iid);
+        save(); render();
+    },
+
+    'add-todo': () => {
+        const inp = $('#todoInput');
+        const texts = splitLines(inp.value);
+        if (!texts.length) return toast('請輸入待辦內容');
+        addTodos(ui.date, texts);
+        const again = $('#todoInput'); if (again) again.focus();
+    },
+    'add-todo-tpl': (el) => {
+        const t = data.templates.find((x) => x.id === el.dataset.tpl);
+        if (t) { const n = addTodos(ui.date, [t.text]); if (!n) toast('已在待辦中'); }
+    },
+    'toggle-tpl-todo': () => { ui.showTplTodo = !ui.showTplTodo; const el = $('#tplTodo'); if (el) el.classList.toggle('hidden', !ui.showTplTodo); },
+    'toggle-todo': (el) => {
+        const d = ensureDay(el.dataset.key);
+        const t = d.todos.find((x) => x.id === el.dataset.id);
+        if (t) { t.done = !t.done; save(); render(); }
+    },
+    'del-todo': (el) => {
+        const d = ensureDay(el.dataset.key);
+        d.todos = d.todos.filter((x) => x.id !== el.dataset.id);
+        save(); render();
+    },
+    'carry-over': (el) => {
+        const k = el.dataset.key;
+        let prev = null;
+        for (let i = 1; i <= 31; i++) {
+            const pk = addDays(k, -i), pd = data.days[pk];
+            if (pd && (pd.todos.length || pd.visits.length || pd.tomorrow)) { prev = { pk, pd }; break; }
+        }
+        if (!prev) return toast('找不到前一個有紀錄的工作日');
+        const texts = [...prev.pd.todos.filter((t) => !t.done).map((t) => t.text), ...splitLines(prev.pd.tomorrow)];
+        if (!texts.length) return toast(`${shortDate(prev.pk)} 沒有未完成待辦或明日計畫`);
+        const n = addTodos(k, texts);
+        toast(n ? `已從 ${shortDate(prev.pk)} 帶入 ${n} 項` : '這些項目都已在待辦中');
+    },
+
+    'new-visit': () => openVisitEditor(null),
+    'edit-visit': (el) => openVisitEditor(el.dataset.vid),
+    'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
+    'modal-close': () => closeModal(),
+    'modal-add-row': (el) => {
+        const wrap = $('#vfItems');
+        wrap.insertAdjacentHTML('beforeend', window.__itemRow({ id: '', text: el.dataset.text || '' }));
+        if (!el.dataset.text) $('[data-item-row]:last-child [data-item-text]', wrap).focus();
+    },
+    'modal-del-row': (el) => el.closest('[data-item-row]').remove(),
+    'modal-save-visit': () => saveVisitFromModal(),
+    'modal-del-visit': (el) => {
+        const f = findVisit(el.dataset.vid); if (!f) return;
+        if (!confirm(`確定刪除「${f.v.place} ${hm(f.v.arriveAt)}」這筆行程？`)) return;
+        f.day.visits = f.day.visits.filter((v) => v.id !== f.v.id);
+        save(); closeModal(); render(); toast('已刪除');
+    },
+
+    'copy-report': () => copyText(buildDayReport(ui.date)),
+    'share-report': async () => {
+        try { await navigator.share({ title: mailSubject(ui.date), text: buildDayReport(ui.date) }); }
+        catch (e) { if (e.name !== 'AbortError') copyText(buildDayReport(ui.date)); }
+    },
+    'mail-report': () => {
+        const s = data.settings;
+        const body = buildDayReport(ui.date).replace(/\n/g, '\r\n');
+        const q = [];
+        if (s.mailCc.trim()) q.push('cc=' + encodeURIComponent(s.mailCc.trim()));
+        q.push('subject=' + encodeURIComponent(mailSubject(ui.date)));
+        q.push('body=' + encodeURIComponent(body));
+        const to = s.mailTo.split(/[,;，\s]+/).filter(Boolean).map(encodeURIComponent).join(',');
+        location.href = `mailto:${to}?${q.join('&')}`;
+    },
+    'csv-summary': () => exportFile(`工作行程統計_${ui.month}.csv`, csvSummary(ui.month), 'text/csv;charset=utf-8'),
+    'csv-detail': () => exportFile(`工作行程明細_${ui.month}.csv`, csvDetail(ui.month), 'text/csv;charset=utf-8'),
+
+    'toggle-gps': () => { data.settings.useGps = !data.settings.useGps; save(); render(); },
+    'place-geo': async (el) => {
+        const p = data.places.find((x) => x.id === el.dataset.id); if (!p) return;
+        toast('定位中…');
+        try {
+            const g = await getPosition();
+            p.lat = g.lat; p.lng = g.lng;
+            save(); render(); toast(`已將目前位置記為「${p.name}」（誤差 ${g.acc} m）`);
+        } catch (e) { toast(e.message); }
+    },
+    'add-place': () => {
+        const v = $('#newPlace').value.trim(); if (!v) return;
+        if (data.places.some((p) => p.name === v)) return toast('已有此地點');
+        data.places.push({ id: uid(), name: v }); save(); render(); $('#newPlace').focus();
+    },
+    'add-tpl': () => {
+        const v = $('#newTpl').value.trim(); if (!v) return;
+        if (data.templates.some((t) => t.text === v)) return toast('已有此項目');
+        data.templates.push({ id: uid(), text: v }); save(); render(); $('#newTpl').focus();
+    },
+    'move': (el) => {
+        const list = data[el.dataset.list], i = Number(el.dataset.i);
+        if (i <= 0) return;
+        [list[i - 1], list[i]] = [list[i], list[i - 1]]; save(); render();
+    },
+    'del-entry': (el) => {
+        const name = el.dataset.list;
+        const item = data[name].find((x) => x.id === el.dataset.id);
+        if (!item) return;
+        if (!confirm(`刪除「${item.name || item.text}」？（既有紀錄不受影響）`)) return;
+        data[name] = data[name].filter((x) => x.id !== el.dataset.id); save(); render();
+    },
+    'export-json': () => {
+        save(true);
+        exportFile(`workLog-backup-${dayKey().replace(/-/g, '')}.json`, JSON.stringify(data, null, 2), 'application/json');
+    },
+    'import-json': (el) => { const f = $('#importFile'); f.dataset.mode = el.dataset.mode; f.value = ''; f.click(); },
+    'clear-all': () => {
+        if (!confirm('確定要清除全部紀錄與設定？此動作無法復原，建議先匯出備份。')) return;
+        if (!confirm('再次確認：真的要清除全部資料？')) return;
+        data = defaults(); save(true); render(); toast('已清除');
+    },
+};
+
+document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-act]');
+    if (!el || el.disabled) return;
+    const fn = actions[el.dataset.act];
+    if (fn) fn(el, e);
+});
+
+// 文字輸入：即時存入資料，不重新渲染（避免失去焦點）
+document.addEventListener('input', (e) => {
+    const el = e.target, b = el.dataset && el.dataset.bind;
+    if (!b) return;
+    const val = el.value;
+    if (b === 'arriveNew') {
+        ui.arriveNew = val;
+        $$('[data-act="pick-place"]').forEach((c) => c.classList.toggle('on', !val.trim() && c.dataset.id === ui.arrivePlace));
+        return;
+    }
+    if (b === 'arriveTime') { ui.arriveTime = val || null; return; }
+    if (b === 'summary' || b === 'tomorrow') { ensureDay(ui.date)[b] = val; save(); return; }
+    if (b === 'result') {
+        const f = findVisit(el.dataset.vid); if (!f) return;
+        const it = f.v.items.find((i) => i.id === el.dataset.iid); if (it) { it.result = val; save(); }
+        return;
+    }
+    if (b.startsWith('set-')) { data.settings[b.slice(4)] = val; save(); return; }
+    if (b === 'place-name') {
+        const p = data.places.find((x) => x.id === el.dataset.id);
+        if (p && val.trim()) { p.name = val.trim(); save(); }
+        return;
+    }
+    if (b === 'tpl-text') {
+        const t = data.templates.find((x) => x.id === el.dataset.id);
+        if (t && val.trim()) { t.text = val.trim(); save(); }
+    }
+});
+
+document.addEventListener('change', (e) => {
+    const c = e.target.dataset && e.target.dataset.change;
+    if (c === 'date' && e.target.value) { ui.date = e.target.value; render(); }
+    if (c === 'month' && e.target.value) { ui.month = e.target.value; render(); }
+});
+
+// Enter 送出（textarea 需不按 Shift；中文輸入法組字中不觸發）
+document.addEventListener('keydown', (e) => {
+    const el = e.target, a = el.dataset && el.dataset.enter;
+    if (!a || e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    if (el.tagName === 'TEXTAREA' && e.shiftKey) return;
+    e.preventDefault();
+    const fn = actions[a];
+    if (fn) fn(el, e);
+});
+
+// 匯入 JSON
+$('#importFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    let incoming;
+    try { incoming = normalize(JSON.parse(await file.text())); }
+    catch (err) { return toast('檔案格式錯誤'); }
+    const mode = e.target.dataset.mode;
+    if (mode === 'replace') {
+        if (!confirm(`以備份檔取代目前全部資料（備份含 ${Object.keys(incoming.days).length} 天）？`)) return;
+        data = incoming;
+    } else {
+        // 合併：同一天以「行程 id／待辦 id」去重，備份檔的設定只補空白欄位
+        for (const [k, d] of Object.entries(incoming.days)) {
+            const cur = ensureDay(k);
+            for (const t of d.todos || []) if (!cur.todos.some((x) => x.id === t.id)) cur.todos.push(t);
+            for (const v of d.visits || []) if (!cur.visits.some((x) => x.id === v.id)) cur.visits.push(v);
+            cur.visits = sortVisits(cur.visits);
+            if (!cur.summary && d.summary) cur.summary = d.summary;
+            if (!cur.tomorrow && d.tomorrow) cur.tomorrow = d.tomorrow;
+        }
+        for (const p of incoming.places) if (!data.places.some((x) => x.id === p.id || x.name === p.name)) data.places.push(p);
+        for (const t of incoming.templates) if (!data.templates.some((x) => x.id === t.id || x.text === t.text)) data.templates.push(t);
+        for (const [key, val] of Object.entries(incoming.settings)) if (!data.settings[key] && val) data.settings[key] = val;
+    }
+    save(true); render(); toast('匯入完成');
+});
+
+// 回到前景時更新畫面（跨日、計時）
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!$('#modal').innerHTML && !document.activeElement.matches('input, textarea')) render();
+    else tickElapsed();
+    if (ui.tab === 'today') locate();
+});
+
+render();
+if (ui.tab === 'today') locate();
+</script>
+
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () =>
+            navigator.serviceWorker.register('./sw.js')
+                .catch((err) => console.warn('[SW] Registration failed:', err))
+        );
+    }
+</script>
+</body>
+</html>

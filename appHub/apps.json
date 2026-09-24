@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-13T07:39:48.017Z",
-  "count": 12,
+  "generatedAt": "2026-09-24T05:26:30.169Z",
+  "count": 13,
   "apps": [
     {
       "id": "bridgeGame",
@@ -149,6 +149,20 @@
       "icon": "../shareHTML/icons/shareHTML-192.svg",
       "themeColor": "#3b82f6",
       "categories": []
+    },
+    {
+      "id": "workLog",
+      "name": "工作行程記錄",
+      "shortName": "工作行程",
+      "description": "記錄每天往返客戶的抵達／離開時間、地點、工作內容與成果；可預填待辦、套用常用工作內容，匯出單日報告寄給主管與每月工時統計 CSV",
+      "path": "../workLog/",
+      "icon": "../workLog/icons/workLog-192.png",
+      "themeColor": "#4f46e5",
+      "categories": [
+        "productivity",
+        "business",
+        "utilities"
+      ]
     }
   ]
 }

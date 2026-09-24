@@ -1,0 +1,29 @@
+{
+  "id": "workLog",
+  "name": "工作行程記錄",
+  "short_name": "工作行程",
+  "description": "記錄每天往返客戶的抵達／離開時間、地點、工作內容與成果；可預填待辦、套用常用工作內容，匯出單日報告寄給主管與每月工時統計 CSV",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "lang": "zh-TW",
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    { "src": "./icons/workLog-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/workLog-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/workLog-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/workLog-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/workLog-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日行程打卡",
+      "short_name": "打卡",
+      "url": "./",
+      "icons": [{ "src": "./icons/workLog-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}
