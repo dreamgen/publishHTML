@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const PBKDF2_ITER = 310000;
 const SUMCOLS = ['工作狀態', '平日可請假天數/年', '會開車/可載人', '出發地點(行政區)', '一年願意服務次數', '可支援項目', '116年意願備註'];
 const DEFAULT_SET = { interviewer: '', lockMin: 5, lastExportAt: 0 };
@@ -792,6 +792,7 @@ function rekeySurveys() {
 function mergeRestored(list) {
   let add = 0;
   for (const o of list) {
+    SV.migrate(o.answers);
     let id = o.id;
     if (!BYID.has(id) || BYID.get(id).sheet === 'new') { const t = findPerson(o.name, o.region); id = t ? t.id : (o.isNew ? o.id : null); }
     if (!id) id = o.id || 'N' + Math.random().toString(36).slice(2, 9);
@@ -841,7 +842,7 @@ async function importSurveyJson(files) {
     try {
       const d = JSON.parse(await file.text());
       if (d.type !== 'tiandatang-survey' || !d.answers) { bad++; continue; }
-      const S = d.answers, ts = Date.parse(d.savedAt) || file.lastModified || Date.now();
+      const S = SV.migrate(d.answers), ts = Date.parse(d.savedAt) || file.lastModified || Date.now();
       const name = String(S['A1.姓名'] || '').trim(), region = SV.region(S);
       const t = findPerson(name, region);
       const id = t ? t.id : 'N' + ts.toString(36) + Math.random().toString(36).slice(2, 5);
@@ -1073,7 +1074,7 @@ async function renderTools() {
     <div class="card"><h2>寫回名冊</h2>
       <p class="small">已填問卷 <b>${all.length}</b> 份，其中 <b>${pending}</b> 份尚未寫回。${SET.lastExportAt ? `上次匯出：${fmtFull(SET.lastExportAt)}` : ''}</p>
       <div class="btns"><button class="btn primary" data-act="export" ${all.length && R ? '' : 'disabled'}>${I.down}下載名冊 xlsx</button>${canShare ? `<button class="btn" data-act="exportShare" ${all.length && R ? '' : 'disabled'}>${I.share}分享…</button>` : ''}</div>
-      <p class="tiny muted">以原本的名冊檔為底（格式、公式、下拉選單都保留）：填入黃底欄「工作狀態…116年意願備註」，名冊外的新人加在最後一列，並新增〈問卷明細〉工作表放完整 31 題答案。檔案會存到手機的下載或「檔案」App；「分享」會交給你選的 App（例如 LINE），請只傳給負責的幹部。</p>
+      <p class="tiny muted">以原本的名冊檔為底（格式、公式、下拉選單都保留）：填入黃底欄「工作狀態…116年意願備註」，名冊外的新人加在最後一列，並新增〈問卷明細〉工作表放完整 32 題答案。檔案會存到手機的下載或「檔案」App；「分享」會交給你選的 App（例如 LINE），請只傳給負責的幹部。</p>
     </div>
 
     <div class="card"><h2>匯入線上問卷檔</h2>

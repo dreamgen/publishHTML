@@ -6,7 +6,7 @@
  * - 只處理本站檔案；名冊與問卷存在 IndexedDB（加密），不經過 SW
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_NAME = `staffSurvey-${SW_VERSION}`;
 const ASSETS = [
   './',
