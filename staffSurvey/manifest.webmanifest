@@ -1,0 +1,21 @@
+{
+  "id": "staffSurvey",
+  "name": "服務人員調查",
+  "short_name": "服務調查",
+  "description": "天達堂服務人員名冊查詢與問卷調查：匯入名冊 xlsx 後以 PIN 加密存在手機，可搜尋人員、查看出席與服務紀錄、直接填寫排班問卷，並把結果寫回名冊 xlsx；資料不上傳",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#faf6f0",
+  "theme_color": "#7a4b1e",
+  "lang": "zh-TW",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "./icons/staffSurvey-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/staffSurvey-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/staffSurvey-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/staffSurvey-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/staffSurvey-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

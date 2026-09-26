@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-24T05:26:30.169Z",
-  "count": 13,
+  "generatedAt": "2026-09-26T12:06:19.711Z",
+  "count": 14,
   "apps": [
     {
       "id": "bridgeGame",
@@ -149,6 +149,19 @@
       "icon": "../shareHTML/icons/shareHTML-192.svg",
       "themeColor": "#3b82f6",
       "categories": []
+    },
+    {
+      "id": "staffSurvey",
+      "name": "服務人員調查",
+      "shortName": "服務調查",
+      "description": "天達堂服務人員名冊查詢與問卷調查：匯入名冊 xlsx 後以 PIN 加密存在手機，可搜尋人員、查看出席與服務紀錄、直接填寫排班問卷，並把結果寫回名冊 xlsx；資料不上傳",
+      "path": "../staffSurvey/",
+      "icon": "../staffSurvey/icons/staffSurvey-192.png",
+      "themeColor": "#7a4b1e",
+      "categories": [
+        "productivity",
+        "utilities"
+      ]
     },
     {
       "id": "workLog",
