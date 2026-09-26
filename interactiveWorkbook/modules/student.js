@@ -7,6 +7,7 @@ import {
 } from './ui.js';
 import { validateAnswer } from './schema.js';
 import { saveAnswer, archivesFor } from './data.js';
+import { markActivity, markEntered } from './live.js';
 import {
   canEdit, myEditLock, editLockBanner, mountEditLock, unmountEditLock,
   touchLock, releaseLock, resetEditLock,
@@ -105,8 +106,10 @@ export function renderField(f) {
 }
 
 /**
- * 封存內容提示。目前的來源是講師合併小組時選了「兩者皆保留」的那一份；
- * 功能二（講師改題）之後會用同一個節點與同一個浮動視窗。
+ * 封存內容提示。來源有兩種，共用同一個節點與同一個浮動視窗：
+ * （1）講師合併小組時選了「兩者皆保留」的那一份；
+ * （2）講師修改題目時，原題連同各組答案被封存，封存的那一份會掛在**新題**的 qid 上，
+ *      所以學員一進到新題就看得到入口，可以把舊答案複製回來。
  * 封存只有該組自己看得到，也不進匯出檔——這一點要寫在畫面上，避免學員以為講師已經收到。
  */
 export function archiveNotice() {
@@ -216,9 +219,10 @@ export function renderStudent() {
   }
   const n = exNumber(S.qid);
   if (S.course.locks[S.qid]) {
-    // 題目沒開放時沒有東西可以填，不顯示編輯權橫幅；鎖本身不動（鎖是整組共用，不是綁在某一題）。
-    unmountEditLock();
-    shell(`${identityBar()}${tabs()}<section class="card waiting">
+    // 鎖是**整組共用、不綁題目**，所以未開放畫面也要留著編輯權橫幅：
+    // 講師關掉這一題時，持有者才還能主動交出、同組其他人才看得到狀態。
+    // 橫幅拿掉的話，課程只有一題時這段空窗會整堂課存在，同組只能等閒置 5 分鐘。
+    shell(`${editLockBanner(S.session.gid)}${identityBar()}${tabs()}<section class="card waiting">
       <div class="eyebrow">依課程進度開放</div><h1>${exLabel(n)}尚未開放</h1>
       <p>請等候講師開放，再進入本題作答。</p><p>其他已開放的練習，可從上方按鈕進入。</p>
       ${S.dirty ? '<div class="notice warn">本題未儲存的修改暫留在此頁；請勿重新整理或離開，待講師重新開放後儲存。</div>' : ''}
@@ -229,8 +233,12 @@ export function renderStudent() {
     bindArchiveNotice();
     bindLeaveRelease();
     bindTabTouch();
+    mountEditLock(S.session.code, S.session.gid, { onChange: handleEditLockChange });
     return;
   }
+  // 「已進入」標記：規劃文件的判準是「進入即視為正在作答，不論有沒有輸入」，
+  // 所以寫在這裡（真的看到作答畫面）而不是在欄位 focus 時。同一組同一題只會寫一次（live.js 自己去重）。
+  markEntered(S.session.code, S.session.gid, S.qid);
   const editable = canEdit(S.session.gid);
   shell(`${editLockBanner(S.session.gid)}${identityBar()}${tabs()}
     <div class="card">
@@ -308,6 +316,37 @@ export function bindFieldEvents() {
   document.querySelectorAll('[data-table-remove]').forEach((el) => el.addEventListener('click', () => {
     S.draft[el.dataset.tableRemove].splice(Number(el.dataset.idx), 1); markDirty(); renderStudent();
   }));
+  bindActivityMarks();
+}
+
+/**
+ * 投影的橘點：欄位 focus 時寫入一次活動標記。
+ *
+ * 傳給 markActivity 的 key 一律是**題目定義裡 field 的 key**（renderField 把它放進
+ * data-field／data-radio／data-checkbox／data-list／data-table），與 projection.js 產生
+ * 點 id（`dot-<gid>-<qid>-<f.key>`）用的是同一個值——對不上的話橘點會亮在別的欄位。
+ * 表格欄位的 data-col 是欄的 key，不是欄位 key，這裡刻意不取它。
+ *
+ * 只有握有編輯權的裝置才寫：唯讀的人只是在看，不該在投影上留下「已被點過」的訊號。
+ * 去重（同一欄位只寫一次）由 live.js 自己處理；fire-and-forget，寫失敗不提示、不擋輸入。
+ */
+function bindActivityMarks() {
+  if (!S.session || !S.session.gid) return;
+  const mark = (key) => {
+    if (!key || !canEdit(S.session.gid)) return;
+    markActivity(S.session.code, S.session.gid, S.qid, key);
+  };
+  [
+    ['[data-field]', 'field'],
+    ['[data-radio]', 'radio'],
+    ['[data-checkbox]', 'checkbox'],
+    ['[data-list]', 'list'],
+    ['[data-table]', 'table'],
+  ].forEach(([selector, prop]) => {
+    document.querySelectorAll(selector).forEach((el) => {
+      el.addEventListener('focus', () => mark(el.dataset[prop]));
+    });
+  });
 }
 
 export function markDirty() {

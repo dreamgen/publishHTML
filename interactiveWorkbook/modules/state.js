@@ -22,7 +22,7 @@ export const S = {
   busy: false,
   joinOpen: false,
   projMode: 'dots',
-  projScale: 1,
+  projScale: 1.2,   // 投影字級倍率；1.2 讓簡潔投影的 24px 基準達到 28px 門檻（見 projection.js）
   projField: null,
   projGroups: [],
   live: { activity: {}, editLocks: {} },

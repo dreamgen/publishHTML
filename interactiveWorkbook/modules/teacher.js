@@ -1,5 +1,5 @@
 import {
-  S, fieldsOf, currentEx, exNumber, firstQid,
+  S, currentEx, exNumber, firstQid,
 } from './state.js';
 import {
   E, exLabel, notify, randomId,
@@ -11,14 +11,19 @@ import {
   courseRef, update, remove,
 } from './firebase.js';
 import {
-  deleteExercise, setLock, migrateCourseIfNeeded, answerHasContent,
+  deleteExercise, setLock, migrateCourseIfNeeded, answerHasContent, courseHasAnswers,
   createGroups, renameGroup, deleteGroup, mergeGroups, setAllowStudentGroupNames,
-  clearLiveCourse, MERGE_KEEP, MERGE_DROP, MERGE_BOTH,
+  clearLiveCourse, clearLiveGroup, orphanAnswerUpdates, MERGE_KEEP, MERGE_DROP, MERGE_BOTH,
 } from './data.js';
 import {
   TEMPLATE, validateExercisesPayload, validateAnswer, normalizeGroupName, MAX_GROUPS,
 } from './schema.js';
 import { forgetCourse } from './storage.js';
+import { clearActivityForQuestion, clearEnteredForQuestion } from './live.js';
+import { projectionSection, bindProjection, disposeProjection } from './projection.js';
+import {
+  beginEditQuestion, beginNewQuestion, confirmLockQuestion, archivedSection, bindArchivedSection,
+} from './editor.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 9. 講師控制台
@@ -48,25 +53,6 @@ export function answerRows(fields, a) {
     } else v = a[f.key] || '';
     return [f.label, v];
   });
-}
-
-export function compare() {
-  const list = Object.entries(S.course.groups).filter(([k]) => S.groupFilter === 'all' || k === S.groupFilter);
-  if (!list.length) return '<div class="notice">目前還沒有組別答案。學員加入並儲存後，答案會即時出現在這裡。</div>';
-  const fields = fieldsOf(S.qid);
-  const labels = answerRows(fields, {});
-  return `<div class="table-scroll"><table class="data-table comparison"><thead><tr><th scope="col">作答欄位</th>${
-    list.map(([, g]) => `<th scope="col">${E(g.name)}<div class="muted">${
-      g.complete[S.qid] ? '✓ 已完成' : (g.updated[S.qid] ? '草稿' : '尚未作答')
-    }</div></th>`).join('')
-  }</tr></thead><tbody>${
-    labels.map(([label], i) => `<tr><th scope="row">${E(label)}</th>${
-      list.map(([, g]) => {
-        const v = answerRows(fields, g.answers[S.qid] || {})[i][1];
-        return `<td class="answer ${v ? '' : 'empty'}">${v ? E(v) : '— 尚未填寫'}</td>`;
-      }).join('')
-    }</tr>`).join('')
-  }</tbody></table></div>`;
 }
 
 /** 判斷一個答案值是否真的有填（空字串、空清單、整列空白的表格都不算） */
@@ -370,9 +356,13 @@ export function openMergeDialog(keepGid, dropGid) {
 }
 
 export function renderTeacher() {
+  // 重畫會換掉整棵 DOM：先解除上一輪投影區的 live 訂閱與鍵盤監聽，否則殭屍訂閱會對已移除的節點動手。
+  disposeProjection();
   ensureMigrated(S.session.code);
   const hasEx = S.course.exercises.length > 0;
   const groupCount = Object.keys(S.course.groups).length;
+  // 匯入降級為開課前的準備動作：一旦有任何答案就停用（理由寫在按鈕下方的說明裡）。
+  const importLocked = courseHasAnswers(S.course);
   // S.qid 指不到任何已開放題目時（剛進控制台、或這一題剛被刪掉）自動回到第一題。
   if (exNumber(S.qid) < 0) S.qid = firstQid();
   const current = currentEx();
@@ -384,16 +374,20 @@ export function renderTeacher() {
       <p class="muted" style="margin-top:10px">學員在首頁輸入這組代碼即可加入；也可以按「學員加入 QR Code」投影出來讓學員掃描。</p>
       <div class="toolbar">
         <button id="join-qr" class="primary">學員加入 QR Code</button>
+        <button id="new-exercise">新增一題</button>
         <button id="dl-template">下載題目範本 JSON</button>
-        <button id="import-questions">匯入題目 JSON</button>
+        <button id="import-questions" ${importLocked ? 'disabled' : ''}>匯入題目 JSON</button>
         <input id="import-questions-file" type="file" accept=".json,application/json" hidden>
         <button class="danger" id="delete-course">刪除整個課程</button>
       </div>
-      <p class="muted">匯入題目會取代目前全部練習內容；已存在的組別答案中，欄位不符者將會清空。${
+      <p class="muted">${importLocked
+    ? '「匯入題目 JSON」已停用：這場課程已經有組別存過答案。匯入是整份取代，在封存／還原的語意下無法判斷「新的第 2 題」是舊第 2 題的修改版還是全新題目，硬對應只會製造無聲的資料損失。要重新匯入請先按下方的「重置本場課程」（會清掉全部組別與答案），或改用「新增一題」與各題的「編輯」逐題調整。'
+    : '匯入題目會取代目前全部練習內容；已存在的組別答案中，欄位不符者將會清空。課程開始有答案之後匯入就會停用，屆時請改用「新增一題」與各題的「編輯」。'}${
     hasEx ? `目前共 ${S.course.exercises.length} 個練習：${S.course.exercises.map((e2) => E(e2.title)).join('、')}` : ''
   }</p>
     </section>
     ${groupManageSection()}
+    ${archivedSection()}
     ${!hasEx || !current ? noQuestionsNotice() : `
     ${tabs()}
     <div class="toolbar projection-tools">
@@ -407,12 +401,13 @@ export function renderTeacher() {
     </div>
     <section class="manage card" style="margin-top:24px">
       <h2>課程進度｜練習開關</h2>
-      <p>未開放的練習，學員無法進入或查看。可依進度逐題開放，關閉不會刪除答案。「刪除」則會連同各組在該題的答案一起移除。</p>
+      <p>未開放的練習，學員無法進入或查看。可依進度逐題開放，關閉不會刪除答案。「刪除」則會連同各組在該題的答案一起移除，無法復原。
+        「編輯」必須先關閉該題（用流程約束取代技術鎖，避免講師編到一半學員剛好存檔）；已經有組別作答的題目，編輯時會先封存原題再複製出一題新的。</p>
       <div class="exercise-gates">${S.course.exercises.map((t, i) => `<div class="gate-row"><div><b>${exLabel(i)}｜${E(t.title)}</b><div class="muted">${
     S.course.locks[t.qid] ? '未開放' : '已開放，學員可進入'
   }${answeredCount(t.qid) ? ` · ${answeredCount(t.qid)} 組已作答` : ''}</div></div><div class="toolbar"><button type="button" role="switch" aria-checked="${!S.course.locks[t.qid]}" data-gate="${E(t.qid)}" class="${
     S.course.locks[t.qid] ? '' : 'primary'
-  }">${S.course.locks[t.qid] ? '開放' : '關閉'}${exLabel(i)}</button><button type="button" class="danger" data-del-ex="${E(t.qid)}" aria-label="刪除${exLabel(i)}">刪除</button></div></div>`).join('')}</div>
+  }">${S.course.locks[t.qid] ? '開放' : '關閉'}${exLabel(i)}</button><button type="button" data-edit-ex="${E(t.qid)}" aria-label="編輯${exLabel(i)}">編輯</button><button type="button" class="danger" data-del-ex="${E(t.qid)}" aria-label="刪除${exLabel(i)}">刪除</button></div></div>`).join('')}</div>
       <div class="toolbar">
         <button id="export-json">匯出全部答案 JSON</button>
         <button id="export-csv">匯出全部答案 CSV</button>
@@ -425,8 +420,8 @@ export function renderTeacher() {
       </div>
     </section>
     <h1>${exLabel(n)}｜${E(current.title)}</h1>
-    <p class="status-line" id="connection">答案即時同步 · 全部組別可左右捲動比較</p>
-    <div id="comparison">${compare()}</div>`}`);
+    <p class="status-line" id="connection">答案即時同步 · 作答進行中看狀態點，要分享時再切到單題／單組／比較／全覽</p>
+    ${projectionSection()}`}`);
 
   document.querySelector('#dl-template').onclick = downloadTemplate;
   document.querySelector('#import-questions').onclick = () => document.querySelector('#import-questions-file').click();
@@ -444,17 +439,25 @@ export function renderTeacher() {
       notify('課程已刪除。');
     } catch (e) { notify(e.message); }
   };
-  // 小組管理在「還沒有題目」的課程也要能用：綁定放在提前 return 之前。
+  // 小組管理、新增題目與封存區塊在「還沒有題目」的課程也要能用：綁定放在提前 return 之前。
   bindGroupManage();
+  document.querySelector('#new-exercise').onclick = () => beginNewQuestion(S.session.code);
+  bindArchivedSection(S.session.code);
   if (!hasEx || !current) return;
 
   bindTabs();
   document.querySelectorAll('[data-gate]').forEach((button) => {
     button.onclick = async () => {
       const qid = button.dataset.gate;
+      const locking = !S.course.locks[qid];
+      // 關閉（不是開放）而且已經有小組進入這一題時先問一次，並一併說明「接下來要修改」的後續影響。
+      if (locking && !confirmLockQuestion(qid)) return;
       button.disabled = true;
-      try { await setLock(S.session.code, qid, !S.course.locks[qid]); } catch (e) { notify(e.message); button.disabled = false; }
+      try { await setLock(S.session.code, qid, locking); } catch (e) { notify(e.message); button.disabled = false; }
     };
+  });
+  document.querySelectorAll('[data-edit-ex]').forEach((button) => {
+    button.onclick = () => beginEditQuestion(S.session.code, button.dataset.editEx);
   });
   document.querySelectorAll('[data-del-ex]').forEach((button) => {
     button.onclick = async () => {
@@ -467,6 +470,9 @@ export function renderTeacher() {
       button.disabled = true;
       try {
         await deleteExercise(S.session.code, S.course, qid);
+        // 題目沒了，掛在它身上的 live 輔助標記（橘點、已進入）留著只會是永遠不會被讀到的垃圾。
+        await clearActivityForQuestion(S.session.code, qid);
+        await clearEnteredForQuestion(S.session.code, qid);
         if (S.qid === qid) S.qid = firstQid();
         notify(`已刪除「${target.title}」。`);
       } catch (e) {
@@ -484,7 +490,7 @@ export function renderTeacher() {
   document.querySelector('#import-file').onchange = importAnswersFile;
 
   document.querySelector('#clear').onclick = async () => {
-    if (!confirm(`確定清除${S.groupFilter === 'all' ? '所有組別' : '所選組別'}的${exLabel(exNumber(S.qid))}答案？其他練習會保留。`)) return;
+    if (!confirm(`確定清除${S.groupFilter === 'all' ? '所有組別' : '所選組別'}的${exLabel(exNumber(S.qid))}答案？其他練習會保留。此操作無法復原。`)) return;
     try {
       const qid = S.qid;
       const targets = Object.keys(S.course.groups).filter((k) => S.groupFilter === 'all' || k === S.groupFilter);
@@ -496,6 +502,10 @@ export function renderTeacher() {
         updates[`groups/${gid}/revision/${qid}`] = (S.course.groups[gid].revision[qid] || 0) + 1;
       });
       await update(courseRef(S.session.code), updates);
+      // 答案清掉了，活動標記也要跟著清：否則橘點會留在一個已經沒有答案的欄位上，變成假訊號。
+      await clearActivityForQuestion(S.session.code, qid);
+      // 「已進入」標記同理：不清的話，接下來關閉這一題時還會彈出「已經有 N 組進入這一題」的假警訊。
+      await clearEnteredForQuestion(S.session.code, qid);
       notify('本題答案已清除。');
     } catch (e) { notify(e.message); }
   };
@@ -512,6 +522,8 @@ export function renderTeacher() {
     } catch (e) { notify(e.message); }
   };
 
+  // 投影區的綁定放在最後：它會重新登記 live 訂閱，必須在這一輪 DOM 都建好之後。
+  bindProjection();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -547,6 +559,10 @@ export async function importQuestionsFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   try {
+    // 畫面上按鈕已經停用，這裡再擋一次：檔案選擇窗開著的時候，別的裝置可能剛好存進第一筆答案。
+    if (courseHasAnswers(S.course)) {
+      throw Error('這場課程已經有組別存過答案，匯入題目已停用（匯入是整份取代，無法分辨修改版與全新題目）。要重新匯入請先執行「重置本場課程」，或改用「新增一題」與各題的「編輯」。');
+    }
     const payload = await readJSONFile(file, 2000000, '無法讀取 JSON，請使用範本格式編輯。');
     const validated = validateExercisesPayload(payload);
     const carried = validated.map((_, i) => {
@@ -576,6 +592,10 @@ export async function importQuestionsFile(event) {
       updates[`locks/${ex.qid}`] = S.course.locks[ex.qid] === undefined ? true : !!S.course.locks[ex.qid];
     });
     Object.keys(S.course.locks).forEach((qid) => { if (!keep.has(qid)) updates[`locks/${qid}`] = null; });
+    // 匯入是整份取代，消失的 qid 底下各組的 answers/complete/updated/revision 也要清掉。
+    // 「有答案就停用匯入」只擋得住有內容的答案，一批全空白的答案節點照樣放行，不清就成孤兒。
+    // 遷移完成後才讀：此時伺服器上的 key 都已經是 qid，舊的數字 key 不會被誤判成孤兒。
+    Object.assign(updates, await orphanAnswerUpdates(S.session.code, keep));
     await update(courseRef(S.session.code), updates);
     S.qid = exercises[0].qid;
     notify(`已匯入 ${exercises.length} 個練習。`);
@@ -647,16 +667,31 @@ export async function importAnswersFile(event) {
     if (names.size !== prepared.length) throw Error('匯入檔有重複的組別名稱（比對時會忽略空白與全形半形差異），請先確認備份。');
     const existingNames = new Set(Object.values(S.course.groups).map((g) => g.nameKey));
     const replaced = prepared.filter((g) => existingNames.has(g.nameKey)).length;
+    // 被取代的組別是整組刪掉再重建，而備份檔本來就不含 archives，
+    // 所以那些封存內容一定會消失。硬留只會產生對不上題目的孤兒，因此改成在確認訊息裡講清楚。
+    const losingArchives = Object.values(S.course.groups)
+      .filter((g) => names.has(g.nameKey) && Object.keys(g.archives || {}).length).length;
+    const archiveWarning = losingArchives
+      ? `\n注意：被取代的組別中有 ${losingArchives} 組帶有封存內容（來自合併小組或講師修改題目），這些封存內容會一併永久消失；備份檔裡沒有它們，匯入後無法復原。\n`
+      : '';
     const preview = prepared.slice(0, 12).map((g) => g.name).join('\n') + (prepared.length > 12 ? `\n…其餘 ${prepared.length - 12} 組` : '');
     const mapping = matchByQid
       ? ''
       : '這份備份沒有可對應的題目 ID（舊版備份或來自其他課程），將依題號順序對應到目前的第一題、第二題……請先確認題目順序相同。\n\n';
-    if (!confirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。確定匯入？`)) return;
+    if (!confirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。\n${archiveWarning}確定匯入？`)) return;
 
     const updates = {};
-    Object.entries(S.course.groups).forEach(([gid, g]) => { if (names.has(g.nameKey)) updates[`groups/${gid}`] = null; });
+    const removedGids = [];
+    Object.entries(S.course.groups).forEach(([gid, g]) => {
+      if (!names.has(g.nameKey)) return;
+      updates[`groups/${gid}`] = null;
+      removedGids.push(gid);
+    });
     prepared.forEach((g) => { updates[`groups/${randomId(8)}`] = g; });
     await update(courseRef(S.session.code), updates);
+    // 被取代的組別已經不存在了，它們在 live/<CODE> 的活動標記、已進入與編輯鎖要一併清掉（同 deleteGroup）。
+    // 清不掉只是留下不會被讀到的垃圾，不該因此把已經完成的匯入報成失敗。
+    await Promise.all(removedGids.map((gid) => clearLiveGroup(S.session.code, gid).catch(() => {})));
     S.groupFilter = 'all';
     notify(`已匯入 ${prepared.length} 組答案。`);
   } catch (e) {
@@ -666,6 +701,11 @@ export async function importAnswersFile(event) {
   }
 }
 
+/**
+ * 匯出。list 只取 S.course.exercises（status === 'active'），因此**封存題的答案不會出現在匯出檔**，
+ * 各組的 archives（封存紀錄）也完全沒被讀到。這是講師的課堂管理責任，不是權限管制——
+ * 把封存題還原之後，它就是一般題目，答案自然會回到匯出檔裡。
+ */
 export function exportData(format) {
   try {
     const list = S.course.exercises;
@@ -701,7 +741,7 @@ export function exportData(format) {
         list.forEach((exDef, i) => {
           answerRows(exDef.fields || [], g.answers[exDef.qid] || {}).forEach(([k, v]) => {
             rows.push([
-              g.name, g.author, `練習${i + 1} ${exDef.title || ''}`,
+              g.name, g.author, `${exLabel(i)} ${exDef.title || ''}`,
               g.complete[exDef.qid] ? '已完成' : '草稿',
               g.updated[exDef.qid] ? new Date(g.updated[exDef.qid]).toLocaleString('zh-TW') : '',
               k, v || '',

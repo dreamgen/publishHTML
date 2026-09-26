@@ -2,6 +2,7 @@ import { S, myGroup } from './state.js';
 import { E, exLabel, notify } from './util.js';
 import { clearSession } from './storage.js';
 import { leaveSession } from './session.js';
+import { stopWatchLive } from './live.js';
 import { renderStudentEntry } from './entry.js';
 import { rerender } from './render.js';
 import { applyDefaults } from './student.js';
@@ -66,6 +67,8 @@ export function bindIdentityBar() {
     if (S.dirty && !confirm('尚有未儲存的答案，確定離開並重新填寫組別／姓名？')) return;
     const { code } = S.session;
     if (S.unwatch) { S.unwatch(); S.unwatch = null; }
+    // 跟 leaveSession 一樣：live/<CODE> 是另一條訂閱，不解就會留著僵尸監聽與上一個身分的緩存。
+    stopWatchLive();
     S.session = null; S.course = null; S.draft = {}; S.dirty = false; S.qid = null; S.lastStudentSignature = '';
     clearSession();
     renderStudentEntry({ code });

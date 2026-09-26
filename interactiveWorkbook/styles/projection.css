@@ -1,1 +1,177 @@
-/* 功能三：投影。由後續功能實作填入，勿寫入 base.css。 */
+/* ──────────────────────────────────────────────────────────────────────────────
+   功能三：投影呈現（狀態點 ＋ 單題／單組／比較／全覽）
+   顏色、圓角、邊框都沿用 base.css 的同一套色盤，看起來要像同一個產品。
+   ────────────────────────────────────────────────────────────────────────────── */
+
+/* ── 工具列 ──────────────────────────────────────────────────────────────── */
+.proj-root { margin-top: 18px }
+
+.proj-bar {
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid #dde6ec
+}
+
+.proj-bar-label {
+  color: #176184;
+  font-weight: 700;
+  font-size: .85rem;
+  letter-spacing: .06em
+}
+
+.proj-mode-row, .proj-chip-row { display: flex; gap: 8px; flex-wrap: wrap }
+.proj-mode-row button, .proj-chip-row button { min-height: 46px; padding: 8px 18px }
+
+.proj-scale { display: flex; align-items: center; gap: 6px }
+.proj-scale button { min-height: 46px; min-width: 52px; padding: 8px 14px }
+
+.proj-scale output {
+  min-width: 4.2em;
+  text-align: center;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: #2b4a5e
+}
+
+.proj-check { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: #2b4a5e }
+.proj-check input { width: 24px; height: 24px; min-height: 24px; flex: 0 0 24px; margin: 0 }
+.proj-hint { margin: 10px 0 14px }
+
+/* 投影時最需要常駐在畫面上的是這五顆模式鍵，不是「展示題目／組別」下拉——
+   因此在投影模式下把 base.css 的 .projection-tools 改回一般流，改由模式列置頂。 */
+.projection .projection-tools { position: static }
+
+.projection .proj-mode-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: white;
+  border-top: 0;
+  border-bottom: 1px solid #dde6ec
+}
+
+/* ── 投影區的字級（App 內字級，不是瀏覽器縮放） ──────────────────────────── */
+/* 用 em 而不是 rem：這樣「簡潔投影」把 body 調大時，倍率是疊在那個基準上的。 */
+.proj-area { font-size: calc(1em * var(--proj-scale, 1)) }
+.proj-area .answer { white-space: pre-wrap; overflow-wrap: anywhere }
+.proj-area .notice { font-size: .85em }
+
+.proj-table { margin: .6em 0 }
+.proj-table th, .proj-table td { padding: .5em .6em; vertical-align: top }
+.proj-table th[scope="row"] { min-width: 7em; background: #e9f1f6 }
+.proj-table td { min-width: 8em; max-width: 22em }
+.proj-group-name { display: block; font-weight: 700 }
+.proj-group-state { display: block; font-size: .7em; font-weight: 500; color: #526b7b }
+.proj-expand { font-size: .8em; margin-left: .3em }
+
+/* 每格的寬度上限依模式收緊：組數越多，單格能佔的畫面越少。 */
+.proj-one-group td { min-width: 0; max-width: none }
+.proj-compare td { min-width: 7em; max-width: 16em }
+.proj-overview td { min-width: 5em; max-width: 11em }
+
+/* ── 狀態點 ──────────────────────────────────────────────────────────────── */
+.proj-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 .6em;
+  font-size: .78em;
+  color: #40586a
+}
+
+.proj-legend .proj-dot { margin-left: 12px }
+.proj-legend .proj-dot:first-child { margin-left: 0 }
+.proj-legend-note { color: #526b7b }
+
+.proj-dots td { min-width: 5em; max-width: none }
+.proj-dot-cell { text-align: center; cursor: pointer }
+.proj-dot-cell:hover, .proj-dot-cell:focus-visible { background: #eef5fa }
+.proj-dot-cell[aria-expanded="true"] { background: #eef5fa }
+
+.proj-dot {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: #c2cdd6;
+  transition: background-color .15s linear
+}
+
+.proj-dot.is-filled { background: #1d7a45 }
+.proj-dot.is-touched { background: #d97a10 }
+.proj-dot.is-idle { background: #c2cdd6 }
+
+.proj-dot-detail {
+  margin-top: .5em;
+  padding-top: .5em;
+  border-top: 1px dashed #c7d6df;
+  text-align: left;
+  font-size: .78em;
+  line-height: 1.5
+}
+
+.proj-dot-detail .answer { display: block }
+
+/* ── 單題模式：每組一張卡 ────────────────────────────────────────────────── */
+.proj-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16em, 1fr));
+  gap: .7em;
+  margin: .6em 0
+}
+
+.proj-card {
+  border: 1px solid #cad8e1;
+  border-radius: 10px;
+  background: white;
+  padding: .6em .75em
+}
+
+.proj-card h3 {
+  margin: 0 0 .4em;
+  font-size: 1em;
+  display: flex;
+  align-items: baseline;
+  gap: .6em;
+  flex-wrap: wrap
+}
+
+.proj-card .proj-group-state { display: inline; font-size: .72em }
+
+/* ── 單題模式：複選題打勾矩陣 ────────────────────────────────────────────── */
+.proj-matrix td { min-width: 3.5em; max-width: none }
+.proj-matrix .proj-tick { text-align: center; color: #b3c2cd; font-size: 1.25em; line-height: 1.2 }
+.proj-matrix .proj-tick.on { color: #1d7a45; font-weight: 700 }
+.proj-matrix .proj-tick-count { text-align: right; white-space: nowrap; font-size: .78em; color: #40586a }
+
+/* ── 單題模式：清單題合併成全班清單 ──────────────────────────────────────── */
+.proj-merged { margin: .6em 0; padding-left: 1.7em }
+.proj-merged li { margin: .35em 0; overflow-wrap: anywhere }
+.proj-merged-text { margin-right: .3em }
+
+.proj-source {
+  display: inline-block;
+  background: #e5eef4;
+  border-radius: 5px;
+  padding: 0 .45em;
+  margin-left: .35em;
+  font-size: .72em;
+  color: #2b4a5e;
+  vertical-align: middle;
+  white-space: nowrap
+}
+
+/* ── 窄畫面：講師偶爾用筆電或平板操作 ────────────────────────────────────── */
+@media (max-width: 720px) {
+  .proj-bar { align-items: flex-start }
+  .proj-mode-row button, .proj-chip-row button { flex: 1 0 auto }
+  .proj-cards { grid-template-columns: 1fr }
+}
+
+/* 列印：投影用的控制項不印出來（base.css 已隱藏 .toolbar，這裡補上倍率歸一） */
+@media print {
+  .proj-area { font-size: 1em }
+  .proj-table td, .proj-overview td, .proj-compare td { min-width: 0; max-width: none }
+}

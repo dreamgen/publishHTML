@@ -7,7 +7,7 @@
  * - Scope: /interactiveWorkbook/
  */
 
-const SW_VERSION = 'v5';
+const SW_VERSION = 'v6';
 const CACHE_NAME = `interactiveWorkbook-${SW_VERSION}`;
 const SHARED_CACHE = `interactiveWorkbook-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];

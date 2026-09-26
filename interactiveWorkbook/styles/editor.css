@@ -1,1 +1,62 @@
-/* 功能二：題目編輯器。由後續功能實作填入，勿寫入 base.css。 */
+/* 功能二：題目編輯器與封存／還原。
+   外觀沿用 base.css 與 group.css 的既有語彙（.float-window／.card／.row-card／.gate-row），
+   這裡只補「編輯器比一般浮動視窗寬、欄位要排成幾欄」這類版面差異，不重新定義按鈕與輸入框。 */
+
+.editor-window {
+  width: min(1100px, 96vw);
+  max-height: 94dvh
+}
+
+.editor-body { background: #f7fafc }
+
+.editor-section {
+  background: white;
+  border: 1px solid #d7e0e7;
+  border-radius: 11px;
+  padding: 20px 22px;
+  margin-bottom: 20px
+}
+
+.editor-section > h3 { margin: 0 0 6px }
+.editor-section > p { margin-top: 6px }
+.editor-section .form-field:first-of-type label { margin-top: 6px }
+.editor-body > .notice:first-child { margin-top: 0 }
+
+/* 欄位卡片：與學員端的 .row-card 同一種盒子，只是標題列要能換行 */
+.editor-field { background: #fbfdfe }
+.editor-field-top { align-items: flex-start; justify-content: space-between }
+.editor-field-top h3 { margin: 0; overflow-wrap: anywhere }
+
+/* 兩欄／三欄排版；窄畫面一律塌成一欄（.row-grid 預設是 2fr 1fr 1fr，這裡要等寬） */
+.editor-grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+.editor-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+
+/* 選項、表格欄位、參考資料列：一列一組輸入框加一顆移除鈕 */
+.editor-inline {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0
+}
+
+.editor-inline input, .editor-inline select { flex: 1 1 120px; min-width: 0 }
+.editor-inline button { flex-shrink: 0 }
+.editor-col-row select { flex: 0 1 150px }
+.editor-ref-row { flex-wrap: wrap }
+.editor-foot { flex: 1 1 200px; min-width: 0 }
+
+/* 已封存的題目 */
+.archived-card { border-color: #cbd8e1; background: #fbfcfd }
+.archived-list { display: grid; gap: 12px; margin-top: 18px }
+.archived-row { background: #e9eef2 }
+.archived-row b { overflow-wrap: anywhere }
+
+@media (max-width: 720px) {
+  .editor-window { width: 100vw; max-width: none; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; margin: 0 }
+  .editor-section { padding: 16px }
+  .editor-grid2, .editor-grid3 { grid-template-columns: 1fr }
+  .editor-inline { flex-wrap: wrap }
+  .editor-inline input, .editor-inline select { flex: 1 1 100% }
+  .editor-inline button { width: 100% }
+  .archived-row { flex-direction: column; align-items: stretch }
+}

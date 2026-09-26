@@ -4,7 +4,7 @@ import {
 import {
   randomCode, randomId, derivePassword, PBKDF2_ITERATIONS,
 } from './util.js';
-import { normalizeGroupName, MAX_GROUPS } from './schema.js';
+import { normalizeGroupName, MAX_GROUPS, MAX_EXERCISES } from './schema.js';
 import { rememberCourse } from './storage.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -99,6 +99,9 @@ function normalizeArchives(raw) {
       label: String(rec.label || ''),
       savedAt: Number(rec.savedAt) || 0,
       qid: String(rec.qid || ''),
+      // sourceQid：這份封存是從哪一題複製過來的（功能二「修改題目」才有）。
+      // 取消修改要靠它精準刪回去，不能靠 label 之類的字串猜。
+      sourceQid: String(rec.sourceQid || ''),
       json: typeof rec.json === 'string' ? rec.json : JSON.stringify(rec.json ?? {}),
     };
   });
@@ -319,7 +322,7 @@ export async function verifyTeacher(code, password) {
  */
 export async function clearLiveGroup(code, gid) {
   await authReady;
-  await update(liveRef(code), { [`activity/${gid}`]: null, [`editLocks/${gid}`]: null });
+  await update(liveRef(code), { [`activity/${gid}`]: null, [`editLocks/${gid}`]: null, [`entered/${gid}`]: null });
 }
 
 /** 整個課程的 live 資料（刪除課程、重置課程時用） */
@@ -620,17 +623,75 @@ export async function setLock(code, qid, locked) {
 export async function deleteExercise(code, courseData, qid) {
   const target = courseData.byQid[qid];
   if (!target) throw Error('找不到這個練習，可能已被其他裝置刪除。');
+  await authReady;
   await migrateCourseIfNeeded(code);
-  const remaining = courseData.all.filter((exDef) => exDef.qid !== qid);
-  const updates = { exercisesJson: JSON.stringify(remaining.map(stripRuntimeFields)) };
-  updates[`locks/${qid}`] = null;
-  Object.keys(courseData.groups).forEach((gid) => {
-    updates[`groups/${gid}/answers/${qid}`] = null;
-    updates[`groups/${gid}/complete/${qid}`] = null;
-    updates[`groups/${gid}/updated/${qid}`] = null;
-    updates[`groups/${gid}/revision/${qid}`] = null;
+  // 跟其他題目寫入路徑一樣走 transaction：用**伺服器當下**的 exercisesJson 重新算要保留的題目，
+  // 不拿本機快照整份覆寫——否則別台裝置剛新增的題目會被這次刪除順手吃掉。
+  const outcome = await courseTransaction(code, (current) => {
+    const all = parseExercises(current.exercisesJson);
+    // 別人先刪掉了：結果跟呼叫端想要的一致，當成功，不報錯。
+    if (!all.some((exDef) => exDef.qid === qid)) return { alreadyGone: true };
+    const next = all.filter((exDef) => exDef.qid !== qid);
+
+    const locks = { ...(current.locks || {}) };
+    delete locks[qid];
+
+    const groups = { ...(current.groups || {}) };
+    Object.keys(groups).forEach((gid) => {
+      const g = { ...(groups[gid] || {}) };
+      ['answers', 'complete', 'updated', 'revision'].forEach((node) => {
+        if (!g[node] || g[node][qid] === undefined) return;
+        const copy = { ...g[node] };
+        delete copy[qid];
+        g[node] = copy;
+      });
+      // 掛在這一題上的封存紀錄也要刪：題目沒了，這些紀錄永遠不會再被任何畫面讀到，
+      // 留著就是孤兒資料。掛在**別題**上、只是來源是這一題的紀錄（sourceQid）不動——
+      // 那是學員在新題上還看得到、還要拿來複製的內容。
+      if (g.archives) {
+        const kept = {};
+        Object.entries(g.archives).forEach(([id, rec]) => {
+          if (rec && rec.qid === qid) return;
+          kept[id] = rec;
+        });
+        g.archives = Object.keys(kept).length ? kept : null;
+      }
+      groups[gid] = g;
+    });
+
+    const extra = { locks: Object.keys(locks).length ? locks : null };
+    if (Object.keys(groups).length) extra.groups = groups;
+    return { value: writeExercises(current, next, extra) };
   });
-  await update(courseRef(code), updates);
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.alreadyGone) return; // 伺服器上已經沒有這一題，視為完成
+  if (!outcome.committed) throw Error('刪除練習未完成，請再試一次。');
+}
+
+/**
+ * 找出各組身上「已經不屬於任何題目」的答案節點（answers / complete / updated / revision），
+ * 回傳可以直接併進 courseRef(code) 一次 update 的補丁。
+ *
+ * 匯入題目是整份取代，舊 qid 消失後這些節點沒有任何畫面讀得到，留著就是孤兒。
+ * 一定要讀伺服器的原始資料：normalizeCourse 只留現有題目的 key，孤兒在本機快照裡根本看不到。
+ * 呼叫前請先確定課程已遷移（migrateCourseIfNeeded），否則舊的數字 key 會被當成孤兒清掉。
+ */
+export async function orphanAnswerUpdates(code, keepQids) {
+  await authReady;
+  const keep = new Set(keepQids || []);
+  const snap = await get(courseRef(code, 'groups'));
+  if (!snap.exists()) return {};
+  const updates = {};
+  Object.entries(snap.val() || {}).forEach(([gid, g]) => {
+    ['answers', 'complete', 'updated', 'revision'].forEach((node) => {
+      const box = (g || {})[node];
+      if (!box || typeof box !== 'object') return;
+      Object.keys(box).forEach((qid) => {
+        if (!keep.has(qid)) updates[`groups/${gid}/${node}/${qid}`] = null;
+      });
+    });
+  });
+  return updates;
 }
 
 /**
@@ -677,4 +738,300 @@ export async function saveAnswer(code, gid, qid, answerObject, expectedRevision,
   if (conflict) throw Error('本題已在其他裝置更新或由講師清除。請先複製保留畫面上的文字，再按「重新載入本題」。');
   if (!result.committed) throw Error('儲存未完成，請再試一次。');
   return revisionOf(result.snapshot.val(), qid);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 4.4 題目編輯、封存與還原（功能二）
+//
+// 三個動作的語意（規劃文件第三節的表格）：
+//   刪除題目：直接刪，不封存，不可逆（見 deleteExercise）。
+//   修改題目：封存原題 → 以原題內容複製出一題新的 → 講師編輯新題。取消即等同沒發生。
+//   還原題目：只適用於「因修改而封存」的題目；還原後即為一般題目，可再修改，可循環。
+//
+// 為什麼這裡一律用「整個課程節點的 transaction」而不是 multi-path update：
+// 這些動作同時動到 exercisesJson、locks 與各組的 answers/archives，
+// 任何一段沒跟上就會留下孤兒資料（例如封存了原題卻沒複製出新題）。
+// 這些是講師偶爾才做一次的動作，用整份讀寫換原子性划算。
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 還原題目時加在標題後面的註記。講師要能一眼分辨「原版」與「修改版」。 */
+export const RESTORED_SUFFIX = '（修改前版本）';
+
+/** 加上還原註記；已經有註記就原樣回傳（冪等：還原兩次不會疊兩層） */
+export function restoredTitle(title) {
+  const base = String(title ?? '').trim();
+  if (base.endsWith(RESTORED_SUFFIX)) return base;
+  const room = 200 - RESTORED_SUFFIX.length; // schema.js 的 title 上限是 200 字
+  return (base.length > room ? base.slice(0, room).trimEnd() : base) + RESTORED_SUFFIX;
+}
+
+/**
+ * 這場課程裡是否已經有任何一筆答案（含封存題的答案與封存紀錄）。
+ * 匯入題目的停用條件——理由見 teacher.js 匯入按鈕旁的說明。
+ */
+export function courseHasAnswers(courseData) {
+  return Object.values((courseData && courseData.groups) || {}).some((g) => {
+    if (Object.keys(g.archives || {}).length) return true;
+    return Object.values(g.answers || {}).some((a) => answerHasContent(a));
+  });
+}
+
+/**
+ * 整個課程節點的 transaction 包裝，與 groupsTransaction 同一套規矩：
+ * RTDB 第一次呼叫回呼可能給 null（本機尚無快取），中止後再向伺服器確認一次才回報結果。
+ * apply(current) 回傳 { value } 表示要寫入，回傳其他東西表示中止（原因由呼叫端判讀）。
+ */
+async function courseTransaction(code, apply) {
+  const once = async () => {
+    let outcome = { fromNull: true };
+    const result = await runTransaction(courseRef(code), (current) => {
+      if (current === null) { outcome = { fromNull: true }; return undefined; }
+      outcome = apply(current) || {};
+      return Object.prototype.hasOwnProperty.call(outcome, 'value') ? outcome.value : undefined;
+    });
+    return { ...outcome, committed: !!(result && result.committed) };
+  };
+  let outcome = await once();
+  if (outcome.fromNull) {
+    const snap = await get(courseRef(code));
+    if (!snap.exists()) return { missingCourse: true, committed: false };
+    outcome = await once();
+    if (outcome.fromNull) return { unreadable: true, committed: false };
+  }
+  return outcome;
+}
+
+const ACTIVE = (all) => all.filter((exDef) => exDef.status === 'active');
+
+/** 產生一個不與現有題目相撞的 qid */
+function freshQid(all) {
+  let qid = randomId(8);
+  while (all.some((exDef) => exDef.qid === qid)) qid = randomId(8);
+  return qid;
+}
+
+/** 題目身分與狀態欄位（編輯只換內容，這些一律沿用資料庫裡的那一份，不接受畫面送上來的值） */
+const IDENTITY_KEYS = ['qid', 'rev', 'status', 'archiveReason', 'replacedBy', 'archivedFrom', 'restoredNote'];
+
+function withIdentity(content, stored, rev) {
+  const out = { ...content, qid: stored.qid, rev };
+  IDENTITY_KEYS.forEach((k) => {
+    if (k === 'qid' || k === 'rev') return;
+    if (stored[k] !== undefined) out[k] = stored[k];
+  });
+  return out;
+}
+
+function writeExercises(current, all, extra = {}) {
+  return { ...current, exercisesJson: JSON.stringify(all.map(stripRuntimeFields)), ...extra };
+}
+
+/**
+ * 存檔單一題目（樂觀鎖）。
+ *
+ * 題目**不上鎖**，改用 rev 比對：所有講師共用同一組代碼與密碼，系統無法分辨
+ * 「兩位講師」與「同一人的兩台裝置」，上鎖只會讓講師被自己的另一台裝置擋住。
+ * content 是 validateExercise 的輸出（完整內容），身分欄位一律沿用資料庫那一份：
+ * 用整份取代而不是淺層合併，講師在編輯器裡刪掉 goal／notice 才真的刪得掉。
+ */
+export async function saveExercise(code, qid, content, expectedRev) {
+  await authReady;
+  await migrateCourseIfNeeded(code); // 改寫 exercisesJson 之前先升級，否則舊的數字 key 會失去退回來源
+  const outcome = await courseTransaction(code, (current) => {
+    const all = parseExercises(current.exercisesJson);
+    const i = all.findIndex((exDef) => exDef.qid === qid);
+    if (i < 0) return { missing: true };
+    const stored = all[i];
+    if ((Number(stored.rev) || 0) !== (Number(expectedRev) || 0)) return { conflict: true };
+    const next = all.slice();
+    next[i] = withIdentity(content, stored, (Number(stored.rev) || 0) + 1);
+    return { value: writeExercises(current, next), rev: (Number(stored.rev) || 0) + 1 };
+  });
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.missing) throw Error('這一題已不存在，可能已被其他裝置刪除。請先複製保留畫面上的文字，再重新載入頁面。');
+  if (outcome.conflict) throw Error('這一題已在其他裝置修改過。請先複製保留畫面上的文字，再重新載入頁面，確認目前內容後重做一次。');
+  if (!outcome.committed) throw Error('題目儲存未完成，請再試一次。');
+  return outcome.rev;
+}
+
+/**
+ * 新增一題。空白題目也走同一個編輯器，所以這裡只負責寫入，內容由呼叫端驗證過再送進來。
+ * 預設 locks[qid] = true（未開放）：新題不應該一存檔就出現在學員畫面上。
+ */
+export async function addExercise(code, content) {
+  await authReady;
+  await migrateCourseIfNeeded(code);
+  let created = '';
+  const outcome = await courseTransaction(code, (current) => {
+    const all = parseExercises(current.exercisesJson);
+    if (ACTIVE(all).length >= MAX_EXERCISES) return { full: true };
+    created = freshQid(all);
+    const next = [...all, {
+      ...content, qid: created, rev: 0, status: 'active',
+    }];
+    return { value: writeExercises(current, next, { locks: { ...(current.locks || {}), [created]: true } }) };
+  });
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.full) throw Error(`練習數量已達上限 ${MAX_EXERCISES} 題，無法再新增。請先刪除不需要的練習（含已封存的舊版本）。`);
+  if (!outcome.committed) throw Error('新增題目未完成，請再試一次。');
+  return created;
+}
+
+/**
+ * 修改題目的第一步：封存原題、複製出一題新的。
+ *
+ * - 原題：status='archived'、archiveReason='edit'、replacedBy=新題 qid。答案原地保留，不搬動。
+ * - 新題：內容與原題相同，qid 新、rev 0、archivedFrom=原題 qid，預設未開放。
+ * - 新題插在原題後面：原題轉為封存後不佔題號，新題正好接下原題的「練習幾」。
+ * - 各組在原題有內容的答案，**複製**一份到該組的 archives（qid 指向新題），
+ *   學員在新題上就看得到入口、可以複製回來。複製而不是搬移：原題的答案要留著，還原才拿得回去。
+ */
+export async function archiveForEdit(code, qid) {
+  await authReady;
+  await migrateCourseIfNeeded(code);
+  let newQid = '';
+  const outcome = await courseTransaction(code, (current) => {
+    const all = parseExercises(current.exercisesJson);
+    const i = all.findIndex((exDef) => exDef.qid === qid);
+    if (i < 0) return { missing: true };
+    const original = all[i];
+    if (original.status !== 'active') return { notActive: true };
+    newQid = freshQid(all);
+
+    const archived = {
+      ...original, status: 'archived', archiveReason: 'edit', replacedBy: newQid,
+    };
+    const copy = {
+      ...original, qid: newQid, rev: 0, status: 'active', archivedFrom: qid,
+    };
+    delete copy.archiveReason;
+    delete copy.replacedBy;
+    delete copy.restoredNote; // 新題是修改版，不該帶著原題的「還原」註記旗標
+    const next = all.slice();
+    next[i] = archived;
+    next.splice(i + 1, 0, copy);
+
+    const now = Date.now();
+    const label = `修改前的作答｜${original.title || ''}`;
+    const groups = { ...(current.groups || {}) };
+    Object.keys(groups).forEach((gid) => {
+      const g = groups[gid] || {};
+      const raw = (g.answers || {})[qid];
+      if (!answerHasContent(raw)) return; // 沒填過的組不必產生一份空白封存
+      groups[gid] = {
+        ...g,
+        archives: {
+          ...(g.archives || {}),
+          [randomId(8)]: {
+            label, savedAt: now, qid: newQid, sourceQid: qid, json: typeof raw === 'string' ? raw : JSON.stringify(raw ?? {}),
+          },
+        },
+      };
+    });
+
+    const extra = { locks: { ...(current.locks || {}), [newQid]: true } };
+    if (Object.keys(groups).length) extra.groups = groups;
+    return { value: writeExercises(current, next, extra), newQid };
+  });
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.missing) throw Error('這一題已不存在，可能已被其他裝置刪除。請重新載入頁面。');
+  if (outcome.notActive) throw Error('這一題目前是封存狀態，請先還原再修改。');
+  if (!outcome.committed) throw Error('準備修改未完成，請再試一次。');
+  return outcome.newQid || newQid;
+}
+
+/**
+ * 取消修改：必須真的等同沒發生。
+ * 解除原題封存、刪掉新題（連同新題上的 locks、任何答案，以及剛剛為它產生的封存紀錄）。
+ * 原題**已經**被別的裝置刪掉時不當作失敗：新題還是要收乾淨，否則留下的是最難察覺的孤兒資料。
+ */
+export async function cancelEdit(code, newQid) {
+  await authReady;
+  const outcome = await courseTransaction(code, (current) => {
+    const all = parseExercises(current.exercisesJson);
+    const i = all.findIndex((exDef) => exDef.qid === newQid);
+    if (i < 0) return { missing: true };
+    const origQid = all[i].archivedFrom || '';
+    const next = all.slice();
+    next.splice(i, 1);
+    const j = next.findIndex((exDef) => exDef.qid === origQid);
+    let orphaned = true;
+    if (j >= 0) {
+      const restored = { ...next[j], status: 'active' };
+      delete restored.archiveReason;
+      delete restored.replacedBy;
+      next[j] = restored;
+      orphaned = false;
+    }
+
+    const locks = { ...(current.locks || {}) };
+    delete locks[newQid];
+    const groups = { ...(current.groups || {}) };
+    Object.keys(groups).forEach((gid) => {
+      const g = { ...(groups[gid] || {}) };
+      ['answers', 'complete', 'updated', 'revision'].forEach((node) => {
+        if (!g[node] || g[node][newQid] === undefined) return;
+        const copy = { ...g[node] };
+        delete copy[newQid];
+        g[node] = copy;
+      });
+      if (g.archives) {
+        const keptArchives = {};
+        Object.entries(g.archives).forEach(([id, rec]) => {
+          // 只刪「這一次修改」為新題產生的那些，別的封存（例如合併小組留下的）不動。
+          if (rec && rec.qid === newQid && rec.sourceQid === origQid) return;
+          keptArchives[id] = rec;
+        });
+        g.archives = Object.keys(keptArchives).length ? keptArchives : null;
+      }
+      groups[gid] = g;
+    });
+
+    const extra = { locks: Object.keys(locks).length ? locks : null };
+    if (Object.keys(groups).length) extra.groups = groups;
+    return { value: writeExercises(current, next, extra), orphaned };
+  });
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.missing) throw Error('要取消的這一題已不存在，可能已被其他裝置處理過。請重新載入頁面確認。');
+  if (!outcome.committed) throw Error('取消修改未完成，請再試一次。');
+  return { orphaned: !!outcome.orphaned };
+}
+
+/**
+ * 還原「因修改而封存」的題目。
+ * 還原後預設**關閉**（locks=true）：課程裡會同時存在原版與修改版，
+ * 直接開放只會讓學員在一個即將被刪掉的題目上白做工。
+ * 標題加註記讓講師分辨兩者；rev 進位，讓還停在舊畫面的裝置存檔時撞到樂觀鎖。
+ */
+export async function restoreExercise(code, qid) {
+  await authReady;
+  await migrateCourseIfNeeded(code);
+  const outcome = await courseTransaction(code, (current) => {
+    const all = parseExercises(current.exercisesJson);
+    const i = all.findIndex((exDef) => exDef.qid === qid);
+    if (i < 0) return { missing: true };
+    const target = all[i];
+    if (target.status !== 'archived') return { notArchived: true };
+    if (target.archiveReason !== 'edit') return { notEditArchive: true };
+    if (ACTIVE(all).length >= MAX_EXERCISES) return { full: true };
+    const next = all.slice();
+    const restored = {
+      ...target,
+      status: 'active',
+      rev: (Number(target.rev) || 0) + 1,
+      restoredNote: true,
+      title: restoredTitle(target.title),
+    };
+    delete restored.archiveReason;
+    delete restored.replacedBy;
+    next[i] = restored;
+    return { value: writeExercises(current, next, { locks: { ...(current.locks || {}), [qid]: true } }), title: restored.title };
+  });
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.missing) throw Error('這一題已不存在，可能已被其他裝置刪除。');
+  if (outcome.notArchived) throw Error('這一題目前不是封存狀態，不需要還原。');
+  if (outcome.notEditArchive) throw Error('只有「因修改而封存」的題目可以還原。');
+  if (outcome.full) throw Error(`練習數量已達上限 ${MAX_EXERCISES} 題，無法再還原。請先刪除不需要的練習。`);
+  if (!outcome.committed) throw Error('還原未完成，請再試一次。');
+  return outcome.title;
 }

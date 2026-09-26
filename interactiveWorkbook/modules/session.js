@@ -10,6 +10,7 @@ import { renderEntry } from './entry.js';
 import { renderTeacher } from './teacher.js';
 import { renderStudent, applyDefaults } from './student.js';
 import { watchLive, stopWatchLive } from './live.js';
+import { disposeProjection } from './projection.js';
 
 // urlCode 原屬「6. 入口畫面」一節，因為只被 startSession 之外的入口畫面使用、且與 session 生命週期相關，
 // 一併留在這裡由 entry.js 匯入。
@@ -17,6 +18,9 @@ export const urlCode = (new URLSearchParams(location.search).get('c') || '').toU
 
 export function leaveSession() {
   if (S.unwatch) { S.unwatch(); S.unwatch = null; }
+  // 投影的 live 訂閱與鍵盤監聽掛在模組層級，離開課程時要一起收掉，
+  // 否則會留到下一次 live 事件才自清（projection.js 有 isConnected 自保，但那是後盾不是正解）。
+  disposeProjection();
   stopWatchLive();
   S.session = null; S.course = null; S.draft = {}; S.dirty = false; S.projection = false;
   S.qid = null; S.groupFilter = 'all'; S.lastStudentSignature = '';
