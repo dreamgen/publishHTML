@@ -3,10 +3,10 @@
  * - 安裝時預先快取 App 外殼（含 ExcelJS），之後可完全離線使用
  * - Stale-While-Revalidate；人才庫資料存在 IndexedDB，不經過 SW
  */
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_NAME = `talentPool-${SW_VERSION}`;
 const ASSETS = [
-  './', './index.html', './app.js', './vendor/exceljs.min.js', './manifest.webmanifest',
+  './', './index.html', './app.js', './filter.js', './vendor/exceljs.min.js', './manifest.webmanifest',
   './icons/talentPool-192.png', './icons/talentPool-512.png', './icons/talentPool-192.svg',
 ];
 self.addEventListener('install', (e) => {

@@ -289,35 +289,6 @@ function toggleSel(id) {
   $('#btnSelAll').textContent = r.length && nSel === r.length ? '取消全選' : '全選結果';
 }
 
-/* ---------------- filter sheet ---------------- */
-function chipGroup(key, items, labelFn = (v) => v) {
-  return `<div class="chips">${items.map(([v, n]) => `<button class="chip${S.f[key].includes(v) ? ' on' : ''}" data-fk="${key}" data-fv="${esc(v)}">${esc(labelFn(v))}<i>${n}</i></button>`).join('')}</div>`;
-}
-function renderFilter() {
-  const P = S.data.people, f = S.f;
-  const ranks = counts('rank', P.map((p) => ({ rank: p.rank || '（未填）' })));
-  const actCounts = new Map();
-  for (const p of P) for (const s of actOf(p, f.actYear)) actCounts.set(s, (actCounts.get(s) || 0) + 1);
-  const acts = [...actCounts].filter(([s]) => s !== '其他').sort((a, b) => b[1] - a[1]).slice(0, 40);
-  $('#filterBody').innerHTML = `
-    <div class="fs"><h4>名冊來源</h4>${chipGroup('src', counts('src', P), (v) => (v === 'c' ? '確定名冊' : '待校核'))}</div>
-    <div class="fs"><h4>乾坤</h4>${chipGroup('gender', counts('gender', P))}</div>
-    <div class="fs"><h4>區域</h4>${chipGroup('region', counts('region', P))}</div>
-    <div class="fs"><h4>年齡（依年次推算）</h4><div class="agerow"><input type="number" inputmode="numeric" id="ageMin" placeholder="最小" value="${esc(f.ageMin)}"> – <input type="number" inputmode="numeric" id="ageMax" placeholder="最大" value="${esc(f.ageMax)}"> 歲</div><div class="tiny muted" style="margin-top:4px">設定年齡時，未填年次者會被排除</div></div>
-    <div class="fs"><h4>2026 出席次數 ≥</h4><div class="rangerow"><input type="range" id="attMin" min="0" max="10" value="${f.attMin}"><output id="attOut">${f.attMin ? f.attMin + ' 次' : '不限'}</output></div></div>
-    <div class="fs"><h4>服務跨越年份數 ≥</h4><div class="rangerow"><input type="range" id="spanMin" min="0" max="5" value="${f.spanMin}"><output id="spanOut">${f.spanMin ? f.spanMin + ' 年' : '不限'}</output></div></div>
-    <div class="fs"><h4>推薦組別<span class="sp"></span><span class="seg" id="gMode"><button data-v="any" class="${f.groupsMode === 'any' ? 'on' : ''}">符合任一</button><button data-v="all" class="${f.groupsMode === 'all' ? 'on' : ''}">全部符合</button></span></h4>${chipGroup('groups', counts('groups', P))}</div>
-    <div class="fs"><h4>官方道職</h4>${chipGroup('rank', ranks)}</div>
-    <div class="fs"><h4>主要處室／單位</h4>${chipGroup('unit', counts('unit', P))}</div>
-    <div class="fs"><h4>參與項目<span class="sp"></span><select class="yrsel" id="actYear">${['2026', '2025', '2024', '2023', '2022', 'any'].map((y) => `<option value="${y}"${f.actYear === y ? ' selected' : ''}>${y === 'any' ? '任一年' : y + ' 年'}</option>`).join('')}</select></h4>${chipGroup('act', acts)}</div>`;
-  updateApplyBtn();
-}
-function updateApplyBtn() {
-  const terms = S.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const n = S.data.people.filter((p) => matches(p, S.f, terms)).length;
-  $('#fApply').textContent = `查看 ${n} 位結果`;
-}
-
 /* ---------------- detail ---------------- */
 let detailId = null;
 function openDetail(id) {
@@ -464,26 +435,12 @@ function bind() {
     renderList();
   });
 
-  // filter sheet
-  $('#btnFilter').onclick = () => { renderFilter(); openSheet('#sheetFilter'); };
-  $('#fReset').onclick = () => { S.f = emptyFilter(); renderFilter(); };
-  $('#filterBody').addEventListener('click', (e) => {
-    const c = e.target.closest('.chip');
-    if (c) { const k = c.dataset.fk, v = c.dataset.fv; S.f[k] = S.f[k].includes(v) ? S.f[k].filter((x) => x !== v) : [...S.f[k], v]; c.classList.toggle('on'); updateApplyBtn(); return; }
-    const m = e.target.closest('#gMode button');
-    if (m) { S.f.groupsMode = m.dataset.v; $$('#gMode button').forEach((b) => b.classList.toggle('on', b === m)); updateApplyBtn(); }
-  });
-  $('#filterBody').addEventListener('input', (e) => {
-    const id = e.target.id;
-    if (id === 'attMin') { S.f.attMin = +e.target.value; $('#attOut').textContent = S.f.attMin ? S.f.attMin + ' 次' : '不限'; }
-    else if (id === 'spanMin') { S.f.spanMin = +e.target.value; $('#spanOut').textContent = S.f.spanMin ? S.f.spanMin + ' 年' : '不限'; }
-    else if (id === 'ageMin' || id === 'ageMax') S.f[id] = e.target.value.trim();
-    else return;
-    updateApplyBtn();
-  });
-  $('#filterBody').addEventListener('change', (e) => {
-    if (e.target.id === 'actYear') { S.f.actYear = e.target.value; S.f.act = []; renderFilter(); }
-  });
+  // filter page
+  $('#btnFilter').onclick = () => FP.openPage();
+  FP.bind();
+
+  // font size
+  $('#mFont').onclick = (e) => { e.stopPropagation(); setFont((LS.get('fs', 1) + 1) % FONTS.length); };
 
   // close sheets
   $('#scrim').onclick = closeSheet;
@@ -516,6 +473,12 @@ function bind() {
 }
 
 /* ---------------- boot ---------------- */
+const FONTS = [['標準', 16], ['大', 18], ['特大', 20]];
+function setFont(i) {
+  LS.set('fs', i);
+  document.documentElement.style.fontSize = FONTS[i][1] + 'px';
+  $('#mFont').textContent = `字級：${FONTS[i][0]}（點一下切換）`;
+}
 function boot() {
   const has = !!S.data;
   $('#welcome').classList.toggle('hidden', has);
@@ -524,13 +487,15 @@ function boot() {
   $('#dataInfo').textContent = has
     ? `${S.data.fileName}｜${S.data.people.length} 人｜${new Date(S.data.importedAt).toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' })} 匯入`
     : '尚未匯入人才庫';
+  FP.renderPresetRow();
   if (has) renderList(); else { $('#list').innerHTML = ''; renderSelBar(); }
 }
 
-(async function init() {
+window.addEventListener('DOMContentLoaded', async function init() {
   $('#shTitle').value = LS.get('title', '');
+  setFont(LS.get('fs', 1));
   bind();
   try { S.data = (await DB.get('data')) || null; } catch (e) { console.error(e); }
   boot();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
-})();
+});
