@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-26T12:06:19.711Z",
-  "count": 14,
+  "generatedAt": "2026-10-01T14:27:07.617Z",
+  "count": 15,
   "apps": [
     {
       "id": "bridgeGame",
@@ -158,6 +158,19 @@
       "path": "../staffSurvey/",
       "icon": "../staffSurvey/icons/staffSurvey-192.png",
       "themeColor": "#7a4b1e",
+      "categories": [
+        "productivity",
+        "utilities"
+      ]
+    },
+    {
+      "id": "talentPool",
+      "name": "人才庫查詢",
+      "shortName": "人才庫",
+      "description": "天達堂人才庫快速查詢：匯入人才庫總名冊 xlsx 後存在手機，可搜尋、多條件篩選人選（區域、乾坤、年齡、道職、推薦組別、出席次數、參與項目），勾選後一鍵複製或分享到 LINE；資料不上傳",
+      "path": "../talentPool/",
+      "icon": "../talentPool/icons/talentPool-192.png",
+      "themeColor": "#0f5e5a",
       "categories": [
         "productivity",
         "utilities"

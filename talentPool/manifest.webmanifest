@@ -1,0 +1,20 @@
+{
+  "id": "talentPool",
+  "name": "人才庫查詢",
+  "short_name": "人才庫",
+  "description": "天達堂人才庫快速查詢：匯入人才庫總名冊 xlsx 後存在手機，可搜尋、多條件篩選人選（區域、乾坤、年齡、道職、推薦組別、出席次數、參與項目），勾選後一鍵複製或分享到 LINE；資料不上傳",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f6f5",
+  "theme_color": "#0f5e5a",
+  "lang": "zh-TW",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "./icons/talentPool-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/talentPool-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/talentPool-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/talentPool-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
