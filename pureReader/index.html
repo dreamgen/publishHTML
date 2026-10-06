@@ -2247,33 +2247,33 @@
         function _buildProxyStrategies(url, signal, preferredIdx, setStatus) {
             const label = (n, name) => `嘗試策略${n}${preferredIdx === (n - 1) ? ' ★慣用' : ''} (${name})…`;
             const allStrategies = [
-                { idx: 0, label: 'PureReader Proxy (CF)', fn: async () => {
+                { idx: 0, label: 'PureReader Proxy (CF)', fn: async (sig = signal) => {
                     if (setStatus) setStatus(label(1, '自有代理 (CF)'));
-                    const res = await fetch(`https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(url)}`, { signal });
+                    const res = await fetch(`https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(url)}`, { signal: sig });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return await res.text();
                 }},
-                { idx: 1, label: 'CodeTabs', fn: async () => {
+                { idx: 1, label: 'CodeTabs', fn: async (sig = signal) => {
                     if (setStatus) setStatus(label(2, 'CodeTabs'));
-                    const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal });
+                    const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal: sig });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return await res.text();
                 }},
-                { idx: 2, label: 'AllOrigins JSON', fn: async () => {
+                { idx: 2, label: 'AllOrigins JSON', fn: async (sig = signal) => {
                     if (setStatus) setStatus(label(3, 'AllOrigins JSON'));
-                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal });
+                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal: sig });
                     if (!res.ok) throw new Error('Proxy API Failed');
                     const data = await res.json();
                     if (data.status && data.status.http_code >= 400) throw new Error(`HTTP ${data.status.http_code}`);
                     return data.contents;
                 }},
-                { idx: 3, label: 'AllOrigins Raw', fn: async () => {
+                { idx: 3, label: 'AllOrigins Raw', fn: async (sig = signal) => {
                     if (setStatus) setStatus(label(4, 'AllOrigins Raw'));
-                    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal });
+                    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: sig });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return await res.text();
                 }},
-                { idx: 4, label: 'Jina Reader', fn: async () => {
+                { idx: 4, label: 'Jina Reader', fn: async (sig = signal) => {
                     if (setStatus) setStatus(label(5, 'Jina Reader'));
                     // Jina Reader 頻率限制防護（每分鐘最多 20 次請求），在此處加入最少 3 秒請求間隔以防預載被阻擋
                     if (typeof window._lastJinaFetchTime === 'undefined') window._lastJinaFetchTime = 0;
@@ -2289,7 +2289,7 @@
                     try {
                         const res = await fetch(`https://r.jina.ai/${url}`, {
                             headers: { 'X-Return-Format': 'html' },
-                            signal
+                            signal: sig
                         });
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return await res.text();
@@ -2310,7 +2310,7 @@
 
                         const res2 = await fetch(`https://r.jina.ai/${url}`, {
                             headers: { 'X-With-Links-Summary': 'true' },
-                            signal
+                            signal: sig
                         });
                         if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
                         const markdown = await res2.text();
@@ -2325,13 +2325,26 @@
 
         // 方案 C：統一抓取邏輯，讓 extractArticle 與 NovelMode._fetchHtml 共用同一份策略清單與 bot 頁偵測，
         // 避免重複程式碼與預載快取污染。回傳 { html, winnerIdx, lastError, hadChallengePage }。
+        const PROXY_TIMEOUT_MS      = 15000; // 一般代理單次請求上限
+        const PROXY_TIMEOUT_JINA_MS = 30000; // Jina 需實際渲染頁面，給較長時間
         async function fetchViaProxies(url, { signal, preferredIdx = -1, setStatus } = {}) {
             const strategies = _buildProxyStrategies(url, signal, preferredIdx, setStatus);
             let lastError = '';
             let hadChallengePage = false;
             for (const strategy of strategies) {
+                // 單一策略逾時保護：部分公開代理（CodeTabs / AllOrigins）偶爾會卡住數十秒才失敗，
+                // 沒有逾時的話小說模式預載／自動更新會整個停在那裡，永遠輪不到後面可用的策略。
+                const timeoutMs = strategy.idx === 4 ? PROXY_TIMEOUT_JINA_MS : PROXY_TIMEOUT_MS;
+                const stratCtrl = new AbortController();
+                const onOuterAbort = () => stratCtrl.abort();
+                if (signal) {
+                    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                    signal.addEventListener('abort', onOuterAbort, { once: true });
+                }
+                let timedOut = false;
+                const timer = setTimeout(() => { timedOut = true; stratCtrl.abort(); }, timeoutMs);
                 try {
-                    const content = await strategy.fn();
+                    const content = await strategy.fn(stratCtrl.signal);
                     if (isUsableHtml(content)) {
                         return { html: content, winnerIdx: strategy.idx, lastError: '', hadChallengePage };
                     }
@@ -2343,9 +2356,12 @@
                     }
                     if (content) lastError = '回應內容過短';
                 } catch (e) {
-                    if (e.name === 'AbortError') throw e;
-                    lastError = e.message;
-                    console.warn('[pureReader] Strategy failed:', strategy.label, e.message);
+                    if (e.name === 'AbortError' && !timedOut) throw e; // 使用者／外部中止
+                    lastError = timedOut ? `逾時 (${Math.round(timeoutMs / 1000)}s)` : e.message;
+                    console.warn('[pureReader] Strategy failed:', strategy.label, lastError);
+                } finally {
+                    clearTimeout(timer);
+                    if (signal) signal.removeEventListener('abort', onOuterAbort);
                 }
             }
             return { html: null, winnerIdx: -1, lastError, hadChallengePage };
@@ -3937,7 +3953,14 @@
                 if (depth > 3) return null; // Prevent infinite JS redirect loops
                 let html;
                 try {
-                    ({ html } = await fetchViaProxies(url, { signal }));
+                    // 與單篇模式共用「此網域上次成功的策略」偏好：小說模式每章都要抓，
+                    // 若每次都從頭依序嘗試已知會失敗的代理（例如被 Cloudflare 擋下的自有代理），
+                    // 單章就要耗費數十秒，預載／自動更新看起來就像完全沒動作。
+                    let hostname = ''; try { hostname = new URL(url).hostname; } catch (e) {}
+                    const preferredIdx = getStratPref()[hostname]?.winner ?? -1;
+                    let winnerIdx;
+                    ({ html, winnerIdx } = await fetchViaProxies(url, { signal, preferredIdx }));
+                    if (html && winnerIdx >= 0 && hostname && winnerIdx !== preferredIdx) saveStratPref(hostname, winnerIdx);
                 } catch (e) {
                     if (e.name === 'AbortError') throw e;
                     return null;
