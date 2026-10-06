@@ -8,6 +8,7 @@ import {
   chooseExportDelivery,
   detectExportEnvironment,
 } from "./export-delivery.mjs";
+import { getImageRenderScale } from "./image-export.mjs";
 import { copyPagesBySource } from "./pdf-page-copy.mjs";
 import {
   arrangeInsertedPages,
@@ -156,6 +157,7 @@ class PdfWorkshop {
     this.excelPreviewRenderTask = null;
     this.excelImportMode = "insert";
     this.excelPreviousActiveId = null;
+    this.imageExportRunning = false;
     this.pendingExportShare = null;
     this.pendingDownloadUrls = new Map();
     this.feedbackConfig = {
@@ -207,6 +209,15 @@ class PdfWorkshop {
       feedbackButton: $("#feedbackButton"),
       themeButton: $("#themeButton"),
       exportButton: $("#exportButton"),
+      exportImagesButton: $("#exportImagesButton"),
+      imageExportDialog: $("#imageExportDialog"),
+      imageExportFormat: $("#imageExportFormat"),
+      imageExportScope: $("#imageExportScope"),
+      imageExportDpi: $("#imageExportDpi"),
+      imageExportQuality: $("#imageExportQuality"),
+      imageExportQualityField: $("#imageExportQualityField"),
+      imageExportSummary: $("#imageExportSummary"),
+      startImageExportButton: $("#startImageExportButton"),
       openFileInput: $("#openFileInput"),
       mergeFileInput: $("#mergeFileInput"),
       annotationImageInput: $("#annotationImageInput"),
@@ -559,6 +570,19 @@ class PdfWorkshop {
       this.openDialog(this.elements.insertDialog)
     );
     themeButton.addEventListener("click", () => this.toggleTheme());
+    this.elements.exportImagesButton.addEventListener("click", () => {
+      if (!this.pages.length || this.imageExportRunning) return;
+      this.elements.imageExportScope.querySelector('[value="selected"]').disabled =
+        !this.selectedPageIds.size;
+      this.elements.imageExportScope.value = this.selectedPageIds.size > 1 ? "selected" : "active";
+      this.updateImageExportOptions();
+      this.openDialog(this.elements.imageExportDialog);
+    });
+    for (const control of [this.elements.imageExportScope, this.elements.imageExportFormat]) {
+      control.addEventListener("change", () => this.updateImageExportOptions());
+    }
+    this.elements.startImageExportButton.addEventListener("click", () => this.exportImages());
+
     exportButton.addEventListener("click", () =>
       this.exportPages(this.pages.map((page) => page.id), {
         mode: "download",
@@ -2336,6 +2360,7 @@ class PdfWorkshop {
 
     this.elements.mergeButton.disabled = !hasDocument;
     this.elements.exportButton.disabled = !hasDocument;
+    this.elements.exportImagesButton.disabled = !hasDocument || Boolean(this.imageExportRunning);
     this.elements.shareButton.disabled =
       !hasDocument || !this.supportsPdfFileShare();
     this.elements.undoButton.disabled = !hasDocument || !this.undoStack.length;
@@ -6633,6 +6658,155 @@ class PdfWorkshop {
     }
   }
 
+  getImageExportRecords() {
+    const scope = this.elements.imageExportScope.value;
+    return this.pages.filter((page) =>
+      scope === "all" || (scope === "selected"
+        ? this.selectedPageIds.has(page.id)
+        : page.id === this.activePageId)
+    );
+  }
+
+  updateImageExportOptions() {
+    const count = this.getImageExportRecords().length;
+    const format = this.elements.imageExportFormat.value.toUpperCase();
+    this.elements.imageExportQualityField.hidden = format !== "JPG";
+    this.elements.imageExportSummary.textContent = count
+      ? `共 ${count} 頁，${count === 1 ? `儲存為 ${format} 圖片` : `將 ${count} 張 ${format} 圖片打包為 ZIP`}。`
+      : "請先在頁面清單選取要匯出的頁面。";
+    this.elements.startImageExportButton.disabled = !count;
+  }
+
+  async renderPageAsImage(record, { dpi, mimeType, quality }) {
+    const source = this.sources.get(record.sourceId);
+    if (!source) throw new Error("找不到頁面來源");
+    const pdfPage = await source.pdfjsDoc.getPage(record.sourcePageIndex + 1);
+    const rotation = this.getPageRotation(record);
+    const baseViewport = pdfPage.getViewport({ scale: 1, rotation });
+    const scale = getImageRenderScale(baseViewport.width, baseViewport.height, dpi);
+    const viewport = pdfPage.getViewport({ scale, rotation });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    try {
+      const context = canvas.getContext("2d", { alpha: false });
+      if (!context) throw new Error("無法建立圖片，請降低解析度後重試。");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await pdfPage.render({
+        canvasContext: context,
+        viewport,
+        background: "#ffffff",
+        annotationMode: pdfjsLib.AnnotationMode.ENABLE,
+      }).promise;
+      // Draw editor annotations in the unrotated coordinate system, then apply
+      // the page transform so text and images rotate together with the PDF.
+      const annotationViewport = pdfPage.getViewport({ scale, rotation: 0 });
+      context.save();
+      context.transform(...pdfjsLib.Util.transform(
+        viewport.transform,
+        pdfjsLib.Util.inverseTransform(annotationViewport.transform)
+      ));
+      await this.drawRasterAnnotations(context, annotationViewport, record.annotations, scale);
+      context.restore();
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((result) => result ? resolve(result) : reject(
+          new Error("圖片編碼失敗，請降低解析度後重試。")
+        ), mimeType, quality);
+      });
+      if (blob.type !== mimeType) throw new Error("此瀏覽器不支援選擇的圖片格式。");
+      return { blob, reduced: scale < dpi / 72 - 0.000001 };
+    } finally {
+      canvas.width = canvas.height = 0;
+    }
+  }
+
+  async exportImages() {
+    if (this.imageExportRunning) return;
+    const records = this.getImageExportRecords();
+    if (!records.length) {
+      this.updateImageExportOptions();
+      return;
+    }
+    const format = this.elements.imageExportFormat.value === "png" ? "png" : "jpg";
+    const mimeType = format === "png" ? "image/png" : "image/jpeg";
+    const dpi = Number(this.elements.imageExportDpi.value);
+    const quality = Number(this.elements.imageExportQuality.value);
+    const baseName = this.buildOutputFileName("images").replace(/\.pdf$/i, "");
+    const pageNames = records.map((record) =>
+      `${baseName}-page-${String(this.pages.indexOf(record) + 1).padStart(3, "0")}.${format}`
+    );
+    const multiple = records.length > 1;
+    const fileName = multiple ? `${baseName}-${format}.zip` : pageNames[0];
+    const outputType = multiple ? "application/zip" : mimeType;
+    this.imageExportRunning = true;
+    this.elements.startImageExportButton.disabled = true;
+    let fileHandle = null;
+    try {
+      if (typeof window.showSaveFilePicker === "function") {
+        try {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{ description: multiple ? "ZIP 圖片壓縮檔" : `${format.toUpperCase()} 圖片`,
+              accept: { [outputType]: [multiple ? ".zip" : `.${format}`] } }],
+          });
+        } catch (error) {
+          if (error?.name === "AbortError") return;
+          console.warn("[PDF Editor] Image file picker unavailable", error);
+        }
+      }
+      this.closeDialog(this.elements.imageExportDialog);
+      this.setBusy(true, "正在轉成圖片", `準備輸出 ${records.length} 頁`, 2);
+      await document.fonts?.ready;
+      const chunks = [];
+      let zipError = null;
+      let totalBytes = 0;
+      let reduced = false;
+      if (multiple && !window.fflate) throw new Error("圖片打包元件載入失敗，請重新載入頁面。");
+      const zip = multiple ? new window.fflate.Zip((error, chunk) => {
+        if (error) zipError = error;
+        else chunks.push(chunk);
+      }) : null;
+      let outputBlob;
+      for (let index = 0; index < records.length; index += 1) {
+        this.setBusy(true, "正在轉成圖片", `處理第 ${index + 1} / ${records.length} 頁`,
+          5 + Math.round(index / records.length * 85));
+        const result = await this.renderPageAsImage(records[index], { dpi, mimeType, quality });
+        reduced ||= result.reduced;
+        totalBytes += result.blob.size;
+        if (totalBytes > 256 * 1024 * 1024) {
+          throw new Error("圖片總大小超過 256 MB，請分批選取頁面或降低解析度後重試。");
+        }
+        if (zip) {
+          const entry = new window.fflate.ZipPassThrough(pageNames[index]);
+          zip.add(entry);
+          entry.push(new Uint8Array(await result.blob.arrayBuffer()), true);
+          if (zipError) throw zipError;
+        } else outputBlob = result.blob;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      if (zip) {
+        zip.end();
+        if (zipError) throw zipError;
+        outputBlob = new Blob(chunks, { type: outputType });
+      }
+      const delivery = await this.deliverExportedPdf({ blob: outputBlob, fileName, fileHandle });
+      if (["file-picker", "file-share", "blob-download"].includes(delivery)) {
+        this.toast(`已輸出 ${records.length} 張 ${format.toUpperCase()} 圖片${multiple ? "（ZIP）" : ""}。${reduced ? "特大頁面已自動降低解析度。" : ""}`, "success", 6500);
+      }
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        console.error("[PDF Editor] Image export failed", error);
+        this.toast(error.message || "圖片輸出失敗，請降低解析度後重試。", "error", 8000);
+      }
+    } finally {
+      this.imageExportRunning = false;
+      this.setBusy(false);
+      this.updateImageExportOptions();
+      this.updateUI();
+    }
+  }
+
   async exportPages(pageIds, { mode = "download", suffix = "edited" } = {}) {
     const idSet = new Set(pageIds);
     const records = this.pages.filter((page) => idSet.has(page.id));
@@ -6814,13 +6988,14 @@ class PdfWorkshop {
     return this.canSharePdfFile(probe);
   }
 
+  // Preserve the Blob MIME type for PDF, image and ZIP delivery.
   async deliverExportedPdf({
     blob,
     fileName,
     fileHandle = null,
     requestedMode = "download",
   }) {
-    const file = new File([blob], fileName, { type: "application/pdf" });
+    const file = new File([blob], fileName, { type: blob.type || "application/pdf" });
     const environment = this.getExportEnvironment();
     const delivery = chooseExportDelivery({
       requestedMode,
@@ -6830,7 +7005,7 @@ class PdfWorkshop {
     });
 
     if (delivery === "file-picker") {
-      this.setBusy(true, "正在儲存 PDF", fileName, 96);
+      this.setBusy(true, "正在儲存檔案", fileName, 96);
       const writable = await fileHandle.createWritable();
       await writable.write(blob);
       await writable.close();
@@ -6843,7 +7018,7 @@ class PdfWorkshop {
     }
 
     if (delivery === "share-unsupported") {
-      const error = new Error("此瀏覽器不支援分享 PDF 檔案");
+      const error = new Error("此瀏覽器不支援分享此類型的檔案");
       error.code = "FILE_SHARE_UNSUPPORTED";
       throw error;
     }
@@ -6854,7 +7029,7 @@ class PdfWorkshop {
         file,
         title: "請改用 Safari 儲存",
         message:
-          "目前的 iPhone／iPad 主畫面 APP 無法分享檔案。為避免畫面被導向 PDF 後無法返回，這次不會啟動 blob 下載。",
+          "目前的 iPhone／iPad 主畫面 APP 無法分享檔案。為避免畫面被導向檔案後無法返回，這次不會啟動 blob 下載。",
         note:
           "請從 Safari 開啟 PDF 工坊後重新匯出，或將 iOS 更新至支援檔案分享的版本。",
       });
@@ -6903,13 +7078,15 @@ class PdfWorkshop {
     }
     this.cancelPreparedExportShare();
     this.elements.exportReadyEyebrow.textContent = "安全儲存";
-    this.elements.exportReadyTitle.textContent = "PDF 已建立";
+    const format = file.name.split(".").pop().toUpperCase();
+    this.elements.exportReadyTitle.textContent = `${format} 已建立`;
+    $("#exportReadyFileMark").textContent = format;
     this.elements.exportReadyMessage.textContent =
       "請點選下方按鈕開啟系統分享，再選擇「儲存到檔案」或其他儲存位置。";
     this.elements.exportReadyFileName.textContent = file.name;
-    this.elements.exportReadyFileMeta.textContent = `${this.formatBytes(file.size)} · PDF`;
+    this.elements.exportReadyFileMeta.textContent = `${this.formatBytes(file.size)} · ${format}`;
     this.elements.exportReadyNote.textContent =
-      "PDF 已在本機準備完成；再次點擊可提供分享功能需要的使用者操作權限。";
+      "檔案已在本機準備完成；再次點擊可提供分享功能需要的使用者操作權限。";
     this.elements.exportReadyCancelButton.textContent = "取消";
     this.elements.exportReadyShareButton.hidden = false;
     this.elements.exportReadyShareButton.disabled = false;
@@ -6963,6 +7140,7 @@ class PdfWorkshop {
     this.cancelPreparedExportShare();
     this.elements.exportReadyEyebrow.textContent = "此裝置需要其他方式";
     this.elements.exportReadyTitle.textContent = title;
+    $("#exportReadyFileMark").textContent = file.name.split(".").pop().toUpperCase();
     this.elements.exportReadyMessage.textContent = message;
     this.elements.exportReadyFileName.textContent = file.name;
     this.elements.exportReadyFileMeta.textContent = `${this.formatBytes(file.size)} · 尚未儲存`;
@@ -7285,7 +7463,7 @@ class PdfWorkshop {
   downloadBlob(blob, fileName) {
     const environment = this.getExportEnvironment();
     if (environment.ios && environment.standalone) {
-      const file = new File([blob], fileName, { type: "application/pdf" });
+      const file = new File([blob], fileName, { type: blob.type || "application/pdf" });
       this.showExportDeliveryGuidance({
         file,
         title: "請改用 Safari 儲存",

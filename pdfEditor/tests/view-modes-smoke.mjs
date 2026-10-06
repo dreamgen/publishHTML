@@ -32,6 +32,9 @@ page.on("console", (msg) => {
 });
 page.on("pageerror", (error) => consoleErrors.push(String(error)));
 
+// The scenario exercises single -> continuous -> browse. Restore a saved
+// single-page preference explicitly; fresh installations default to continuous.
+await page.addInitScript(() => localStorage.setItem("pdfEditor-view-mode-v1", "single"));
 await page.goto(`${BASE}/?testHarness=1`, { waitUntil: "networkidle" });
 await page.waitForFunction(() => window.__PDF_WORKSHOP_TEST__);
 await page.evaluate(() => window.__PDF_WORKSHOP_TEST__.ready);
@@ -75,7 +78,7 @@ let state = await page.evaluate(() => {
   };
 });
 check("載入 6 頁 PDF", state.pages === 6, `pages=${state.pages}`);
-check("預設單頁模式", state.viewMode === "single");
+check("還原已儲存的單頁模式", state.viewMode === "single");
 check("模式按鈕啟用且單頁為 active", !state.singleDisabled && state.singlePressed === "true");
 check("單頁 canvas 已渲染", state.canvasW > 0, `w=${state.canvasW}`);
 

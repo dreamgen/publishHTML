@@ -4380,3 +4380,59 @@ body.view-browse .thumbnail-wrap canvas {
     display: none;
   }
 }
+
+/* Keep both PDF and image export reachable on tablet and narrow phones. */
+@media (min-width: 721px) and (max-width: 1100px) {
+  .header-actions .button span,
+  .header-actions .compact-hide {
+    display: none;
+  }
+
+  .header-actions .button {
+    min-width: 40px;
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 440px) {
+  :root {
+    --header-height: 104px;
+  }
+
+  .app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 8px;
+  }
+
+  .brand {
+    height: 32px;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .brand > span:last-child {
+    display: grid;
+  }
+
+  .brand strong {
+    max-width: none;
+  }
+
+  .header-actions {
+    justify-content: space-between;
+    gap: 2px;
+  }
+
+  .header-actions .button,
+  .header-actions .icon-button {
+    width: 34px;
+    min-width: 34px;
+    padding-inline: 0;
+    flex-shrink: 0;
+  }
+}
