@@ -429,3 +429,6 @@ body.teacher-console .merge-row select { width: auto; flex: 1 1 160px }
   .prep-q { flex-wrap: wrap }
   .header-spacer { display: none }
 }
+
+/* 課前準備的題目列也放開關（與上課中左欄同一顆），不必切到上課中才能開放／關閉 */
+.prep-q .ex-gate { min-width: 64px }

@@ -430,10 +430,10 @@ async function main() {
 
       // 第一題已經有學員答案（S5 存過），所以編輯必須走封存路徑。
       // 前置條件：題目還開放時不能編輯 —— 先關閉它。
-      await teacherMode(teacherPage, 'live');
-      await teacherPage.locator('[data-gate]').first().click();
-      await waitForText(teacherPage, '.ex-gate-state', '關閉');
+      // 課前準備的題目列也有開關，不必切到上課中。
       await prepTab(teacherPage, 'q');
+      await teacherPage.locator('.prep-q [data-gate]').first().click();
+      await teacherPage.locator('.prep-q [data-gate][aria-checked="false"]').first().waitFor({ timeout: 8000 });
 
       const before = await snapshot();
       const firstQid = JSON.parse(before.exercisesJson)[0].qid;

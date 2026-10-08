@@ -418,6 +418,26 @@ function switchTrack(on) {
   return `<span class="sw-track${on ? ' is-on' : ''}" aria-hidden="true"><span class="sw-knob"></span></span>`;
 }
 
+/** 題目開放／關閉的開關；上課中的左欄與課前準備的題目列表共用，綁定見 bindGates()。 */
+function gateButton(qid, i, open) {
+  return `<button type="button" class="ex-gate" role="switch" aria-checked="${open}" data-gate="${E(qid)}" aria-label="${open ? '關閉' : '開放'}${exLabel(i)}">
+          ${switchTrack(open)}<span class="ex-gate-state">${open ? '開放中' : '關閉'}</span>
+        </button>`;
+}
+
+function bindGates() {
+  document.querySelectorAll('[data-gate]').forEach((button) => {
+    button.onclick = async () => {
+      const qid = button.dataset.gate;
+      const locking = !S.course.locks[qid];
+      // 關閉（不是開放）而且已經有小組進入這一題時先問一次，並一併說明「接下來要修改」的後續影響。
+      if (locking && !confirmLockQuestion(qid)) return;
+      button.disabled = true;
+      try { await setLock(S.session.code, qid, locking); } catch (e) { notify(e.message); button.disabled = false; }
+    };
+  });
+}
+
 // ── 上課中 ──────────────────────────────────────────────────────────────────
 function liveLayout() {
   const total = Object.keys(S.course.groups).length;
@@ -430,9 +450,7 @@ function liveLayout() {
           <b class="ex-row-title">${E(t.title)}</b>
           <span class="ex-row-meta${open ? ' is-open' : ''}">${open ? `${completedCount(t.qid)}／${total} 組完成` : '學員看不到'}</span>
         </button>
-        <button type="button" class="ex-gate" role="switch" aria-checked="${open}" data-gate="${E(t.qid)}" aria-label="${open ? '關閉' : '開放'}${exLabel(i)}">
-          ${switchTrack(open)}<span class="ex-gate-state">${open ? '開放中' : '關閉'}</span>
-        </button>
+        ${gateButton(t.qid, i, open)}
       </div>`;
   }).join('');
   const aside = `<aside class="console-left">
@@ -475,12 +493,12 @@ function prepQuestions(importLocked) {
     const answered = answeredCount(t.qid);
     const t2 = shortTime(t);
     const meta = `${(t.fields || []).length} 個欄位${t2 ? ` · ${E(t2)}` : ''}${answered ? ` · ${answered} 組已作答` : ' · 尚無作答'}`;
-    const note = open ? '需先關閉才能編輯' : (answered ? '編輯時會先封存原題' : '');
+    const note = open ? '先把開關關掉才能編輯' : (answered ? '編輯時會先封存原題' : '');
     const menuOpen = S.prepMenu === t.qid;
     return `<div class="prep-q">
         <div class="prep-q-num">${i + 1}</div>
         <div class="prep-q-body"><b>${E(t.title)}</b><span>${meta}</span></div>
-        <span class="state-pill sm${open ? ' is-open' : ''}">${open ? '開放中' : '關閉'}</span>
+        ${gateButton(t.qid, i, open)}
         <div class="prep-q-actions">
           <div class="prep-q-buttons">
             <button type="button" class="outline-btn${open ? ' is-blocked' : ''}" data-edit-ex="${E(t.qid)}" aria-disabled="${open}" aria-label="編輯${exLabel(i)}">編輯</button>
@@ -688,16 +706,7 @@ export function renderTeacher() {
       syncProjection();
     };
   });
-  document.querySelectorAll('[data-gate]').forEach((button) => {
-    button.onclick = async () => {
-      const qid = button.dataset.gate;
-      const locking = !S.course.locks[qid];
-      // 關閉（不是開放）而且已經有小組進入這一題時先問一次，並一併說明「接下來要修改」的後續影響。
-      if (locking && !confirmLockQuestion(qid)) return;
-      button.disabled = true;
-      try { await setLock(S.session.code, qid, locking); } catch (e) { notify(e.message); button.disabled = false; }
-    };
-  });
+  bindGates();
   if (!hasEx || !currentEx()) return;
   document.querySelector('#open-projector').onclick = () => {
     if (openProjectorWindow() === false) notify('瀏覽器擋下了新視窗。請允許這個網站開啟彈出式視窗，或改用「本機全螢幕」。');
@@ -745,6 +754,7 @@ function bindPrepPane() {
     return;
   }
   // 題目分頁
+  bindGates();
   document.querySelector('#dl-template').onclick = downloadTemplate;
   document.querySelector('#import-questions').onclick = () => document.querySelector('#import-questions-file').click();
   document.querySelector('#import-questions-file').onchange = importQuestionsFile;
