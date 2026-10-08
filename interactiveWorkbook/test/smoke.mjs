@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * smoke.mjs — 「互動題本」PWA 的無頭煙霧測試（S1–S8）。
+ * smoke.mjs — 「互動題本」PWA 的無頭煙霧測試（S1–S13）。
  *
  * 用法：
  *   IW_SRC=/tmp/iw IW_BASE_URL=http://127.0.0.1:8791 node smoke.mjs
@@ -76,6 +76,21 @@ async function stubExternal(context) {
       } catch (e) { /* 測試用 stub，失敗就算了 */ }
     };`,
   }));
+}
+
+/** 講師控制台分成「課前準備／上課中」兩個模式；課前準備再分題目／小組／匯入匯出／課程設定四個分頁。 */
+async function teacherMode(page, mode) {
+  const btn = page.locator(`[data-teacher-mode="${mode}"]`);
+  await btn.waitFor({ timeout: 8000 });
+  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
+  await page.locator(`.console-grid.${mode === 'live' ? 'is-live' : 'is-prep'}`).waitFor({ timeout: 8000 });
+}
+
+async function prepTab(page, tab) {
+  await teacherMode(page, 'prep');
+  const btn = page.locator(`[data-prep-tab="${tab}"]`);
+  if ((await btn.getAttribute('aria-current')) !== 'page') await btn.click();
+  await page.locator(`[data-prep-tab="${tab}"][aria-current="page"]`).waitFor({ timeout: 8000 });
 }
 
 function attachErrorCollectors(page, bucket, label) {
@@ -171,20 +186,22 @@ async function main() {
         name: 'questions.json', mimeType: 'application/json', buffer: payload,
       });
       await waitForText(teacherPage, '#message', '已匯入 1 個練習');
-      await waitForText(teacherPage, '.manage', '目前共 1 個練習');
-      await waitForText(teacherPage, 'nav.tabs', '練習一');
+      await waitForText(teacherPage, '.prep-questions', '目前共 1 個練習');
+      await waitForText(teacherPage, '.prep-q-list', '全欄位型別測試');
     });
 
     // ── S3 開放題目 ──────────────────────────────────────────────────────────
     await step('S3 開放題目', async () => {
+      await teacherMode(teacherPage, 'live');
       await teacherPage.locator('[data-gate]').first().click();
-      await waitForText(teacherPage, '.exercise-gates', '已開放，學員可進入');
+      await waitForText(teacherPage, '.exercise-gates', '開放中');
     });
 
     // ── S3b 講師建立小組 ────────────────────────────────────────────────────
     // 新版預設由講師預先命名小組（allowStudentGroupNames=false），
     // 學員只能從清單選；所以要先在控制台建立組別，學員才進得來。
     await step('S3b 講師建立小組', async () => {
+      await prepTab(teacherPage, 'g');
       await teacherPage.locator('#new-group-name').fill('測試組');
       await teacherPage.locator('#add-group').click();
       await waitForText(teacherPage, '#app', '測試組');
@@ -246,6 +263,7 @@ async function main() {
     // ── S6 講師即時看到 ──────────────────────────────────────────────────────
     await step('S6 講師即時看到', async () => {
       // 監看階段預設是「狀態點」模式，刻意不顯示文字；要看內容得切到分享模式。
+      await teacherMode(teacherPage, 'live');
       await teacherPage.locator('[data-proj-mode="all"]').click();
       await waitForText(teacherPage, '#proj-area', '同學回答文字', 8000);
       await waitForText(teacherPage, '#proj-area', '第一項', 8000);
@@ -253,6 +271,7 @@ async function main() {
 
     // ── S7 匯出 ─────────────────────────────────────────────────────────────
     await step('S7 匯出', async () => {
+      await prepTab(teacherPage, 'd');
       const [download] = await Promise.all([
         teacherPage.waitForEvent('download'),
         teacherPage.locator('#export-json').click(),
@@ -411,8 +430,10 @@ async function main() {
 
       // 第一題已經有學員答案（S5 存過），所以編輯必須走封存路徑。
       // 前置條件：題目還開放時不能編輯 —— 先關閉它。
+      await teacherMode(teacherPage, 'live');
       await teacherPage.locator('[data-gate]').first().click();
-      await waitForText(teacherPage, '.exercise-gates', '未開放');
+      await waitForText(teacherPage, '.ex-gate-state', '關閉');
+      await prepTab(teacherPage, 'q');
 
       const before = await snapshot();
       const firstQid = JSON.parse(before.exercisesJson)[0].qid;
@@ -435,7 +456,7 @@ async function main() {
       await teacherPage.locator('#ed-title').fill('改過的第一題');
       await teacherPage.locator('[data-save]').click();
       await teacherPage.locator('#ed-title').waitFor({ state: 'detached', timeout: 8000 });
-      await waitForText(teacherPage, '.exercise-gates', '改過的第一題');
+      await waitForText(teacherPage, '.prep-q-list', '改過的第一題');
 
       const afterEdit = await snapshot();
       const list = JSON.parse(afterEdit.exercisesJson);
@@ -455,6 +476,7 @@ async function main() {
       if (g.answers[firstQid] !== keptBefore) throw Error('封存後原題的答案內容被改動了。');
 
       // ③ 匯出不可以含封存題的答案
+      await prepTab(teacherPage, 'd');
       const [dl] = await Promise.all([
         teacherPage.waitForEvent('download'),
         teacherPage.locator('#export-json').click(),
@@ -467,8 +489,9 @@ async function main() {
       if (anyGroup.archives) throw Error('匯出檔含有 archives。');
 
       // ④ 還原：原題回來、預設關閉、標題有註記
+      await prepTab(teacherPage, 'q');
       await teacherPage.locator(`[data-restore-ex="${firstQid}"]`).click();
-      await waitForText(teacherPage, '.exercise-gates', '（修改前版本）');
+      await waitForText(teacherPage, '.prep-q-list', '（修改前版本）');
       const afterRestore = await snapshot();
       const restored = JSON.parse(afterRestore.exercisesJson).find((q) => q.qid === firstQid);
       if (restored.status !== 'active') throw Error('還原後題目仍是封存狀態。');
@@ -491,8 +514,9 @@ async function main() {
       if (!fresh) throw Error('找不到 S11 產生的「改過的第一題」。');
 
       // 講師開放這一題
+      await teacherMode(teacherPage, 'live');
       await teacherPage.locator(`[data-gate="${fresh.qid}"]`).click();
-      await waitForText(teacherPage, '.exercise-gates', '已開放，學員可進入');
+      await teacherPage.locator(`[data-gate="${fresh.qid}"][aria-checked="true"]`).waitFor({ timeout: 8000 });
 
       // 學員重新載入後進入這一題（sessionStorage 記著身分）
       await studentPage.reload({ waitUntil: 'domcontentloaded' });
@@ -514,7 +538,8 @@ async function main() {
       }
 
       // 講師端切到這一題的狀態點模式，應該看得到橘點、且沒有綠點（這一題還沒存過）
-      await teacherPage.locator('#exercise-select').selectOption(fresh.qid);
+      await teacherPage.locator(`[data-select-ex="${fresh.qid}"]`).click();
+      await teacherPage.locator(`[data-select-ex="${fresh.qid}"][aria-current="true"]`).waitFor({ timeout: 8000 });
       await teacherPage.locator('[data-proj-mode="dots"]').click();
       await teacherPage.locator('.proj-dot').first().waitFor({ timeout: 5000 });
       const deadline = Date.now() + 6000;
@@ -537,6 +562,48 @@ async function main() {
       if (filled.length) throw Error('這一題還沒有人儲存過，卻出現了綠點：' + filled.join(' , '));
 
       return `橘點 ${touched} 顆，綠點 0 顆`;
+    });
+
+    // ── S13 投影舞台與另開投影視窗 ──────────────────────────────────────────
+    // 本機全螢幕：控制台整頁換成投影舞台，字不得小於 28px，Esc 回控制台。
+    // 另開視窗：投影視窗只顯示舞台，控制台切模式時投影視窗跟著切（BroadcastChannel，不寫資料庫）。
+    await step('S13 投影舞台與投影視窗', async () => {
+      await teacherMode(teacherPage, 'live');
+      await teacherPage.locator('[data-proj-mode="compare"]').click();
+      await teacherPage.locator('.console-right #project').click();
+      await teacherPage.locator('.proj-stage #proj-area').waitFor({ timeout: 8000 });
+      const minFont = await teacherPage.evaluate(() => {
+        let min = Infinity;
+        document.querySelectorAll('.proj-stage-head *, .proj-stage-body *, .proj-stage-foot *').forEach((el) => {
+          const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+          if (own && el.offsetParent !== null) min = Math.min(min, parseFloat(getComputedStyle(el).fontSize));
+        });
+        return min;
+      });
+      if (minFont < 28) throw Error(`投影舞台有文字小於 28px（最小 ${minFont}px）。`);
+      await teacherPage.keyboard.press('Escape');
+      await teacherPage.locator('.console-grid.is-live').waitFor({ timeout: 8000 });
+
+      const [popup] = await Promise.all([
+        teacherPage.waitForEvent('popup'),
+        teacherPage.locator('#open-projector').click(),
+      ]);
+      attachErrorCollectors(popup, errors, 'projector');
+      await popup.locator('.proj-stage #proj-area').waitFor({ timeout: 10000 });
+      await waitForText(teacherPage, '#proj-win-status', '已連線');
+      await teacherPage.locator('[data-proj-mode="group"]').click();
+      const deadline = Date.now() + 6000;
+      let cls = '';
+      while (Date.now() < deadline) {
+        // eslint-disable-next-line no-await-in-loop
+        cls = (await popup.locator('#proj-area').getAttribute('class').catch(() => '')) || '';
+        if (cls.includes('proj-mode-group')) break;
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      if (!cls.includes('proj-mode-group')) throw Error('控制台切到「單組」之後，投影視窗沒有跟著切：' + cls);
+      await popup.close();
+      return `舞台最小字級 ${minFont}px，投影視窗同步正常`;
     });
   } finally {
     if (studentCtx) await studentCtx.close().catch(() => {});

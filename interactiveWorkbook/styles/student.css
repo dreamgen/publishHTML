@@ -1,0 +1,179 @@
+/* ──────────────────────────────────────────────────────────────────────────────
+   學員作答畫面（手機優先）
+   ui.js 的 shell() 在學員身分時替 body 加上 student-mode，所以這裡的規則全部掛在
+   body.student-mode 底下，不影響講師端與登入畫面；base.css 不動。
+   色盤與講師控制台相同：深藍 #14263a、米白底 #f6f4ef、側欄 #efece5、線 #e1dbcf。
+   ────────────────────────────────────────────────────────────────────────────── */
+
+body.student-mode {
+  background: #f6f4ef;
+  color: #14263a;
+  font-size: 16px;
+  line-height: 1.6
+}
+
+body.student-mode button, body.student-mode input, body.student-mode select { min-height: 48px }
+body.student-mode button { border-radius: 10px; border-color: #d1c9ba; color: #14263a; padding: 8px 16px }
+body.student-mode button:hover { background: #f3f0e9 }
+body.student-mode button.primary { background: #14263a; border-color: #14263a; color: #fff }
+body.student-mode button.danger { color: #a32626; border-color: #e2b8b0 }
+body.student-mode button.small { min-height: 40px; font-size: 14px; padding: 4px 12px }
+
+/* ── 頁首與身分列：深藍一整條，組別／姓名在最上面一眼看得到 ────────────────── */
+body.student-mode header {
+  background: #14263a;
+  padding: 14px 18px 10px;
+  gap: 12px
+}
+
+body.student-mode header b { font-size: 17px }
+body.student-mode header small { color: #b9c4cf; font-size: 12px }
+body.student-mode #logout { min-height: 44px; padding: 0 14px; border-radius: 9px; border: 1px solid #44607d; background: transparent; color: #f6f4ef; font-size: 14px }
+body.student-mode main.wrap { max-width: 760px; padding: 0 0 180px; display: flex; flex-direction: column }
+/* 編輯權橫幅在 markup 裡排在身分列前面；視覺上讓身分列緊接深藍頁首，橫幅放到練習切換下方 */
+body.student-mode main.wrap > .identity { order: -3 }
+body.student-mode main.wrap > .tabs { order: -2 }
+body.student-mode main.wrap > .editlock { order: -1; margin: 12px 16px 0; border-radius: 10px }
+
+body.student-mode .identity {
+  background: #14263a;
+  color: #f6f4ef;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 2px 18px 14px;
+  gap: 4px 18px
+}
+
+body.student-mode .identity-label { color: #b9c4cf; font-size: 12px }
+body.student-mode .identity-item b { font-size: 17px }
+body.student-mode .identity #fix-identity { min-height: 44px; padding: 0 14px; border-radius: 9px; border: 1px solid #44607d; background: transparent; color: #f6f4ef; font-size: 14px }
+
+/* ── 練習切換：可以左右滑的膠囊，不再換行擠成好幾排 ───────────────────────── */
+body.student-mode .tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: #efece5;
+  border-bottom: 1px solid #e1dbcf;
+  scrollbar-width: none;
+  position: sticky;
+  top: 0;
+  z-index: 4
+}
+
+body.student-mode .tabs::-webkit-scrollbar { display: none }
+
+body.student-mode .tabs button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid #d9d2c4;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px
+}
+
+/* 練習標題放在題目卡內就夠了；膠囊只留「練習一 · 已開放 ✓」，手機上才排得下 */
+body.student-mode .tabs button span { display: none }
+body.student-mode .tabs button.active { background: #14263a; border-color: #14263a; color: #fff }
+body.student-mode .tabs button:disabled { opacity: 1; background: #e8e4dc; border-color: #e8e4dc; color: #8a8478; font-weight: 400 }
+
+/* ── 題目內容 ────────────────────────────────────────────────────────────── */
+body.student-mode .card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 16px 16px 24px;
+  margin: 0
+}
+
+body.student-mode .card.waiting { background: #fff; border: 1px solid #e1dbcf; border-radius: 14px; margin: 16px; padding: 22px 20px }
+body.student-mode .badge { background: none; padding: 0; color: #5a6876; font-size: 13px }
+body.student-mode .card h1 { font-size: 22px; line-height: 1.35; margin: 4px 0 8px }
+body.student-mode .card > p { margin: 0 0 14px; color: #3e4d5b }
+body.student-mode .eyebrow { color: #5a6876; font-size: 13px; letter-spacing: .04em }
+body.student-mode .muted { color: #5a6876; font-size: 13px }
+body.student-mode .notice { background: #fff; border: 1px solid #e1dbcf; border-left: 4px solid #5a6876; border-radius: 10px; padding: 12px 14px; margin: 12px 0; font-size: 15px }
+body.student-mode .notice.warn { border-left-color: #a8670f; background: #fdf6ea }
+
+body.student-mode .table-scroll { background: #fff; border: 1px solid #e1dbcf; border-radius: 10px; margin: 12px 0 }
+body.student-mode .data-table { margin: 0; font-size: 14px }
+body.student-mode .data-table caption { text-align: left; padding: 10px 12px; font-weight: 700; font-size: 15px }
+body.student-mode .data-table th, body.student-mode .data-table td { padding: 8px 10px; border-bottom-color: #eee8de }
+body.student-mode .data-table th { background: #f3f0e9 }
+
+/* ── 作答欄位 ────────────────────────────────────────────────────────────── */
+body.student-mode .form-field { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 }
+body.student-mode .form-field > label { font-weight: 700; font-size: 16px }
+body.student-mode .form-field > label span[aria-hidden] { color: #a8670f }
+body.student-mode .form-field > .muted { margin: -4px 0 0 }
+
+body.student-mode textarea, body.student-mode input:not([type=checkbox]):not([type=radio]), body.student-mode select {
+  border: 1.5px solid #b9b1a2;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 16px;
+  background: #fff;
+  width: 100%
+}
+
+body.student-mode textarea { min-height: 104px; line-height: 1.6 }
+body.student-mode fieldset:disabled textarea, body.student-mode fieldset:disabled input { background: #f3f0e9; color: #55636f }
+
+body.student-mode .row-card { background: #fff; border: 1px solid #e1dbcf; border-radius: 12px; padding: 12px 14px; margin: 0 }
+body.student-mode .row-card + .row-card { margin-top: 10px }
+body.student-mode .row-card .toolbar { justify-content: space-between; flex-wrap: nowrap; margin-bottom: 8px }
+body.student-mode .row-card h3 { font-size: 14px; margin: 0; color: #5a6876 }
+body.student-mode .row-card .form-field { margin: 8px 0 0 }
+body.student-mode .row-card .form-field > label { font-size: 14px }
+body.student-mode .list-item textarea { min-height: 72px }
+
+/* 新增一項：虛線鈕，跟設計稿的「＋ 再加一個問題」一致 */
+body.student-mode [data-list-add], body.student-mode [data-table-add] {
+  min-height: 48px;
+  border: 1.5px dashed #b9b1a2;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 700
+}
+
+body.student-mode .choice { background: #fff; border-color: #d1c9ba; border-radius: 10px; padding: 12px 14px; margin: 0 }
+body.student-mode .choice + .choice { margin-top: 8px }
+body.student-mode .choice:has(:checked) { background: #e3efe7; border-color: #2f8a57 }
+body.student-mode input[type=radio], body.student-mode input[type=checkbox] { accent-color: #2f8a57 }
+
+/* ── 儲存列：白底固定在最下方，按鈕 52px 高 ─────────────────────────────── */
+body.student-mode .savebar {
+  background: #fff;
+  border-top: 1px solid #e1dbcf;
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  justify-content: stretch
+}
+
+body.student-mode .savebar #save-state { grid-column: 1 / -1; font-size: 13px; font-weight: 700; color: #22663f }
+body.student-mode .savebar button { min-height: 52px; border-radius: 12px; font-size: 15px; padding: 0 12px }
+body.student-mode .savebar #complete { grid-column: 1 / -1; font-size: 16px; font-weight: 700 }
+body.student-mode .savebar #reload { color: #5a6876 }
+
+/* 平板以上：儲存列改成一排，內容欄放寬 */
+@media (min-width: 761px) {
+  body.student-mode main.wrap { padding-top: 0 }
+  body.student-mode .savebar { display: flex; justify-content: center }
+  body.student-mode .savebar #save-state { margin-right: auto }
+  body.student-mode .savebar > * { max-width: 760px }
+}
+
+@media print {
+  body.student-mode .tabs { position: static }
+}

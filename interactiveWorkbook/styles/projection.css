@@ -1,93 +1,22 @@
 /* ──────────────────────────────────────────────────────────────────────────────
    功能三：投影呈現（狀態點 ＋ 單題／單組／比較／全覽）
-   顏色、圓角、邊框都沿用 base.css 的同一套色盤，看起來要像同一個產品。
+   兩個地方會畫同一份投影內容（projection.js 的 projectionArea / projectionStage）：
+   - 控制台中欄的「作答監看／投影預覽」：一律淺色、固定字級，樣式在 console.css。
+   - 投影舞台（body.proj-stage-mode）：本機全螢幕或另開的投影視窗，深色／淺色兩套底色，字級跟著 --proj-scale。
+   控制台的投影控制項（右欄）也在 console.css。
    ────────────────────────────────────────────────────────────────────────────── */
 
-/* ── 工具列 ──────────────────────────────────────────────────────────────── */
-.proj-root { margin-top: 18px }
-
-.proj-bar {
-  gap: 10px;
-  padding: 10px 0;
-  border-top: 1px solid #dde6ec
-}
-
-.proj-bar-label {
-  color: #176184;
-  font-weight: 700;
-  font-size: .85rem;
-  letter-spacing: .06em
-}
-
-.proj-mode-row, .proj-chip-row { display: flex; gap: 8px; flex-wrap: wrap }
-.proj-mode-row button, .proj-chip-row button { min-height: 46px; padding: 8px 18px }
-
-.proj-scale { display: flex; align-items: center; gap: 6px }
-.proj-scale button { min-height: 46px; min-width: 52px; padding: 8px 14px }
-
-.proj-scale output {
-  min-width: 4.2em;
-  text-align: center;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  color: #2b4a5e
-}
-
-.proj-check { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: #2b4a5e }
-.proj-check input { width: 24px; height: 24px; min-height: 24px; flex: 0 0 24px; margin: 0 }
-.proj-hint { margin: 10px 0 14px }
-
-/* 投影時最需要常駐在畫面上的是這五顆模式鍵，不是「展示題目／組別」下拉——
-   因此在投影模式下把 base.css 的 .projection-tools 改回一般流，改由模式列置頂。 */
-.projection .projection-tools { position: static }
-
-.projection .proj-mode-bar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: white;
-  border-top: 0;
-  border-bottom: 1px solid #dde6ec
-}
-
-/* ── 投影區的字級（App 內字級，不是瀏覽器縮放） ──────────────────────────── */
-/* 用 em 而不是 rem：這樣「簡潔投影」把 body 調大時，倍率是疊在那個基準上的。 */
-.proj-area { font-size: calc(1em * var(--proj-scale, 1)) }
+/* ── 共用的基本外觀 ──────────────────────────────────────────────────────── */
 .proj-area .answer { white-space: pre-wrap; overflow-wrap: anywhere }
-.proj-area .notice { font-size: .85em }
-
-.proj-table { margin: .6em 0 }
-.proj-table th, .proj-table td { padding: .5em .6em; vertical-align: top }
-.proj-table th[scope="row"] { min-width: 7em; background: #e9f1f6 }
-.proj-table td { min-width: 8em; max-width: 22em }
+.proj-area .answer.empty, .proj-area .empty { color: #8a8478 }
 .proj-group-name { display: block; font-weight: 700 }
-.proj-group-state { display: block; font-size: .7em; font-weight: 500; color: #526b7b }
+.proj-group-state { display: block; font-weight: 500 }
 .proj-expand { font-size: .8em; margin-left: .3em }
-
-/* 每格的寬度上限依模式收緊：組數越多，單格能佔的畫面越少。 */
-.proj-one-group td { min-width: 0; max-width: none }
-.proj-compare td { min-width: 7em; max-width: 16em }
-.proj-overview td { min-width: 5em; max-width: 11em }
-
-/* ── 狀態點 ──────────────────────────────────────────────────────────────── */
-.proj-legend {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 0 0 .6em;
-  font-size: .78em;
-  color: #40586a
-}
-
-.proj-legend .proj-dot { margin-left: 12px }
-.proj-legend .proj-dot:first-child { margin-left: 0 }
-.proj-legend-note { color: #526b7b }
-
-.proj-dots td { min-width: 5em; max-width: none }
-.proj-dot-cell { text-align: center; cursor: pointer }
-.proj-dot-cell:hover, .proj-dot-cell:focus-visible { background: #eef5fa }
-.proj-dot-cell[aria-expanded="true"] { background: #eef5fa }
+.proj-table th, .proj-table td { vertical-align: top }
+.proj-table td { max-width: 22em }
+.proj-compare td { max-width: 16em }
+.proj-overview td { max-width: 11em }
+.proj-one-group td, .proj-dots td, .proj-matrix td { max-width: none }
 
 .proj-dot {
   display: inline-block;
@@ -95,83 +24,186 @@
   height: 1.1em;
   border-radius: 50%;
   vertical-align: middle;
-  background: #c2cdd6;
+  background: #d6d0c4;
   transition: background-color .15s linear
 }
 
-.proj-dot.is-filled { background: #1d7a45 }
-.proj-dot.is-touched { background: #d97a10 }
-.proj-dot.is-idle { background: #c2cdd6 }
+.proj-dot.is-filled { background: #2f8a57 }
+.proj-dot.is-touched { background: #d9822b }
+.proj-dot.is-idle { background: #d6d0c4 }
+.proj-dot-cell { text-align: center; cursor: pointer }
 
-.proj-dot-detail {
-  margin-top: .5em;
-  padding-top: .5em;
-  border-top: 1px dashed #c7d6df;
-  text-align: left;
-  font-size: .78em;
-  line-height: 1.5
-}
+/* 狀態點展開：表格下方的明細面板（控制台用；投影舞台不會出現） */
+.proj-dot-detail { border-top: 1px solid #ece6db; background: #f8f6f1; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px }
+.proj-dot-detail[hidden] { display: none }
+.proj-dot-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 10px }
+.proj-dot-detail-head b { font-size: 14px }
+.proj-dot-detail .answer, .proj-dot-detail .empty { font-size: 15px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere }
+.proj-dot-detail button.link { color: #1f4f7a; font-size: 14px; text-decoration: none; padding: 6px; min-height: 0; align-self: flex-start }
+.proj-dot-detail .proj-dot-detail-head button.link { align-self: auto }
 
-.proj-dot-detail .answer { display: block }
+/* 單題模式 */
+.proj-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px }
+.proj-card { border: 1px solid #e1dbcf; border-radius: 12px; background: #fff; padding: 12px 14px; overflow: hidden }
+.proj-card h3 { margin: 0 0 .4em; font-size: 1em; display: flex; align-items: baseline; gap: .6em; flex-wrap: wrap }
+.proj-card .proj-group-state { display: inline; font-size: .75em; color: #5a6876 }
+.proj-field-title { font-weight: 700 }
 
-/* ── 單題模式：每組一張卡 ────────────────────────────────────────────────── */
-.proj-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16em, 1fr));
-  gap: .7em;
-  margin: .6em 0
-}
+/* 單題模式：複選題打勾矩陣 */
+.proj-matrix .proj-tick { text-align: center; color: #c4bcae; font-size: 1.25em; line-height: 1.2 }
+.proj-matrix .proj-tick.on { color: #2f8a57; font-weight: 700 }
+.proj-matrix .proj-tick-count { text-align: right; white-space: nowrap; font-size: .78em }
 
-.proj-card {
-  border: 1px solid #cad8e1;
-  border-radius: 10px;
-  background: white;
-  padding: .6em .75em
-}
-
-.proj-card h3 {
-  margin: 0 0 .4em;
-  font-size: 1em;
-  display: flex;
-  align-items: baseline;
-  gap: .6em;
-  flex-wrap: wrap
-}
-
-.proj-card .proj-group-state { display: inline; font-size: .72em }
-
-/* ── 單題模式：複選題打勾矩陣 ────────────────────────────────────────────── */
-.proj-matrix td { min-width: 3.5em; max-width: none }
-.proj-matrix .proj-tick { text-align: center; color: #b3c2cd; font-size: 1.25em; line-height: 1.2 }
-.proj-matrix .proj-tick.on { color: #1d7a45; font-weight: 700 }
-.proj-matrix .proj-tick-count { text-align: right; white-space: nowrap; font-size: .78em; color: #40586a }
-
-/* ── 單題模式：清單題合併成全班清單 ──────────────────────────────────────── */
-.proj-merged { margin: .6em 0; padding-left: 1.7em }
+/* 單題模式：清單題合併成全班清單 */
+.proj-merged { margin: .3em 0; padding-left: 1.7em }
 .proj-merged li { margin: .35em 0; overflow-wrap: anywhere }
 .proj-merged-text { margin-right: .3em }
 
 .proj-source {
   display: inline-block;
-  background: #e5eef4;
+  background: #efece5;
   border-radius: 5px;
   padding: 0 .45em;
   margin-left: .35em;
   font-size: .72em;
-  color: #2b4a5e;
+  color: #3e4d5b;
   vertical-align: middle;
   white-space: nowrap
 }
 
-/* ── 窄畫面：講師偶爾用筆電或平板操作 ────────────────────────────────────── */
-@media (max-width: 720px) {
-  .proj-bar { align-items: flex-start }
-  .proj-mode-row button, .proj-chip-row button { flex: 1 0 auto }
-  .proj-cards { grid-template-columns: 1fr }
+/* 單組模式：欄位標題在左、答案在右 */
+.proj-one-head { display: flex; align-items: baseline; gap: 16px; padding-bottom: 8px }
+.proj-one-name { font-size: 1.4em }
+.proj-one-head .proj-group-state { display: inline; color: #5a6876 }
+.proj-one-row { display: grid; grid-template-columns: minmax(8em, 30%) 1fr; gap: 24px; padding: 14px 0; border-bottom: 1px solid #ece6db; align-items: baseline }
+.proj-one-label { font-weight: 700; color: #5a6876 }
+
+/* ── 投影舞台 ─────────────────────────────────────────────────────────────── */
+body.proj-stage-mode { margin: 0; height: 100dvh; overflow: hidden; background: var(--stage-bg, #0e1b2a) }
+body.proj-stage-mode #app, body.proj-stage-mode main.stage { height: 100% }
+
+.proj-stage {
+  --bg: #0e1b2a; --fg: #f4efe4; --muted: #a9b6c2; --line: #26384c; --panel: #15263a; --head: #132233;
+  --filled: #43b072; --touched: #f0953a; --idle: #34475c; --empty: #6f8091;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 28px;
+  line-height: 1.45;
+  position: relative;
+  transition: background .2s, color .2s
 }
 
-/* 列印：投影用的控制項不印出來（base.css 已隱藏 .toolbar，這裡補上倍率歸一） */
+.proj-stage[data-proj-theme="light"] {
+  --bg: #fbf9f4; --fg: #14263a; --muted: #55636f; --line: #ddd5c7; --panel: #fff; --head: #f0ebe1;
+  --filled: #2f8a57; --touched: #d9822b; --idle: #d3ccbf; --empty: #8a8478
+}
+
+.proj-stage-head {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 40px;
+  padding: clamp(20px, 4vh, 44px) clamp(24px, 3.75vw, 72px) clamp(16px, 3vh, 32px);
+  border-bottom: 2px solid var(--line)
+}
+
+.proj-stage-title { display: flex; flex-direction: column; gap: 6px; min-width: 0 }
+.proj-stage-eyebrow { font-size: 28px; font-weight: 700; letter-spacing: .06em; color: var(--muted) }
+.proj-stage-title b { font-size: 52px; line-height: 1.2; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.proj-stage-code { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--muted) }
+.proj-stage-code span { font-size: 28px }
+.proj-stage-code b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 40px; letter-spacing: .16em; color: var(--fg) }
+
+.proj-stage-body { flex: 1; min-height: 0; padding: clamp(20px, 3.7vh, 40px) clamp(24px, 3.75vw, 72px) 0; overflow: auto }
+
+.proj-stage-foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: 24px clamp(24px, 3.75vw, 72px) 36px;
+  font-size: 28px;
+  color: var(--muted)
+}
+
+.proj-stage-foot .proj-legend { display: flex; gap: 28px; align-items: center; font-size: 28px; color: var(--muted) }
+.proj-stage-foot .proj-legend-item { display: flex; align-items: center; gap: 10px }
+.proj-stage-foot .proj-legend-dot { width: 28px; height: 28px; border-radius: 50%; display: inline-block; background: var(--idle) }
+.proj-stage-foot .proj-legend-dot.is-filled { background: var(--filled) }
+.proj-stage-foot .proj-legend-dot.is-touched { background: var(--touched) }
+
+/* 舞台上的操作鈕：平常幾乎看不見，滑鼠移過去才浮現，不干擾投影 */
+.proj-stage-tools { position: absolute; right: 16px; bottom: 12px; opacity: .15; transition: opacity .2s }
+.proj-stage-tools:hover, .proj-stage-tools:focus-within { opacity: 1 }
+
+.proj-stage-tools button {
+  min-height: 0;
+  height: 40px;
+  padding: 0 14px;
+  font-size: 15px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--fg)
+}
+
+/* 投影字級：設計稿以 100% 為準，App 的預設倍率是 1.2，所以除以 1.2 讓預設值剛好等於設計稿 */
+.proj-stage .proj-area { --k: calc(var(--proj-scale, 1.2) / 1.2); font-size: max(28px, calc(30px * var(--k))) }
+.proj-stage .notice { background: var(--panel); border: 2px solid var(--line); border-left: 8px solid var(--muted); color: var(--fg); border-radius: 12px; padding: 24px 28px; margin: 0 }
+.proj-stage .answer.empty, .proj-stage .empty { color: var(--empty) }
+
+.proj-stage .table-scroll { border: 2px solid var(--line); border-radius: 16px; overflow: auto; background: var(--panel) }
+.proj-stage .data-table { margin: 0; width: 100%; border-collapse: collapse }
+.proj-stage .data-table th, .proj-stage .data-table td { border-bottom: 1px solid var(--line); color: var(--fg); background: transparent }
+.proj-stage .data-table thead th { background: var(--head); border-bottom: 2px solid var(--line); padding: calc(16px * var(--k)) calc(12px * var(--k)); text-align: center; vertical-align: middle }
+.proj-stage .data-table thead th:first-child { width: 340px; color: var(--muted); font-size: max(28px, calc(24px * var(--k))); text-align: left; padding-left: calc(24px * var(--k)) }
+.proj-stage .proj-dots thead th:first-child { width: 420px }
+.proj-stage .data-table tbody th[scope="row"] { background: var(--head); padding: calc(18px * var(--k)) calc(24px * var(--k)); font-size: max(28px, calc(30px * var(--k))); font-weight: 700; line-height: 1.35; vertical-align: middle; text-align: left }
+.proj-stage .proj-group-name { font-size: max(28px, calc(36px * var(--k))); line-height: 1.2 }
+.proj-stage .proj-group-state { font-size: max(28px, calc(24px * var(--k))); color: var(--muted) }
+.proj-stage .data-table td { padding: calc(18px * var(--k)) calc(20px * var(--k)); font-size: max(28px, calc(26px * var(--k))); line-height: 1.45 }
+.proj-stage .proj-compare td { font-size: max(28px, calc(32px * var(--k))) }
+.proj-stage .proj-dot-cell { text-align: center; vertical-align: middle; padding: calc(20px * var(--k)) 0; cursor: default }
+.proj-stage .proj-dot { width: calc(48px * var(--k)); height: calc(48px * var(--k)); background: var(--idle) }
+.proj-stage .proj-dot.is-filled { background: var(--filled) }
+.proj-stage .proj-dot.is-touched { background: var(--touched) }
+.proj-stage .proj-dot.is-idle { background: var(--idle) }
+.proj-stage .proj-expand { color: var(--muted); min-height: 0 }
+
+.proj-stage .proj-field-title { font-size: max(28px, calc(40px * var(--k))); padding-bottom: 20px }
+.proj-stage .proj-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-content: start }
+.proj-stage .proj-card { background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 28px 32px; display: flex; flex-direction: column; gap: 14px }
+.proj-stage .proj-card h3 { margin: 0; font-size: max(28px, calc(36px * var(--k))); line-height: 1.2; gap: 16px }
+.proj-stage .proj-card .proj-group-state { font-size: max(28px, calc(24px * var(--k))) }
+.proj-stage .proj-card .answer { font-size: max(28px, calc(34px * var(--k))); line-height: 1.5 }
+.proj-stage .proj-tick { color: var(--idle) }
+.proj-stage .proj-tick.on { color: var(--filled) }
+.proj-stage .proj-tick-count, .proj-stage .proj-source { color: var(--muted) }
+.proj-stage .proj-source { background: var(--head) }
+.proj-stage .proj-tick-count, .proj-stage .proj-source, .proj-stage .proj-expand, .proj-stage .proj-card .proj-group-state { font-size: max(28px, .78em) }
+
+.proj-stage .proj-one-head { gap: 24px; padding-bottom: 12px }
+.proj-stage .proj-one-name { font-size: max(28px, calc(64px * var(--k))); line-height: 1.15 }
+.proj-stage .proj-one-head .proj-group-state { font-size: 32px; color: var(--muted) }
+.proj-stage .proj-one-row { grid-template-columns: 420px 1fr; gap: 40px; padding: 28px 0; border-bottom: 2px solid var(--line) }
+.proj-stage .proj-one-label { font-size: max(28px, calc(30px * var(--k))); color: var(--muted); line-height: 1.4 }
+.proj-stage .proj-one-row .answer { font-size: max(28px, calc(40px * var(--k))); line-height: 1.5 }
+
+/* 投影舞台不需要 base.css 投影模式的白底與置中寬度 */
+body.proj-stage-mode.projection { background: transparent; font-size: 28px }
+
+@media (max-width: 1280px) {
+  .proj-stage .data-table thead th:first-child, .proj-stage .proj-dots thead th:first-child { width: 26% }
+  .proj-stage .proj-one-row { grid-template-columns: 30% 1fr }
+  .proj-stage-title b { font-size: 40px }
+}
+
+/* 列印：倍率歸一 */
 @media print {
   .proj-area { font-size: 1em }
-  .proj-table td, .proj-overview td, .proj-compare td { min-width: 0; max-width: none }
 }

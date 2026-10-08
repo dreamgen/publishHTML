@@ -1,0 +1,431 @@
+/* ──────────────────────────────────────────────────────────────────────────────
+   講師控制台：「課前準備」與「上課中」兩種版面（見 teacher.js 9.2）
+   全部規則都掛在 body.teacher-console 底下，不影響學員端與登入畫面；base.css 不動。
+   色盤：深藍 #14263a、米白底 #f6f4ef、側欄 #efece5、分隔線 #e1dbcf、次要字 #5a6876、綠 #2f8a57。
+   ────────────────────────────────────────────────────────────────────────────── */
+
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0
+}
+
+body.teacher-console {
+  background: #f6f4ef;
+  color: #14263a;
+  font-size: 16px;
+  line-height: 1.5;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden
+}
+
+body.teacher-console #app { flex: 1; min-height: 0; display: flex; flex-direction: column }
+body.teacher-console button, body.teacher-console select, body.teacher-console input { min-height: 0 }
+body.teacher-console button { font-weight: 500; padding: 0 16px; border-radius: 9px }
+body.teacher-console button:hover { background: inherit; filter: brightness(.97) }
+body.teacher-console input, body.teacher-console select { border: 1.5px solid #b9b1a2; border-radius: 8px; height: 46px; padding: 0 12px }
+body.teacher-console label { margin: 0 }
+body.teacher-console h2 { margin: 0 }
+body.teacher-console .notice { background: #fff; border: 1px solid #e1dbcf; border-left: 5px solid #5a6876; border-radius: 10px; font-size: 15px; margin: 0 }
+body.teacher-console .muted { color: #5a6876; font-size: 14px }
+
+/* ── 頁首 ─────────────────────────────────────────────────────────────────── */
+body.teacher-console header {
+  height: 72px;
+  flex: 0 0 72px;
+  background: #14263a;
+  color: #f6f4ef;
+  padding: 0 24px;
+  gap: 24px;
+  justify-content: flex-start
+}
+
+body.teacher-console .header-title { display: flex; flex-direction: column; line-height: 1.25; min-width: 0 }
+body.teacher-console .header-title b { font-size: 18px }
+body.teacher-console .header-title small { font-size: 14px; color: #b9c4cf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px }
+body.teacher-console .header-spacer { flex: 1 }
+
+.mode-switch { display: flex; background: #0b1825; border-radius: 10px; padding: 4px; gap: 4px; margin-left: 24px }
+
+body.teacher-console .mode-switch button {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
+  color: #b9c4cf;
+  font-size: 15px;
+  font-weight: 500
+}
+
+body.teacher-console .mode-switch button.is-on { background: #f6f4ef; color: #14263a; font-weight: 700 }
+
+.code-box { display: flex; align-items: center; gap: 10px; background: #1f3a56; border-radius: 10px; padding: 6px 8px 6px 14px }
+.code-box span { font-size: 13px; color: #b9c4cf }
+.code-box b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 22px; letter-spacing: .18em }
+body.teacher-console .code-box button { height: 40px; padding: 0 14px; border-radius: 8px; border: 0; background: #f6f4ef; color: #14263a; font-weight: 700 }
+
+body.teacher-console #logout { height: 44px; padding: 0 16px; border: 1px solid #44607d; background: transparent; color: #f6f4ef }
+
+/* ── 主體格線 ─────────────────────────────────────────────────────────────── */
+main.console { flex: 1; min-height: 0; display: flex; flex-direction: column }
+.console-grid { flex: 1; min-height: 0; display: grid }
+.console-grid.is-live { grid-template-columns: 300px minmax(0, 1fr) 380px }
+.console-grid.is-prep { grid-template-columns: 240px minmax(0, 1fr) }
+
+/* ── 共用按鈕與開關 ──────────────────────────────────────────────────────── */
+body.teacher-console .navy-btn { height: 46px; padding: 0 18px; border: 1px solid #14263a; background: #14263a; color: #fff; font-weight: 700 }
+body.teacher-console .outline-btn, body.teacher-console .ghost-btn { height: 44px; padding: 0 16px; border: 1px solid #c9c1b2; background: #fff; color: #14263a }
+body.teacher-console .outline-btn:disabled { border-color: #d9d2c4; background: #ece8e0; color: #8a8478; opacity: 1 }
+body.teacher-console .outline-btn.is-blocked { border-color: #ddd5c7; background: #f3f0e9; color: #8a8478; cursor: not-allowed }
+body.teacher-console .text-danger-btn { height: 38px; padding: 0 10px; border: 0; background: none; color: #a32626; font-size: 14px }
+body.teacher-console .danger-soft-btn { height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid #d9a3a3; background: #fff6f5; color: #a32626; font-size: 14px }
+body.teacher-console .danger-outline-btn { height: 44px; border: 1px solid #c88; background: #fff; color: #a32626 }
+body.teacher-console .danger-fill-btn { height: 44px; border: 1px solid #a32626; background: #a32626; color: #fff }
+
+.sw-track {
+  width: 52px;
+  height: 30px;
+  border-radius: 15px;
+  background: #c4bcae;
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  transition: background .15s
+}
+
+.sw-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #0003;
+  transition: left .15s
+}
+
+.sw-track.is-on { background: #2f8a57 }
+.sw-track.is-on .sw-knob { left: 25px }
+
+/* 原生 checkbox 做成同一個開關樣式（保留 input，鍵盤與測試都照舊） */
+body.teacher-console input.switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 52px;
+  height: 30px;
+  min-height: 30px;
+  flex: 0 0 52px;
+  border: 0;
+  border-radius: 15px;
+  padding: 0;
+  margin: 0;
+  background: #c4bcae;
+  position: relative;
+  cursor: pointer;
+  transition: background .15s
+}
+
+body.teacher-console input.switch-input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #0003;
+  transition: left .15s
+}
+
+body.teacher-console input.switch-input:checked { background: #2f8a57 }
+body.teacher-console input.switch-input:checked::after { left: 25px }
+
+.state-pill { font-size: 14px; font-weight: 700; padding: 6px 14px; border-radius: 20px; background: #ece7dd; color: #6c6559; white-space: nowrap; flex: 0 0 auto }
+.state-pill.is-open { background: #e3efe7; color: #22663f }
+.state-pill.sm { font-size: 13px; padding: 5px 12px }
+
+/* ── 上課中：左欄（逐題開關） ────────────────────────────────────────────── */
+.console-left { border-right: 1px solid #e1dbcf; display: flex; flex-direction: column; min-height: 0; background: #efece5 }
+.console-left-head { padding: 20px 20px 10px; display: flex; justify-content: space-between; align-items: baseline }
+.console-left-head b { font-size: 16px }
+.console-left-head span { font-size: 13px; color: #5a6876 }
+.console-left .exercise-gates { flex: 1; overflow: auto; padding: 0 12px 16px; display: flex; flex-direction: column; gap: 8px }
+.console-left-foot { padding: 14px 20px; border-top: 1px solid #e1dbcf; font-size: 13px; color: #5a6876; line-height: 1.6 }
+
+.ex-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent
+}
+
+.ex-row.is-selected { background: #fff; border-color: #cfc6b5; box-shadow: 0 2px 8px #14263a14 }
+
+body.teacher-console .ex-row-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: inherit
+}
+
+body.teacher-console .ex-row-main:hover, body.teacher-console .ex-gate:hover { filter: none }
+.ex-row-label { font-size: 13px; color: #5a6876; font-weight: 500 }
+.ex-row-title { font-size: 16px; line-height: 1.35; overflow-wrap: anywhere }
+.ex-row-meta { font-size: 13px; color: #6c6559 }
+.ex-row-meta.is-open { color: #22663f }
+
+body.teacher-console .ex-gate {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 0;
+  padding: 4px
+}
+
+.ex-gate-state { font-size: 12px; font-weight: 700; color: #3e4d5b }
+
+/* ── 上課中：中欄（摘要＋監看） ──────────────────────────────────────────── */
+.console-center { min-width: 0; min-height: 0; overflow: auto; padding: 24px 28px; display: flex; flex-direction: column; gap: 18px }
+.center-head { display: flex; align-items: flex-end; gap: 16px; justify-content: space-between }
+.center-title { min-width: 0 }
+.center-eyebrow { font-size: 14px; color: #5a6876; font-weight: 500 }
+.center-title h2 { margin: 4px 0 0; font-size: 26px; line-height: 1.3 }
+
+.summary-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px }
+.summary-card { background: #fff; border: 1px solid #e1dbcf; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px }
+.summary-card > span { font-size: 13px; color: #5a6876 }
+.summary-card b { font-size: 28px; line-height: 1.2 }
+.summary-card small { font-size: 15px; color: #5a6876; font-weight: 500 }
+
+.monitor-card { background: #fff; border: 1px solid #e1dbcf; border-radius: 12px; overflow: hidden }
+.monitor-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #ece6db; flex-wrap: wrap }
+.monitor-head b { font-size: 15px }
+.console-note { margin: 0; font-size: 13px; color: #5a6876 }
+
+.proj-legend { display: flex; gap: 14px; font-size: 13px; color: #3e4d5b; align-items: center; flex-wrap: wrap }
+.proj-legend-item { display: flex; align-items: center; gap: 6px }
+.proj-legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: #d6d0c4 }
+.proj-legend-dot.is-filled { background: #2f8a57 }
+.proj-legend-dot.is-touched { background: #d9822b }
+.proj-legend-dot.is-idle { background: #d6d0c4 }
+
+/* 控制台裡的投影內容：一律淺色、不套投影字級倍率（倍率只在投影舞台上生效） */
+.monitor-body .proj-root { margin: 0 }
+.monitor-body .proj-area { font-size: 15px; padding: 0 }
+.monitor-body .proj-area:not(.proj-mode-dots) { padding: 14px 16px }
+.monitor-body .notice { margin: 14px 16px }
+.monitor-body .data-table { margin: 0; font-size: 14px }
+.monitor-body .data-table th, .monitor-body .data-table td { border-bottom: 1px solid #f0ebe2; padding: 10px 12px }
+.monitor-body .data-table thead th { background: #f8f6f1; border-bottom: 1px solid #ece6db; font-size: 13px; color: #5a6876; font-weight: 500; text-align: center }
+.monitor-body .data-table thead th:first-child { text-align: left; padding-left: 16px }
+.monitor-body .data-table tbody th[scope="row"] { background: #fff; font-weight: 500; padding-left: 16px; min-width: 9em }
+.monitor-body .proj-group-name { font-size: 15px; color: #14263a; font-weight: 700 }
+.monitor-body .proj-group-state { font-size: 12px; color: #5a6876 }
+.monitor-body .proj-dot-cell { padding: 0; height: 52px; vertical-align: middle; text-align: center }
+.monitor-body .proj-dot-cell:hover, .monitor-body .proj-dot-cell:focus-visible { background: #f6f2ea }
+.monitor-body .proj-dot-cell.is-selected { background: #efe9dc }
+.monitor-body .proj-dot { width: 22px; height: 22px }
+.monitor-body .proj-dot.is-filled { background: #2f8a57 }
+.monitor-body .proj-dot.is-touched { background: #d9822b }
+.monitor-body .proj-dot.is-idle { background: #d6d0c4 }
+.monitor-body .proj-cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)) }
+.monitor-body .proj-field-title { font-size: 17px; font-weight: 700; margin-bottom: 8px }
+
+/* ── 上課中：右欄（投影控制） ────────────────────────────────────────────── */
+.console-right { border-left: 1px solid #e1dbcf; background: #fff; min-height: 0; overflow: auto; display: flex; flex-direction: column }
+.proj-ctl-block { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #ece6db }
+.proj-ctl-block:first-child { padding-top: 20px; gap: 12px }
+.proj-ctl-block.proj-ctl-settings { gap: 14px; border-bottom: 0 }
+.proj-ctl-row { display: flex; justify-content: space-between; align-items: center; gap: 10px }
+.proj-ctl-title { font-size: 16px }
+.proj-ctl-label { font-size: 13px; color: #5a6876; font-weight: 700; letter-spacing: .06em }
+.proj-ctl-note { font-size: 12px; color: #5a6876 }
+.proj-ctl-name { font-size: 14px; font-weight: 500 }
+.proj-ctl-hint { margin: 0; font-size: 12.5px; color: #5a6876; line-height: 1.6 }
+.proj-win-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+body.teacher-console .proj-win-buttons button { height: 46px; padding: 0 8px; font-weight: 700 }
+body.teacher-console .proj-win-buttons .ghost-btn { border-color: #c9c1b2 }
+
+.status-pill { font-size: 12px; font-weight: 700; background: #ece7dd; color: #6c6559; padding: 3px 10px; border-radius: 20px; white-space: nowrap }
+.status-pill.is-on { background: #e3efe7; color: #22663f }
+
+.proj-mode-list { display: flex; flex-direction: column; gap: 8px }
+
+body.teacher-console .proj-mode-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 14px;
+  border-radius: 10px;
+  text-align: left;
+  border: 1px solid #ddd5c7;
+  background: #fff;
+  color: #14263a
+}
+
+.proj-mode-btn b { font-size: 16px; white-space: nowrap }
+.proj-mode-btn span { font-size: 12.5px; color: #6c6559; text-align: right }
+body.teacher-console .proj-mode-btn.is-on { border-color: #14263a; background: #14263a; color: #fff }
+.proj-mode-btn.is-on span { color: #c5d0da }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px }
+
+body.teacher-console .chip {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 20px;
+  font-size: 14px;
+  border: 1px solid #d1c9ba;
+  background: #fff;
+  color: #14263a;
+  font-weight: 400
+}
+
+body.teacher-console .chip.is-on { border-color: #14263a; background: #14263a; color: #fff; font-weight: 700 }
+
+.proj-scale { display: flex; align-items: center; gap: 6px }
+body.teacher-console .proj-scale button { width: 44px; height: 40px; padding: 0; border-radius: 8px; border: 1px solid #c9c1b2; background: #fff; font-size: 18px }
+body.teacher-console .proj-scale output { min-width: 58px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; color: #14263a }
+
+.seg { display: flex; border: 1px solid #c9c1b2; border-radius: 8px; overflow: hidden }
+body.teacher-console .seg button { height: 38px; padding: 0 16px; border: 0; border-radius: 0; font-size: 14px; background: #fff; color: #14263a; font-weight: 400 }
+body.teacher-console .seg button.is-on { background: #14263a; color: #fff; font-weight: 700 }
+
+.proj-check { cursor: pointer; font-size: 14px; color: inherit }
+body.teacher-console .proj-check input.switch-input { width: 44px; flex-basis: 44px; height: 26px; min-height: 26px; border-radius: 13px }
+body.teacher-console .proj-check input.switch-input::after { width: 20px; height: 20px }
+body.teacher-console .proj-check input.switch-input:checked::after { left: 21px }
+.proj-key-hint { background: #f6f4ef; border-radius: 9px; padding: 10px 12px; font-size: 12.5px; color: #3e4d5b; line-height: 1.6 }
+
+/* ── 課前準備 ─────────────────────────────────────────────────────────────── */
+.prep-nav { background: #efece5; border-right: 1px solid #e1dbcf; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; min-height: 0 }
+
+body.teacher-console .prep-nav > button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 50px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 0;
+  font-size: 16px;
+  text-align: left;
+  background: transparent;
+  color: #14263a;
+  font-weight: 400
+}
+
+body.teacher-console .prep-nav > button.is-on { background: #fff; font-weight: 700; box-shadow: 0 1px 4px #14263a14 }
+.prep-nav-count { font-size: 13px; color: #5a6876; font-weight: 400 }
+.prep-nav-fill { flex: 1 }
+.prep-nav-foot { padding: 12px; font-size: 13px; color: #5a6876; line-height: 1.6 }
+
+.prep-main { min-width: 0; min-height: 0; overflow: auto; padding: 28px 36px 60px }
+.prep-pane { display: flex; flex-direction: column; gap: 18px; max-width: 920px }
+.prep-pane.group-manage { max-width: 980px; gap: 20px }
+.prep-pane.prep-data, .prep-pane.prep-settings { max-width: 760px }
+.prep-pane h2 { font-size: 24px }
+.prep-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap }
+.prep-head-note { font-size: 14px; color: #5a6876 }
+.prep-head-actions { display: flex; gap: 8px; flex-wrap: wrap }
+.prep-sub { margin: 0; font-size: 14px; color: #5a6876; line-height: 1.6 }
+.prep-warn { background: #fbf3e3; border: 1px solid #ecd9b3; border-radius: 10px; padding: 12px 16px; font-size: 14px; line-height: 1.65; color: #5b4618 }
+
+.prep-q-list { display: flex; flex-direction: column; gap: 10px }
+.prep-q { background: #fff; border: 1px solid #e1dbcf; border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 18px }
+.prep-q-num { width: 44px; height: 44px; border-radius: 10px; background: #efece5; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; flex: 0 0 auto }
+.prep-q-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.prep-q-body b { font-size: 17px; overflow-wrap: anywhere }
+.prep-q-body span { font-size: 13.5px; color: #5a6876 }
+.prep-q-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: 0 0 auto }
+.prep-q-buttons { display: flex; gap: 6px }
+body.teacher-console .prep-q-buttons .outline-btn { height: 40px; border-radius: 8px }
+body.teacher-console .more-btn { width: 40px; padding: 0; font-weight: 900; letter-spacing: .05em }
+.prep-q-menu { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 6px }
+.prep-q-note { font-size: 12px; color: #8a6a1e }
+
+/* 封存題：沿用 editor.js 的區塊，只換成虛線卡的外觀 */
+body.teacher-console .archived-card { border: 1px dashed #c9c1b2; border-radius: 12px; background: transparent; padding: 14px 18px; margin: 0 }
+body.teacher-console .archived-card h2 { font-size: 15px; font-weight: 500; color: #3e4d5b }
+body.teacher-console .archived-card p { font-size: 13.5px; color: #5a6876; margin: 6px 0 0 }
+body.teacher-console .archived-row { background: #fff; border: 1px solid #e1dbcf; border-radius: 10px; font-size: 15px }
+body.teacher-console .archived-row button { height: 38px; font-size: 14px }
+
+.prep-card { background: #fff; border: 1px solid #e1dbcf; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px }
+.prep-card > b, .prep-card > label { font-size: 15px; font-weight: 700 }
+.prep-card-note { font-size: 14px; color: #5a6876; line-height: 1.6 }
+.prep-row { display: flex; gap: 8px; flex-wrap: wrap }
+.course-name-text { font-size: 18px }
+
+.danger-zone { border: 1.5px solid #e2b4b0; border-radius: 12px; background: #fffaf9; overflow: hidden }
+.danger-zone-head { padding: 12px 18px; background: #fbecea; color: #8c2320; font-weight: 700; font-size: 14px }
+.danger-zone-row { padding: 16px 18px; display: flex; align-items: center; gap: 16px }
+.danger-zone-row + .danger-zone-row { border-top: 1px solid #f1d9d6 }
+.danger-zone-row > div { flex: 1; display: flex; flex-direction: column; gap: 2px }
+.danger-zone-row span { font-size: 13.5px; color: #5a6876 }
+
+/* 小組分頁（group.css 的舊規則在這裡覆蓋成卡片格線） */
+body.teacher-console .group-rows { margin: 0 }
+.group-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px }
+body.teacher-console .group-row.group-card { background: #fff; border: 1px solid #e1dbcf; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; align-items: stretch; gap: 10px }
+.group-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px }
+.group-card-head b { font-size: 18px; overflow-wrap: anywhere }
+.group-card-head span { font-size: 13px; color: #5a6876; white-space: nowrap }
+.group-card-meta { font-size: 13.5px; color: #5a6876 }
+.group-card-actions { display: flex; gap: 6px; align-items: center }
+body.teacher-console .group-card-actions .ghost-btn { height: 38px; padding: 0 14px; border-radius: 8px; font-size: 14px }
+.flex-spacer { flex: 1 }
+body.teacher-console .group-add { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 }
+body.teacher-console .group-add-item { padding: 16px 18px; gap: 10px }
+.inline-row { display: flex; gap: 8px; align-items: center }
+.inline-row input { flex: 1; min-width: 0 }
+body.teacher-console .inline-row input.count-input { flex: 0 0 80px; width: 80px; text-align: center }
+body.teacher-console .group-allow { margin: 0; flex-direction: row; align-items: center; gap: 16px; cursor: pointer; font-weight: 400 }
+.switch-card-text { flex: 1; display: flex; flex-direction: column; gap: 2px }
+.switch-card-text b { font-size: 15px }
+.switch-card-text span { font-size: 13.5px; color: #5a6876 }
+body.teacher-console .group-merge-tools { margin: 0; border-top: 1px solid #e1dbcf }
+.merge-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+body.teacher-console .merge-row select { width: auto; flex: 1 1 160px }
+.prep-foot-note { margin: 0; font-size: 13px; color: #5a6876 }
+
+/* ── 窄畫面：筆電以下改成單欄捲動 ────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  body.teacher-console { height: auto; overflow: auto; display: block }
+  .console-grid.is-live, .console-grid.is-prep { grid-template-columns: 1fr }
+  .console-left .exercise-gates { max-height: none }
+  .prep-nav { flex-direction: row; flex-wrap: wrap; padding: 10px }
+  .prep-nav-fill, .prep-nav-foot { display: none }
+  .group-cards { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  body.teacher-console header { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 12px }
+  .mode-switch { margin-left: 0 }
+}
+
+@media (max-width: 640px) {
+  .summary-cards, .group-cards, body.teacher-console .group-add { grid-template-columns: 1fr }
+  .prep-main { padding: 20px 16px 60px }
+  .prep-q { flex-wrap: wrap }
+  .header-spacer { display: none }
+}

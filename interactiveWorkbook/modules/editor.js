@@ -508,7 +508,7 @@ export async function beginEditQuestion(code, qid) {
   const n = exNumber(qid);
   const label = `${n >= 0 ? exLabel(n) + '｜' : ''}${exDef.title || ''}`;
   if (!S.course.locks[qid]) {
-    notify(`要編輯「${label}」必須先關閉這一題：關閉之後學員無法進入本題，已儲存的答案不會消失。請按這一列的「關閉${n >= 0 ? exLabel(n) : '本題'}」，再按一次「編輯」。`);
+    notify(`要編輯「${label}」必須先關閉這一題：關閉之後學員無法進入本題，已儲存的答案不會消失。請在「上課中」把${n >= 0 ? exLabel(n) : '本題'}的開關關掉，再回到「課前準備」按「編輯」。`);
     return;
   }
   const answered = groupsAnswered(qid);

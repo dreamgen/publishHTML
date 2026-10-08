@@ -9,13 +9,16 @@
 //   2. 狀態點只做局部更新：每顆點有固定 id，onLiveChange 進來時只改 class，不重畫頁面。
 //      答案儲存造成的整頁重繪是可接受的，刻意不把局部更新推廣到答案儲存格。
 // ──────────────────────────────────────────────────────────────────────────────
-import { S, fieldsOf, currentEx } from './state.js';
-import { E, notify } from './util.js';
+import { S, fieldsOf, currentEx, exNumber } from './state.js';
+import { E, exLabel, notify } from './util.js';
 import { expandDialog, truncate } from './ui.js';
 import { onLiveChange, hasActivity } from './live.js';
 import { loadJSON, saveJSON } from './storage.js';
 import { rerender } from './render.js';
 import { answerRows, hasContent, sortedGroups } from './teacher.js';
+import {
+  isProjectorWindow, onProjState, setSnapshotProvider, publishProjState, bindProjectorStatus, startProjectorBeacon,
+} from './projwin.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 截斷字數的具名常數
@@ -59,12 +62,16 @@ const SCALE_MIN = 0.8;
 const SCALE_MAX = 2.4;
 const SCALE_STEP = 0.1;
 
+// 投影底色：深色（教室燈光暗、投影機亮度不足時對比較好）／淺色（白天、燈全開）。存 localStorage，下次沿用。
+const THEME_KEY = 'iw_projTheme';
+const THEMES = [['dark', '深色'], ['light', '淺色']];
+
 // 五顆並排按鈕的順序：狀態點在最左（時間上先發生），接著依「欄位範圍 × 組別範圍」由窄到寬排列，
 // 順序與規劃文件第四節的表格一致，講師看文件與看畫面不用換一套心智模型。
 const MODES = [
-  { key: 'dots', label: '狀態點', hint: '作答進行中：只看誰動了哪個欄位' },
+  { key: 'dots', label: '狀態點', hint: '作答中監看：誰動了哪個欄位' },
   { key: 'single', label: '單題', hint: '一個欄位 × 全部組別' },
-  { key: 'group', label: '單組', hint: '全部欄位 × 一組' },
+  { key: 'group', label: '單組', hint: '全部欄位 × 一組（發表用）' },
   { key: 'compare', label: '比較', hint: '全部欄位 × 2～3 組' },
   { key: 'all', label: '全覽', hint: '全部欄位 × 全部組別' },
 ];
@@ -93,6 +100,8 @@ let keyBound = false;
 /** 「只顯示已作答的組別」。刻意留在模組內而不進 state.js：它是投影當下的臨時開關。 */
 let onlyAnswered = false;
 let scaleLoaded = false;
+/** 狀態點目前展開的那一格（gid|key）；重畫後用來還原選取 */
+let openCell = null;
 
 /**
  * 預設 1.2 而不是 1：投影字級要 28px 以上才看得到，
@@ -105,6 +114,8 @@ function ensureScale() {
   if (scaleLoaded) return;
   scaleLoaded = true;
   S.projScale = clampScale(Number(loadJSON(SCALE_KEY, SCALE_DEFAULT)) || SCALE_DEFAULT);
+  const theme = loadJSON(THEME_KEY, 'dark');
+  S.projTheme = THEMES.some(([k]) => k === theme) ? theme : 'dark';
 }
 
 function clampScale(value) {
@@ -207,13 +218,36 @@ function renderDots(list, fields) {
       return `<td class="proj-dot-cell" data-dot-gid="${E(gid)}" data-dot-key="${E(f.key)}" tabindex="0" role="button" aria-expanded="false"><span class="${cls}" id="${E(id)}" aria-label="${E(prefix + DOT_TEXT[cls])}"></span></td>`;
     }).join('')
   }</tr>`).join('');
-  return `<p class="proj-legend"><span class="proj-dot is-filled"></span>已有內容
-      <span class="proj-dot is-touched"></span>已被點過，尚未儲存
-      <span class="proj-dot is-idle"></span>未填
-      <span class="proj-legend-note">橘點不會自動熄滅，儲存後會變成綠點。點任一格可以看內容，再點一次收合。</span></p>
-    <div class="table-scroll"><table class="data-table proj-table proj-dots"><thead><tr><th scope="col">作答欄位</th>${
+  return `<div class="table-scroll"><table class="data-table proj-table proj-dots"><thead><tr><th scope="col">作答欄位</th>${
   list.map(([, g]) => groupHeadHTML(g)).join('')
-}</tr></thead><tbody>${body}</tbody></table></div>`;
+}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="proj-dot-detail" id="proj-dot-detail" hidden></div>`;
+}
+
+/** 圖例：控制台的監看卡片標頭與投影舞台的頁尾共用 */
+function legendHTML() {
+  return `<span class="proj-legend"><span class="proj-legend-item"><span class="proj-legend-dot is-filled"></span>已有內容</span><span class="proj-legend-item"><span class="proj-legend-dot is-touched"></span>點過未儲存</span><span class="proj-legend-item"><span class="proj-legend-dot is-idle"></span>未填</span></span>`;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 分享階段：單組（全部欄位 × 一組）——發表用，欄位標題在左、答案在右
+// ──────────────────────────────────────────────────────────────────────────────
+function renderOneGroup(list, fields) {
+  if (!list.length) return emptyNotice('目前沒有可顯示的組別。');
+  if (!fields.length) return emptyNotice('這一題沒有作答欄位。');
+  const [, g] = list[0];
+  const rows = answerRows(fields, g.answers[S.qid] || {});
+  return `<div class="proj-one">
+      <div class="proj-one-head"><b class="proj-one-name">${E(g.name)}</b><span class="proj-group-state">${E(groupStatus(g, S.qid))}</span></div>
+      ${rows.map(([label, text]) => {
+    const value = String(text || '');
+    const cut = truncate(value, MAX_ONE_GROUP);
+    return `<div class="proj-one-row"><span class="proj-one-label">${E(label)}</span>${
+      value.trim() ? `<span class="answer">${E(cut.shown)}${expandButton(cut.truncated, `${g.name}｜${label}`, value)}</span>`
+        : '<span class="answer empty">— 尚未填寫</span>'
+    }</div>`;
+  }).join('')}
+    </div>`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -289,54 +323,79 @@ function renderSingleField(list, fields) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 工具列
+// 投影控制（控制台右欄）
 // ──────────────────────────────────────────────────────────────────────────────
-function modeBar() {
-  return `<div class="toolbar proj-bar proj-mode-bar">
-      <span class="proj-bar-label">投影模式</span>
-      <div class="proj-mode-row" role="group" aria-label="投影模式">${
-  MODES.map((m) => `<button type="button" data-proj-mode="${m.key}" class="${S.projMode === m.key ? 'primary' : ''}" aria-pressed="${S.projMode === m.key}" title="${E(m.hint)}">${E(m.label)}</button>`).join('')
-}</div>
-      <span class="proj-bar-label">投影字級</span>
-      <div class="proj-scale" role="group" aria-label="投影字級">
-        <button type="button" data-proj-scale="-1" aria-label="縮小投影字級">－</button>
-        <output id="proj-scale-value">${Math.round(S.projScale * 100)}%</output>
-        <button type="button" data-proj-scale="1" aria-label="放大投影字級">＋</button>
-      </div>
-      <label class="proj-check"><input type="checkbox" id="proj-only-answered" ${onlyAnswered ? 'checked' : ''}>只顯示已作答的組別</label>
+function switchHTML(on) {
+  return `<span class="sw-track${on ? ' is-on' : ''}" aria-hidden="true"><span class="sw-knob"></span></span>`;
+}
+
+function pickerHTML(fields, list) {
+  let title = '';
+  let note = '';
+  let items = '';
+  if (S.projMode === 'single') {
+    if (!fields.length) return '';
+    title = '顯示欄位';
+    note = '← → 切換';
+    items = fields.map((f) => `<button type="button" class="chip${S.projField === f.key ? ' is-on' : ''}" data-proj-field="${E(f.key)}" aria-pressed="${S.projField === f.key}" title="${E(f.label)}">${E(truncate(f.label, 10).shown)}</button>`).join('');
+  } else if (S.projMode === 'group' || S.projMode === 'compare') {
+    if (!list.length) return '';
+    const isCompare = S.projMode === 'compare';
+    title = isCompare ? '比較組別' : '顯示組別';
+    note = isCompare ? `已選 ${S.projGroups.length}／${COMPARE_MAX_GROUPS}` : '← → 切換';
+    items = list.map(([gid, g]) => `<button type="button" class="chip${S.projGroups.includes(gid) ? ' is-on' : ''}" data-proj-group="${E(gid)}" aria-pressed="${S.projGroups.includes(gid)}">${E(g.name)}</button>`).join('');
+  } else return '';
+  return `<div class="proj-ctl-block">
+      <div class="proj-ctl-row"><span class="proj-ctl-label">${title}</span><span class="proj-ctl-note">${note}</span></div>
+      <div class="chip-row" role="group" aria-label="${title}">${items}</div>
     </div>`;
 }
 
-function pickerBar(fields, list) {
-  if (S.projMode === 'single') {
-    if (!fields.length) return '';
-    return `<div class="toolbar proj-bar proj-picker">
-        <span class="proj-bar-label">顯示欄位</span>
-        <div class="proj-chip-row" role="group" aria-label="顯示欄位">${
-  fields.map((f) => `<button type="button" data-proj-field="${E(f.key)}" class="${S.projField === f.key ? 'primary' : ''}" aria-pressed="${S.projField === f.key}">${E(f.label)}</button>`).join('')
+/** 控制台右欄：投影視窗、顯示方式、欄位／組別、字級、底色、只顯示已作答 */
+export function projectionControls() {
+  ensureScale();
+  const fields = fieldsOf(S.qid);
+  const list = baseGroups();
+  normalizeSelection(fields, list);
+  return `<div class="proj-controls" id="proj-controls">
+      <div class="proj-ctl-block">
+        <div class="proj-ctl-row"><b class="proj-ctl-title">投影</b><span class="status-pill" id="proj-win-status">投影視窗未開啟</span></div>
+        <div class="proj-win-buttons">
+          <button type="button" class="navy-btn" id="open-projector">另開投影視窗</button>
+          <button type="button" class="ghost-btn" id="project">本機全螢幕</button>
+        </div>
+        <p class="proj-ctl-hint">延伸螢幕：把投影視窗拖到投影機，這裡繼續操作。只有一個螢幕：按全螢幕，Esc 回控制台。</p>
+      </div>
+      <div class="proj-ctl-block">
+        <span class="proj-ctl-label">顯示方式</span>
+        <div class="proj-mode-list" role="group" aria-label="投影模式">${
+  MODES.map((m) => `<button type="button" class="proj-mode-btn${S.projMode === m.key ? ' is-on' : ''}" data-proj-mode="${m.key}" aria-pressed="${S.projMode === m.key}"><b>${E(m.label)}</b><span>${E(m.hint)}</span></button>`).join('')
 }</div>
-        <span class="muted">也可以按鍵盤左右鍵（或簡報筆的上下頁）切換欄位。</span>
-      </div>`;
-  }
-  if (S.projMode === 'group' || S.projMode === 'compare') {
-    if (!list.length) return '';
-    const isCompare = S.projMode === 'compare';
-    return `<div class="toolbar proj-bar proj-picker">
-        <span class="proj-bar-label">${isCompare ? `顯示組別（最多 ${COMPARE_MAX_GROUPS} 組）` : '顯示組別'}</span>
-        <div class="proj-chip-row" role="group" aria-label="顯示組別">${
-  list.map(([gid, g]) => `<button type="button" data-proj-group="${E(gid)}" class="${S.projGroups.includes(gid) ? 'primary' : ''}" aria-pressed="${S.projGroups.includes(gid)}">${E(g.name)}</button>`).join('')
+      </div>
+      ${pickerHTML(fields, list)}
+      <div class="proj-ctl-block proj-ctl-settings">
+        <div class="proj-ctl-row"><span class="proj-ctl-name">字級</span>
+          <div class="proj-scale" role="group" aria-label="投影字級">
+            <button type="button" data-proj-scale="-1" aria-label="縮小投影字級">－</button>
+            <output id="proj-scale-value">${Math.round(S.projScale * 100)}%</output>
+            <button type="button" data-proj-scale="1" aria-label="放大投影字級">＋</button>
+          </div>
+        </div>
+        <div class="proj-ctl-row"><span class="proj-ctl-name">底色</span>
+          <div class="seg" role="group" aria-label="投影底色">${
+  THEMES.map(([k, label]) => `<button type="button" data-proj-theme="${k}" class="${S.projTheme === k ? 'is-on' : ''}" aria-pressed="${S.projTheme === k}">${label}</button>`).join('')
 }</div>
-        <span class="muted">${isCompare ? '再按一次可取消選取。' : '也可以按鍵盤左右鍵切換組別。'}</span>
-      </div>`;
-  }
-  return '';
+        </div>
+        <label class="proj-ctl-row proj-check"><span class="proj-ctl-name">只顯示已作答的組別</span><input type="checkbox" role="switch" class="switch-input switch-sm" id="proj-only-answered" ${onlyAnswered ? 'checked' : ''}></label>
+        <div class="proj-key-hint">鍵盤 ← → 或簡報筆：單題模式切換欄位、單組模式切換組別。</div>
+      </div>
+    </div>`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 對外：整段 HTML
+// 對外：投影內容
 // ──────────────────────────────────────────────────────────────────────────────
-export function projectionSection() {
-  ensureScale();
+function areaBody() {
   dotRegistry = [];
   expandStore = [];
   if (!MODES.some((m) => m.key === S.projMode)) S.projMode = 'dots';
@@ -344,22 +403,70 @@ export function projectionSection() {
   const list = baseGroups();
   normalizeSelection(fields, list);
   const shown = selectedGroups(list);
-  let body;
-  if (S.projMode === 'dots') body = renderDots(list, fields);
-  else if (S.projMode === 'single') body = renderSingleField(list, fields);
-  else if (S.projMode === 'group') body = renderRowsTable(shown, fields, MAX_ONE_GROUP, 'proj-one-group');
-  else if (S.projMode === 'compare') body = renderRowsTable(shown, fields, MAX_COMPARE, 'proj-compare');
-  else body = renderRowsTable(shown, fields, MAX_OVERVIEW, 'proj-overview');
+  if (S.projMode === 'dots') return renderDots(list, fields);
+  if (S.projMode === 'single') {
+    const field = fields.find((f) => f.key === S.projField);
+    return `${field ? `<div class="proj-field-title">${E(field.label)}</div>` : ''}${renderSingleField(list, fields)}`;
+  }
+  if (S.projMode === 'group') return renderOneGroup(shown, fields);
+  if (S.projMode === 'compare') return renderRowsTable(shown, fields, MAX_COMPARE, 'proj-compare');
+  return renderRowsTable(shown, fields, MAX_OVERVIEW, 'proj-overview');
+}
+
+/** 投影內容本體（控制台中欄與投影舞台共用同一份渲染） */
+export function projectionArea() {
+  ensureScale();
+  const body = areaBody();
+  return `<div class="proj-root" id="proj-root"><div class="proj-area proj-mode-${S.projMode}" id="proj-area" style="--proj-scale:${S.projScale}">${body}</div></div>`;
+}
+
+export function projModeLabel() {
+  return (MODES.find((m) => m.key === S.projMode) || MODES[0]).label;
+}
+
+export { legendHTML as projectionLegend };
+
+/** 目前題目的各組進度：控制台摘要卡與投影頁尾共用 */
+export function projectionCounts() {
+  const qid = S.qid;
+  const counts = { done: 0, draft: 0, none: 0, total: 0 };
+  Object.values(S.course.groups).forEach((g) => {
+    counts.total += 1;
+    if (g.complete && g.complete[qid]) counts.done += 1;
+    else if (g.updated && g.updated[qid]) counts.draft += 1;
+    else counts.none += 1;
+  });
+  return counts;
+}
+
+/**
+ * 投影舞台：本機全螢幕或另開的投影視窗。只有投影內容，沒有任何控制項；
+ * 1920×1080、字級以 --proj-scale 調整（投影字級 28px 以上的門檻見檔頭）。
+ */
+export function projectionStage() {
+  ensureScale();
   const ex = currentEx();
-  const hint = (MODES.find((m) => m.key === S.projMode) || {}).hint || '';
-  return `<section class="proj-root" id="proj-root">
-      ${modeBar()}
-      ${pickerBar(fields, list)}
-      <p class="status-line proj-hint">${E(hint)}${
-  onlyAnswered ? '｜已隱藏尚未作答的組別' : ''
-}${ex ? `｜${E(ex.title)}` : ''}</p>
-      <div class="proj-area" id="proj-area" style="--proj-scale:${S.projScale}">${body}</div>
-    </section>`;
+  const n = exNumber(S.qid);
+  const body = ex ? areaBody() : emptyNotice('目前沒有可投影的練習。');
+  const c = projectionCounts();
+  const shown = selectedGroups(baseGroups());
+  const field = fieldsOf(S.qid).find((f) => f.key === S.projField);
+  const fields = fieldsOf(S.qid);
+  let foot = `${shown.length} 組`;
+  if (S.projMode === 'dots') foot = `已完成 ${c.done} 組 · 草稿 ${c.draft} 組 · 尚未作答 ${c.none} 組`;
+  else if (S.projMode === 'single') foot = `欄位 ${Math.max(1, fields.indexOf(field) + 1)}／${fields.length}`;
+  else if (S.projMode === 'group') foot = shown.length ? `${shown[0][1].name} 發表中` : '';
+  return `<div class="proj-stage" data-proj-theme="${E(S.projTheme)}">
+      <div class="proj-stage-head">
+        <div class="proj-stage-title"><span class="proj-stage-eyebrow">${n >= 0 ? exLabel(n) : ''} · ${E(projModeLabel())}</span><b>${E(ex ? ex.title : '')}</b></div>
+        <div class="proj-stage-code"><span>加入代碼</span><b>${E(S.session.code)}</b></div>
+      </div>
+      <div class="proj-stage-body proj-root" id="proj-root"><div class="proj-area proj-mode-${S.projMode}" id="proj-area" style="--proj-scale:${S.projScale}">${body}</div></div>
+      <div class="proj-stage-foot"><span>${E(foot)}</span>${S.projMode === 'dots' ? legendHTML() : ''}</div>
+      <div class="proj-stage-tools">${isProjectorWindow
+    ? '<button type="button" id="stage-fullscreen">全螢幕</button>'
+    : '<button type="button" id="project">回控制台（Esc）</button>'}</div>
+    </div>`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -391,6 +498,50 @@ function applyScale(step) {
   if (area) area.style.setProperty('--proj-scale', String(next));
   const out = document.querySelector('#proj-scale-value');
   if (out) out.textContent = `${Math.round(next * 100)}%`;
+  publishProjState(projSnapshot());
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 與投影視窗同步（見 projwin.js）
+// ──────────────────────────────────────────────────────────────────────────────
+function projSnapshot() {
+  return {
+    qid: S.qid, projMode: S.projMode, projField: S.projField, projGroups: [...(S.projGroups || [])],
+    projScale: S.projScale, projTheme: S.projTheme, onlyAnswered,
+  };
+}
+
+/** 講師改了投影呈現方式：先通知另一個視窗，再重畫自己 */
+function commit() {
+  publishProjState(projSnapshot());
+  rerender();
+}
+
+/** 控制台換了題目等不經過這個模組的改動，也要讓投影視窗跟上 */
+export function syncProjection() {
+  publishProjState(projSnapshot());
+}
+
+function applyIncoming(st) {
+  if (!S.course || !S.session || S.session.role !== 'teacher') return;
+  ensureScale();
+  if (st.qid && S.course.byQid[st.qid] && exNumber(st.qid) >= 0) S.qid = st.qid;
+  if (MODES.some((m) => m.key === st.projMode)) S.projMode = st.projMode;
+  if (typeof st.projField === 'string') S.projField = st.projField;
+  if (Array.isArray(st.projGroups)) S.projGroups = st.projGroups.filter((x) => typeof x === 'string');
+  if (st.projScale) S.projScale = clampScale(st.projScale);
+  if (THEMES.some(([k]) => k === st.projTheme)) S.projTheme = st.projTheme;
+  onlyAnswered = !!st.onlyAnswered;
+  rerender();
+}
+
+setSnapshotProvider(projSnapshot);
+onProjState(applyIncoming);
+
+function setTheme(theme) {
+  S.projTheme = theme;
+  saveJSON(THEME_KEY, theme);
+  commit();
 }
 
 function cycleField(step) {
@@ -427,38 +578,51 @@ function onKeyDown(e) {
   else if (S.projMode === 'group') moved = cycleGroup(step);
   if (!moved) return;
   e.preventDefault();
-  rerender();
+  commit();
+}
+
+function showDotDetail(root, cell) {
+  const panel = root.querySelector('#proj-dot-detail');
+  root.querySelectorAll('.proj-dot-cell.is-selected').forEach((c) => {
+    c.classList.remove('is-selected');
+    c.setAttribute('aria-expanded', 'false');
+  });
+  if (!panel) return;
+  const gid = cell && cell.dataset.dotGid;
+  const key = cell && cell.dataset.dotKey;
+  const g = gid ? S.course.groups[gid] : null;
+  const field = key ? fieldsOf(S.qid).find((f) => f.key === key) : null;
+  if (!cell || !g || !field || openCell === `${gid}|${key}`) {
+    openCell = null;
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+  openCell = `${gid}|${key}`;
+  cell.classList.add('is-selected');
+  cell.setAttribute('aria-expanded', 'true');
+  const text = fieldText(field, g.answers[S.qid] || {});
+  const cut = truncate(text, MAX_DOT_PREVIEW);
+  panel.innerHTML = `<div class="proj-dot-detail-head"><b>${E(g.name)}｜${E(field.label)}</b><button type="button" class="link" data-dot-close>收合</button></div>${
+    String(text).trim() ? `<div class="answer">${E(cut.shown)}</div>` : '<div class="empty">— 尚未填寫</div>'
+  }`;
+  if (cut.truncated) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'link';
+    b.textContent = '展開全文';
+    b.onclick = () => expandDialog(`${g.name}｜${field.label}`, text);
+    panel.appendChild(b);
+  }
+  panel.querySelector('[data-dot-close]').onclick = () => { openCell = `${gid}|${key}`; showDotDetail(root, null); };
+  panel.hidden = false;
 }
 
 function bindDotCells(root) {
   root.querySelectorAll('.proj-dot-cell').forEach((cell) => {
     const toggle = () => {
-      const open = cell.querySelector('.proj-dot-detail');
-      if (open) { open.remove(); cell.setAttribute('aria-expanded', 'false'); return; }
-      const gid = cell.dataset.dotGid;
-      const key = cell.dataset.dotKey;
-      const g = S.course.groups[gid];
-      const field = fieldsOf(S.qid).find((f) => f.key === key);
-      if (!g || !field) return;
-      const text = fieldText(field, g.answers[S.qid] || {});
-      const box = document.createElement('div');
-      box.className = 'proj-dot-detail';
-      if (!String(text).trim()) {
-        box.innerHTML = '<span class="empty">— 尚未填寫</span>';
-      } else {
-        const cut = truncate(text, MAX_DOT_PREVIEW);
-        box.innerHTML = `<span class="answer">${E(cut.shown)}</span>`;
-        if (cut.truncated) {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'link';
-          b.textContent = '展開全文';
-          b.onclick = (ev) => { ev.stopPropagation(); expandDialog(`${g.name}｜${field.label}`, text); };
-          box.appendChild(b);
-        }
-      }
-      cell.appendChild(box);
-      cell.setAttribute('aria-expanded', 'true');
+      if (openCell === `${cell.dataset.dotGid}|${cell.dataset.dotKey}`) showDotDetail(root, null);
+      else showDotDetail(root, cell);
     };
     cell.onclick = toggle;
     cell.onkeydown = (ev) => {
@@ -467,28 +631,39 @@ function bindDotCells(root) {
       toggle();
     };
   });
+  // 重畫（例如別組剛存檔）之後還原原本展開的那一格，講師不用再點一次。
+  if (openCell) {
+    const [gid, key] = openCell.split('|');
+    const cell = [...root.querySelectorAll('.proj-dot-cell')].find((c) => c.dataset.dotGid === gid && c.dataset.dotKey === key);
+    openCell = null;
+    if (cell) showDotDetail(root, cell);
+  }
 }
 
 export function bindProjection() {
   disposeProjection();
   const root = document.querySelector('#proj-root');
   if (!root) return;
+  const controls = document.querySelector('#proj-controls') || root;
 
-  root.querySelectorAll('[data-proj-mode]').forEach((b) => {
-    b.onclick = () => { S.projMode = b.dataset.projMode; rerender(); };
+  controls.querySelectorAll('[data-proj-mode]').forEach((b) => {
+    b.onclick = () => { S.projMode = b.dataset.projMode; openCell = null; commit(); };
   });
-  root.querySelectorAll('[data-proj-scale]').forEach((b) => {
+  controls.querySelectorAll('[data-proj-scale]').forEach((b) => {
     b.onclick = () => applyScale(Number(b.dataset.projScale));
   });
-  const only = root.querySelector('#proj-only-answered');
-  if (only) only.onchange = () => { onlyAnswered = only.checked; rerender(); };
-  root.querySelectorAll('[data-proj-field]').forEach((b) => {
-    b.onclick = () => { S.projField = b.dataset.projField; rerender(); };
+  controls.querySelectorAll('[data-proj-theme]').forEach((b) => {
+    b.onclick = () => setTheme(b.dataset.projTheme);
   });
-  root.querySelectorAll('[data-proj-group]').forEach((b) => {
+  const only = controls.querySelector('#proj-only-answered');
+  if (only) only.onchange = () => { onlyAnswered = only.checked; commit(); };
+  controls.querySelectorAll('[data-proj-field]').forEach((b) => {
+    b.onclick = () => { S.projField = b.dataset.projField; commit(); };
+  });
+  controls.querySelectorAll('[data-proj-group]').forEach((b) => {
     b.onclick = () => {
       const gid = b.dataset.projGroup;
-      if (S.projMode === 'group') { S.projGroups = [gid]; rerender(); return; }
+      if (S.projMode === 'group') { S.projGroups = [gid]; commit(); return; }
       if (S.projGroups.includes(gid)) {
         if (S.projGroups.length === 1) { notify('比較模式至少要選一組。'); return; }
         S.projGroups = S.projGroups.filter((x) => x !== gid);
@@ -499,7 +674,7 @@ export function bindProjection() {
         }
         S.projGroups = [...S.projGroups, gid];
       }
-      rerender();
+      commit();
     };
   });
   root.querySelectorAll('[data-proj-expand]').forEach((b) => {
@@ -510,6 +685,8 @@ export function bindProjection() {
     };
   });
   bindDotCells(root);
+  if (document.querySelector('#proj-win-status')) bindProjectorStatus();
+  if (isProjectorWindow) startProjectorBeacon();
 
   // 活動標記的訂閱：回呼裡只改狀態點的 class，絕不 rerender()。
   // root 已經不在文件裡（畫面被其他模組重畫過）就自己解除訂閱，避免殭屍訂閱對已移除的 DOM 動手。

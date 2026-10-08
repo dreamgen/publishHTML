@@ -5,7 +5,7 @@ import {
   E, exLabel, notify, randomId,
 } from './util.js';
 import {
-  shell, tabs, bindTabs, noQuestionsNotice, expandDialog, truncate,
+  shell, noQuestionsNotice, expandDialog, truncate,
 } from './ui.js';
 import {
   courseRef, update, remove,
@@ -20,7 +20,11 @@ import {
 } from './schema.js';
 import { forgetCourse } from './storage.js';
 import { clearActivityForQuestion, clearEnteredForQuestion } from './live.js';
-import { projectionSection, bindProjection, disposeProjection } from './projection.js';
+import {
+  projectionArea, projectionControls, projectionStage, projectionCounts, projectionLegend, projModeLabel,
+  bindProjection, disposeProjection, syncProjection,
+} from './projection.js';
+import { isProjectorWindow, openProjectorWindow, startProjectorBeacon } from './projwin.js';
 import {
   beginEditQuestion, beginNewQuestion, confirmLockQuestion, archivedSection, bindArchivedSection,
 } from './editor.js';
@@ -108,44 +112,50 @@ export function groupManageSection() {
   const entries = sortedGroups();
   const total = S.course.exercises.length;
   const allow = S.course.allowStudentGroupNames;
-  const rows = entries.length
-    ? entries.map(([gid, g]) => {
+  const cards = entries.length
+    ? `<div class="group-cards">${entries.map(([gid, g]) => {
       const archives = Object.keys(g.archives || {}).length;
-      return `<div class="group-row"><div class="group-row-main"><b>${E(g.name)}</b><div class="muted">${
-        g.author ? `加入者：${E(g.author)}` : '尚未有人加入'
-      } · 已作答 ${groupAnsweredCount(g)}／${total} 題${archives ? ` · 封存內容 ${archives} 筆` : ''}</div></div><div class="toolbar"><button type="button" class="small" data-rename-group="${E(gid)}">改名</button><button type="button" class="small danger" data-delete-group="${E(gid)}">刪除</button></div></div>`;
-    }).join('')
+      return `<div class="group-row group-card">
+          <div class="group-card-head"><b>${E(g.name)}</b><span>已作答 ${groupAnsweredCount(g)}／${total}</span></div>
+          <span class="group-card-meta">${g.author ? `加入者：${E(g.author)}` : '尚未有人加入'}${archives ? ` · 封存內容 ${archives} 筆` : ''}</span>
+          <div class="group-card-actions">
+            <button type="button" class="ghost-btn" data-rename-group="${E(gid)}">改名</button>
+            ${entries.length >= 2 ? `<button type="button" class="ghost-btn" data-merge-from="${E(gid)}">合併到…</button>` : ''}
+            <span class="flex-spacer"></span>
+            <button type="button" class="text-danger-btn" data-delete-group="${E(gid)}">刪除</button>
+          </div>
+        </div>`;
+    }).join('')}</div>`
     : '<div class="notice">目前還沒有任何小組。請在下方先建立組別，學員才能加入；若已允許學員自訂組名，學員也可以自己輸入新的組別。</div>';
 
   const mergeTools = entries.length >= 2
-    ? `<div class="group-merge-tools"><h3>合併小組</h3>
-      <p>用在同一組被分成兩筆的時候（例如兩個人各自輸入了不同寫法的組名）。合併會把其中一組的答案併進另一組，再刪除被併入的那一組。這是破壞性動作，無法復原。</p>
-      <div class="toolbar">
-        <label for="merge-keep">保留這一組</label>
-        <select id="merge-keep">${entries.map(([gid, g], i) => `<option value="${E(gid)}" ${i === 0 ? 'selected' : ''}>${E(g.name)}</option>`).join('')}</select>
-        <label for="merge-drop">併入並刪除</label>
+    ? `<div class="group-merge-tools prep-card" id="merge-tools"><b>合併小組</b>
+      <span class="prep-card-note">用在同一組被分成兩筆的時候（例如兩個人各自輸入了不同寫法的組名）。合併會把其中一組的答案併進另一組，再刪除被併入的那一組。這是破壞性動作，無法復原。</span>
+      <div class="merge-row">
+        <label for="merge-drop">把這一組</label>
         <select id="merge-drop">${entries.map(([gid, g], i) => `<option value="${E(gid)}" ${i === 1 ? 'selected' : ''}>${E(g.name)}</option>`).join('')}</select>
-        <button type="button" id="merge-start">檢視合併內容</button>
+        <label for="merge-keep">併入</label>
+        <select id="merge-keep">${entries.map(([gid, g], i) => `<option value="${E(gid)}" ${i === 0 ? 'selected' : ''}>${E(g.name)}</option>`).join('')}</select>
+        <button type="button" class="ghost-btn" id="merge-start">檢視合併內容</button>
       </div></div>`
     : '';
 
-  return `<section class="manage card group-manage">
-      <h2>小組管理</h2>
-      <p>小組的身分是系統給的固定編號，名稱只是標籤：改名不會影響任何已經存好的答案。目前共 ${entries.length} 組，一場課程上限 ${MAX_GROUPS} 組。</p>
-      <div class="group-rows">${rows}</div>
+  return `<section class="prep-pane group-manage">
+      <div class="prep-head"><h2>小組</h2><span class="prep-head-note">${entries.length} 組 · 上限 ${MAX_GROUPS} 組 · 改名不影響答案</span></div>
+      <div class="group-rows">${cards}</div>
       <div class="group-add">
-        <div class="group-add-item">
+        <div class="prep-card group-add-item">
           <label for="new-group-name">新增一個小組</label>
-          <div class="toolbar"><input id="new-group-name" maxlength="100" placeholder="例如：第 1 組"><button type="button" class="primary" id="add-group">新增</button></div>
+          <div class="inline-row"><input id="new-group-name" maxlength="100" placeholder="例如：第 ${entries.length + 1} 組"><button type="button" class="navy-btn" id="add-group">新增</button></div>
         </div>
-        <div class="group-add-item">
+        <div class="prep-card group-add-item">
           <label for="new-group-count">一次產生多組</label>
-          <div class="toolbar"><input id="new-group-count" type="number" min="1" max="${MAX_GROUPS}" value="6"><button type="button" id="add-group-batch">產生「第 1 組」～「第 N 組」</button></div>
+          <div class="inline-row"><span>第 1 組 ～ 第</span><input id="new-group-count" class="count-input" type="number" min="1" max="${MAX_GROUPS}" value="6"><span>組</span><span class="flex-spacer"></span><button type="button" class="ghost-btn" id="add-group-batch">產生</button></div>
         </div>
       </div>
-      <p class="muted">名稱比對時會忽略空白與全形半形差異，「第 1 組」與「第1組」會被當成同一組，已經存在的不會重複建立。</p>
-      <label class="choice group-allow"><input type="checkbox" id="allow-student-names" ${allow ? 'checked' : ''}><span><b>允許學員自行輸入組別名稱</b><br>關閉時，學員只能從你建立的組別中選擇；若還沒有任何組別，學員會看到「講師尚未建立小組，請稍候」的等待畫面，你一建立組別他們的畫面就會自動更新。</span></label>
+      <label class="prep-card switch-card group-allow"><span class="switch-card-text"><b>允許學員自行輸入組別名稱</b><span>關閉時，學員只能從上面的組別中選擇；還沒有任何組別時，學員會停在等待畫面，你一建立組別就會自動更新。</span></span><input type="checkbox" role="switch" class="switch-input" id="allow-student-names" ${allow ? 'checked' : ''}></label>
       ${mergeTools}
+      <p class="prep-foot-note">名稱比對時會忽略空白與全形半形差異，「第 1 組」與「第1組」會被當成同一組，已經存在的不會重複建立。</p>
     </section>`;
 }
 
@@ -239,6 +249,23 @@ export function bindGroupManage() {
       } finally { allowBox.disabled = false; }
     };
   }
+
+  // 卡片上的「合併到…」只是幫忙預選下方合併工具的「把這一組」，真正的確認仍走 openMergeDialog。
+  document.querySelectorAll('[data-merge-from]').forEach((button) => {
+    button.onclick = () => {
+      const drop = document.querySelector('#merge-drop');
+      const keep = document.querySelector('#merge-keep');
+      if (!drop || !keep) return;
+      drop.value = button.dataset.mergeFrom;
+      if (keep.value === drop.value) {
+        const other = [...keep.options].find((o) => o.value !== drop.value);
+        if (other) keep.value = other.value;
+      }
+      const tools = document.querySelector('#merge-tools');
+      if (tools) tools.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      keep.focus();
+    };
+  });
 
   const mergeStart = document.querySelector('#merge-start');
   if (mergeStart) {
@@ -355,97 +382,312 @@ export function openMergeDialog(keepGid, dropGid) {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 9.2 控制台版面
+//
+// 講師控制台分成兩個模式，用頁首的切換鈕切換：
+//   課前準備：題目、小組、匯入／匯出、課程設定（左側分頁）。所有「會改結構」的操作都在這裡。
+//   上課中：  左欄逐題開關、中欄進度摘要＋作答監看、右欄投影控制。上課時只需要看這一頁。
+// 投影（S.projection）時整個控制台換成投影舞台，只剩投影內容。
+// ──────────────────────────────────────────────────────────────────────────────
+const PREP_TABS = [['q', '題目'], ['g', '小組'], ['d', '匯入／匯出'], ['s', '課程設定']];
+
+/** 題目的建議時間只取第一段（「8 分鐘｜小組 5 分鐘…」→「8 分鐘」），控制台空間有限 */
+function shortTime(exDef) {
+  return String((exDef && exDef.time) || '').split('｜')[0].trim();
+}
+
+function exHeadLabel(i, exDef) {
+  const t = shortTime(exDef);
+  return `${exLabel(i)}${t ? ` · ${E(t)}` : ''}`;
+}
+
+function completedCount(qid) {
+  return Object.values(S.course.groups).filter((g) => g.complete && g.complete[qid]).length;
+}
+
+function teacherHeaderExtra() {
+  const mode = S.teacherMode;
+  return `<div class="mode-switch" role="group" aria-label="控制台模式">${
+    [['prep', '課前準備'], ['live', '上課中']].map(([k, label]) => `<button type="button" data-teacher-mode="${k}" class="${mode === k ? 'is-on' : ''}" aria-pressed="${mode === k}">${label}</button>`).join('')
+  }</div><div class="header-spacer"></div>
+    <div class="code-box"><span>加入代碼</span><b>${E(S.session.code)}</b><button type="button" id="join-qr">顯示 QR</button></div>`;
+}
+
+function switchTrack(on) {
+  return `<span class="sw-track${on ? ' is-on' : ''}" aria-hidden="true"><span class="sw-knob"></span></span>`;
+}
+
+// ── 上課中 ──────────────────────────────────────────────────────────────────
+function liveLayout() {
+  const total = Object.keys(S.course.groups).length;
+  const gates = S.course.exercises.map((t, i) => {
+    const open = !S.course.locks[t.qid];
+    const sel = t.qid === S.qid;
+    return `<div class="ex-row${sel ? ' is-selected' : ''}">
+        <button type="button" class="ex-row-main" data-select-ex="${E(t.qid)}" aria-current="${sel ? 'true' : 'false'}">
+          <span class="ex-row-label">${exHeadLabel(i, t)}</span>
+          <b class="ex-row-title">${E(t.title)}</b>
+          <span class="ex-row-meta${open ? ' is-open' : ''}">${open ? `${completedCount(t.qid)}／${total} 組完成` : '學員看不到'}</span>
+        </button>
+        <button type="button" class="ex-gate" role="switch" aria-checked="${open}" data-gate="${E(t.qid)}" aria-label="${open ? '關閉' : '開放'}${exLabel(i)}">
+          ${switchTrack(open)}<span class="ex-gate-state">${open ? '開放中' : '關閉'}</span>
+        </button>
+      </div>`;
+  }).join('');
+  const aside = `<aside class="console-left">
+      <div class="console-left-head"><b>練習</b><span>開關即時生效</span></div>
+      <div class="exercise-gates">${gates}</div>
+      <div class="console-left-foot">要編輯、刪除題目，請到「課前準備」。</div>
+    </aside>`;
+  const current = currentEx();
+  if (!current) {
+    return `${aside}<section class="console-center">${noQuestionsNotice()}<p class="muted">到「課前準備」新增或匯入題目。</p></section><aside class="console-right"></aside>`;
+  }
+  const n = exNumber(S.qid);
+  const open = !S.course.locks[S.qid];
+  const c = projectionCounts();
+  const dots = S.projMode === 'dots';
+  return `${aside}
+    <section class="console-center">
+      <div class="center-head">
+        <div class="center-title"><div class="center-eyebrow">${exHeadLabel(n, current)}</div><h2>${E(current.title)}</h2></div>
+        <span class="state-pill${open ? ' is-open' : ''}">${open ? '開放中 · 學員可作答' : '關閉中'}</span>
+      </div>
+      <div class="summary-cards">
+        <div class="summary-card"><span>已完成</span><b>${c.done}<small> ／ ${c.total} 組</small></b></div>
+        <div class="summary-card"><span>草稿中</span><b>${c.draft}<small> 組</small></b></div>
+        <div class="summary-card"><span>尚未作答</span><b>${c.none}<small> 組</small></b></div>
+      </div>
+      <div class="monitor-card">
+        <div class="monitor-head"><b>${dots ? '作答監看' : `投影預覽 · ${E(projModeLabel())}`}</b>${dots ? projectionLegend() : ''}</div>
+        <div class="monitor-body">${projectionArea()}</div>
+      </div>
+      <p class="console-note" id="connection">${dots ? '點任一格看該組內容。橘點不會自動熄滅，儲存後轉為綠點。' : '答案即時同步 · 投影畫面與這裡的預覽內容相同。'}</p>
+    </section>
+    <aside class="console-right">${projectionControls()}</aside>`;
+}
+
+// ── 課前準備 ────────────────────────────────────────────────────────────────
+function prepQuestions(importLocked) {
+  const list = S.course.exercises.map((t, i) => {
+    const open = !S.course.locks[t.qid];
+    const answered = answeredCount(t.qid);
+    const t2 = shortTime(t);
+    const meta = `${(t.fields || []).length} 個欄位${t2 ? ` · ${E(t2)}` : ''}${answered ? ` · ${answered} 組已作答` : ' · 尚無作答'}`;
+    const note = open ? '需先關閉才能編輯' : (answered ? '編輯時會先封存原題' : '');
+    const menuOpen = S.prepMenu === t.qid;
+    return `<div class="prep-q">
+        <div class="prep-q-num">${i + 1}</div>
+        <div class="prep-q-body"><b>${E(t.title)}</b><span>${meta}</span></div>
+        <span class="state-pill sm${open ? ' is-open' : ''}">${open ? '開放中' : '關閉'}</span>
+        <div class="prep-q-actions">
+          <div class="prep-q-buttons">
+            <button type="button" class="outline-btn${open ? ' is-blocked' : ''}" data-edit-ex="${E(t.qid)}" aria-disabled="${open}" aria-label="編輯${exLabel(i)}">編輯</button>
+            <button type="button" class="outline-btn more-btn" data-prep-menu="${E(t.qid)}" aria-expanded="${menuOpen}" aria-label="${exLabel(i)}的更多操作">···</button>
+          </div>
+          ${menuOpen ? `<div class="prep-q-menu">
+            ${answered ? `<button type="button" class="danger-soft-btn" data-clear-ex="${E(t.qid)}">清除此題各組答案…</button>` : ''}
+            <button type="button" class="danger-soft-btn" data-del-ex="${E(t.qid)}" aria-label="刪除${exLabel(i)}">刪除此題（含各組答案）</button>
+          </div>` : ''}
+          ${note ? `<span class="prep-q-note">${note}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  return `<section class="prep-pane prep-questions">
+      <div class="prep-head">
+        <h2>題目</h2>
+        <div class="prep-head-actions">
+          <button type="button" class="outline-btn" id="dl-template">下載範本 JSON</button>
+          <button type="button" class="outline-btn" id="import-questions" ${importLocked ? 'disabled' : ''}>匯入題目 JSON</button>
+          <input id="import-questions-file" type="file" accept=".json,application/json" hidden>
+          <button type="button" class="navy-btn" id="new-exercise">＋ 新增一題</button>
+        </div>
+      </div>
+      ${importLocked
+    ? '<div class="prep-warn">已有組別存過答案，「匯入題目 JSON」已停用。要整份重新匯入，請先在「課程設定」重置本場課程；或改用「新增一題」與各題的「編輯」。</div>'
+    : '<p class="prep-sub">匯入題目會取代目前全部練習內容；課程開始有答案之後匯入就會停用，屆時請改用「新增一題」與各題的「編輯」。</p>'}
+      ${S.course.exercises.length ? `<p class="prep-sub">目前共 ${S.course.exercises.length} 個練習</p><div class="prep-q-list">${list}</div>` : noQuestionsNotice()}
+      ${archivedSection()}
+    </section>`;
+}
+
+function prepData() {
+  return `<section class="prep-pane prep-data">
+      <h2>匯入／匯出答案</h2>
+      <div class="prep-card">
+        <b>匯出全部答案</b>
+        <div class="prep-row"><button type="button" class="navy-btn" id="export-json">JSON（可再匯入還原）</button><button type="button" class="outline-btn" id="export-csv">CSV（Excel 閱讀）</button></div>
+      </div>
+      <div class="prep-card">
+        <b>從備份還原答案</b>
+        <span class="prep-card-note">同名組別的答案會由備份取代，其他組別不受影響。</span>
+        <div><button type="button" class="outline-btn" id="import-json">選擇 JSON 備份檔</button><input id="import-file" type="file" accept=".json,application/json" hidden></div>
+      </div>
+    </section>`;
+}
+
+function prepSettings() {
+  return `<section class="prep-pane prep-settings">
+      <h2>課程設定</h2>
+      <div class="prep-card">
+        <span class="prep-card-note">課程名稱</span>
+        <b class="course-name-text">${E(S.course.name)}</b>
+      </div>
+      <div class="danger-zone">
+        <div class="danger-zone-head">無法復原的操作</div>
+        <div class="danger-zone-row"><div><b>重置本場課程</b><span>清空全部組別與答案、關閉所有練習，題目保留。</span></div><button type="button" class="danger-outline-btn" id="reset">重置…</button></div>
+        <div class="danger-zone-row"><div><b>刪除整個課程</b><span>題目、組別、答案全部刪除，需輸入課程名稱確認。</span></div><button type="button" class="danger-fill-btn" id="delete-course">刪除課程…</button></div>
+      </div>
+    </section>`;
+}
+
+function prepLayout(importLocked) {
+  const counts = { q: S.course.exercises.length, g: Object.keys(S.course.groups).length };
+  const nav = `<nav class="prep-nav" aria-label="課前準備">${
+    PREP_TABS.map(([k, label]) => `<button type="button" data-prep-tab="${k}" class="${S.prepTab === k ? 'is-on' : ''}" aria-current="${S.prepTab === k ? 'page' : 'false'}"><span>${label}</span><span class="prep-nav-count">${counts[k] ?? ''}</span></button>`).join('')
+  }<div class="prep-nav-fill"></div><div class="prep-nav-foot">準備好之後切到「上課中」，再逐題開放。</div></nav>`;
+  let pane = '';
+  if (S.prepTab === 'g') pane = groupManageSection();
+  else if (S.prepTab === 'd') pane = prepData();
+  else if (S.prepTab === 's') pane = prepSettings();
+  else pane = prepQuestions(importLocked);
+  return `${nav}<div class="prep-main">${pane}</div>`;
+}
+
+// ── 刪除／清除單題（課前準備的「···」選單） ─────────────────────────────────
+async function deleteQuestion(button, qid) {
+  const target = S.course.byQid[qid];
+  if (!target) return;
+  const answered = answeredCount(qid);
+  const warning = answered ? `目前有 ${answered} 組在這一題已經作答，答案會一併永久刪除。\n` : '';
+  if (!confirm(`確定刪除「${exLabel(exNumber(qid))}｜${target.title}」？\n\n${warning}後面的練習會自動往前遞補題號，其他練習的答案保留。此操作無法復原。`)) return;
+  button.disabled = true;
+  try {
+    await deleteExercise(S.session.code, S.course, qid);
+    // 題目沒了，掛在它身上的 live 輔助標記（橘點、已進入）留著只會是永遠不會被讀到的垃圾。
+    await clearActivityForQuestion(S.session.code, qid);
+    await clearEnteredForQuestion(S.session.code, qid);
+    if (S.qid === qid) S.qid = firstQid();
+    S.prepMenu = null;
+    notify(`已刪除「${target.title}」。`);
+  } catch (e) {
+    notify(e.message);
+    button.disabled = false;
+  }
+}
+
+async function clearQuestionAnswers(qid) {
+  const target = S.course.byQid[qid];
+  if (!target) return;
+  if (!confirm(`確定清除所有組別的「${exLabel(exNumber(qid))}｜${target.title}」答案？其他練習會保留。此操作無法復原。`)) return;
+  try {
+    const updates = {};
+    Object.keys(S.course.groups).forEach((gid) => {
+      updates[`groups/${gid}/answers/${qid}`] = '{}';
+      updates[`groups/${gid}/complete/${qid}`] = false;
+      updates[`groups/${gid}/updated/${qid}`] = 0;
+      updates[`groups/${gid}/revision/${qid}`] = (S.course.groups[gid].revision[qid] || 0) + 1;
+    });
+    await update(courseRef(S.session.code), updates);
+    // 答案清掉了，活動標記也要跟著清：否則橘點會留在一個已經沒有答案的欄位上，變成假訊號。
+    await clearActivityForQuestion(S.session.code, qid);
+    // 「已進入」標記同理：不清的話，接下來關閉這一題時還會彈出「已經有 N 組進入這一題」的假警訊。
+    await clearEnteredForQuestion(S.session.code, qid);
+    S.prepMenu = null;
+    notify('本題答案已清除。');
+  } catch (e) { notify(e.message); }
+}
+
+// ── 投影：本機全螢幕 ───────────────────────────────────────────────────────
+function leaveLocalProjection() {
+  if (!S.projection || isProjectorWindow) return;
+  S.projection = false;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  renderTeacher();
+}
+
+function enterLocalProjection() {
+  S.projection = true;
+  renderTeacher();
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => { /* 瀏覽器不允許時就停在視窗內的投影畫面，Esc 一樣能回去 */ });
+}
+
+let fullscreenBound = false;
+function bindFullscreenExit() {
+  if (fullscreenBound) return;
+  fullscreenBound = true;
+  // 使用者按 Esc 退出全螢幕時，瀏覽器只會發 fullscreenchange，不會把 Esc 交給頁面。
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && S.projection && !isProjectorWindow && S.session && S.session.role === 'teacher') leaveLocalProjection();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && S.projection && !isProjectorWindow && S.session && S.session.role === 'teacher' && !document.querySelector('dialog[open]')) leaveLocalProjection();
+  });
+}
+
 export function renderTeacher() {
   // 重畫會換掉整棵 DOM：先解除上一輪投影區的 live 訂閱與鍵盤監聽，否則殭屍訂閱會對已移除的節點動手。
   disposeProjection();
   ensureMigrated(S.session.code);
   const hasEx = S.course.exercises.length > 0;
-  const groupCount = Object.keys(S.course.groups).length;
-  // 匯入降級為開課前的準備動作：一旦有任何答案就停用（理由寫在按鈕下方的說明裡）。
+  // 匯入降級為開課前的準備動作：一旦有任何答案就停用（理由寫在題目分頁的警示裡）。
   const importLocked = courseHasAnswers(S.course);
   // S.qid 指不到任何已開放題目時（剛進控制台、或這一題剛被刪掉）自動回到第一題。
   if (exNumber(S.qid) < 0) S.qid = firstQid();
-  const current = currentEx();
-  const n = exNumber(S.qid);
-  shell(`<div class="context"><div class="eyebrow">講師控制台</div><h1>${E(S.course.name)}</h1></div>
-    <section class="manage card">
-      <h2>課程資訊與題目管理</h2>
-      <div class="course-item"><b>學員加入代碼</b><span><code style="font-size:1.4rem">${E(S.session.code)}</code></span></div>
-      <p class="muted" style="margin-top:10px">學員在首頁輸入這組代碼即可加入；也可以按「學員加入 QR Code」投影出來讓學員掃描。</p>
-      <div class="toolbar">
-        <button id="join-qr" class="primary">學員加入 QR Code</button>
-        <button id="new-exercise">新增一題</button>
-        <button id="dl-template">下載題目範本 JSON</button>
-        <button id="import-questions" ${importLocked ? 'disabled' : ''}>匯入題目 JSON</button>
-        <input id="import-questions-file" type="file" accept=".json,application/json" hidden>
-        <button class="danger" id="delete-course">刪除整個課程</button>
-      </div>
-      <p class="muted">${importLocked
-    ? '「匯入題目 JSON」已停用：這場課程已經有組別存過答案。匯入是整份取代，在封存／還原的語意下無法判斷「新的第 2 題」是舊第 2 題的修改版還是全新題目，硬對應只會製造無聲的資料損失。要重新匯入請先按下方的「重置本場課程」（會清掉全部組別與答案），或改用「新增一題」與各題的「編輯」逐題調整。'
-    : '匯入題目會取代目前全部練習內容；已存在的組別答案中，欄位不符者將會清空。課程開始有答案之後匯入就會停用，屆時請改用「新增一題」與各題的「編輯」。'}${
-    hasEx ? `目前共 ${S.course.exercises.length} 個練習：${S.course.exercises.map((e2) => E(e2.title)).join('、')}` : ''
-  }</p>
-    </section>
-    ${groupManageSection()}
-    ${archivedSection()}
-    ${!hasEx || !current ? noQuestionsNotice() : `
-    ${tabs()}
-    <div class="toolbar projection-tools">
-      <label for="exercise-select">展示題目</label>
-      <select id="exercise-select">${S.course.exercises.map((t, i) => `<option value="${E(t.qid)}" ${t.qid === S.qid ? 'selected' : ''}>${exLabel(i)}｜${E(t.title)}</option>`).join('')}</select>
-      <label for="group-select">組別</label>
-      <select id="group-select"><option value="all">全部組別（${groupCount} 組）</option>${
-    Object.entries(S.course.groups).map(([k, g]) => `<option value="${E(k)}" ${S.groupFilter === k ? 'selected' : ''}>${E(g.name)}</option>`).join('')
-  }</select>
-      <button id="project">${S.projection ? '退出投影' : '簡潔投影'}</button>
-    </div>
-    <section class="manage card" style="margin-top:24px">
-      <h2>課程進度｜練習開關</h2>
-      <p>未開放的練習，學員無法進入或查看。可依進度逐題開放，關閉不會刪除答案。「刪除」則會連同各組在該題的答案一起移除，無法復原。
-        「編輯」必須先關閉該題（用流程約束取代技術鎖，避免講師編到一半學員剛好存檔）；已經有組別作答的題目，編輯時會先封存原題再複製出一題新的。</p>
-      <div class="exercise-gates">${S.course.exercises.map((t, i) => `<div class="gate-row"><div><b>${exLabel(i)}｜${E(t.title)}</b><div class="muted">${
-    S.course.locks[t.qid] ? '未開放' : '已開放，學員可進入'
-  }${answeredCount(t.qid) ? ` · ${answeredCount(t.qid)} 組已作答` : ''}</div></div><div class="toolbar"><button type="button" role="switch" aria-checked="${!S.course.locks[t.qid]}" data-gate="${E(t.qid)}" class="${
-    S.course.locks[t.qid] ? '' : 'primary'
-  }">${S.course.locks[t.qid] ? '開放' : '關閉'}${exLabel(i)}</button><button type="button" data-edit-ex="${E(t.qid)}" aria-label="編輯${exLabel(i)}">編輯</button><button type="button" class="danger" data-del-ex="${E(t.qid)}" aria-label="刪除${exLabel(i)}">刪除</button></div></div>`).join('')}</div>
-      <div class="toolbar">
-        <button id="export-json">匯出全部答案 JSON</button>
-        <button id="export-csv">匯出全部答案 CSV</button>
-        <button id="import-json">匯入答案 JSON</button>
-        <input id="import-file" type="file" accept=".json,application/json" hidden>
-      </div>
-      <div class="toolbar" style="margin-top:18px">
-        <button class="danger" id="clear">清除${S.groupFilter === 'all' ? '所有組別' : '所選組別'}本題答案</button>
-        <button class="danger" id="reset">重置本場課程</button>
-      </div>
-    </section>
-    <h1>${exLabel(n)}｜${E(current.title)}</h1>
-    <p class="status-line" id="connection">答案即時同步 · 作答進行中看狀態點，要分享時再切到單題／單組／比較／全覽</p>
-    ${projectionSection()}`}`);
+  // 群組篩選下拉已移除：控制台一律看全部組別。
+  S.groupFilter = 'all';
+  if (isProjectorWindow) S.projection = true;
+  if (S.teacherMode !== 'prep' && S.teacherMode !== 'live') S.teacherMode = hasEx ? 'live' : 'prep';
+  bindFullscreenExit();
 
-  document.querySelector('#dl-template').onclick = downloadTemplate;
-  document.querySelector('#import-questions').onclick = () => document.querySelector('#import-questions-file').click();
-  document.querySelector('#import-questions-file').onchange = importQuestionsFile;
+  // ── 投影舞台 ──
+  if (S.projection) {
+    shell(projectionStage(), { layout: 'stage' });
+    const back = document.querySelector('.proj-stage #project');
+    if (back) back.onclick = leaveLocalProjection;
+    const full = document.querySelector('#stage-fullscreen');
+    if (full) {
+      full.onclick = () => {
+        const el = document.documentElement;
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        else if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      };
+    }
+    if (hasEx && currentEx()) bindProjection();
+    else if (isProjectorWindow) startProjectorBeacon();
+    return;
+  }
+
+  const live = S.teacherMode === 'live';
+  shell(`<h1 class="sr-only">講師控制台｜${E(S.course.name)}</h1>
+    <div class="console-grid ${live ? 'is-live' : 'is-prep'}">${live ? liveLayout() : prepLayout(importLocked)}</div>`, {
+    layout: 'console',
+    headerExtra: teacherHeaderExtra(),
+  });
+
+  document.querySelectorAll('[data-teacher-mode]').forEach((b) => {
+    b.onclick = () => { S.teacherMode = b.dataset.teacherMode; renderTeacher(); };
+  });
   document.querySelector('#join-qr').onclick = openJoinQR;
-  // 刪除課程放在最上層區塊並在這裡綁定：還沒匯入題目的課程也必須刪得掉。
-  document.querySelector('#delete-course').onclick = async () => {
-    if (prompt(`這會永久刪除整個課程「${S.course.name}」，包含題目與所有組別答案，無法復原。請輸入課程名稱確認。`) !== S.course.name) return;
-    // 先留存代碼：課程一被刪除，onValue 會立刻收到 null 並把 session 清空。
-    const code = S.session.code;
-    try {
-      await remove(courseRef(code));
-      await clearLiveCourse(code).catch(() => { /* live 是易變資料，清不掉不影響課程已被刪除的事實 */ });
-      forgetCourse(code);
-      notify('課程已刪除。');
-    } catch (e) { notify(e.message); }
-  };
-  // 小組管理、新增題目與封存區塊在「還沒有題目」的課程也要能用：綁定放在提前 return 之前。
-  bindGroupManage();
-  document.querySelector('#new-exercise').onclick = () => beginNewQuestion(S.session.code);
-  bindArchivedSection(S.session.code);
-  if (!hasEx || !current) return;
 
-  bindTabs();
+  if (!live) {
+    document.querySelectorAll('[data-prep-tab]').forEach((b) => {
+      b.onclick = () => { S.prepTab = b.dataset.prepTab; S.prepMenu = null; renderTeacher(); };
+    });
+    bindPrepPane();
+    return;
+  }
+
+  document.querySelectorAll('[data-select-ex]').forEach((b) => {
+    b.onclick = () => {
+      if (S.qid === b.dataset.selectEx) return;
+      S.qid = b.dataset.selectEx;
+      renderTeacher();
+      syncProjection();
+    };
+  });
   document.querySelectorAll('[data-gate]').forEach((button) => {
     button.onclick = async () => {
       const qid = button.dataset.gate;
@@ -456,74 +698,71 @@ export function renderTeacher() {
       try { await setLock(S.session.code, qid, locking); } catch (e) { notify(e.message); button.disabled = false; }
     };
   });
-  document.querySelectorAll('[data-edit-ex]').forEach((button) => {
-    button.onclick = () => beginEditQuestion(S.session.code, button.dataset.editEx);
-  });
-  document.querySelectorAll('[data-del-ex]').forEach((button) => {
-    button.onclick = async () => {
-      const qid = button.dataset.delEx;
-      const target = S.course.byQid[qid];
-      if (!target) return;
-      const answered = answeredCount(qid);
-      const warning = answered ? `目前有 ${answered} 組在這一題已經作答，答案會一併永久刪除。\n` : '';
-      if (!confirm(`確定刪除「${exLabel(exNumber(qid))}｜${target.title}」？\n\n${warning}後面的練習會自動往前遞補題號，其他練習的答案保留。此操作無法復原。`)) return;
-      button.disabled = true;
-      try {
-        await deleteExercise(S.session.code, S.course, qid);
-        // 題目沒了，掛在它身上的 live 輔助標記（橘點、已進入）留著只會是永遠不會被讀到的垃圾。
-        await clearActivityForQuestion(S.session.code, qid);
-        await clearEnteredForQuestion(S.session.code, qid);
-        if (S.qid === qid) S.qid = firstQid();
-        notify(`已刪除「${target.title}」。`);
-      } catch (e) {
-        notify(e.message);
-        button.disabled = false;
-      }
-    };
-  });
-  document.querySelector('#exercise-select').onchange = (e) => { S.qid = e.target.value; renderTeacher(); };
-  document.querySelector('#group-select').onchange = (e) => { S.groupFilter = e.target.value; renderTeacher(); };
-  document.querySelector('#project').onclick = () => { S.projection = !S.projection; renderTeacher(); };
-  document.querySelector('#export-json').onclick = () => exportData('json');
-  document.querySelector('#export-csv').onclick = () => exportData('csv');
-  document.querySelector('#import-json').onclick = () => document.querySelector('#import-file').click();
-  document.querySelector('#import-file').onchange = importAnswersFile;
-
-  document.querySelector('#clear').onclick = async () => {
-    if (!confirm(`確定清除${S.groupFilter === 'all' ? '所有組別' : '所選組別'}的${exLabel(exNumber(S.qid))}答案？其他練習會保留。此操作無法復原。`)) return;
-    try {
-      const qid = S.qid;
-      const targets = Object.keys(S.course.groups).filter((k) => S.groupFilter === 'all' || k === S.groupFilter);
-      const updates = {};
-      targets.forEach((gid) => {
-        updates[`groups/${gid}/answers/${qid}`] = '{}';
-        updates[`groups/${gid}/complete/${qid}`] = false;
-        updates[`groups/${gid}/updated/${qid}`] = 0;
-        updates[`groups/${gid}/revision/${qid}`] = (S.course.groups[gid].revision[qid] || 0) + 1;
-      });
-      await update(courseRef(S.session.code), updates);
-      // 答案清掉了，活動標記也要跟著清：否則橘點會留在一個已經沒有答案的欄位上，變成假訊號。
-      await clearActivityForQuestion(S.session.code, qid);
-      // 「已進入」標記同理：不清的話，接下來關閉這一題時還會彈出「已經有 N 組進入這一題」的假警訊。
-      await clearEnteredForQuestion(S.session.code, qid);
-      notify('本題答案已清除。');
-    } catch (e) { notify(e.message); }
+  if (!hasEx || !currentEx()) return;
+  document.querySelector('#open-projector').onclick = () => {
+    if (openProjectorWindow() === false) notify('瀏覽器擋下了新視窗。請允許這個網站開啟彈出式視窗，或改用「本機全螢幕」。');
   };
-
-  document.querySelector('#reset').onclick = async () => {
-    if (prompt('這會移除全部組別及全部練習答案，並關閉所有練習（題目保留）。請輸入「重置課程」確認。') !== '重置課程') return;
-    try {
-      const updates = { groups: null };
-      S.course.all.forEach((exDef) => { updates[`locks/${exDef.qid}`] = true; });
-      await update(courseRef(S.session.code), updates);
-      await clearLiveCourse(S.session.code).catch(() => { /* 同上：清不掉只是留下垃圾，不影響重置結果 */ });
-      S.groupFilter = 'all';
-      notify('課程已重置，全部組別與答案已清空。');
-    } catch (e) { notify(e.message); }
-  };
+  document.querySelector('#project').onclick = enterLocalProjection;
 
   // 投影區的綁定放在最後：它會重新登記 live 訂閱，必須在這一輪 DOM 都建好之後。
   bindProjection();
+}
+
+function bindPrepPane() {
+  const tab = S.prepTab;
+  if (tab === 'g') { bindGroupManage(); return; }
+  if (tab === 'd') {
+    document.querySelector('#export-json').onclick = () => exportData('json');
+    document.querySelector('#export-csv').onclick = () => exportData('csv');
+    document.querySelector('#import-json').onclick = () => document.querySelector('#import-file').click();
+    document.querySelector('#import-file').onchange = importAnswersFile;
+    return;
+  }
+  if (tab === 's') {
+    // 刪除課程放在課程設定並在這裡綁定：還沒匯入題目的課程也必須刪得掉。
+    document.querySelector('#delete-course').onclick = async () => {
+      if (prompt(`這會永久刪除整個課程「${S.course.name}」，包含題目與所有組別答案，無法復原。請輸入課程名稱確認。`) !== S.course.name) return;
+      // 先留存代碼：課程一被刪除，onValue 會立刻收到 null 並把 session 清空。
+      const code = S.session.code;
+      try {
+        await remove(courseRef(code));
+        await clearLiveCourse(code).catch(() => { /* live 是易變資料，清不掉不影響課程已被刪除的事實 */ });
+        forgetCourse(code);
+        notify('課程已刪除。');
+      } catch (e) { notify(e.message); }
+    };
+    document.querySelector('#reset').onclick = async () => {
+      if (prompt('這會移除全部組別及全部練習答案，並關閉所有練習（題目保留）。請輸入「重置課程」確認。') !== '重置課程') return;
+      try {
+        const updates = { groups: null };
+        S.course.all.forEach((exDef) => { updates[`locks/${exDef.qid}`] = true; });
+        await update(courseRef(S.session.code), updates);
+        await clearLiveCourse(S.session.code).catch(() => { /* 同上：清不掉只是留下垃圾，不影響重置結果 */ });
+        S.groupFilter = 'all';
+        notify('課程已重置，全部組別與答案已清空。');
+      } catch (e) { notify(e.message); }
+    };
+    return;
+  }
+  // 題目分頁
+  document.querySelector('#dl-template').onclick = downloadTemplate;
+  document.querySelector('#import-questions').onclick = () => document.querySelector('#import-questions-file').click();
+  document.querySelector('#import-questions-file').onchange = importQuestionsFile;
+  document.querySelector('#new-exercise').onclick = () => beginNewQuestion(S.session.code);
+  bindArchivedSection(S.session.code);
+  document.querySelectorAll('[data-edit-ex]').forEach((button) => {
+    // 開放中的題目，編輯器自己會擋下並說明要先關閉（按鈕只是看起來停用，點了才會看到理由）。
+    button.onclick = () => beginEditQuestion(S.session.code, button.dataset.editEx);
+  });
+  document.querySelectorAll('[data-prep-menu]').forEach((b) => {
+    b.onclick = () => { S.prepMenu = S.prepMenu === b.dataset.prepMenu ? null : b.dataset.prepMenu; renderTeacher(); };
+  });
+  document.querySelectorAll('[data-del-ex]').forEach((button) => {
+    button.onclick = () => deleteQuestion(button, button.dataset.delEx);
+  });
+  document.querySelectorAll('[data-clear-ex]').forEach((button) => {
+    button.onclick = () => clearQuestionAnswers(button.dataset.clearEx);
+  });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

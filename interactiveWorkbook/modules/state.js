@@ -25,6 +25,10 @@ export const S = {
   projScale: 1.2,   // 投影字級倍率；1.2 讓簡潔投影的 24px 基準達到 28px 門檻（見 projection.js）
   projField: null,
   projGroups: [],
+  projTheme: 'dark',  // 投影底色 'dark'|'light'，存 localStorage（見 projection.js）
+  teacherMode: null,  // 講師控制台：'prep' 課前準備｜'live' 上課中；null 表示依題目數自動決定
+  prepTab: 'q',       // 課前準備的分頁：'q' 題目｜'g' 小組｜'d' 匯入／匯出｜'s' 課程設定
+  prepMenu: null,     // 課前準備題目列「···」選單目前展開的 qid
   live: { activity: {}, editLocks: {} },
   lastStudentSignature: '',
 };

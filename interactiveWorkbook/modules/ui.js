@@ -11,10 +11,18 @@ import { applyDefaults } from './student.js';
 export function shell(body, options = {}) {
   window.__iwBooted = true; // 告訴 index.html 的看門狗：程式已經正常啟動
   document.body.classList.toggle('projection', S.projection);
+  // layout：'console' 是講師控制台的滿版三欄、'stage' 是投影舞台（不顯示頁首），其他畫面維持置中窄版。
+  const layout = options.layout || '';
+  document.body.classList.toggle('teacher-console', layout === 'console');
+  document.body.classList.toggle('proj-stage-mode', layout === 'stage');
+  document.body.classList.toggle('student-mode', !!(S.session && S.session.role === 'student'));
   const subtitle = options.subtitle ?? (S.course ? S.course.name : '線上小組練習');
-  document.querySelector('#app').innerHTML = `<header><div><b>互動題本</b><small>${E(subtitle)}</small></div>${
+  const header = layout === 'stage' ? '' : `<header><div class="header-title"><b>互動題本</b><small>${E(subtitle)}</small></div>${
+    options.headerExtra || ''
+  }${
     S.session ? `<button id="logout">離開${S.session.role === 'teacher' ? '講師模式' : '本組'}</button>` : ''
-  }</header><main class="wrap">${body}</main>`;
+  }</header>`;
+  document.querySelector('#app').innerHTML = `${header}<main class="${layout ? layout : 'wrap'}">${body}</main>`;
   const logout = document.querySelector('#logout');
   if (logout) {
     logout.onclick = () => {
