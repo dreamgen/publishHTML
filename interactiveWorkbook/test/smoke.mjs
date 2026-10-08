@@ -567,6 +567,7 @@ async function main() {
     // ── S13 投影舞台與另開投影視窗 ──────────────────────────────────────────
     // 本機全螢幕：控制台整頁換成投影舞台，字不得小於 28px，Esc 回控制台。
     // 另開視窗：投影視窗只顯示舞台，控制台切模式時投影視窗跟著切（BroadcastChannel，不寫資料庫）。
+    // QR：舞台上按加入代碼開 QR 頁；有投影視窗時，控制台的「顯示 QR」改顯示在投影視窗，兩邊都能收起。
     await step('S13 投影舞台與投影視窗', async () => {
       await teacherMode(teacherPage, 'live');
       await teacherPage.locator('[data-proj-mode="compare"]').click();
@@ -581,6 +582,12 @@ async function main() {
         return min;
       });
       if (minFont < 28) throw Error(`投影舞台有文字小於 28px（最小 ${minFont}px）。`);
+      // 舞台上的加入代碼可直接按出 QR 頁；關閉後仍停在舞台
+      await teacherPage.locator('#stage-join-qr').click();
+      await teacherPage.locator('dialog.join-screen[open]').waitFor({ timeout: 5000 });
+      await teacherPage.locator('#close-join').click();
+      await teacherPage.locator('dialog.join-screen').waitFor({ state: 'detached', timeout: 5000 });
+      await teacherPage.locator('.proj-stage #proj-area').waitFor({ timeout: 5000 });
       await teacherPage.keyboard.press('Escape');
       await teacherPage.locator('.console-grid.is-live').waitFor({ timeout: 8000 });
 
@@ -602,8 +609,23 @@ async function main() {
         await new Promise((r) => setTimeout(r, 150));
       }
       if (!cls.includes('proj-mode-group')) throw Error('控制台切到「單組」之後，投影視窗沒有跟著切：' + cls);
+
+      // 有投影視窗時，控制台的「顯示 QR」改在投影視窗顯示，控制台本身不開 QR 頁
+      await teacherPage.locator('#join-qr').click();
+      await popup.locator('dialog.join-screen[open]').waitFor({ timeout: 6000 });
+      if (await teacherPage.locator('dialog.join-screen').count()) throw Error('有投影視窗時，控制台不該自己開 QR 頁。');
+      await waitForText(teacherPage, '#join-qr', '收起投影 QR');
+      // 在投影視窗按「返回投影畫面」，控制台的按鈕要跟著變回來
+      await popup.locator('#close-join').click();
+      await popup.locator('dialog.join-screen').waitFor({ state: 'detached', timeout: 5000 });
+      await waitForText(teacherPage, '#join-qr', '顯示 QR');
+      // 從控制台收起
+      await teacherPage.locator('#join-qr').click();
+      await popup.locator('dialog.join-screen[open]').waitFor({ timeout: 6000 });
+      await teacherPage.locator('#join-qr').click();
+      await popup.locator('dialog.join-screen').waitFor({ state: 'detached', timeout: 6000 });
       await popup.close();
-      return `舞台最小字級 ${minFont}px，投影視窗同步正常`;
+      return `舞台最小字級 ${minFont}px，投影視窗同步正常，QR 依投影視窗／舞台代碼開啟`;
     });
   } finally {
     if (studentCtx) await studentCtx.close().catch(() => {});

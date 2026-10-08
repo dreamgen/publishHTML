@@ -24,7 +24,9 @@ import {
   projectionArea, projectionControls, projectionStage, projectionCounts, projectionLegend, projModeLabel,
   bindProjection, disposeProjection, syncProjection,
 } from './projection.js';
-import { isProjectorWindow, openProjectorWindow, startProjectorBeacon } from './projwin.js';
+import {
+  isProjectorWindow, onJoinQR, openProjectorWindow, projectorConnected, publishJoinQR, startProjectorBeacon,
+} from './projwin.js';
 import {
   beginEditQuestion, beginNewQuestion, confirmLockQuestion, archivedSection, bindArchivedSection,
 } from './editor.js';
@@ -659,12 +661,15 @@ export function renderTeacher() {
   if (isProjectorWindow) S.projection = true;
   if (S.teacherMode !== 'prep' && S.teacherMode !== 'live') S.teacherMode = hasEx ? 'live' : 'prep';
   bindFullscreenExit();
+  bindJoinQRChannel();
 
   // ── 投影舞台 ──
   if (S.projection) {
     shell(projectionStage(), { layout: 'stage' });
     const back = document.querySelector('.proj-stage #project');
     if (back) back.onclick = leaveLocalProjection;
+    // 舞台上的加入代碼本身就是按鈕：按了直接顯示 QR，不必先回控制台
+    document.querySelector('#stage-join-qr').onclick = () => openJoinQR({ backLabel: '返回投影畫面' });
     const full = document.querySelector('#stage-fullscreen');
     if (full) {
       full.onclick = () => {
@@ -688,7 +693,8 @@ export function renderTeacher() {
   document.querySelectorAll('[data-teacher-mode]').forEach((b) => {
     b.onclick = () => { S.teacherMode = b.dataset.teacherMode; renderTeacher(); };
   });
-  document.querySelector('#join-qr').onclick = openJoinQR;
+  document.querySelector('#join-qr').onclick = onJoinQRButton;
+  paintJoinButton();
 
   if (!live) {
     document.querySelectorAll('[data-prep-tab]').forEach((b) => {
@@ -1012,19 +1018,30 @@ export function joinURL(code) {
   return location.origin + location.pathname.replace(/index\.html$/, '') + '?c=' + encodeURIComponent(code);
 }
 
-export function openJoinQR() {
+/** 沒有組別又不允許學員自訂組名時先問一次；回傳 false 表示講師選擇先回去開組 */
+function confirmJoinWithoutGroups() {
+  // 學員掃碼只會看到等待畫面。講師常常是「先投影 QR、再想到要開組」，在這裡先問一次比讓全班卡在等待畫面便宜得多。
+  if (S.course.allowStudentGroupNames || Object.keys(S.course.groups).length) return true;
+  return confirm('目前還沒有任何小組，學員掃碼後只會看到等待畫面。要繼續顯示 QR Code 嗎？（取消則回控制台新增組別）');
+}
+
+let closeJoinDialog = null;
+
+/**
+ * 全螢幕的學員加入頁。options：
+ *   skipConfirm  已在控制台確認過（投影視窗收到指令時用）
+ *   backLabel    關閉鈕的字（投影舞台上要寫「返回投影畫面」）
+ *   onClose      關閉後要做什麼（投影視窗用來通知控制台）
+ */
+export function openJoinQR(options = {}) {
   if (S.joinOpen) return;
-  // 尚未建立任何組別、又不允許學員自訂組名時，學員掃碼只會看到等待畫面。
-  // 講師常常是「先投影 QR、再想到要開組」，在這裡先問一次比讓全班卡在等待畫面便宜得多。
-  if (!S.course.allowStudentGroupNames && !Object.keys(S.course.groups).length) {
-    if (!confirm('目前還沒有任何小組，學員掃碼後只會看到等待畫面。要繼續顯示 QR Code 嗎？（取消則回控制台新增組別）')) return;
-  }
+  if (!options.skipConfirm && !confirmJoinWithoutGroups()) return;
   S.joinOpen = true;
   const url = joinURL(S.session.code);
   const dialog = document.createElement('dialog');
   dialog.className = 'join-screen';
   dialog.setAttribute('aria-labelledby', 'join-title');
-  dialog.innerHTML = `<div class="join-top"><strong>${E(S.course.name)}</strong><button id="close-join">返回講師控制台</button></div>
+  dialog.innerHTML = `<div class="join-top"><strong>${E(S.course.name)}</strong><button id="close-join">${E(options.backLabel || '返回講師控制台')}</button></div>
     <div class="join-body">
       <h1 id="join-title">請掃碼，進入小組練習</h1>
       <p>① 用手機相機掃碼，或到下方網址輸入代碼</p>
@@ -1035,7 +1052,15 @@ export function openJoinQR() {
     </div>`;
   document.body.appendChild(dialog);
   dialog.showModal();
-  const close = () => { S.joinOpen = false; dialog.close(); dialog.remove(); };
+  const close = () => {
+    if (!S.joinOpen) return;
+    S.joinOpen = false;
+    closeJoinDialog = null;
+    dialog.close();
+    dialog.remove();
+    if (options.onClose) options.onClose();
+  };
+  closeJoinDialog = close;
   dialog.querySelector('#close-join').onclick = close;
   dialog.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
   try {
@@ -1044,4 +1069,43 @@ export function openJoinQR() {
   } catch {
     dialog.querySelector('#qr-picture').textContent = 'QR Code 產生失敗，請改用上方代碼或網址。';
   }
+}
+
+export function closeJoinQR() { if (closeJoinDialog) closeJoinDialog(); }
+
+// ── 控制台的「顯示 QR」：有投影視窗就顯示在投影視窗，否則在本機開 ─────────────
+let projQrOpen = false;
+
+function paintJoinButton() {
+  const b = document.querySelector('#join-qr');
+  if (!b) return;
+  const remote = projectorConnected();
+  b.textContent = remote && projQrOpen ? '收起投影 QR' : '顯示 QR';
+  b.title = remote ? '在投影視窗顯示學員加入的 QR Code' : '在這台電腦全螢幕顯示學員加入的 QR Code';
+}
+
+function onJoinQRButton() {
+  if (!projectorConnected()) { openJoinQR(); return; }
+  if (projQrOpen) { publishJoinQR(false); projQrOpen = false; paintJoinButton(); return; }
+  if (!confirmJoinWithoutGroups()) return;
+  publishJoinQR(true);
+  projQrOpen = true;
+  paintJoinButton();
+  notify('已在投影視窗顯示 QR Code。');
+}
+
+let joinQRBound = false;
+function bindJoinQRChannel() {
+  if (joinQRBound) return;
+  joinQRBound = true;
+  onJoinQR((open) => {
+    if (isProjectorWindow) {
+      if (open) openJoinQR({ skipConfirm: true, backLabel: '返回投影畫面', onClose: () => publishJoinQR(false) });
+      else closeJoinQR();
+      return;
+    }
+    // 控制台端：投影視窗那邊被關掉（或重新開啟）時，更新按鈕的字
+    projQrOpen = open;
+    paintJoinButton();
+  });
 }

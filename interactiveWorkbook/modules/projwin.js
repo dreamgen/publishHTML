@@ -4,7 +4,7 @@
 // 延伸螢幕的用法：講師在控制台按「另開投影視窗」，把那個視窗拖到投影機並全螢幕，
 // 控制台這邊繼續切模式、換欄位、調字級，投影視窗即時跟著變。
 //
-// 只同步「投影要怎麼呈現」（題目、模式、欄位、組別、字級、底色、只顯示已作答），
+// 只同步「投影要怎麼呈現」（題目、模式、欄位、組別、字級、底色、只顯示已作答）與學員加入 QR 的開關，
 // 不同步任何答案：兩個視窗各自訂閱同一個課程，答案本來就會即時更新。
 // 走 BroadcastChannel，只在同一台電腦、同一個瀏覽器內傳遞，不寫資料庫。
 // 投影視窗由 window.open 開啟，會複製控制台這個分頁的 sessionStorage，因此不必再登入一次。
@@ -22,6 +22,7 @@ let lastBeat = 0;
 let beatTimer = null;
 let staleTimer = null;
 let stateHandler = null;
+let qrHandler = null;
 let snapshotProvider = null;
 let winRef = null;
 
@@ -39,6 +40,7 @@ function ensureChannel() {
     const msg = ev.data || {};
     if (!msg.code || msg.code !== code()) return;
     if (msg.type === 'state' && stateHandler) stateHandler(msg.state || {});
+    if (msg.type === 'qr' && qrHandler) qrHandler(!!msg.open);
     if (isProjectorWindow) return;
     // 以下是控制台端
     if (msg.type === 'hello' || msg.type === 'beat') {
@@ -47,7 +49,12 @@ function ensureChannel() {
       // 新開的投影視窗先要一份目前狀態，否則它會停在預設的「狀態點」。
       if (msg.type === 'hello' && snapshotProvider) post({ type: 'state', state: snapshotProvider() });
     }
-    if (msg.type === 'bye') { lastBeat = 0; paintStatus(); }
+    if (msg.type === 'bye') {
+      lastBeat = 0;
+      paintStatus();
+      // 投影視窗關了，上面的 QR 自然也不在了
+      if (qrHandler) qrHandler(false);
+    }
   };
   return channel;
 }
@@ -60,6 +67,15 @@ export function setSnapshotProvider(fn) { snapshotProvider = fn; }
 
 /** 講師在任一端改了呈現方式：廣播給另一端 */
 export function publishProjState(state) { post({ type: 'state', state }); }
+
+/**
+ * 學員加入 QR Code：控制台送 open=true 叫投影視窗顯示、false 收起；
+ * 投影視窗那邊被講師直接關掉時，也送 false 回來讓控制台更新按鈕。
+ */
+export function publishJoinQR(open) { post({ type: 'qr', open: !!open }); }
+
+/** 收到對方的 QR 開關時要做什麼（由 teacher.js 登記） */
+export function onJoinQR(fn) { qrHandler = fn; ensureChannel(); }
 
 export function projectorConnected() {
   return !!lastBeat && Date.now() - lastBeat < BEAT_MS * 2;

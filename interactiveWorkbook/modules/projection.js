@@ -459,7 +459,7 @@ export function projectionStage() {
   return `<div class="proj-stage" data-proj-theme="${E(S.projTheme)}">
       <div class="proj-stage-head">
         <div class="proj-stage-title"><span class="proj-stage-eyebrow">${n >= 0 ? exLabel(n) : ''} · ${E(projModeLabel())}</span><b>${E(ex ? ex.title : '')}</b></div>
-        <div class="proj-stage-code"><span>加入代碼</span><b>${E(S.session.code)}</b></div>
+        <button type="button" class="proj-stage-code" id="stage-join-qr" title="顯示學員加入的 QR Code" aria-label="加入代碼 ${E(S.session.code)}，按一下顯示 QR Code"><span>加入代碼</span><b>${E(S.session.code)}</b></button>
       </div>
       <div class="proj-stage-body proj-root" id="proj-root"><div class="proj-area proj-mode-${S.projMode}" id="proj-area" style="--proj-scale:${S.projScale}">${body}</div></div>
       <div class="proj-stage-foot"><span>${E(foot)}</span>${S.projMode === 'dots' ? legendHTML() : ''}</div>

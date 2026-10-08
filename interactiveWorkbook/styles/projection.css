@@ -114,7 +114,9 @@ body.proj-stage-mode #app, body.proj-stage-mode main.stage { height: 100% }
 .proj-stage-title { display: flex; flex-direction: column; gap: 6px; min-width: 0 }
 .proj-stage-eyebrow { font-size: 28px; font-weight: 700; letter-spacing: .06em; color: var(--muted) }
 .proj-stage-title b { font-size: 52px; line-height: 1.2; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.proj-stage-code { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--muted) }
+.proj-stage .proj-stage-code { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 12px; padding: 6px 12px; min-height: 0; font: inherit; cursor: pointer }
+/* 加入代碼可以按（顯示 QR）：平常不畫框以免干擾投影，滑過或鍵盤聚焦時才看得出是按鈕 */
+.proj-stage .proj-stage-code:hover, .proj-stage .proj-stage-code:focus-visible { border-color: var(--line, currentColor); background: rgba(127,127,127,.12) }
 .proj-stage-code span { font-size: 28px }
 .proj-stage-code b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 40px; letter-spacing: .16em; color: var(--fg) }
 
