@@ -7,7 +7,7 @@
  * - Suno 播放器 iframe 屬於 suno.com，不經過本 SW
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_NAME = `sunoRecorder-${SW_VERSION}`;
 const SHARED_CACHE = `sunoRecorder-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];

@@ -99,6 +99,13 @@
             </label>
             <a id="openSuno" class="btn btn-ghost" target="_blank" rel="noopener">在 Suno 開啟 ↗</a>
         </div>
+        <div class="grid sm:grid-cols-[12rem_1fr] gap-2 items-end">
+            <label class="block">
+                <span class="text-xs text-slate-500">歌曲長度（分:秒）</span>
+                <input id="durInput" type="text" inputmode="decimal" placeholder="例如 3:42">
+            </label>
+            <div id="durMsg" class="text-xs text-slate-500 pb-2">用來在播完後自動停止，並避免錄進 Suno 循環播放的第二遍。</div>
+        </div>
     </section>
 
     <!-- ② 錄音 -->
@@ -107,7 +114,7 @@
         <ol class="text-sm text-slate-600 list-decimal pl-5 space-y-1">
             <li>按「開始錄音」，在 Chrome 彈出視窗選擇<b>「此分頁」</b>，並確認<b>「分享分頁音訊」</b>已開啟。</li>
             <li>再按上方 Suno 播放器的 ▶ 播放鍵。開始前、結束後的空白會自動裁掉，不必急著按。</li>
-            <li>歌曲播完會<b>自動停止</b>（可在下方關閉），也可隨時按「停止並轉檔」。</li>
+            <li>有歌曲長度時，會在<b>播完後幾秒自動停止</b>；Suno 循環播放的第二遍會被自動偵測並切掉。也可隨時按「停止並轉檔」。</li>
         </ol>
         <div class="flex flex-wrap gap-2 items-center">
             <button id="startBtn" class="btn btn-primary">● 開始錄音</button>
@@ -121,9 +128,9 @@
         <div id="meter"><div id="meterBar"></div></div>
         <label class="flex items-center gap-2 text-sm text-slate-600">
             <input id="autoStop" type="checkbox" class="w-4 h-4 accent-rose-600">
-            偵測到歌曲結束（持續靜音
+            自動停止（依歌曲長度；沒有長度時改為持續靜音
             <input id="autoStopSec" type="number" min="2" max="30" step="1" class="!w-16 !py-1">
-            秒）自動停止
+            秒後停止）
         </label>
     </section>
 
@@ -133,9 +140,28 @@
         <canvas id="wave"></canvas>
         <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
             <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#fb7185"></span> 保留</span>
-            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#475569"></span> 裁掉的空白</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#475569"></span> 裁掉的部分</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#38bdf8"></span> 第二遍（循環播放）開始</span>
         </div>
         <div id="trimInfo" class="text-sm text-slate-700"></div>
+        <div id="loopInfo" class="text-sm"></div>
+
+        <div class="rounded-xl bg-rose-50 border border-rose-100 p-3 grid sm:grid-cols-[1fr_1fr_auto] gap-3 items-end text-sm">
+            <label class="block">
+                <span class="text-slate-600">保留長度（分:秒）</span>
+                <div class="flex gap-1">
+                    <input id="keepLen" type="text" inputmode="decimal" placeholder="自動">
+                    <button id="keepAuto" class="btn btn-ghost !px-2 !py-1 text-xs" title="改回自動計算">自動</button>
+                </div>
+                <span id="keepHint" class="text-xs text-slate-400">輸出 MP3 的總長度（含開頭保留）；空白＝自動</span>
+            </label>
+            <label class="block">
+                <span class="text-slate-600">結尾淡出（秒）</span>
+                <input id="fadeOut" type="number" min="0" max="15" step="0.5">
+                <span class="text-xs text-slate-400">手動截在歌曲中間時建議 2–4 秒</span>
+            </label>
+            <button id="applyBtn" class="btn btn-dark">套用並重新轉檔</button>
+        </div>
 
         <details id="advanced" class="rounded-xl border border-slate-200 p-3">
             <summary class="text-sm font-medium text-slate-700">⚙️ 裁切與音質設定</summary>
@@ -193,6 +219,7 @@
     'use strict';
     const $ = (id) => document.getElementById(id);
     const SAMPLE_RATE = 48000;
+    const LOOP_EXTRA = 8; // 依長度停止時多錄的秒數
     const LS_SETTINGS = 'sunoRecorder.settings';
     const LS_RECENT = 'sunoRecorder.recent';
     const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -202,7 +229,7 @@
         get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
         set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
     };
-    const DEFAULTS = { thr: -50, padPre: 0.1, padPost: 0.8, kbps: 320, autoStop: true, autoStopSec: 4 };
+    const DEFAULTS = { thr: -50, padPre: 0.1, padPost: 0.8, kbps: 320, autoStop: true, autoStopSec: 4, fadeOut: 0 };
     const settings = Object.assign({}, DEFAULTS, store.get(LS_SETTINGS, {}));
     const saveSettings = () => store.set(LS_SETTINGS, settings);
 
@@ -238,8 +265,57 @@
     }
     function decodeEntities(s) { const t = document.createElement('textarea'); t.innerHTML = s; return t.value; }
 
-    function loadSong(id, title) {
+    // ─── 歌曲長度：分:秒 ↔ 秒 ─────────────────────────────────────────────
+    function parseTime(s) {
+        s = String(s || '').trim().replace('：', ':');
+        if (!s) return null;
+        const parts = s.split(':').map(Number);
+        if (parts.some(x => !isFinite(x) || x < 0)) return null;
+        const v = parts.reduce((acc, x) => acc * 60 + x, 0);
+        return v > 0 ? v : null;
+    }
+    const fmtDur = (s) => { s = Math.round(s * 100) / 100; const m = Math.floor(s / 60); const r = s - m * 60; return m + ':' + (r < 10 ? '0' : '') + (Math.round(r * 100) / 100).toString(); };
+    const songDur = () => parseTime($('durInput').value);
+
+    // 透過 purereader-proxy-cf 讀取 Suno embed 頁面，取出歌曲長度與歌名
+    const PROXY = 'https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=';
+    async function fetchSongInfo(id) {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 12000);
+        try {
+            const res = await fetch(PROXY + encodeURIComponent('https://suno.com/embed/' + id), { signal: ctl.signal });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const html = await res.text();
+            // 優先找與此 id 同一段 JSON 的 duration，找不到就取第一個數值型 duration
+            let dur = null;
+            const idx = html.indexOf(id);
+            const re = /\\?"duration\\?"\s*:\s*([0-9]+(?:\.[0-9]+)?)/g;
+            let m, best = null;
+            while ((m = re.exec(html))) {
+                const d = Math.abs(m.index - idx);
+                if (!best || (idx >= 0 && d < best.d)) best = { v: parseFloat(m[1]), d };
+                if (idx < 0) break;
+            }
+            if (best && best.v > 1) dur = best.v;
+            let title = '';
+            const t = html.match(/<title>([^<]*)<\/title>/i);
+            if (t) {
+                title = decodeEntities(t[1]).replace(/\s*\|\s*Suno\s*$/i, '');
+                const by = title.lastIndexOf(' by ');
+                if (by > 0) title = title.slice(0, by);
+                title = title.trim();
+            }
+            return { dur, title };
+        } finally { clearTimeout(timer); }
+    }
+
+    function loadSong(id, title, dur) {
         current = { id, title: title || '' };
+        const saved = getRecent().find(x => x.id === id);
+        if (!current.title && saved && saved.title) current.title = saved.title;
+        if (!dur && saved && saved.dur) dur = saved.dur;
+        $('durInput').value = dur ? fmtDur(dur) : '';
+        $('durMsg').textContent = dur ? '已記住這首歌的長度。' : '讀取歌曲長度中…';
         const wrap = $('playerWrap');
         wrap.innerHTML = '';
         const f = document.createElement('iframe');
@@ -253,21 +329,33 @@
         $('titleInput').value = current.title;
         $('openSuno').href = 'https://suno.com/song/' + id;
         $('embedMsg').textContent = '已載入 ' + id.slice(0, 8) + '…';
-        addRecent(id, current.title);
+        addRecent(id, { title: current.title, dur: dur || (saved && saved.dur) || null });
+        if (!dur || !current.title) {
+            fetchSongInfo(id).then((info) => {
+                if (!current || current.id !== id) return;
+                const patch = {};
+                if (info.dur && !songDur()) { $('durInput').value = fmtDur(info.dur); patch.dur = info.dur; }
+                if (info.title && !$('titleInput').value.trim()) { $('titleInput').value = info.title; current.title = info.title; patch.title = info.title; }
+                $('durMsg').textContent = info.dur ? '已自動取得歌曲長度（' + fmtDur(info.dur) + '）。' : '無法自動取得長度，請照 Suno 播放器顯示的時間輸入。';
+                updateRecent(id, patch);
+            }).catch(() => {
+                if (current && current.id === id && !songDur()) $('durMsg').textContent = '無法自動取得長度（離線或被阻擋），請照 Suno 播放器顯示的時間輸入。';
+            });
+        }
     }
 
     function getRecent() { return store.get(LS_RECENT, []); }
-    function addRecent(id, title) {
-        let list = getRecent().filter(x => x.id !== id);
-        const old = getRecent().find(x => x.id === id);
-        list.unshift({ id, title: title || (old && old.title) || '', t: Date.now() });
+    function addRecent(id, info) {
+        const old = getRecent().find(x => x.id === id) || {};
+        const list = getRecent().filter(x => x.id !== id);
+        list.unshift({ id, title: info.title || old.title || '', dur: info.dur || old.dur || null, t: Date.now() });
         store.set(LS_RECENT, list.slice(0, 20));
         renderRecent();
     }
-    function updateRecentTitle(id, title) {
+    function updateRecent(id, patch) {
         const list = getRecent();
         const it = list.find(x => x.id === id);
-        if (it) { it.title = title; store.set(LS_RECENT, list); renderRecent(); }
+        if (it) { Object.assign(it, patch); store.set(LS_RECENT, list); renderRecent(); }
     }
     function renderRecent() {
         const list = getRecent();
@@ -281,7 +369,7 @@
             b.className = 'load';
             b.textContent = item.title || item.id.slice(0, 8);
             b.title = item.id;
-            b.onclick = () => { $('embedInput').value = 'https://suno.com/song/' + item.id; loadSong(item.id, item.title); };
+            b.onclick = () => { $('embedInput').value = 'https://suno.com/song/' + item.id; loadSong(item.id, item.title, item.dur); };
             const d = document.createElement('button');
             d.className = 'del';
             d.textContent = '×';
@@ -310,7 +398,15 @@
         } catch { $('embedMsg').textContent = '無法讀取剪貼簿，請直接在框內按 Ctrl/⌘+V 貼上'; }
     };
     $('titleInput').addEventListener('change', () => {
-        if (current) { current.title = $('titleInput').value.trim(); updateRecentTitle(current.id, current.title); }
+        if (current) { current.title = $('titleInput').value.trim(); updateRecent(current.id, { title: current.title }); }
+    });
+    $('durInput').addEventListener('change', () => {
+        const d = songDur();
+        if ($('durInput').value.trim() && !d) { $('durMsg').textContent = '格式看不懂，請輸入例如 3:42 或 222.5'; return; }
+        if (d) $('durInput').value = fmtDur(d);
+        $('durMsg').textContent = d ? '已設定歌曲長度 ' + fmtDur(d) + '。' : '未設定長度：錄音改以靜音判斷停止。';
+        if (current) updateRecent(current.id, { dur: d });
+        if (raw) { raw.loop = undefined; analyse(); drawWave(); }
     });
 
     // ─── 設定 UI ───────────────────────────────────────────────────────────
@@ -328,6 +424,8 @@
             settings[key] = Math.min(max, Math.max(min, v)); $(id).value = settings[key]; saveSettings();
             if (raw && key.startsWith('pad')) { analyse(); drawWave(); }
         };
+        $('fadeOut').value = settings.fadeOut;
+        num('fadeOut', 'fadeOut', 0, 15);
         num('padPre', 'padPre', 0, 5); num('padPost', 'padPost', 0, 10); num('autoStopSec', 'autoStopSec', 2, 30);
         $('kbps').onchange = () => { settings.kbps = +$('kbps').value; saveSettings(); };
         $('autoStop').onchange = () => { settings.autoStop = $('autoStop').checked; saveSettings(); };
@@ -390,7 +488,7 @@
         rec = {
             ctx, src, node, mute, ownerStream: ownerStream || audioStream,
             chunksL: [], chunksR: [], frames: 0,
-            heardFrames: 0, silentFrames: 0, stopping: false, t0: Date.now()
+            heardFrames: 0, silentFrames: 0, levelFrames: 0, firstSound: -1, stopping: false, t0: Date.now()
         };
         const r = rec;
         node.port.onmessage = (e) => {
@@ -399,15 +497,23 @@
                 r.chunksL.push(d.l); r.chunksR.push(d.r); r.frames += d.l.length;
             } else if (d.type === 'level') {
                 $('meterBar').style.width = Math.min(100, Math.sqrt(d.peak) * 100) + '%';
-                if (d.peak >= thrLin()) { r.heardFrames += d.frames; r.silentFrames = 0; }
+                const loud = d.peak >= thrLin();
+                if (loud && r.firstSound < 0) r.firstSound = r.levelFrames;
+                r.levelFrames += d.frames;
+                if (loud) { r.heardFrames += d.frames; r.silentFrames = 0; }
                 else r.silentFrames += d.frames;
                 const sec = (Date.now() - r.t0) / 1000;
+                const dur = songDur();
+                // 有歌曲長度：從第一個聲音起算「長度 + 8 秒」停止（多錄 8 秒供比對第二遍循環的起點）
+                const stopAt = dur && r.firstSound >= 0 ? r.firstSound + (dur + LOOP_EXTRA) * SAMPLE_RATE : 0;
                 let s = '錄音中 ' + fmt(sec);
                 if (!r.heardFrames) s += ' · 等待播放…';
+                else if (stopAt && settings.autoStop) s += ' · 約 ' + Math.max(0, Math.ceil((stopAt - r.levelFrames) / SAMPLE_RATE)) + ' 秒後自動停止';
                 else if (r.silentFrames > SAMPLE_RATE) s += ' · 靜音 ' + (r.silentFrames / SAMPLE_RATE).toFixed(0) + ' 秒';
                 $('recStatus').textContent = s;
-                if (settings.autoStop && r.heardFrames > SAMPLE_RATE * 1.5 && r.silentFrames >= settings.autoStopSec * SAMPLE_RATE) {
-                    stopCapture(true);
+                if (settings.autoStop) {
+                    if (stopAt && r.levelFrames >= stopAt) stopCapture(true);
+                    else if (r.heardFrames > SAMPLE_RATE * 1.5 && r.silentFrames >= settings.autoStopSec * SAMPLE_RATE) stopCapture(true);
                 }
             } else if (d.type === 'flushed') {
                 r.onFlushed && r.onFlushed();
@@ -459,24 +565,129 @@
     }
 
     // ─── ③ 裁切 ────────────────────────────────────────────────────────────
-    let trim = null; // { start, end, sigStart, sigEnd }
+    let trim = null;        // { start, end, sigStart, autoEnd, limit, reason }
+    let manualKeep = null;  // 使用者手動輸入的保留長度（秒），null = 自動
+
+    // 迭代式 radix-2 FFT（in-place）
+    function fft(re, im, inv) {
+        const n = re.length;
+        for (let i = 1, j = 0; i < n; i++) {
+            let bit = n >> 1;
+            for (; j & bit; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+        }
+        for (let len = 2; len <= n; len <<= 1) {
+            const half = len >> 1, ang = (inv ? 2 : -2) * Math.PI / len;
+            const wr = Math.cos(ang), wi = Math.sin(ang);
+            for (let i = 0; i < n; i += len) {
+                let cr = 1, ci = 0;
+                for (let j = 0; j < half; j++) {
+                    const p = i + j, q = p + half;
+                    const vr = re[q] * cr - im[q] * ci, vi = re[q] * ci + im[q] * cr;
+                    re[q] = re[p] - vr; im[q] = im[p] - vi;
+                    re[p] += vr; im[p] += vi;
+                    const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+                }
+            }
+        }
+        if (inv) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+    }
+
+    /**
+     * 偵測 Suno 循環播放：取第一遍開頭 0.5 s 後的 5 秒當指紋，
+     * 在錄音後段找「幾乎一模一樣」的位置（正規化互相關），那就是第二遍的起點。
+     * 有歌曲長度時只在「長度 −3 s ～ 長度 +12 s」附近找，更快也更不會誤判副歌重複。
+     */
+    const DEC = 24; // 48 kHz → 2 kHz 做比對
+    function detectLoop(L, R, sr, sigStart, dur) {
+        const fs = sr / DEC;
+        const nD = Math.floor(L.length / DEC);
+        const x = new Float64Array(nD);
+        for (let i = 0, k = 0; i < nD; i++) { let s = 0; for (let j = 0; j < DEC; j++, k++) s += L[k] + R[k]; x[i] = s / (2 * DEC); }
+        const tLen = Math.round(5 * fs);
+        const tPos = Math.floor(sigStart / DEC) + Math.round(0.5 * fs);
+        let minLag, maxLag;
+        if (dur) { minLag = Math.max(Math.round(8 * fs), Math.round((dur - 3) * fs)); maxLag = Math.round((dur + LOOP_EXTRA + 4) * fs); }
+        else { minLag = Math.round(15 * fs); maxLag = nD; }
+        maxLag = Math.min(maxLag, nD - tLen - tPos);
+        if (tPos + tLen > nD || maxLag <= minLag) return null;
+
+        let mean = 0;
+        for (let i = 0; i < tLen; i++) mean += x[tPos + i];
+        mean /= tLen;
+        let tn = 0;
+        const T = new Float64Array(tLen);
+        for (let i = 0; i < tLen; i++) { T[i] = x[tPos + i] - mean; tn += T[i] * T[i]; }
+        tn = Math.sqrt(tn);
+        if (tn < 1e-4) return null; // 指紋段幾乎無聲
+
+        const segStart = tPos + minLag, segLen = maxLag - minLag + tLen;
+        let N = 1; while (N < segLen + tLen) N <<= 1;
+        const ar = new Float64Array(N), ai = new Float64Array(N), br = new Float64Array(N), bi = new Float64Array(N);
+        ar.set(T);
+        for (let i = 0; i < segLen; i++) br[i] = x[segStart + i];
+        fft(ar, ai, false); fft(br, bi, false);
+        for (let i = 0; i < N; i++) { // conj(A) * B
+            const r = ar[i] * br[i] + ai[i] * bi[i], im = ar[i] * bi[i] - ai[i] * br[i];
+            br[i] = r; bi[i] = im;
+        }
+        fft(br, bi, true);
+        // 滑動視窗能量做正規化
+        const ps = new Float64Array(segLen + 1), ps2 = new Float64Array(segLen + 1);
+        for (let i = 0; i < segLen; i++) { const v = x[segStart + i]; ps[i + 1] = ps[i] + v; ps2[i + 1] = ps2[i] + v * v; }
+        let best = -1, bestK = -1;
+        for (let k = 0; k <= maxLag - minLag; k++) {
+            const s1 = ps[k + tLen] - ps[k], s2 = ps2[k + tLen] - ps2[k];
+            const v = s2 - s1 * s1 / tLen;
+            if (v <= 1e-9) continue;
+            const score = br[k] / (tn * Math.sqrt(v));
+            if (score > best) { best = score; bestK = k; }
+        }
+        if (bestK < 0 || best < (dur ? 0.6 : 0.85)) return best > 0 ? { found: false, score: best } : null;
+        const lagSamples = (minLag + bestK) * DEC;
+        return { found: true, score: best, period: lagSamples / sr, secondStart: sigStart + lagSamples };
+    }
+
+    function lastLoud(L, R, from, to, thr) {
+        const B = 256;
+        let last = -1;
+        for (let i = from; i < to; i += B) {
+            const e = Math.min(to, i + B);
+            let p = 0;
+            for (let j = i; j < e; j++) { const a = Math.abs(L[j]), b = Math.abs(R[j]); if (a > p) p = a; if (b > p) p = b; }
+            if (p >= thr) last = e;
+        }
+        return last;
+    }
 
     function analyse() {
         const { L, R, sr } = raw;
         const n = L.length;
         const thr = Math.pow(10, settings.thr / 20);
         const B = 256;
-        let first = -1, last = -1;
-        for (let i = 0; i < n; i += B) {
+        let first = -1;
+        for (let i = 0; i < n && first < 0; i += B) {
             const e = Math.min(n, i + B);
-            let p = 0;
-            for (let j = i; j < e; j++) { const a = Math.abs(L[j]), b = Math.abs(R[j]); if (a > p) p = a; if (b > p) p = b; }
-            if (p >= thr) { if (first < 0) first = i; last = e; }
+            for (let j = i; j < e; j++) { if (Math.abs(L[j]) >= thr || Math.abs(R[j]) >= thr) { first = i; break; } }
         }
         if (first < 0) { trim = null; renderTrimInfo(); return; }
+
+        const dur = songDur();
+        if (raw.loop === undefined || raw.loopKey !== dur) {
+            raw.loop = detectLoop(L, R, sr, first, dur);
+            raw.loopKey = dur;
+        }
+        let limit = n, reason = 'none';
+        if (raw.loop && raw.loop.found) { limit = Math.max(first + 1, raw.loop.secondStart - Math.round(0.02 * sr)); reason = 'loop'; }
+        else if (dur && first + Math.round(dur * sr) < n) { limit = first + Math.round(dur * sr); reason = 'dur'; }
+
+        const last = Math.max(first + B, lastLoud(L, R, first, limit, thr));
         const start = Math.max(0, first - Math.round(settings.padPre * sr));
-        const end = Math.min(n, last + Math.round(settings.padPost * sr));
-        trim = { start, end, sigStart: first, sigEnd: last };
+        const autoEnd = Math.min(limit, last + Math.round(settings.padPost * sr));
+        const end = manualKeep ? Math.min(n, start + Math.round(manualKeep * sr)) : autoEnd;
+        trim = { start, end, sigStart: first, autoEnd, limit, reason };
+        $('keepLen').placeholder = '自動 ' + fmtDur((autoEnd - start) / sr);
         renderTrimInfo();
     }
 
@@ -490,7 +701,20 @@
         }
         const head = trim.start / sr, tail = (raw.L.length - trim.end) / sr, keep = (trim.end - trim.start) / sr;
         el.innerHTML = '原始 <b>' + fmt(total) + '</b> → 裁切後 <b class="text-rose-600">' + fmt(keep) + '</b>'
-            + '<span class="text-slate-500">（剪掉開頭 ' + head.toFixed(1) + ' 秒、結尾 ' + tail.toFixed(1) + ' 秒）</span>';
+            + '<span class="text-slate-500">（剪掉開頭 ' + head.toFixed(1) + ' 秒、結尾 ' + tail.toFixed(1) + ' 秒）</span>'
+            + (manualKeep ? ' <span class="text-amber-700">· 使用手動保留長度</span>' : '');
+        const li = $('loopInfo'), dur = songDur(), lp = raw.loop;
+        if (trim.reason === 'loop') {
+            let t = '🔁 偵測到 Suno 循環播放：第二遍從 <b>' + fmt(lp.secondStart / sr) + '</b> 開始（相似度 ' + Math.round(lp.score * 100) + '%），已在第一遍結尾截斷。';
+            if (dur && Math.abs(lp.period - dur) > 1.5) t += '<br><span class="text-amber-700">實測一輪 ' + fmtDur(lp.period) + '，與歌曲長度 ' + fmtDur(dur) + ' 不同（可能播放時有緩衝），已以實測為準。</span>';
+            li.className = 'text-sm text-sky-700'; li.innerHTML = t;
+        } else if (trim.reason === 'dur') {
+            li.className = 'text-sm text-sky-700';
+            li.innerHTML = '⏱️ 依歌曲長度 <b>' + fmtDur(dur) + '</b> 從聲音開始處起算截斷' + (lp && lp.found === false ? '（第二遍比對相似度只有 ' + Math.round(lp.score * 100) + '%，未採用）' : '') + '。若結尾還有一點第二遍的聲音，請用下方「保留長度」微調。';
+        } else if (!dur) {
+            li.className = 'text-sm text-amber-700';
+            li.innerHTML = '未設定歌曲長度，也沒有偵測到循環播放。若結尾錄到第二遍，請在上方填入歌曲長度，或直接輸入「保留長度」。';
+        } else { li.innerHTML = ''; }
     }
 
     function drawWave() {
@@ -520,22 +744,30 @@
             g.fillStyle = '#fde68a';
             g.fillRect(Math.round(xs), 0, Math.max(1, dpr), h); g.fillRect(Math.round(xe) - 1, 0, Math.max(1, dpr), h);
         }
+        if (raw.loop && raw.loop.found) {
+            const xl = Math.round(raw.loop.secondStart / per);
+            g.fillStyle = '#38bdf8';
+            for (let y = 0; y < h; y += 8 * dpr) g.fillRect(xl, y, Math.max(1, 2 * dpr), 4 * dpr);
+        }
     }
     window.addEventListener('resize', () => { if (raw) drawWave(); });
 
     function trimmedPcm() {
         const { L, R, sr } = raw;
         const a = L.slice(trim.start, trim.end), b = R.slice(trim.start, trim.end);
-        const fadeIn = Math.min(a.length, Math.round(0.005 * sr)), fadeOut = Math.min(a.length, Math.round(0.03 * sr));
+        const fadeIn = Math.min(a.length, Math.round(0.005 * sr)), fadeOut = Math.min(a.length, Math.round(Math.max(0.03, settings.fadeOut || 0) * sr));
         for (let i = 0; i < fadeIn; i++) { const k = i / fadeIn; a[i] *= k; b[i] *= k; }
-        for (let i = 0; i < fadeOut; i++) { const k = i / fadeOut, j = a.length - 1 - i; a[j] *= k; b[j] *= k; }
+        for (let i = 0; i < fadeOut; i++) { const k = i / fadeOut, j = a.length - 1 - i, g = k * k; a[j] *= g; b[j] *= g; }
         return { a, b, sr };
     }
 
     async function processRecording(L, R, sr) {
         raw = { L, R, sr };
+        manualKeep = null; $('keepLen').value = '';
         $('resultCard').classList.remove('hidden');
         $('downloadBox').classList.add('hidden');
+        $('trimInfo').textContent = '分析中（尋找開頭、結尾與循環播放位置）…';
+        await new Promise(r => setTimeout(r, 30));
         analyse();
         drawWave();
         $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -593,7 +825,22 @@
             worker.postMessage({ left: a, right: b, sampleRate: sr, kbps: settings.kbps, title }, [a.buffer, b.buffer]);
         });
     }
-    $('reencodeBtn').onclick = () => { analyse(); drawWave(); encode(); };
+    function applyAndEncode() {
+        const v = $('keepLen').value.trim();
+        if (v) {
+            const t = parseTime(v);
+            if (!t) { $('keepHint').textContent = '格式看不懂，請輸入例如 3:40.5 或 220'; $('keepHint').className = 'text-xs text-rose-600'; return; }
+            manualKeep = t; $('keepLen').value = fmtDur(t);
+        } else manualKeep = null;
+        $('keepHint').textContent = '輸出 MP3 的總長度（含開頭保留）；空白＝自動';
+        $('keepHint').className = 'text-xs text-slate-400';
+        if (!raw) return;
+        analyse(); drawWave(); encode();
+    }
+    $('reencodeBtn').onclick = applyAndEncode;
+    $('applyBtn').onclick = applyAndEncode;
+    $('keepLen').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyAndEncode(); });
+    $('keepAuto').onclick = () => { $('keepLen').value = ''; applyAndEncode(); };
 
     // ─── 初始化 ────────────────────────────────────────────────────────────
     bindSettings();
@@ -602,7 +849,7 @@
     if (last) { $('embedInput').value = 'https://suno.com/song/' + last.id; loadSong(last.id, last.title); }
 
     // 測試掛勾
-    window.sunoRecorder = { startCapture, stopCapture, processRecording, parseSuno, get state() { return { raw, trim, settings }; } };
+    window.sunoRecorder = { startCapture, stopCapture, processRecording, parseSuno, detectLoop, fetchSongInfo, get state() { return { raw, trim, settings }; } };
 })();
 
 if ('serviceWorker' in navigator) {
