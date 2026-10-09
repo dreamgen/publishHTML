@@ -21,7 +21,7 @@ import {
 import { forgetCourse } from './storage.js';
 import { clearActivityForQuestion, clearEnteredForQuestion } from './live.js';
 import {
-  projectionArea, projectionControls, projectionStage, projectionCounts, projectionLegend, projModeLabel,
+  projectionArea, projectionControls, projectionStage, projectionCounts, projectionLegend, projModeLabel, showQuestionFirst,
   bindProjection, disposeProjection, syncProjection,
 } from './projection.js';
 import {
@@ -686,6 +686,9 @@ function leaveLocalProjection() {
 
 function enterLocalProjection() {
   S.projection = true;
+  // 投影的第一頁一律是題目，講師再用 → 翻到答案
+  showQuestionFirst();
+  syncProjection();
   renderTeacher();
   const el = document.documentElement;
   if (el.requestFullscreen) el.requestFullscreen().catch(() => { /* 瀏覽器不允許時就停在視窗內的投影畫面，Esc 一樣能回去 */ });
@@ -765,6 +768,7 @@ export function renderTeacher() {
     b.onclick = () => {
       if (S.qid === b.dataset.selectEx) return;
       S.qid = b.dataset.selectEx;
+      showQuestionFirst(); // 換題時投影先回到題目頁
       renderTeacher();
       syncProjection();
     };
@@ -772,6 +776,8 @@ export function renderTeacher() {
   bindGates();
   if (!hasEx || !currentEx()) return;
   document.querySelector('#open-projector').onclick = () => {
+    // 新開的投影視窗從題目頁開始：控制台先切到題目，投影視窗連上時拿到的就是這份狀態
+    if (!projectorConnected() && S.projMode !== 'question') { showQuestionFirst(); renderTeacher(); }
     if (openProjectorWindow() === false) notify('瀏覽器擋下了新視窗。請允許這個網站開啟彈出式視窗，或改用「本機全螢幕」。');
   };
   document.querySelector('#project').onclick = enterLocalProjection;

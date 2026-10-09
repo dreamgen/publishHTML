@@ -4,7 +4,7 @@
 // 延伸螢幕的用法：講師在控制台按「另開投影視窗」，把那個視窗拖到投影機並全螢幕，
 // 控制台這邊繼續切模式、換欄位、調字級，投影視窗即時跟著變。
 //
-// 只同步「投影要怎麼呈現」（題目、模式、欄位、組別、字級、底色、只顯示已作答）與學員加入 QR 的開關，
+// 只同步「投影要怎麼呈現」（題目、模式、欄位、組別、捲到第幾屏、字級、底色、只顯示已作答）與學員加入 QR 的開關，
 // 不同步任何答案：兩個視窗各自訂閱同一個課程，答案本來就會即時更新。
 // 走 BroadcastChannel，只在同一台電腦、同一個瀏覽器內傳遞，不寫資料庫。
 // 投影視窗由 window.open 開啟，會複製控制台這個分頁的 sessionStorage，因此不必再登入一次。
@@ -23,6 +23,7 @@ let beatTimer = null;
 let staleTimer = null;
 let stateHandler = null;
 let qrHandler = null;
+let screensHandler = null;
 let snapshotProvider = null;
 let winRef = null;
 
@@ -43,6 +44,7 @@ function ensureChannel() {
     if (msg.type === 'qr' && qrHandler) qrHandler(!!msg.open);
     if (isProjectorWindow) return;
     // 以下是控制台端
+    if (msg.type === 'screens' && screensHandler) screensHandler(Number(msg.at) || 0, Number(msg.total) || 1);
     if (msg.type === 'hello' || msg.type === 'beat') {
       lastBeat = Date.now();
       paintStatus();
@@ -76,6 +78,15 @@ export function publishJoinQR(open) { post({ type: 'qr', open: !!open }); }
 
 /** 收到對方的 QR 開關時要做什麼（由 teacher.js 登記） */
 export function onJoinQR(fn) { qrHandler = fn; ensureChannel(); }
+
+/**
+ * 分屏：投影視窗的內容比畫面高時，切成好幾「屏」往下捲。
+ * 屏數只有投影視窗量得出來（控制台的預覽字級不同），所以由投影視窗回報給控制台。
+ */
+export function publishScreens(at, total) { if (isProjectorWindow) post({ type: 'screens', at, total }); }
+
+/** 控制台收到投影視窗回報的「第幾屏／共幾屏」時要做什麼（由 projection.js 登記） */
+export function onScreens(fn) { screensHandler = fn; ensureChannel(); }
 
 export function projectorConnected() {
   return !!lastBeat && Date.now() - lastBeat < BEAT_MS * 2;

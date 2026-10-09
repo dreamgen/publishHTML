@@ -196,6 +196,24 @@ body.proj-stage-mode #app, body.proj-stage-mode main.stage { height: 100% }
 .proj-stage .proj-one-label { font-size: max(28px, calc(30px * var(--k))); color: var(--muted); line-height: 1.4 }
 .proj-stage .proj-one-row .answer { font-size: max(28px, calc(40px * var(--k))); line-height: 1.5 }
 
+/* ── 題目頁（投影第一頁） ── */
+.proj-stage .proj-q { display: flex; flex-direction: column; gap: calc(28px * var(--k)); max-width: 1600px }
+.proj-stage .proj-q-time { font-size: max(28px, calc(30px * var(--k))); color: var(--muted); font-weight: 700 }
+.proj-stage .proj-q-goal { margin: 0; font-size: max(28px, calc(44px * var(--k))); line-height: 1.45; font-weight: 700 }
+.proj-stage .proj-q-notice { background: var(--panel); border: 2px solid var(--line); border-left: 8px solid var(--touched); border-radius: 14px; padding: calc(20px * var(--k)) calc(28px * var(--k)); font-size: max(28px, calc(32px * var(--k))); line-height: 1.5 }
+.proj-stage .proj-q-ref { border: 2px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--panel) }
+.proj-stage .proj-q-ref table { width: 100%; border-collapse: collapse }
+.proj-stage .proj-q-ref caption { text-align: left; padding: calc(14px * var(--k)) calc(24px * var(--k)); font-weight: 700; font-size: max(28px, calc(30px * var(--k))); background: var(--head) }
+.proj-stage .proj-q-ref th, .proj-stage .proj-q-ref td { padding: calc(10px * var(--k)) calc(24px * var(--k)); border-top: 1px solid var(--line); font-size: max(28px, calc(28px * var(--k))); text-align: left }
+.proj-stage .proj-q-ref thead th { color: var(--muted); background: var(--head) }
+.proj-stage .proj-q-more { margin: 0; padding: calc(10px * var(--k)) calc(24px * var(--k)); color: var(--muted); font-size: 28px }
+.proj-stage .proj-q-fields-head { font-size: max(28px, calc(30px * var(--k))); color: var(--muted); font-weight: 700; letter-spacing: .06em }
+.proj-stage .proj-q-fields { margin: 0; padding-left: 1.6em; display: flex; flex-direction: column; gap: calc(18px * var(--k)) }
+.proj-stage .proj-q-fields li { font-size: max(28px, calc(40px * var(--k))); line-height: 1.4 }
+.proj-stage .proj-q-fields li::marker { color: var(--muted); font-weight: 700 }
+.proj-stage .proj-q-fields li b { display: block }
+.proj-stage .proj-q-fields li span { display: block; color: var(--muted); font-size: max(28px, .7em) }
+
 /* 投影舞台不需要 base.css 投影模式的白底與置中寬度 */
 body.proj-stage-mode.projection { background: transparent; font-size: 28px }
 

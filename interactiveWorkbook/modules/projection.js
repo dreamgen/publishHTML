@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────────────────────────────────────
-// 功能三：投影呈現（狀態點 ＋ 四個固定分享模式）
+// 功能三：投影呈現（題目頁 ＋ 狀態點 ＋ 四個固定分享模式）
 //
 // 這個模組只負責「讀取與呈現」：活動標記（橘點）的寫入端在 student.js，
 // 訂閱生命週期由 session.js 的 watchLive / stopWatchLive 管。
@@ -18,6 +18,7 @@ import { rerender } from './render.js';
 import { answerRows, hasContent, sortedGroups } from './teacher.js';
 import {
   isProjectorWindow, onProjState, setSnapshotProvider, publishProjState, bindProjectorStatus, startProjectorBeacon,
+  publishScreens, onScreens, projectorConnected,
 } from './projwin.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -66,9 +67,10 @@ const SCALE_STEP = 0.1;
 const THEME_KEY = 'iw_projTheme';
 const THEMES = [['dark', '深色'], ['light', '淺色']];
 
-// 五顆並排按鈕的順序：狀態點在最左（時間上先發生），接著依「欄位範圍 × 組別範圍」由窄到寬排列，
-// 順序與規劃文件第四節的表格一致，講師看文件與看畫面不用換一套心智模型。
+// 按鈕順序就是上課的時間順序：先投影題目，學員作答時看狀態點，之後依「欄位範圍 × 組別範圍」由窄到寬排列，
+// 答案模式的順序與規劃文件第四節的表格一致，講師看文件與看畫面不用換一套心智模型。
 const MODES = [
+  { key: 'question', label: '題目', hint: '先投影題目：目標、說明與要填的欄位' },
   { key: 'dots', label: '狀態點', hint: '作答中監看：誰動了哪個欄位' },
   { key: 'single', label: '單題', hint: '一個欄位 × 全部組別' },
   { key: 'group', label: '單組', hint: '全部欄位 × 一組（發表用）' },
@@ -77,6 +79,13 @@ const MODES = [
 ];
 
 const COMPARE_MAX_GROUPS = 3;
+
+/** 題目頁的參考資料表最多投幾列：再多就擠不下 28px 的字，完整資料請學員看自己的手機 */
+const MAX_REF_ROWS = 10;
+/** 選項題在題目頁最多列出幾個選項（超過時以「等 N 項」帶過） */
+const MAX_Q_OPTIONS = 8;
+
+const isAnswerMode = (key) => key !== 'question' && MODES.some((m) => m.key === key);
 
 const DOT_FILLED = 'proj-dot is-filled';
 const DOT_TOUCHED = 'proj-dot is-touched';
@@ -371,6 +380,14 @@ export function projectionControls() {
         <div class="proj-mode-list" role="group" aria-label="投影模式">${
   MODES.map((m) => `<button type="button" class="proj-mode-btn${S.projMode === m.key ? ' is-on' : ''}" data-proj-mode="${m.key}" aria-pressed="${S.projMode === m.key}"><b>${E(m.label)}</b><span>${E(m.hint)}</span></button>`).join('')
 }</div>
+        <div class="proj-screen-ctl" id="proj-screen-ctl">
+          <span class="proj-ctl-name">捲動畫面</span>
+          <div class="proj-screen-nav" role="group" aria-label="投影畫面上下捲動">
+            <button type="button" data-proj-screen="-1" aria-label="投影往上捲一屏">▲</button>
+            <output id="proj-screen-value">一屏放得下</output>
+            <button type="button" data-proj-screen="1" aria-label="投影往下捲一屏">▼</button>
+          </div>
+        </div>
       </div>
       ${pickerHTML(fields, list)}
       <div class="proj-ctl-block proj-ctl-settings">
@@ -387,8 +404,51 @@ export function projectionControls() {
 }</div>
         </div>
         <label class="proj-ctl-row proj-check"><span class="proj-ctl-name">只顯示已作答的組別</span><input type="checkbox" role="switch" class="switch-input switch-sm" id="proj-only-answered" ${onlyAnswered ? 'checked' : ''}></label>
-        <div class="proj-key-hint">鍵盤 ← → 或簡報筆：單題模式切換欄位、單組模式切換組別。</div>
+        <div class="proj-key-hint">鍵盤 ← → 或簡報筆翻頁：先投影題目，按 → 進入答案；單題逐欄、單組逐組往後翻，翻到最前面再按 ← 回到題目。內容超出一屏時，→ 先往下捲、捲到底才翻頁；↑ ↓ 只捲動不翻頁。</div>
       </div>
+    </div>`;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 題目頁：投影的第一頁。學員還沒開始作答前，全班一起看題目
+// ──────────────────────────────────────────────────────────────────────────────
+function fieldHint(f) {
+  if (f.type === 'radio' || f.type === 'checkbox') {
+    const opts = f.options || [];
+    const shown = opts.slice(0, MAX_Q_OPTIONS).map((o) => truncate(o, MAX_OPTION_LABEL).shown).join('、');
+    const more = opts.length > MAX_Q_OPTIONS ? ` 等 ${opts.length} 項` : '';
+    let pick = f.type === 'radio' ? '單選' : '可複選';
+    if (f.type === 'checkbox' && f.minSelect && f.minSelect === f.maxSelect) pick = `選 ${f.minSelect} 項`;
+    else if (f.type === 'checkbox' && (f.minSelect || f.maxSelect)) pick = `選 ${f.minSelect || 1}～${f.maxSelect || opts.length} 項`;
+    return `${pick}：${shown}${more}`;
+  }
+  if (f.type === 'list') return f.minItems ? `至少 ${f.minItems} 項` : '可列多項';
+  if (f.type === 'table') {
+    const cols = (f.columns || []).map((c) => c.label).join('、');
+    return `表格：${cols}${f.minRows ? `（至少 ${f.minRows} 列）` : ''}`;
+  }
+  return '';
+}
+
+function renderQuestion(ex) {
+  if (!ex) return emptyNotice('目前沒有可投影的練習。');
+  const ref = ex.reference;
+  const rows = ref ? (ref.rows || []) : [];
+  const refHTML = ref ? `<div class="proj-q-ref"><table>${ref.caption ? `<caption>${E(ref.caption)}</caption>` : ''}<thead><tr>${
+    (ref.columns || []).map((c) => `<th scope="col">${E(c)}</th>`).join('')
+  }</tr></thead><tbody>${
+    rows.slice(0, MAX_REF_ROWS).map((r) => `<tr>${r.map((c, i) => (i === 0 ? `<th scope="row">${E(c)}</th>` : `<td>${E(c)}</td>`)).join('')}</tr>`).join('')
+  }</tbody></table>${rows.length > MAX_REF_ROWS ? `<p class="proj-q-more">共 ${rows.length} 列，這裡只列前 ${MAX_REF_ROWS} 列；完整資料請看作答頁。</p>` : ''}</div>` : '';
+  const fields = ex.fields || [];
+  return `<div class="proj-q">
+      ${ex.time ? `<div class="proj-q-time">${E(ex.time)}</div>` : ''}
+      ${ex.goal ? `<p class="proj-q-goal">${E(ex.goal)}</p>` : ''}
+      ${ex.notice ? `<div class="proj-q-notice">${E(ex.notice)}</div>` : ''}
+      ${refHTML}
+      ${fields.length ? `<div class="proj-q-fields-head">各組要完成</div><ol class="proj-q-fields">${fields.map((f) => {
+    const hint = fieldHint(f);
+    return `<li><b>${E(f.label)}</b>${hint ? `<span>${E(hint)}</span>` : ''}</li>`;
+  }).join('')}</ol>` : ''}
     </div>`;
 }
 
@@ -398,7 +458,8 @@ export function projectionControls() {
 function areaBody() {
   dotRegistry = [];
   expandStore = [];
-  if (!MODES.some((m) => m.key === S.projMode)) S.projMode = 'dots';
+  if (!MODES.some((m) => m.key === S.projMode)) S.projMode = 'question';
+  if (S.projMode === 'question') return renderQuestion(currentEx());
   const fields = fieldsOf(S.qid);
   const list = baseGroups();
   normalizeSelection(fields, list);
@@ -453,7 +514,8 @@ export function projectionStage() {
   const field = fieldsOf(S.qid).find((f) => f.key === S.projField);
   const fields = fieldsOf(S.qid);
   let foot = `${shown.length} 組`;
-  if (S.projMode === 'dots') foot = `已完成 ${c.done} 組 · 草稿 ${c.draft} 組 · 尚未作答 ${c.none} 組`;
+  if (S.projMode === 'question') foot = `各組要完成 ${fields.length} 個欄位`;
+  else if (S.projMode === 'dots') foot = `已完成 ${c.done} 組 · 草稿 ${c.draft} 組 · 尚未作答 ${c.none} 組`;
   else if (S.projMode === 'single') foot = `欄位 ${Math.max(1, fields.indexOf(field) + 1)}／${fields.length}`;
   else if (S.projMode === 'group') foot = shown.length ? `${shown[0][1].name} 發表中` : '';
   return `<div class="proj-stage" data-proj-theme="${E(S.projTheme)}">
@@ -462,7 +524,7 @@ export function projectionStage() {
         <button type="button" class="proj-stage-code" id="stage-join-qr" title="顯示學員加入的 QR Code" aria-label="加入代碼 ${E(S.session.code)}，按一下顯示 QR Code"><span>加入代碼</span><b>${E(S.session.code)}</b></button>
       </div>
       <div class="proj-stage-body proj-root" id="proj-root"><div class="proj-area proj-mode-${S.projMode}" id="proj-area" style="--proj-scale:${S.projScale}">${body}</div></div>
-      <div class="proj-stage-foot"><span>${E(foot)}</span>${S.projMode === 'dots' ? legendHTML() : ''}</div>
+      <div class="proj-stage-foot"><span>${E(foot)}</span>${S.projMode === 'dots' ? legendHTML() : ''}<span class="proj-stage-screens" id="proj-stage-screens" hidden></span></div>
       <div class="proj-stage-tools">${isProjectorWindow
     ? '<button type="button" id="stage-fullscreen">全螢幕</button>'
     : '<button type="button" id="project">回控制台（Esc）</button>'}</div>
@@ -498,17 +560,125 @@ function applyScale(step) {
   if (area) area.style.setProperty('--proj-scale', String(next));
   const out = document.querySelector('#proj-scale-value');
   if (out) out.textContent = `${Math.round(next * 100)}%`;
+  applyScreen();
   publishProjState(projSnapshot());
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 分屏：內容比投影畫面高時，按 → 先往下捲一屏，捲到底才翻到下一頁
+//
+// 投影畫面不方便用滑鼠捲，所以把「往下捲」併進翻頁：簡報筆只有上一頁／下一頁兩顆鍵也能用。
+// 只同步「第幾屏」不同步像素：控制台預覽與投影的字級、視窗高度都不同，像素對不起來。
+// 共幾屏只有舞台（本機全螢幕或投影視窗）量得出來；投影視窗量好再回報給控制台。
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 每往下捲一屏，保留上一屏底部這個比例的高度，讀起來接得上 */
+const SCREEN_OVERLAP = 0.12;
+
+/** 投影視窗回報的 { at, total }；控制台沒有舞台時用它判斷 → 要捲動還是翻頁 */
+let remoteScreens = null;
+let screenObserver = null;
+
+function stageBody() { return document.querySelector('.proj-stage-body'); }
+
+function measure(el) {
+  const view = el.clientHeight;
+  const max = Math.max(0, el.scrollHeight - view);
+  const step = Math.max(1, Math.round(view * (1 - SCREEN_OVERLAP)));
+  const total = max <= 2 ? 1 : Math.ceil(max / step) + 1;
+  return { max, step, total };
+}
+
+/** 目前第幾屏／共幾屏：這個視窗有舞台就自己量，否則用投影視窗回報的 */
+function screens() {
+  const el = stageBody();
+  if (el) {
+    const { total } = measure(el);
+    return { at: Math.min(S.projScreen || 0, total - 1), total };
+  }
+  if (remoteScreens && projectorConnected()) return remoteScreens;
+  return { at: 0, total: 1 };
+}
+
+/** 只改提示文字與按鈕狀態，不重畫 */
+function paintScreens(at, total) {
+  const tag = document.querySelector('#proj-stage-screens');
+  if (tag) {
+    tag.hidden = total <= 1;
+    tag.textContent = at < total - 1 ? `▼ 還有內容　${at + 1}／${total}` : `${at + 1}／${total}`;
+  }
+  const ctl = document.querySelector('#proj-screen-ctl');
+  if (!ctl) return;
+  ctl.classList.toggle('is-single', total <= 1);
+  ctl.querySelector('#proj-screen-value').textContent = total > 1 ? `第 ${at + 1}／${total} 屏` : '一屏放得下';
+  ctl.querySelector('[data-proj-screen="-1"]').disabled = at <= 0;
+  ctl.querySelector('[data-proj-screen="1"]').disabled = at >= total - 1;
+}
+
+/** 把舞台捲到 S.projScreen 那一屏（超出範圍就夾回來），更新提示並回報給控制台 */
+function applyScreen() {
+  const el = stageBody();
+  if (!el) { const sc = screens(); paintScreens(sc.at, sc.total); return; }
+  const { max, step, total } = measure(el);
+  S.projScreen = Math.min(Math.max(0, S.projScreen || 0), total - 1);
+  const top = Math.min(S.projScreen * step, max);
+  if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+  paintScreens(S.projScreen, total);
+  publishScreens(S.projScreen, total);
+}
+
+/** 講師直接用滑鼠或觸控板捲舞台：換算成第幾屏，提示與控制台跟著更新 */
+function onStageScroll() {
+  const el = stageBody();
+  if (!el) return;
+  const { max, step, total } = measure(el);
+  const at = el.scrollTop >= max - 2 ? total - 1 : Math.round(el.scrollTop / step);
+  if (at === S.projScreen) return;
+  S.projScreen = at;
+  paintScreens(at, total);
+  publishScreens(at, total);
+}
+
+/** 往下（step=1）或往上捲一屏；已在最底／最上就回傳 false，交給翻頁 */
+function moveScreen(step) {
+  const { at, total } = screens();
+  const n = at + step;
+  if (n < 0 || n >= total) return false;
+  S.projScreen = n;
+  if (remoteScreens) remoteScreens = { at: n, total: remoteScreens.total };
+  applyScreen();
+  publishProjState(projSnapshot());
+  return true;
+}
+
+/** 換頁時回到第一屏；投影視窗重畫後會回報新頁面的屏數 */
+function resetScreen() {
+  S.projScreen = 0;
+  remoteScreens = null;
+}
+
+onScreens((at, total) => {
+  // 控制台自己開著本機全螢幕時，以自己的舞台為準
+  if (stageBody()) return;
+  remoteScreens = { at, total };
+  S.projScreen = at;
+  paintScreens(at, total);
+});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 與投影視窗同步（見 projwin.js）
 // ──────────────────────────────────────────────────────────────────────────────
 function projSnapshot() {
   return {
-    qid: S.qid, projMode: S.projMode, projField: S.projField, projGroups: [...(S.projGroups || [])],
-    projScale: S.projScale, projTheme: S.projTheme, onlyAnswered,
+    qid: S.qid, projMode: S.projMode, projLastMode: S.projLastMode, projField: S.projField, projGroups: [...(S.projGroups || [])],
+    projScreen: S.projScreen || 0, projScale: S.projScale, projTheme: S.projTheme, onlyAnswered,
   };
+}
+
+/** 除了捲到第幾屏以外的呈現狀態：一樣的話只要捲動，不必重畫 */
+function pageKey() {
+  const { projScreen, ...rest } = projSnapshot();
+  return JSON.stringify(rest);
 }
 
 /** 講師改了投影呈現方式：先通知另一個視窗，再重畫自己 */
@@ -525,13 +695,17 @@ export function syncProjection() {
 function applyIncoming(st) {
   if (!S.course || !S.session || S.session.role !== 'teacher') return;
   ensureScale();
+  const before = pageKey();
   if (st.qid && S.course.byQid[st.qid] && exNumber(st.qid) >= 0) S.qid = st.qid;
   if (MODES.some((m) => m.key === st.projMode)) S.projMode = st.projMode;
+  if (isAnswerMode(st.projLastMode)) S.projLastMode = st.projLastMode;
   if (typeof st.projField === 'string') S.projField = st.projField;
   if (Array.isArray(st.projGroups)) S.projGroups = st.projGroups.filter((x) => typeof x === 'string');
   if (st.projScale) S.projScale = clampScale(st.projScale);
   if (THEMES.some(([k]) => k === st.projTheme)) S.projTheme = st.projTheme;
   onlyAnswered = !!st.onlyAnswered;
+  if (Number.isInteger(st.projScreen) && st.projScreen >= 0) S.projScreen = st.projScreen;
+  if (pageKey() === before) { applyScreen(); return; }
   rerender();
 }
 
@@ -544,20 +718,66 @@ function setTheme(theme) {
   commit();
 }
 
-function cycleField(step) {
+/** 切換投影模式；記下最後用的答案模式，從題目頁按 → 時回到它 */
+function setMode(key) {
+  S.projMode = key;
+  if (isAnswerMode(key)) S.projLastMode = key;
+  openCell = null;
+  resetScreen();
+}
+
+/** 換題、開始投影時呼叫：回到題目頁（「先投影題目，再看答案」） */
+export function showQuestionFirst() {
+  S.projMode = 'question';
+  openCell = null;
+  resetScreen();
+}
+
+/** 單題模式往前／後一個欄位；已在第一個／最後一個就回傳 false（不繞回去） */
+function moveField(step) {
   const fields = fieldsOf(S.qid);
-  if (fields.length < 2) return false;
-  const i = fields.findIndex((f) => f.key === S.projField);
-  S.projField = fields[((i < 0 ? 0 : i) + step + fields.length) % fields.length].key;
+  const i = Math.max(0, fields.findIndex((f) => f.key === S.projField));
+  const j = i + step;
+  if (j < 0 || j >= fields.length) return false;
+  S.projField = fields[j].key;
   return true;
 }
 
-function cycleGroup(step) {
-  const list = baseGroups();
-  if (list.length < 2) return false;
-  const ids = list.map(([gid]) => gid);
-  const i = ids.indexOf(S.projGroups[0]);
-  S.projGroups = [ids[((i < 0 ? 0 : i) + step + ids.length) % ids.length]];
+function moveGroup(step) {
+  const ids = baseGroups().map(([gid]) => gid);
+  const i = Math.max(0, ids.indexOf(S.projGroups[0]));
+  const j = i + step;
+  if (j < 0 || j >= ids.length) return false;
+  S.projGroups = [ids[j]];
+  return true;
+}
+
+/** 從題目頁進入答案：上次用的答案模式，從第一個欄位／第一組開始 */
+function enterAnswers() {
+  const mode = isAnswerMode(S.projLastMode) ? S.projLastMode : 'single';
+  setMode(mode);
+  const fields = fieldsOf(S.qid);
+  if (mode === 'single' && fields.length) S.projField = fields[0].key;
+  if (mode === 'group') {
+    const first = baseGroups()[0];
+    if (first) S.projGroups = [first[0]];
+  }
+}
+
+/**
+ * 翻頁順序像一份簡報：題目 → 答案的第一頁 → … → 最後一頁。
+ * 單題逐欄、單組逐組；其他模式只有一頁。在答案第一頁再往前就回到題目。
+ */
+function stepPage(step) {
+  if (S.projMode === 'question') {
+    if (step < 0) return false;
+    enterAnswers();
+    return true;
+  }
+  if (S.projMode === 'single' && moveField(step)) return true;
+  if (S.projMode === 'group' && moveGroup(step)) return true;
+  if (step > 0) return false;
+  showQuestionFirst();
   return true;
 }
 
@@ -567,16 +787,20 @@ function onKeyDown(e) {
   if (document.querySelector('dialog[open]')) return;
   const t = e.target;
   if (t instanceof Element && t.closest('input, textarea, select')) return;
+  // ↑ ↓ 只捲動，不翻頁
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (moveScreen(e.key === 'ArrowDown' ? 1 : -1)) e.preventDefault();
+    return;
+  }
+  // 簡報筆的上一頁／下一頁送的是 PageUp／PageDown，跟左右鍵同義
   let step = 0;
-  if (e.key === 'ArrowLeft') step = -1;
-  else if (e.key === 'ArrowRight') step = 1;
-  else if (S.projMode === 'single' && e.key === 'PageUp') step = -1;
-  else if (S.projMode === 'single' && e.key === 'PageDown') step = 1;
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') step = -1;
+  else if (e.key === 'ArrowRight' || e.key === 'PageDown') step = 1;
   if (!step) return;
-  let moved = false;
-  if (S.projMode === 'single') moved = cycleField(step);
-  else if (S.projMode === 'group') moved = cycleGroup(step);
-  if (!moved) return;
+  // 這一頁還有沒捲到的內容：先捲，捲到底（或頂）才翻頁
+  if (moveScreen(step)) { e.preventDefault(); return; }
+  if (!stepPage(step)) return;
+  resetScreen();
   e.preventDefault();
   commit();
 }
@@ -647,7 +871,7 @@ export function bindProjection() {
   const controls = document.querySelector('#proj-controls') || root;
 
   controls.querySelectorAll('[data-proj-mode]').forEach((b) => {
-    b.onclick = () => { S.projMode = b.dataset.projMode; openCell = null; commit(); };
+    b.onclick = () => { setMode(b.dataset.projMode); commit(); };
   });
   controls.querySelectorAll('[data-proj-scale]').forEach((b) => {
     b.onclick = () => applyScale(Number(b.dataset.projScale));
@@ -655,14 +879,18 @@ export function bindProjection() {
   controls.querySelectorAll('[data-proj-theme]').forEach((b) => {
     b.onclick = () => setTheme(b.dataset.projTheme);
   });
+  controls.querySelectorAll('[data-proj-screen]').forEach((b) => {
+    b.onclick = () => moveScreen(Number(b.dataset.projScreen));
+  });
   const only = controls.querySelector('#proj-only-answered');
-  if (only) only.onchange = () => { onlyAnswered = only.checked; commit(); };
+  if (only) only.onchange = () => { onlyAnswered = only.checked; resetScreen(); commit(); };
   controls.querySelectorAll('[data-proj-field]').forEach((b) => {
-    b.onclick = () => { S.projField = b.dataset.projField; commit(); };
+    b.onclick = () => { S.projField = b.dataset.projField; resetScreen(); commit(); };
   });
   controls.querySelectorAll('[data-proj-group]').forEach((b) => {
     b.onclick = () => {
       const gid = b.dataset.projGroup;
+      resetScreen();
       if (S.projMode === 'group') { S.projGroups = [gid]; commit(); return; }
       if (S.projGroups.includes(gid)) {
         if (S.projGroups.length === 1) { notify('比較模式至少要選一組。'); return; }
@@ -697,11 +925,25 @@ export function bindProjection() {
 
   document.addEventListener('keydown', onKeyDown);
   keyBound = true;
+
+  // 分屏：重畫後回到原本那一屏（例如別組剛存檔），視窗大小或內容高度變了就重新量
+  const body = stageBody();
+  if (body) {
+    body.onscroll = onStageScroll;
+    if ('ResizeObserver' in window) {
+      screenObserver = new ResizeObserver(() => { if (body.isConnected) applyScreen(); });
+      screenObserver.observe(body);
+      const area = body.querySelector('#proj-area');
+      if (area) screenObserver.observe(area);
+    }
+  }
+  applyScreen();
 }
 
 /** 重畫前務必呼叫：解除 live 訂閱與鍵盤監聽，避免殭屍訂閱。 */
 export function disposeProjection() {
   if (liveUnsub) { liveUnsub(); liveUnsub = null; }
   if (keyBound) { document.removeEventListener('keydown', onKeyDown); keyBound = false; }
+  if (screenObserver) { screenObserver.disconnect(); screenObserver = null; }
   dotRegistry = [];
 }

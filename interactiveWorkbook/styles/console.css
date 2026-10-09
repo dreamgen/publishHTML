@@ -448,3 +448,16 @@ body.teacher-console .merge-row select { width: auto; flex: 1 1 160px }
 @media (max-width: 760px) {
   .prep-card.password-card { flex-direction: column; align-items: stretch }
 }
+
+/* ── 投影預覽：題目頁（控制台中欄用固定小字，投影舞台的大字見 projection.css） ── */
+.monitor-body .proj-q { display: flex; flex-direction: column; gap: 12px }
+.monitor-body .proj-q-time, .monitor-body .proj-q-fields-head { font-size: 13px; color: #5a6876; font-weight: 700 }
+.monitor-body .proj-q-goal { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.5 }
+.monitor-body .proj-q-notice { border-left: 4px solid #d9822b; background: #fdf6ea; border-radius: 8px; padding: 10px 12px; font-size: 14px }
+.monitor-body .proj-q-ref { border: 1px solid #e1dbcf; border-radius: 8px; overflow: auto }
+.monitor-body .proj-q-ref table { width: 100%; border-collapse: collapse; font-size: 13px }
+.monitor-body .proj-q-ref caption { text-align: left; padding: 6px 10px; font-weight: 700; background: #f3f0e9 }
+.monitor-body .proj-q-ref th, .monitor-body .proj-q-ref td { padding: 5px 10px; border-top: 1px solid #eee8de; text-align: left }
+.monitor-body .proj-q-more { margin: 0; padding: 6px 10px; font-size: 12px; color: #5a6876 }
+.monitor-body .proj-q-fields { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 6px; font-size: 15px }
+.monitor-body .proj-q-fields li span { display: block; font-size: 13px; color: #5a6876 }

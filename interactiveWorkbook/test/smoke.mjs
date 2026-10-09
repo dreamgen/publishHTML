@@ -565,15 +565,16 @@ async function main() {
     });
 
     // ── S13 投影舞台與另開投影視窗 ──────────────────────────────────────────
-    // 本機全螢幕：控制台整頁換成投影舞台，字不得小於 28px，Esc 回控制台。
+    // 本機全螢幕：控制台整頁換成投影舞台，第一頁是題目，← → 在題目與答案之間翻頁；字不得小於 28px，Esc 回控制台。
     // 另開視窗：投影視窗只顯示舞台，控制台切模式時投影視窗跟著切（BroadcastChannel，不寫資料庫）。
     // QR：舞台上按加入代碼開 QR 頁；有投影視窗時，控制台的「顯示 QR」改顯示在投影視窗，兩邊都能收起。
+    // 分屏：投影視窗放不下時，→ 先往下捲一屏、捲到底才翻頁；控制台的 ▲ ▼ 只捲動，兩邊屏數同步。
     await step('S13 投影舞台與投影視窗', async () => {
       await teacherMode(teacherPage, 'live');
       await teacherPage.locator('[data-proj-mode="compare"]').click();
       await teacherPage.locator('.console-right #project').click();
       await teacherPage.locator('.proj-stage #proj-area').waitFor({ timeout: 8000 });
-      const minFont = await teacherPage.evaluate(() => {
+      const stageMinFont = () => teacherPage.evaluate(() => {
         let min = Infinity;
         document.querySelectorAll('.proj-stage-head *, .proj-stage-body *, .proj-stage-foot *').forEach((el) => {
           const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
@@ -581,7 +582,27 @@ async function main() {
         });
         return min;
       });
-      if (minFont < 28) throw Error(`投影舞台有文字小於 28px（最小 ${minFont}px）。`);
+      const stageMode = async (mode) => teacherPage.locator(`.proj-stage #proj-area.proj-mode-${mode}`).waitFor({ timeout: 5000 });
+      // 投影第一頁一定是題目（即使控制台剛才選的是「比較」）；→ 進入上次的答案模式，← 回到題目
+      await stageMode('question');
+      const qFields = await teacherPage.locator('.proj-stage .proj-q-fields li').count();
+      if (!qFields) throw Error('題目頁沒有列出要填的欄位。');
+      const qFont = await stageMinFont();
+      // 這一頁若比畫面高，→ 會先捲到底（分屏）才翻頁，所以按到模式變了為止
+      const pressUntil = async (key, mode) => {
+        for (let i = 0; i < 12; i += 1) {
+          // eslint-disable-next-line no-await-in-loop
+          await teacherPage.keyboard.press(key);
+          // eslint-disable-next-line no-await-in-loop
+          if (await teacherPage.locator(`.proj-stage #proj-area.proj-mode-${mode}`).count()) return;
+        }
+        await stageMode(mode);
+      };
+      await pressUntil('ArrowRight', 'compare');
+      const aFont = await stageMinFont();
+      await pressUntil('ArrowLeft', 'question');
+      const minFont = Math.min(qFont, aFont);
+      if (minFont < 28) throw Error(`投影舞台有文字小於 28px（題目頁最小 ${qFont}px、比較最小 ${aFont}px）。`);
       // 舞台上的加入代碼可直接按出 QR 頁；關閉後仍停在舞台
       await teacherPage.locator('#stage-join-qr').click();
       await teacherPage.locator('dialog.join-screen[open]').waitFor({ timeout: 5000 });
@@ -624,8 +645,61 @@ async function main() {
       await popup.locator('dialog.join-screen[open]').waitFor({ timeout: 6000 });
       await teacherPage.locator('#join-qr').click();
       await popup.locator('dialog.join-screen').waitFor({ state: 'detached', timeout: 6000 });
+
+      // 分屏：投影視窗變矮、題目頁放不下時，→ 先往下捲，捲到底才翻頁；控制台的 ▲ ▼ 只捲動
+      const poll = async (fn, what, timeout = 6000) => {
+        const end = Date.now() + timeout;
+        let last;
+        while (Date.now() < end) {
+          // eslint-disable-next-line no-await-in-loop
+          last = await fn();
+          if (last.ok) return last;
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        throw Error(`${what}（最後狀態：${JSON.stringify(last)}）`);
+      };
+      const popupView = () => popup.evaluate(() => {
+        const b = document.querySelector('.proj-stage-body');
+        const tag = document.querySelector('#proj-stage-screens');
+        return {
+          top: Math.round(b.scrollTop), max: Math.round(b.scrollHeight - b.clientHeight),
+          cls: document.querySelector('#proj-area').className, tag: tag && !tag.hidden ? tag.textContent : '',
+        };
+      });
+      const ctlText = () => teacherPage.locator('#proj-screen-value').textContent();
+      await teacherPage.locator('[data-proj-mode="question"]').click();
+      await popup.setViewportSize({ width: 1000, height: 420 });
+      await poll(async () => ({ ok: /第 1／\d+ 屏/.test(await ctlText()), text: await ctlText() }), '投影視窗放不下時，控制台沒有顯示分屏');
+      // 視窗剛縮小時版面還在重排，等控制台的屏數連續兩次一樣再讀
+      let total = 0;
+      await poll(async () => {
+        const n = Number((await ctlText()).match(/／(\d+)/)[1]);
+        const ok = n === total;
+        total = n;
+        await new Promise((r) => setTimeout(r, 250));
+        return { ok, n };
+      }, '控制台的屏數一直在變');
+      if (total < 2) throw Error('題目頁應該超過一屏：' + total);
+      const v0 = await popupView();
+      if (!v0.cls.includes('proj-mode-question') || !v0.tag.includes('還有內容')) throw Error('舞台沒有「還有內容」提示：' + JSON.stringify(v0));
+      await teacherPage.keyboard.press('ArrowRight');
+      await poll(async () => { const v = await popupView(); return { ...v, ok: v.top > 0 && v.cls.includes('proj-mode-question') }; }, '按 → 應該先往下捲，不是翻頁');
+      await waitForText(teacherPage, '#proj-screen-value', `第 2／${total} 屏`);
+      await teacherPage.locator('[data-proj-screen="-1"]').click();
+      await poll(async () => { const v = await popupView(); return { ...v, ok: v.top === 0 }; }, '控制台按 ▲ 投影視窗沒有捲回頂端');
+      for (let i = 1; i < total; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await teacherPage.locator('[data-proj-screen="1"]').click();
+        // eslint-disable-next-line no-await-in-loop
+        await waitForText(teacherPage, '#proj-screen-value', `第 ${i + 1}／${total} 屏`);
+      }
+      await poll(async () => { const v = await popupView(); return { ...v, ok: v.top >= v.max - 2 && !v.tag.includes('還有內容') }; }, '控制台按 ▼ 到底，投影視窗沒有捲到底');
+      if (!(await teacherPage.locator('[data-proj-screen="1"]').isDisabled())) throw Error('已在最後一屏，▼ 應該停用。');
+      await teacherPage.keyboard.press('ArrowRight');
+      await poll(async () => { const v = await popupView(); return { ...v, ok: v.cls.includes('proj-mode-group') && v.top === 0 }; }, '捲到底再按 → 應該翻到答案第一頁、回到頂端');
       await popup.close();
-      return `舞台最小字級 ${minFont}px，投影視窗同步正常，QR 依投影視窗／舞台代碼開啟`;
+      return `題目頁 ${qFields} 個欄位，舞台最小字級 ${minFont}px，投影視窗同步正常，QR 依投影視窗／舞台代碼開啟，分屏 ${total} 屏捲動與翻頁正常`;
     });
 
     // ── S14 課程設定：重設講師密碼 ──────────────────────────────────────────

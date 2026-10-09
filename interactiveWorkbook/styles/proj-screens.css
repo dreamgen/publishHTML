@@ -1,0 +1,24 @@
+/* ──────────────────────────────────────────────────────────────────────────────
+   投影分屏：內容比投影畫面高時，→ 先往下捲一屏，捲到底才翻頁（邏輯見 projection.js）
+   - 舞台頁尾的「▼ 還有內容」提示（投影字級 28px 以上）
+   - 控制台右欄「捲動畫面」的 ▲ ▼
+   ────────────────────────────────────────────────────────────────────────────── */
+
+/* 舞台 */
+.proj-stage-foot .proj-stage-screens {
+  margin-left: auto;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap
+}
+.proj-stage-foot .proj-stage-screens[hidden] { display: none }
+
+/* 控制台右欄 */
+.proj-screen-ctl { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px }
+.proj-screen-nav { display: flex; align-items: center; gap: 6px }
+body.teacher-console .proj-screen-nav button { width: 44px; height: 40px; padding: 0; border-radius: 8px; border: 1px solid #c9c1b2; background: #fff; font-size: 16px; color: #14263a }
+body.teacher-console .proj-screen-nav button:disabled { opacity: .4; cursor: default }
+.proj-screen-nav output { min-width: 86px; text-align: center; font-weight: 700; font-size: 13.5px; font-variant-numeric: tabular-nums; color: #14263a }
+.proj-screen-ctl.is-single .proj-screen-nav output { font-weight: 500; color: #5a6876 }

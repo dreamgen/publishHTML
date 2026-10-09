@@ -21,7 +21,9 @@ export const S = {
   projection: false,
   busy: false,
   joinOpen: false,
-  projMode: 'dots',
+  projMode: 'question', // 投影一律先顯示題目，再往後翻到答案（見 projection.js 的翻頁順序）
+  projLastMode: 'single', // 從題目頁按 → 時要進入的答案模式：講師上次用的那一個
+  projScreen: 0, // 內容比投影畫面高時，目前捲到第幾屏（0 起算；換頁就回到 0）
   projScale: 1.2,   // 投影字級倍率；1.2 讓簡潔投影的 24px 基準達到 28px 門檻（見 projection.js）
   projField: null,
   projGroups: [],
