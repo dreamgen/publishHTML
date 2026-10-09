@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * smoke.mjs — 「互動題本」PWA 的無頭煙霧測試（S1–S13）。
+ * smoke.mjs — 「互動題本」PWA 的無頭煙霧測試（S1–S14）。
  *
  * 用法：
  *   IW_SRC=/tmp/iw IW_BASE_URL=http://127.0.0.1:8791 node smoke.mjs
@@ -626,6 +626,34 @@ async function main() {
       await popup.locator('dialog.join-screen').waitFor({ state: 'detached', timeout: 6000 });
       await popup.close();
       return `舞台最小字級 ${minFont}px，投影視窗同步正常，QR 依投影視窗／舞台代碼開啟`;
+    });
+
+    // ── S14 課程設定：重設講師密碼 ──────────────────────────────────────────
+    // 目前密碼錯、兩次不一致都要擋下並顯示原因；成功後舊密碼失效、新密碼可登入。
+    await step('S14 重設講師密碼', async () => {
+      await prepTab(teacherPage, 's');
+      await teacherPage.locator('#reset-password').click();
+      const dlg = teacherPage.locator('dialog.password-window[open]');
+      await dlg.waitFor({ timeout: 5000 });
+      await dlg.locator('#pw-current').fill('wrong-pass');
+      await dlg.locator('#pw-next').fill('newpass99');
+      await dlg.locator('#pw-next2').fill('newpass99');
+      await dlg.locator('#pw-save').click();
+      await waitForText(teacherPage, '#pw-error', '目前的密碼不正確');
+      await dlg.locator('#pw-current').fill('test1234');
+      await dlg.locator('#pw-next2').fill('newpass98');
+      await dlg.locator('#pw-save').click();
+      await waitForText(teacherPage, '#pw-error', '不一致');
+      await dlg.locator('#pw-next2').fill('newpass99');
+      await dlg.locator('#pw-save').click();
+      await teacherPage.locator('dialog.password-window').waitFor({ state: 'detached', timeout: 8000 });
+      const check = await teacherPage.evaluate(async (code) => {
+        const { verifyTeacher } = await import('./modules/data.js');
+        const ok = async (pw) => verifyTeacher(code, pw).then(() => true, () => false);
+        return { oldOk: await ok('test1234'), newOk: await ok('newpass99') };
+      }, courseCode);
+      if (check.oldOk || !check.newOk) throw Error('重設後密碼驗證不符預期：' + JSON.stringify(check));
+      return '錯誤密碼與不一致都會擋下；舊密碼失效、新密碼可用';
     });
   } finally {
     if (studentCtx) await studentCtx.close().catch(() => {});

@@ -316,6 +316,21 @@ export async function verifyTeacher(code, password) {
 }
 
 /**
+ * 重設講師密碼：先用目前的密碼驗證，再一次寫入新的 salt／hash／迭代次數（同一個 update，不會只換一半）。
+ * 新密碼也順便升級到目前的 PBKDF2_ITERATIONS。已登入的其他控制台不受影響（session 不存密碼）。
+ */
+export async function changeTeacherPassword(code, currentPassword, nextPassword) {
+  await authReady;
+  if (String(nextPassword).length < 6) throw Error('新密碼至少需要 6 個字元。');
+  await verifyTeacher(code, currentPassword).catch((e) => {
+    throw Error(e.message === '講師密碼不正確。' ? '目前的密碼不正確。' : e.message);
+  });
+  const pwSalt = randomId(16);
+  const pwHash = await derivePassword(nextPassword, pwSalt);
+  await update(courseRef(code), { pwSalt, pwHash, pwIter: PBKDF2_ITERATIONS });
+}
+
+/**
  * 規約 3.2：live/<CODE> 底下是易變資料（活動標記、編輯鎖），刪除小組時要一併清掉，不能留孤兒。
  * 目前還沒有任何模組寫入 live（那是組內編輯鎖與投影功能的事），但清理邏輯先寫好，
  * 之後那些功能上線時就不必回頭補——漏掉的清理不會報錯，只會安靜地留下垃圾。

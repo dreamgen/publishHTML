@@ -12,7 +12,7 @@ import {
 } from './firebase.js';
 import {
   deleteExercise, setLock, migrateCourseIfNeeded, answerHasContent, courseHasAnswers,
-  createGroups, renameGroup, deleteGroup, mergeGroups, setAllowStudentGroupNames,
+  createGroups, renameGroup, deleteGroup, mergeGroups, setAllowStudentGroupNames, changeTeacherPassword,
   clearLiveCourse, clearLiveGroup, orphanAnswerUpdates, MERGE_KEEP, MERGE_DROP, MERGE_BOTH,
 } from './data.js';
 import {
@@ -554,12 +554,69 @@ function prepSettings() {
         <span class="prep-card-note">課程名稱</span>
         <b class="course-name-text">${E(S.course.name)}</b>
       </div>
+      <div class="prep-card password-card">
+        <div><b>講師密碼</b><span class="prep-card-note">所有講師共用這組密碼。重設後，已登入的控制台不受影響，下次登入改用新密碼。</span></div>
+        <button type="button" class="outline-btn" id="reset-password">重設密碼…</button>
+      </div>
       <div class="danger-zone">
         <div class="danger-zone-head">無法復原的操作</div>
         <div class="danger-zone-row"><div><b>重置本場課程</b><span>清空全部組別與答案、關閉所有練習，題目保留。</span></div><button type="button" class="danger-outline-btn" id="reset">重置…</button></div>
         <div class="danger-zone-row"><div><b>刪除整個課程</b><span>題目、組別、答案全部刪除，需輸入課程名稱確認。</span></div><button type="button" class="danger-fill-btn" id="delete-course">刪除課程…</button></div>
       </div>
     </section>`;
+}
+
+let passwordOpen = false;
+function openPasswordDialog() {
+  if (passwordOpen) return;
+  passwordOpen = true;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'float-window password-window';
+  dialog.setAttribute('aria-labelledby', 'pw-title');
+  // 用 form 包起來：按 Enter 就送出，瀏覽器的密碼管理員也認得這是「改密碼」
+  dialog.innerHTML = `<form method="dialog" id="pw-form">
+      <div class="float-top"><strong id="pw-title">重設講師密碼</strong><button type="button" data-close>取消</button></div>
+      <div class="float-body">
+        <input type="text" name="username" autocomplete="username" value="${E(S.session.code)}" hidden>
+        <label for="pw-current">目前的密碼</label>
+        <input id="pw-current" type="password" autocomplete="current-password" required>
+        <label for="pw-next">新密碼（至少 6 個字元）</label>
+        <input id="pw-next" type="password" autocomplete="new-password" minlength="6" required>
+        <label for="pw-next2">再輸入一次新密碼</label>
+        <input id="pw-next2" type="password" autocomplete="new-password" minlength="6" required>
+        <p class="muted">密碼以不可還原的方式儲存。重設後請通知其他共用這門課的講師。</p>
+        <p class="pw-error" id="pw-error" role="alert"></p>
+      </div>
+      <div class="float-actions"><button type="button" data-close>取消</button><button type="submit" class="primary" id="pw-save">更新密碼</button></div>
+    </form>`;
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  const close = () => { passwordOpen = false; dialog.close(); dialog.remove(); };
+  dialog.querySelectorAll('[data-close]').forEach((b) => { b.onclick = close; });
+  dialog.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  const field = (id) => dialog.querySelector(id);
+  const showError = (msg, focus) => { field('#pw-error').textContent = msg; if (focus) focus.focus(); };
+  field('#pw-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const current = field('#pw-current').value;
+    const next = field('#pw-next').value;
+    if (next.length < 6) { showError('新密碼至少需要 6 個字元。', field('#pw-next')); return; }
+    if (next !== field('#pw-next2').value) { showError('兩次輸入的新密碼不一致。', field('#pw-next2')); return; }
+    if (next === current) { showError('新密碼與目前的密碼相同。', field('#pw-next')); return; }
+    const save = field('#pw-save');
+    save.disabled = true;
+    save.textContent = '更新中…';
+    try {
+      await changeTeacherPassword(S.session.code, current, next);
+      close();
+      notify('講師密碼已更新，下次登入請使用新密碼。');
+    } catch (err) {
+      save.disabled = false;
+      save.textContent = '更新密碼';
+      showError(err.message, err.message.startsWith('目前的密碼') ? field('#pw-current') : null);
+    }
+  };
+  field('#pw-current').focus();
 }
 
 function prepLayout(importLocked) {
@@ -735,6 +792,7 @@ function bindPrepPane() {
   }
   if (tab === 's') {
     // 刪除課程放在課程設定並在這裡綁定：還沒匯入題目的課程也必須刪得掉。
+    document.querySelector('#reset-password').onclick = openPasswordDialog;
     document.querySelector('#delete-course').onclick = async () => {
       if (prompt(`這會永久刪除整個課程「${S.course.name}」，包含題目與所有組別答案，無法復原。請輸入課程名稱確認。`) !== S.course.name) return;
       // 先留存代碼：課程一被刪除，onValue 會立刻收到 null 並把 session 清空。
