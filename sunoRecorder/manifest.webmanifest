@@ -1,0 +1,20 @@
+{
+  "id": "sunoRecorder",
+  "name": "Suno 錄音轉 MP3",
+  "short_name": "Suno錄音",
+  "description": "貼上 Suno 的 Embed 分享碼或歌曲連結，在 Chrome 錄下分頁音訊，自動裁掉前後空白並轉成 MP3 下載",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#e11d48",
+  "lang": "zh-TW",
+  "categories": ["music", "utilities"],
+  "icons": [
+    { "src": "./icons/sunoRecorder-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/sunoRecorder-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/sunoRecorder-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/sunoRecorder-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/sunoRecorder-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

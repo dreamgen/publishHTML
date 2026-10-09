@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-01T15:08:50.187Z",
-  "count": 15,
+  "generatedAt": "2026-10-09T13:43:23.572Z",
+  "count": 16,
   "apps": [
     {
       "id": "bridgeGame",
@@ -160,6 +160,19 @@
       "themeColor": "#7a4b1e",
       "categories": [
         "productivity",
+        "utilities"
+      ]
+    },
+    {
+      "id": "sunoRecorder",
+      "name": "Suno 錄音轉 MP3",
+      "shortName": "Suno錄音",
+      "description": "貼上 Suno 的 Embed 分享碼或歌曲連結，在 Chrome 錄下分頁音訊，自動裁掉前後空白並轉成 MP3 下載",
+      "path": "../sunoRecorder/",
+      "icon": "../sunoRecorder/icons/sunoRecorder-192.png",
+      "themeColor": "#e11d48",
+      "categories": [
+        "music",
         "utilities"
       ]
     },

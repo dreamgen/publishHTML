@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Suno 錄音轉 MP3</title>
+    <meta name="description" content="貼上 Suno 的 Embed 分享碼或歌曲連結，在 Chrome 錄下分頁音訊，自動裁掉前後空白並轉成 MP3 下載">
+
+    <!-- PWA Setup -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="./icons/sunoRecorder-192.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/sunoRecorder-192.png">
+    <link rel="apple-touch-icon" href="./icons/sunoRecorder-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Suno錄音">
+    <meta name="theme-color" content="#e11d48">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        html, body { min-height: 100%; }
+        body {
+            background: linear-gradient(180deg, #fff1f2 0%, #f8fafc 40%);
+            min-height: 100dvh;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: .375rem; padding: .55rem .95rem; border-radius: .75rem; font-weight: 600; font-size: .92rem; transition: all .12s ease; white-space: nowrap; }
+        .btn:active:not(:disabled) { transform: scale(.97); }
+        .btn:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-primary { background: #e11d48; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #be123c; }
+        .btn-dark { background: #0f172a; color: #fff; }
+        .btn-dark:hover:not(:disabled) { background: #1e293b; }
+        .btn-ghost { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+        .btn-ghost:hover:not(:disabled) { background: #f1f5f9; }
+        .btn-ok { background: #059669; color: #fff; }
+        .btn-ok:hover:not(:disabled) { background: #047857; }
+        .chip { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .4rem .3rem .75rem; border-radius: 9999px; font-size: .82rem; border: 1px solid #fecdd3; background: #fff1f2; color: #9f1239; max-width: 100%; }
+        .chip button.load { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+        .chip button.del { width: 1.25rem; height: 1.25rem; border-radius: 9999px; color: #be123c; line-height: 1; }
+        .chip button.del:hover { background: #fecdd3; }
+        .step { display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1.6rem; border-radius: 9999px; background: #e11d48; color: #fff; font-weight: 700; font-size: .85rem; flex: none; }
+        input[type=text], input[type=number], textarea, select { border: 1px solid #cbd5e1; border-radius: .6rem; padding: .5rem .65rem; font-size: .92rem; width: 100%; background: #fff; }
+        input:focus, textarea:focus, select:focus { outline: 2px solid #fda4af; outline-offset: 0; border-color: #fb7185; }
+        #meter { height: 10px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
+        #meterBar { height: 100%; width: 0; background: linear-gradient(90deg, #10b981, #f59e0b 70%, #ef4444); transition: width .05s linear; }
+        .rec-dot { width: .7rem; height: .7rem; border-radius: 9999px; background: #ef4444; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: .2; } }
+        #wave { width: 100%; height: 120px; display: block; border-radius: .6rem; background: #0f172a; }
+        #progress { height: 8px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
+        #progressBar { height: 100%; width: 0; background: #e11d48; transition: width .1s linear; }
+        .player-wrap iframe { width: 100%; height: 240px; border: 0; border-radius: .75rem; background: #f1f5f9; }
+        .hidden-important { display: none !important; }
+        details > summary { cursor: pointer; list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+    </style>
+</head>
+<body class="text-slate-800">
+<div class="max-w-3xl mx-auto px-4 py-5 space-y-4" style="padding-bottom: max(1.25rem, env(safe-area-inset-bottom));">
+
+    <header class="flex items-center gap-3">
+        <img src="./icons/sunoRecorder-192.svg" alt="" class="w-10 h-10 rounded-xl">
+        <div class="min-w-0">
+            <h1 class="text-xl font-bold leading-tight">Suno 錄音轉 MP3</h1>
+            <p class="text-sm text-slate-500">貼上 Embed → 錄下分頁音訊 → 自動裁掉前後空白 → 下載 MP3</p>
+        </div>
+    </header>
+
+    <div id="unsupported" class="hidden card border-amber-300 bg-amber-50 text-amber-900 text-sm">
+        ⚠️ 這個瀏覽器不支援分頁音訊錄製（getDisplayMedia）。請改用<b>電腦版 Chrome 或 Edge</b> 開啟本工具；手機與 Safari 無法錄製分頁聲音。
+    </div>
+
+    <!-- ① 貼上 Suno -->
+    <section class="card space-y-3">
+        <div class="flex items-center gap-2"><span class="step">1</span><h2 class="font-semibold">貼上 Suno 歌曲</h2></div>
+        <textarea id="embedInput" rows="3" placeholder="貼上 Suno「分享 → Embed」的 &lt;iframe …&gt; 分享碼，或歌曲連結 https://suno.com/song/…"></textarea>
+        <div class="flex flex-wrap gap-2 items-center">
+            <button id="loadBtn" class="btn btn-dark">載入播放器</button>
+            <button id="pasteBtn" class="btn btn-ghost">📋 從剪貼簿貼上</button>
+            <span id="embedMsg" class="text-sm text-slate-500"></span>
+        </div>
+        <div id="recentWrap" class="hidden">
+            <div class="text-xs text-slate-500 mb-1">最近使用</div>
+            <div id="recentList" class="flex flex-wrap gap-2"></div>
+        </div>
+    </section>
+
+    <!-- 播放器 -->
+    <section id="playerCard" class="card space-y-3 hidden">
+        <div class="player-wrap" id="playerWrap"></div>
+        <div class="grid sm:grid-cols-[1fr_auto] gap-2 items-end">
+            <label class="block">
+                <span class="text-xs text-slate-500">檔名／歌名（會寫入 MP3 標題）</span>
+                <input id="titleInput" type="text" placeholder="例如：晨光之歌">
+            </label>
+            <a id="openSuno" class="btn btn-ghost" target="_blank" rel="noopener">在 Suno 開啟 ↗</a>
+        </div>
+    </section>
+
+    <!-- ② 錄音 -->
+    <section class="card space-y-3">
+        <div class="flex items-center gap-2"><span class="step">2</span><h2 class="font-semibold">錄音</h2></div>
+        <ol class="text-sm text-slate-600 list-decimal pl-5 space-y-1">
+            <li>按「開始錄音」，在 Chrome 彈出視窗選擇<b>「此分頁」</b>，並確認<b>「分享分頁音訊」</b>已開啟。</li>
+            <li>再按上方 Suno 播放器的 ▶ 播放鍵。開始前、結束後的空白會自動裁掉，不必急著按。</li>
+            <li>歌曲播完會<b>自動停止</b>（可在下方關閉），也可隨時按「停止並轉檔」。</li>
+        </ol>
+        <div class="flex flex-wrap gap-2 items-center">
+            <button id="startBtn" class="btn btn-primary">● 開始錄音</button>
+            <button id="stopBtn" class="btn btn-dark" disabled>■ 停止並轉檔</button>
+            <button id="cancelBtn" class="btn btn-ghost hidden">取消</button>
+            <div class="flex items-center gap-2 text-sm">
+                <span id="recDot" class="rec-dot hidden"></span>
+                <span id="recStatus" class="text-slate-600">待機中</span>
+            </div>
+        </div>
+        <div id="meter"><div id="meterBar"></div></div>
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+            <input id="autoStop" type="checkbox" class="w-4 h-4 accent-rose-600">
+            偵測到歌曲結束（持續靜音
+            <input id="autoStopSec" type="number" min="2" max="30" step="1" class="!w-16 !py-1">
+            秒）自動停止
+        </label>
+    </section>
+
+    <!-- ③ 裁切與轉檔 -->
+    <section id="resultCard" class="card space-y-3 hidden">
+        <div class="flex items-center gap-2"><span class="step">3</span><h2 class="font-semibold">裁切與下載 MP3</h2></div>
+        <canvas id="wave"></canvas>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#fb7185"></span> 保留</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#475569"></span> 裁掉的空白</span>
+        </div>
+        <div id="trimInfo" class="text-sm text-slate-700"></div>
+
+        <details id="advanced" class="rounded-xl border border-slate-200 p-3">
+            <summary class="text-sm font-medium text-slate-700">⚙️ 裁切與音質設定</summary>
+            <div class="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
+                <label class="block">
+                    <span class="text-slate-500">靜音門檻：<b id="thrLabel"></b> dBFS</span>
+                    <input id="thr" type="range" min="-75" max="-25" step="1" class="w-full accent-rose-600">
+                    <span class="text-xs text-slate-400">低於此音量視為空白；尾巴被剪太多就往左調</span>
+                </label>
+                <label class="block">
+                    <span class="text-slate-500">MP3 位元率</span>
+                    <select id="kbps">
+                        <option value="320">320 kbps（最高音質）</option>
+                        <option value="256">256 kbps</option>
+                        <option value="192">192 kbps</option>
+                        <option value="128">128 kbps（檔案最小）</option>
+                    </select>
+                </label>
+                <label class="block">
+                    <span class="text-slate-500">開頭保留（秒）</span>
+                    <input id="padPre" type="number" min="0" max="5" step="0.05">
+                </label>
+                <label class="block">
+                    <span class="text-slate-500">結尾保留（秒，保留餘韻）</span>
+                    <input id="padPost" type="number" min="0" max="10" step="0.1">
+                </label>
+            </div>
+            <div class="mt-3 flex gap-2">
+                <button id="reencodeBtn" class="btn btn-dark">套用設定並重新轉檔</button>
+            </div>
+        </details>
+
+        <div id="encodeBox" class="space-y-1 hidden">
+            <div class="text-sm text-slate-600" id="encodeStatus">轉檔中…</div>
+            <div id="progress"><div id="progressBar"></div></div>
+        </div>
+
+        <div id="downloadBox" class="space-y-2 hidden">
+            <audio id="preview" controls class="w-full"></audio>
+            <div class="flex flex-wrap gap-2 items-center">
+                <a id="downloadLink" class="btn btn-ok">⬇ 下載 MP3</a>
+                <span id="fileInfo" class="text-sm text-slate-500"></span>
+            </div>
+        </div>
+    </section>
+
+    <footer class="text-xs text-slate-400 space-y-1 pt-2">
+        <p>錄音只在你的瀏覽器內處理，不會上傳任何檔案。僅支援電腦版 Chrome／Edge。</p>
+        <p>若安裝成 App 後找不到「此分頁」選項，請改用一般 Chrome 分頁開啟。請只錄製你有權使用的歌曲。</p>
+    </footer>
+</div>
+
+<script>
+(() => {
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const SAMPLE_RATE = 48000;
+    const LS_SETTINGS = 'sunoRecorder.settings';
+    const LS_RECENT = 'sunoRecorder.recent';
+    const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+    // ─── 儲存（localStorage 失敗時退回記憶體） ──────────────────────────────
+    const store = {
+        get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+        set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+    };
+    const DEFAULTS = { thr: -50, padPre: 0.1, padPost: 0.8, kbps: 320, autoStop: true, autoStopSec: 4 };
+    const settings = Object.assign({}, DEFAULTS, store.get(LS_SETTINGS, {}));
+    const saveSettings = () => store.set(LS_SETTINGS, settings);
+
+    // ─── 狀態 ────────────────────────────────────────────────────────────
+    let current = null;        // { id, title }
+    let rec = null;            // 錄音中的物件
+    let raw = null;            // { L, R, sr } 原始錄音
+    let lastUrl = null;        // 下載用 object URL
+    let worker = null;
+
+    // ─── 支援檢查 ──────────────────────────────────────────────────────────
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) || !window.AudioWorkletNode) {
+        $('unsupported').classList.remove('hidden');
+        $('startBtn').disabled = true;
+    }
+
+    // ─── ① Embed 解析 ─────────────────────────────────────────────────────
+    function parseSuno(text) {
+        text = (text || '').trim();
+        if (!text) return { error: '請先貼上 Embed 分享碼或歌曲連結' };
+        const m = text.match(UUID_RE);
+        if (!m) {
+            if (/suno\.com\/s\//i.test(text)) return { error: '短網址（suno.com/s/…）無法直接解析，請改貼「Embed」分享碼，或在瀏覽器開啟短網址後複製網址列的完整歌曲連結' };
+            return { error: '找不到 Suno 歌曲 ID，請確認貼上的是 Suno 的 Embed 分享碼或歌曲連結' };
+        }
+        const id = m[0].toLowerCase();
+        let title = '';
+        const t1 = text.match(/title\s*=\s*["']([^"']+)["']/i);
+        const t2 = text.match(/<a[^>]*>([^<]+)<\/a>/i);
+        const cand = (t1 && t1[1]) || (t2 && t2[1]) || '';
+        if (cand && !/listen on suno|suno ai|^suno$/i.test(cand.trim())) title = decodeEntities(cand.trim());
+        return { id, title };
+    }
+    function decodeEntities(s) { const t = document.createElement('textarea'); t.innerHTML = s; return t.value; }
+
+    function loadSong(id, title) {
+        current = { id, title: title || '' };
+        const wrap = $('playerWrap');
+        wrap.innerHTML = '';
+        const f = document.createElement('iframe');
+        f.src = 'https://suno.com/embed/' + id;
+        f.allow = 'autoplay; encrypted-media; fullscreen; clipboard-write';
+        f.allowFullscreen = true;
+        f.referrerPolicy = 'no-referrer-when-downgrade';
+        f.title = 'Suno 播放器';
+        wrap.appendChild(f);
+        $('playerCard').classList.remove('hidden');
+        $('titleInput').value = current.title;
+        $('openSuno').href = 'https://suno.com/song/' + id;
+        $('embedMsg').textContent = '已載入 ' + id.slice(0, 8) + '…';
+        addRecent(id, current.title);
+    }
+
+    function getRecent() { return store.get(LS_RECENT, []); }
+    function addRecent(id, title) {
+        let list = getRecent().filter(x => x.id !== id);
+        const old = getRecent().find(x => x.id === id);
+        list.unshift({ id, title: title || (old && old.title) || '', t: Date.now() });
+        store.set(LS_RECENT, list.slice(0, 20));
+        renderRecent();
+    }
+    function updateRecentTitle(id, title) {
+        const list = getRecent();
+        const it = list.find(x => x.id === id);
+        if (it) { it.title = title; store.set(LS_RECENT, list); renderRecent(); }
+    }
+    function renderRecent() {
+        const list = getRecent();
+        $('recentWrap').classList.toggle('hidden', !list.length);
+        const box = $('recentList');
+        box.innerHTML = '';
+        list.forEach(item => {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            const b = document.createElement('button');
+            b.className = 'load';
+            b.textContent = item.title || item.id.slice(0, 8);
+            b.title = item.id;
+            b.onclick = () => { $('embedInput').value = 'https://suno.com/song/' + item.id; loadSong(item.id, item.title); };
+            const d = document.createElement('button');
+            d.className = 'del';
+            d.textContent = '×';
+            d.title = '從清單移除';
+            d.onclick = () => { store.set(LS_RECENT, getRecent().filter(x => x.id !== item.id)); renderRecent(); };
+            chip.append(b, d);
+            box.appendChild(chip);
+        });
+    }
+
+    $('loadBtn').onclick = () => {
+        const r = parseSuno($('embedInput').value);
+        if (r.error) { $('embedMsg').textContent = r.error; $('embedMsg').className = 'text-sm text-rose-600'; return; }
+        $('embedMsg').className = 'text-sm text-slate-500';
+        loadSong(r.id, r.title);
+    };
+    $('embedInput').addEventListener('paste', () => setTimeout(() => {
+        const r = parseSuno($('embedInput').value);
+        if (!r.error) { $('embedMsg').className = 'text-sm text-slate-500'; loadSong(r.id, r.title); }
+    }, 0));
+    $('pasteBtn').onclick = async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            $('embedInput').value = text;
+            $('loadBtn').click();
+        } catch { $('embedMsg').textContent = '無法讀取剪貼簿，請直接在框內按 Ctrl/⌘+V 貼上'; }
+    };
+    $('titleInput').addEventListener('change', () => {
+        if (current) { current.title = $('titleInput').value.trim(); updateRecentTitle(current.id, current.title); }
+    });
+
+    // ─── 設定 UI ───────────────────────────────────────────────────────────
+    function bindSettings() {
+        $('thr').value = settings.thr; $('thrLabel').textContent = settings.thr;
+        $('padPre').value = settings.padPre; $('padPost').value = settings.padPost;
+        $('kbps').value = String(settings.kbps);
+        $('autoStop').checked = settings.autoStop; $('autoStopSec').value = settings.autoStopSec;
+        $('thr').oninput = () => {
+            settings.thr = +$('thr').value; $('thrLabel').textContent = settings.thr; saveSettings();
+            if (raw) { analyse(); drawWave(); }
+        };
+        const num = (id, key, min, max) => $(id).onchange = () => {
+            let v = parseFloat($(id).value); if (!isFinite(v)) v = DEFAULTS[key];
+            settings[key] = Math.min(max, Math.max(min, v)); $(id).value = settings[key]; saveSettings();
+            if (raw && key.startsWith('pad')) { analyse(); drawWave(); }
+        };
+        num('padPre', 'padPre', 0, 5); num('padPost', 'padPost', 0, 10); num('autoStopSec', 'autoStopSec', 2, 30);
+        $('kbps').onchange = () => { settings.kbps = +$('kbps').value; saveSettings(); };
+        $('autoStop').onchange = () => { settings.autoStop = $('autoStop').checked; saveSettings(); };
+    }
+
+    // ─── ② 錄音 ────────────────────────────────────────────────────────────
+    const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + (s - m * 60).toFixed(1).padStart(4, '0'); };
+
+    function setRecUI(on) {
+        $('startBtn').disabled = on;
+        $('stopBtn').disabled = !on;
+        $('cancelBtn').classList.toggle('hidden', !on);
+        $('recDot').classList.toggle('hidden', !on);
+    }
+
+    $('startBtn').onclick = async () => {
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false },
+                preferCurrentTab: true,
+                selfBrowserSurface: 'include',
+                surfaceSwitching: 'exclude',
+                systemAudio: 'include'
+            });
+        } catch (e) {
+            $('recStatus').textContent = '已取消或失敗：' + (e.message || e.name);
+            return;
+        }
+        const audioTracks = stream.getAudioTracks();
+        if (!audioTracks.length) {
+            stream.getTracks().forEach(t => t.stop());
+            $('recStatus').textContent = '沒有取得音訊：請選「此分頁」並開啟「分享分頁音訊」';
+            return;
+        }
+        stream.getVideoTracks().forEach(t => t.stop()); // 只要聲音
+        try {
+            await startCapture(new MediaStream(audioTracks), stream);
+        } catch (e) {
+            stream.getTracks().forEach(t => t.stop());
+            $('recStatus').textContent = '無法開始錄音：' + e.message;
+        }
+    };
+
+    // 將任何含音訊的 MediaStream 錄成 PCM（測試時也可直接呼叫）
+    async function startCapture(audioStream, ownerStream) {
+        const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+        await ctx.audioWorklet.addModule('./capture-worklet.js');
+        if (ctx.state === 'suspended') await ctx.resume();
+        const src = ctx.createMediaStreamSource(audioStream);
+        const node = new AudioWorkletNode(ctx, 'pcm-capture', {
+            numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+            channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers'
+        });
+        const mute = ctx.createGain(); mute.gain.value = 0;
+        src.connect(node); node.connect(mute); mute.connect(ctx.destination);
+
+        const thrLin = () => Math.pow(10, settings.thr / 20);
+        rec = {
+            ctx, src, node, mute, ownerStream: ownerStream || audioStream,
+            chunksL: [], chunksR: [], frames: 0,
+            heardFrames: 0, silentFrames: 0, stopping: false, t0: Date.now()
+        };
+        const r = rec;
+        node.port.onmessage = (e) => {
+            const d = e.data;
+            if (d.type === 'pcm') {
+                r.chunksL.push(d.l); r.chunksR.push(d.r); r.frames += d.l.length;
+            } else if (d.type === 'level') {
+                $('meterBar').style.width = Math.min(100, Math.sqrt(d.peak) * 100) + '%';
+                if (d.peak >= thrLin()) { r.heardFrames += d.frames; r.silentFrames = 0; }
+                else r.silentFrames += d.frames;
+                const sec = (Date.now() - r.t0) / 1000;
+                let s = '錄音中 ' + fmt(sec);
+                if (!r.heardFrames) s += ' · 等待播放…';
+                else if (r.silentFrames > SAMPLE_RATE) s += ' · 靜音 ' + (r.silentFrames / SAMPLE_RATE).toFixed(0) + ' 秒';
+                $('recStatus').textContent = s;
+                if (settings.autoStop && r.heardFrames > SAMPLE_RATE * 1.5 && r.silentFrames >= settings.autoStopSec * SAMPLE_RATE) {
+                    stopCapture(true);
+                }
+            } else if (d.type === 'flushed') {
+                r.onFlushed && r.onFlushed();
+            }
+        };
+        audioStream.getAudioTracks().forEach(t => t.onended = () => stopCapture(true));
+        setRecUI(true);
+        $('recStatus').textContent = '錄音中 0:00.0 · 等待播放…';
+        return r;
+    }
+
+    function teardown(r) {
+        try { r.src.disconnect(); r.node.disconnect(); r.mute.disconnect(); } catch {}
+        r.ownerStream.getTracks().forEach(t => t.stop());
+        r.ctx.close().catch(() => {});
+        $('meterBar').style.width = '0';
+        setRecUI(false);
+    }
+
+    function stopCapture(keep) {
+        const r = rec;
+        if (!r || r.stopping) return Promise.resolve();
+        r.stopping = true;
+        return new Promise((resolve) => {
+            let finished = false;
+            const done = () => {
+                if (finished) return;
+                finished = true;
+                teardown(r);
+                rec = null;
+                if (!keep) { $('recStatus').textContent = '已取消'; resolve(); return; }
+                const L = concat(r.chunksL, r.frames), R = concat(r.chunksR, r.frames);
+                $('recStatus').textContent = '錄音完成，共 ' + fmt(r.frames / SAMPLE_RATE);
+                processRecording(L, R, SAMPLE_RATE).then(resolve);
+            };
+            r.onFlushed = done;
+            r.node.port.postMessage('flush');
+            setTimeout(done, 1500); // 保險：worklet 沒回應時仍結束
+        });
+    }
+    $('stopBtn').onclick = () => stopCapture(true);
+    $('cancelBtn').onclick = () => stopCapture(false);
+
+    function concat(chunks, total) {
+        const out = new Float32Array(total);
+        let o = 0;
+        for (const c of chunks) { out.set(c.subarray(0, Math.min(c.length, total - o)), o); o += c.length; if (o >= total) break; }
+        return out;
+    }
+
+    // ─── ③ 裁切 ────────────────────────────────────────────────────────────
+    let trim = null; // { start, end, sigStart, sigEnd }
+
+    function analyse() {
+        const { L, R, sr } = raw;
+        const n = L.length;
+        const thr = Math.pow(10, settings.thr / 20);
+        const B = 256;
+        let first = -1, last = -1;
+        for (let i = 0; i < n; i += B) {
+            const e = Math.min(n, i + B);
+            let p = 0;
+            for (let j = i; j < e; j++) { const a = Math.abs(L[j]), b = Math.abs(R[j]); if (a > p) p = a; if (b > p) p = b; }
+            if (p >= thr) { if (first < 0) first = i; last = e; }
+        }
+        if (first < 0) { trim = null; renderTrimInfo(); return; }
+        const start = Math.max(0, first - Math.round(settings.padPre * sr));
+        const end = Math.min(n, last + Math.round(settings.padPost * sr));
+        trim = { start, end, sigStart: first, sigEnd: last };
+        renderTrimInfo();
+    }
+
+    function renderTrimInfo() {
+        const el = $('trimInfo');
+        if (!raw) { el.textContent = ''; return; }
+        const sr = raw.sr, total = raw.L.length / sr;
+        if (!trim) {
+            el.innerHTML = '<span class="text-rose-600">沒有偵測到聲音（全部低於 ' + settings.thr + ' dBFS）。請確認錄音時有開啟「分享分頁音訊」，或調低靜音門檻。</span>';
+            return;
+        }
+        const head = trim.start / sr, tail = (raw.L.length - trim.end) / sr, keep = (trim.end - trim.start) / sr;
+        el.innerHTML = '原始 <b>' + fmt(total) + '</b> → 裁切後 <b class="text-rose-600">' + fmt(keep) + '</b>'
+            + '<span class="text-slate-500">（剪掉開頭 ' + head.toFixed(1) + ' 秒、結尾 ' + tail.toFixed(1) + ' 秒）</span>';
+    }
+
+    function drawWave() {
+        const c = $('wave');
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.round(c.clientHeight * dpr);
+        c.width = w; c.height = h;
+        const g = c.getContext('2d');
+        g.fillStyle = '#0f172a'; g.fillRect(0, 0, w, h);
+        if (!raw) return;
+        const { L, R } = raw;
+        const n = L.length, per = n / w, mid = h / 2;
+        for (let x = 0; x < w; x++) {
+            const s = Math.floor(x * per), e = Math.min(n, Math.floor((x + 1) * per));
+            let mn = 0, mx = 0;
+            const step = Math.max(1, Math.floor((e - s) / 400));
+            for (let i = s; i < e; i += step) { const v = (L[i] + R[i]) / 2; if (v < mn) mn = v; if (v > mx) mx = v; }
+            const inside = trim && s >= trim.start && s < trim.end;
+            g.fillStyle = inside ? '#fb7185' : '#475569';
+            const y1 = mid - mx * mid * 0.95, y2 = mid - mn * mid * 0.95;
+            g.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+        }
+        if (trim) {
+            g.fillStyle = 'rgba(15,23,42,.45)';
+            const xs = trim.start / per, xe = trim.end / per;
+            g.fillRect(0, 0, xs, h); g.fillRect(xe, 0, w - xe, h);
+            g.fillStyle = '#fde68a';
+            g.fillRect(Math.round(xs), 0, Math.max(1, dpr), h); g.fillRect(Math.round(xe) - 1, 0, Math.max(1, dpr), h);
+        }
+    }
+    window.addEventListener('resize', () => { if (raw) drawWave(); });
+
+    function trimmedPcm() {
+        const { L, R, sr } = raw;
+        const a = L.slice(trim.start, trim.end), b = R.slice(trim.start, trim.end);
+        const fadeIn = Math.min(a.length, Math.round(0.005 * sr)), fadeOut = Math.min(a.length, Math.round(0.03 * sr));
+        for (let i = 0; i < fadeIn; i++) { const k = i / fadeIn; a[i] *= k; b[i] *= k; }
+        for (let i = 0; i < fadeOut; i++) { const k = i / fadeOut, j = a.length - 1 - i; a[j] *= k; b[j] *= k; }
+        return { a, b, sr };
+    }
+
+    async function processRecording(L, R, sr) {
+        raw = { L, R, sr };
+        $('resultCard').classList.remove('hidden');
+        $('downloadBox').classList.add('hidden');
+        analyse();
+        drawWave();
+        $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (trim) await encode();
+    }
+
+    // ─── MP3 編碼 ──────────────────────────────────────────────────────────
+    function safeName(s) { return (s || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80); }
+    function stamp() { const d = new Date(), p = (x) => String(x).padStart(2, '0'); return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()); }
+
+    function encode() {
+        if (!raw || !trim) return Promise.resolve();
+        if (worker) { worker.terminate(); worker = null; }
+        const { a, b, sr } = trimmedPcm();
+        const title = safeName($('titleInput').value) || (current && current.title) || '';
+        const fileBase = title || ('suno-' + (current ? current.id.slice(0, 8) : 'recording') + '-' + stamp());
+        $('encodeBox').classList.remove('hidden');
+        $('downloadBox').classList.add('hidden');
+        $('encodeStatus').textContent = '轉成 MP3（' + settings.kbps + ' kbps）中… 0%';
+        $('progressBar').style.width = '0';
+        $('reencodeBtn').disabled = true;
+        const t0 = performance.now();
+        return new Promise((resolve) => {
+            worker = new Worker('./mp3-worker.js');
+            worker.onmessage = (e) => {
+                const d = e.data;
+                if (d.type === 'progress') {
+                    $('progressBar').style.width = d.pct + '%';
+                    $('encodeStatus').textContent = '轉成 MP3（' + settings.kbps + ' kbps）中… ' + d.pct + '%';
+                } else if (d.type === 'done') {
+                    worker.terminate(); worker = null;
+                    if (lastUrl) URL.revokeObjectURL(lastUrl);
+                    lastUrl = URL.createObjectURL(d.blob);
+                    const name = fileBase + '.mp3';
+                    $('preview').src = lastUrl;
+                    const a = $('downloadLink'); a.href = lastUrl; a.download = name;
+                    $('fileInfo').textContent = name + ' · ' + (d.blob.size / 1048576).toFixed(2) + ' MB · ' + fmt(trim ? (trim.end - trim.start) / sr : 0);
+                    $('encodeBox').classList.add('hidden');
+                    $('downloadBox').classList.remove('hidden');
+                    $('reencodeBtn').disabled = false;
+                    window.__lastMp3 = { blob: d.blob, name, ms: performance.now() - t0 };
+                    resolve(d.blob);
+                } else if (d.type === 'error') {
+                    worker.terminate(); worker = null;
+                    $('encodeStatus').textContent = '轉檔失敗：' + d.message;
+                    $('reencodeBtn').disabled = false;
+                    resolve(null);
+                }
+            };
+            worker.onerror = (err) => {
+                $('encodeStatus').textContent = '轉檔失敗：' + (err.message || '無法載入編碼器');
+                $('reencodeBtn').disabled = false;
+                resolve(null);
+            };
+            worker.postMessage({ left: a, right: b, sampleRate: sr, kbps: settings.kbps, title }, [a.buffer, b.buffer]);
+        });
+    }
+    $('reencodeBtn').onclick = () => { analyse(); drawWave(); encode(); };
+
+    // ─── 初始化 ────────────────────────────────────────────────────────────
+    bindSettings();
+    renderRecent();
+    const last = getRecent()[0];
+    if (last) { $('embedInput').value = 'https://suno.com/song/' + last.id; loadSong(last.id, last.title); }
+
+    // 測試掛勾
+    window.sunoRecorder = { startCapture, stopCapture, processRecording, parseSuno, get state() { return { raw, trim, settings }; } };
+})();
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () =>
+        navigator.serviceWorker.register('./sw.js')
+            .catch((err) => console.warn('[SW] Registration failed:', err))
+    );
+}
+</script>
+</body>
+</html>
