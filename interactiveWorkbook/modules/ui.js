@@ -6,6 +6,7 @@ import { stopWatchLive } from './live.js';
 import { renderStudentEntry } from './entry.js';
 import { rerender } from './render.js';
 import { applyDefaults } from './student.js';
+import { askConfirm } from './dialog.js';
 
 // shell()：畫面外殼，沿用現有行為（原屬「5. 畫面狀態」一節）。
 export function shell(body, options = {}) {
@@ -25,9 +26,14 @@ export function shell(body, options = {}) {
   document.querySelector('#app').innerHTML = `${header}<main class="${layout ? layout : 'wrap'}">${body}</main>`;
   const logout = document.querySelector('#logout');
   if (logout) {
-    logout.onclick = () => {
+    // async：student.js 的 bindLeaveRelease() 會 await 這個 handler，再看 S.session 是否被清掉來決定要不要釋放編輯權。
+    logout.onclick = async () => {
       if (S.busy) return;
-      if (S.dirty && !confirm('尚有未儲存的答案，確定離開？')) return;
+      if (S.dirty) {
+        const title = S.session.role === 'teacher' ? '離開講師模式' : '離開本組';
+        if (!(await askConfirm('尚有未儲存的答案，確定離開？', { title, okLabel: '確定離開', danger: true }))) return;
+        if (!S.session) return; // 提示窗開著的期間已經被其他原因登出
+      }
       leaveSession();
     };
   }
@@ -70,9 +76,15 @@ export function identityBar() {
 export function bindIdentityBar() {
   const button = document.querySelector('#fix-identity');
   if (!button) return;
-  button.onclick = () => {
+  // async：同上，bindLeaveRelease() 會 await 這個 handler。
+  button.onclick = async () => {
     if (S.busy) return;
-    if (S.dirty && !confirm('尚有未儲存的答案，確定離開並重新填寫組別／姓名？')) return;
+    if (S.dirty) {
+      if (!(await askConfirm('尚有未儲存的答案，確定離開並重新填寫組別／姓名？', {
+        title: '更正組別／姓名', okLabel: '離開並重新填寫', danger: true,
+      }))) return;
+      if (!S.session) return;
+    }
     const { code } = S.session;
     if (S.unwatch) { S.unwatch(); S.unwatch = null; }
     // 跟 leaveSession 一樣：live/<CODE> 是另一條訂閱，不解就會留著僵尸監聽與上一個身分的緩存。
@@ -85,12 +97,19 @@ export function bindIdentityBar() {
 
 export function bindTabs() {
   document.querySelectorAll('[data-qid]').forEach((b) => {
-    b.onclick = () => {
+    b.onclick = async () => {
       if (S.busy) return;
       const target = b.dataset.qid;
       if (!S.course.byQid[target]) { notify('這一題已被講師刪除，請改選其他練習。'); return; }
       if (S.session.role === 'student' && S.course.locks[target]) { notify('本題尚未開放。'); return; }
-      if (S.dirty && !confirm('本題還沒儲存。確定捨棄修改並切換題目？')) return;
+      if (S.dirty) {
+        if (!(await askConfirm('本題還沒儲存。確定捨棄修改並切換題目？', {
+          title: '切換題目', okLabel: '捨棄並切換', cancelLabel: '留在本題', danger: true,
+        }))) return;
+        // 提示窗開著的期間，講師可能剛好刪掉或關閉了目標題目，或這台裝置已經離開。
+        if (!S.session || !S.course || !S.course.byQid[target]) return;
+        if (S.session.role === 'student' && S.course.locks[target]) { notify('本題尚未開放。'); return; }
+      }
       S.qid = target;
       S.dirty = false;
       if (S.session.role === 'teacher') { rerender(); return; }

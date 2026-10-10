@@ -14,6 +14,7 @@ import {
 } from './editlock.js';
 // 循環 import（student → teacher → ui → student）：只在函式體內使用，不在模組頂層執行期取值。
 import { answerText } from './teacher.js';
+import { askConfirm } from './dialog.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 8. 學員作答畫面
@@ -166,7 +167,9 @@ export function touchMine() {
 /**
  * 「離開本組」與身分列的「更正」都要釋放編輯權。
  * 這兩顆按鈕分別由 shell() 與 bindIdentityBar() 綁定（都在 ui.js），所以這裡用包一層的方式處理：
- * 兩者都是「真的離開了才把 S.session 清成 null」，用這一點就能分辨使用者有沒有在 confirm 按取消。
+ * 兩者都是「真的離開了才把 S.session 清成 null」，用這一點就能分辨使用者有沒有在提示窗按取消。
+ * 原 handler 是 async（要等使用者在自製提示窗按下確定，S.session 才會被清掉），
+ * 所以這裡必須 await 它的回傳值之後再檢查，不能呼叫完就同步檢查。
  */
 function bindLeaveRelease() {
   ['#logout', '#fix-identity'].forEach((selector) => {
@@ -175,9 +178,9 @@ function bindLeaveRelease() {
     const original = button.onclick;
     if (typeof original !== 'function') return;
     button.dataset.editlockWrapped = '1';
-    button.onclick = (ev) => {
+    button.onclick = async (ev) => {
       const before = S.session;
-      const result = original.call(button, ev);
+      const result = await original.call(button, ev);
       if (before && before.gid && !S.session) {
         releaseLock(before.code, before.gid);
         resetEditLock();
@@ -187,7 +190,10 @@ function bindLeaveRelease() {
   });
 }
 
-/** 切換題目也算動作。bindTabs() 在 ui.js，這裡同樣用包一層的方式補上 touch。 */
+/**
+ * 切換題目也算動作。bindTabs() 在 ui.js，這裡同樣用包一層的方式補上 touch。
+ * 原 handler 是 async，這裡只是先 touch 再把它的 Promise 原樣回傳，不需要等它。
+ */
 function bindTabTouch() {
   document.querySelectorAll('[data-qid]').forEach((button) => {
     const original = button.onclick;
@@ -269,10 +275,15 @@ export function renderStudent() {
   mountEditLock(S.session.code, S.session.gid, { onChange: handleEditLockChange });
   document.querySelector('#save').onclick = () => saveDraft(false);
   document.querySelector('#complete').onclick = () => saveDraft(true);
-  document.querySelector('#reload').onclick = () => {
+  document.querySelector('#reload').onclick = async () => {
     if (S.busy) return;
-    if (S.dirty && !confirm('重新載入會捨棄畫面上未儲存的修改，確定繼續？')) return;
+    if (S.dirty && !(await askConfirm('重新載入會捨棄畫面上未儲存的修改，確定繼續？', {
+      title: '重新載入', okLabel: '捨棄並重新載入', danger: true,
+    }))) return;
+    // 提示窗開著的期間可能已經離開本組（或組別被講師刪除）。
+    if (!S.session || S.session.role !== 'student') return;
     const g = myGroup();
+    if (!g) return;
     S.draft = structuredClone(g.answers[S.qid] || {});
     S.revision = g.revision[S.qid] || 0;
     S.dirty = false;

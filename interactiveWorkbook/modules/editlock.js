@@ -34,6 +34,7 @@ import {
 import { deviceId } from './storage.js';
 import { E, notify } from './util.js';
 import { onLiveChange } from './live.js';
+import { askConfirm } from './dialog.js';
 
 /** 閒置多久之後，同組其他人可以接手 */
 export const IDLE_TAKEOVER_MS = 5 * 60 * 1000;
@@ -342,7 +343,9 @@ async function handleAction(state, action) {
     if (action === 'takeover') {
       const info = myEditLock(state.gid);
       const who = info.holderName ? `「${info.holderName}」` : '目前的填寫者';
-      const ok = confirm(`接手之後，${who}的畫面會變成唯讀。對方正在打、還沒儲存的內容可能會因此遺失，系統不會替他保留，請先跟同組的人講一聲。\n\n確定要接手本組的編輯權嗎？`);
+      const ok = await askConfirm(`接手之後，${who}的畫面會變成唯讀。對方正在打、還沒儲存的內容可能會因此遺失，系統不會替他保留，請先跟同組的人講一聲。\n\n確定要接手本組的編輯權嗎？`, {
+        title: '接手編輯權', okLabel: '確定接手', danger: true,
+      });
       if (!ok) { if (button) button.disabled = false; return; }
       const outcome = await takeoverLock(state.code, state.gid);
       notify(outcome.ok
@@ -351,7 +354,9 @@ async function handleAction(state, action) {
           ? '對方剛剛又有動作，閒置時間已經重新計算，暫時還不能接手。'
           : '接手沒有成功，可能剛好被同組其他裝置接走了。請看畫面上方最新的狀態。'));
     } else if (action === 'release') {
-      if (S.dirty && !confirm('畫面上還有沒儲存的內容。交出編輯權之後這台裝置就是唯讀的，沒辦法再儲存這些內容。確定要交出嗎？')) {
+      if (S.dirty && !(await askConfirm('畫面上還有沒儲存的內容。交出編輯權之後這台裝置就是唯讀的，沒辦法再儲存這些內容。確定要交出嗎？', {
+        title: '交出編輯權', okLabel: '仍要交出', cancelLabel: '先不要', danger: true,
+      }))) {
         if (button) button.disabled = false;
         return;
       }

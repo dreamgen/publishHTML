@@ -11,6 +11,7 @@ import { onValue, courseRef } from './firebase.js';
 import { startSession, urlCode } from './session.js';
 import { notify, CODE_LENGTH, E } from './util.js';
 import { downloadTemplate } from './teacher.js';
+import { askConfirm } from './dialog.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 6. 入口畫面（學員 / 講師）
@@ -183,7 +184,7 @@ export function renderStudentEntry(prefill = {}) {
       if (select) {
         const hit = info.groups.find((g) => g.gid === select.value);
         if (!hit) throw Error('請先從清單中選擇你們這一組。');
-        if (!confirm(joinExistingMessage(hit))) return;
+        if (!(await askConfirm(joinExistingMessage(hit), { title: '加入現有小組', okLabel: '加入這一組' }))) return;
         target = { gid: hit.gid };
         displayName = hit.name;
       } else {
@@ -191,14 +192,16 @@ export function renderStudentEntry(prefill = {}) {
         if (!typed) throw Error('請填寫組別。');
         const hit = info.groups.find((g) => g.nameKey === normalizeGroupName(typed));
         if (hit) {
-          if (!confirm(joinExistingMessage(hit))) return;
+          if (!(await askConfirm(joinExistingMessage(hit), { title: '加入現有小組', okLabel: '加入這一組' }))) return;
           target = { gid: hit.gid };
           displayName = hit.name;
         } else {
           if (!info.allowStudentGroupNames) {
             throw Error('這場課程的組別由講師預先建立，找不到你輸入的這一組。請重新整理後從清單中選擇，或請講師新增這一組。');
           }
-          if (!confirm(`找不到「${typed}」，要新增一個小組嗎？新增之後其他組員也會在清單上看到這一組，並和你共用同一份答案。`)) return;
+          if (!(await askConfirm(`找不到「${typed}」，要新增一個小組嗎？新增之後其他組員也會在清單上看到這一組，並和你共用同一份答案。`, {
+            title: '新增小組', okLabel: '新增並加入',
+          }))) return;
           target = { name: typed };
           displayName = typed;
         }

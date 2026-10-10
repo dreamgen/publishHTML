@@ -30,6 +30,7 @@ import {
 import {
   beginEditQuestion, beginNewQuestion, confirmLockQuestion, archivedSection, bindArchivedSection,
 } from './editor.js';
+import { askConfirm, askText, askTyped } from './dialog.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 9. 講師控制台
@@ -167,10 +168,11 @@ export function bindGroupManage() {
       const gid = button.dataset.renameGroup;
       const g = S.course.groups[gid];
       if (!g) return;
-      const next = prompt(`要把「${g.name}」改成什麼名稱？名稱只是標籤，這一組已經存好的答案不會受到影響。`, g.name);
-      if (next === null) return;
-      if (next.trim() === g.name) return;
       button.disabled = true;
+      const next = await askText(`要把「${g.name}」改成什麼名稱？名稱只是標籤，這一組已經存好的答案不會受到影響。`, {
+        title: '小組改名', label: '新的組別名稱', defaultValue: g.name, maxLength: 100, okLabel: '改名',
+      });
+      if (next === null || next.trim() === g.name) { button.disabled = false; return; }
       try {
         await renameGroup(S.session.code, gid, next);
         notify(`已改名為「${next.trim()}」。`);
@@ -187,8 +189,10 @@ export function bindGroupManage() {
       const detail = answered
         ? `這一組在 ${answered} 個練習已經有答案，會連同小組一起永久刪除。`
         : '這一組目前還沒有任何答案。';
-      if (!confirm(`確定刪除「${g.name}」？\n\n${detail}\n該組的加入紀錄與封存內容也會一併移除，其他小組不受影響。此操作無法復原。`)) return;
       button.disabled = true;
+      if (!(await askConfirm(`確定刪除「${g.name}」？\n\n${detail}\n該組的加入紀錄與封存內容也會一併移除，其他小組不受影響。此操作無法復原。`, {
+        title: '刪除小組', okLabel: '刪除這一組', danger: true,
+      }))) { button.disabled = false; return; }
       try {
         await deleteGroup(S.session.code, gid);
         if (S.groupFilter === gid) S.groupFilter = 'all';
@@ -222,8 +226,10 @@ export function bindGroupManage() {
       const n = Number(input.value);
       if (!Number.isInteger(n) || n < 1) { notify('請輸入 1 以上的整數，代表要產生幾組。'); input.focus(); return; }
       if (n > MAX_GROUPS) { notify(`一次最多只能產生 ${MAX_GROUPS} 組，請輸入 ${MAX_GROUPS} 以下的數字。`); input.focus(); return; }
-      if (!confirm(`要建立「第 1 組」到「第 ${n} 組」嗎？已經存在的同名組別會自動跳過，不會重複建立，也不會影響任何已存的答案。`)) return;
       batchButton.disabled = true;
+      if (!(await askConfirm(`要建立「第 1 組」到「第 ${n} 組」嗎？已經存在的同名組別會自動跳過，不會重複建立，也不會影響任何已存的答案。`, {
+        title: '產生組別', okLabel: `建立 ${n} 組`,
+      }))) { batchButton.disabled = false; return; }
       try {
         const names = Array.from({ length: n }, (_, i) => `第 ${i + 1} 組`);
         const result = await createGroups(S.session.code, names);
@@ -372,9 +378,11 @@ export function openMergeDialog(keepGid, dropGid) {
       archived ? `${archived} 題兩者皆保留，落選那一份存成封存紀錄。` : '',
       discarded ? `${discarded} 題保留「${keep.name}」的答案，「${drop.name}」那一份會隨著小組一起刪除。` : '',
     ].filter(Boolean).join('\n');
-    if (!confirm(`確定要合併嗎？\n\n${summary}\n\n此操作無法復原。`)) return;
     const button = dialog.querySelector('#merge-confirm');
     button.disabled = true;
+    if (!(await askConfirm(`確定要合併嗎？\n\n${summary}\n\n此操作無法復原。`, {
+      title: '確認合併', okLabel: '確定合併', danger: true,
+    }))) { button.disabled = false; return; }
     try {
       await mergeGroups(S.session.code, keepGid, dropGid, choices, finalName);
       if (S.groupFilter === dropGid) S.groupFilter = 'all';
@@ -432,9 +440,9 @@ function bindGates() {
     button.onclick = async () => {
       const qid = button.dataset.gate;
       const locking = !S.course.locks[qid];
-      // 關閉（不是開放）而且已經有小組進入這一題時先問一次，並一併說明「接下來要修改」的後續影響。
-      if (locking && !confirmLockQuestion(qid)) return;
+      // 關閉（不是開放）時提醒講師先口頭確認各組都已存檔（課程裡還沒有任何小組時不問），並說明「接下來要修改」的後續影響。
       button.disabled = true;
+      if (locking && !(await confirmLockQuestion(qid))) { button.disabled = false; return; }
       try { await setLock(S.session.code, qid, locking); } catch (e) { notify(e.message); button.disabled = false; }
     };
   });
@@ -638,8 +646,10 @@ async function deleteQuestion(button, qid) {
   if (!target) return;
   const answered = answeredCount(qid);
   const warning = answered ? `目前有 ${answered} 組在這一題已經作答，答案會一併永久刪除。\n` : '';
-  if (!confirm(`確定刪除「${exLabel(exNumber(qid))}｜${target.title}」？\n\n${warning}後面的練習會自動往前遞補題號，其他練習的答案保留。此操作無法復原。`)) return;
   button.disabled = true;
+  if (!(await askConfirm(`確定刪除「${exLabel(exNumber(qid))}｜${target.title}」？\n\n${warning}後面的練習會自動往前遞補題號，其他練習的答案保留。此操作無法復原。`, {
+    title: '刪除練習', okLabel: '刪除這一題', danger: true,
+  }))) { button.disabled = false; return; }
   try {
     await deleteExercise(S.session.code, S.course, qid);
     // 題目沒了，掛在它身上的 live 輔助標記（橘點、已進入）留著只會是永遠不會被讀到的垃圾。
@@ -654,10 +664,13 @@ async function deleteQuestion(button, qid) {
   }
 }
 
-async function clearQuestionAnswers(qid) {
+async function clearQuestionAnswers(button, qid) {
   const target = S.course.byQid[qid];
   if (!target) return;
-  if (!confirm(`確定清除所有組別的「${exLabel(exNumber(qid))}｜${target.title}」答案？其他練習會保留。此操作無法復原。`)) return;
+  button.disabled = true;
+  if (!(await askConfirm(`確定清除所有組別的「${exLabel(exNumber(qid))}｜${target.title}」答案？其他練習會保留。此操作無法復原。`, {
+    title: '清除答案', okLabel: '清除答案', danger: true,
+  }))) { button.disabled = false; return; }
   try {
     const updates = {};
     Object.keys(S.course.groups).forEach((gid) => {
@@ -673,7 +686,7 @@ async function clearQuestionAnswers(qid) {
     await clearEnteredForQuestion(S.session.code, qid);
     S.prepMenu = null;
     notify('本題答案已清除。');
-  } catch (e) { notify(e.message); }
+  } catch (e) { notify(e.message); button.disabled = false; }
 }
 
 // ── 投影：本機全螢幕 ───────────────────────────────────────────────────────
@@ -799,8 +812,14 @@ function bindPrepPane() {
   if (tab === 's') {
     // 刪除課程放在課程設定並在這裡綁定：還沒匯入題目的課程也必須刪得掉。
     document.querySelector('#reset-password').onclick = openPasswordDialog;
-    document.querySelector('#delete-course').onclick = async () => {
-      if (prompt(`這會永久刪除整個課程「${S.course.name}」，包含題目與所有組別答案，無法復原。請輸入課程名稱確認。`) !== S.course.name) return;
+    document.querySelector('#delete-course').onclick = async (ev) => {
+      const button = ev.currentTarget;
+      button.disabled = true;
+      const ok = await askTyped(`這會永久刪除整個課程「${S.course.name}」，包含題目與所有組別答案，無法復原。`, S.course.name, {
+        title: '刪除整個課程', okLabel: '永久刪除課程',
+      });
+      button.disabled = false;
+      if (!ok || !S.session || !S.course) return;
       // 先留存代碼：課程一被刪除，onValue 會立刻收到 null 並把 session 清空。
       const code = S.session.code;
       try {
@@ -810,8 +829,14 @@ function bindPrepPane() {
         notify('課程已刪除。');
       } catch (e) { notify(e.message); }
     };
-    document.querySelector('#reset').onclick = async () => {
-      if (prompt('這會移除全部組別及全部練習答案，並關閉所有練習（題目保留）。請輸入「重置課程」確認。') !== '重置課程') return;
+    document.querySelector('#reset').onclick = async (ev) => {
+      const button = ev.currentTarget;
+      button.disabled = true;
+      const ok = await askTyped('這會移除全部組別及全部練習答案，並關閉所有練習（題目保留）。', '重置課程', {
+        title: '重置本場課程', okLabel: '重置課程',
+      });
+      button.disabled = false;
+      if (!ok || !S.session || !S.course) return;
       try {
         const updates = { groups: null };
         S.course.all.forEach((exDef) => { updates[`locks/${exDef.qid}`] = true; });
@@ -841,7 +866,7 @@ function bindPrepPane() {
     button.onclick = () => deleteQuestion(button, button.dataset.delEx);
   });
   document.querySelectorAll('[data-clear-ex]').forEach((button) => {
-    button.onclick = () => clearQuestionAnswers(button.dataset.clearEx);
+    button.onclick = () => clearQuestionAnswers(button, button.dataset.clearEx);
   });
 }
 
@@ -902,7 +927,7 @@ export async function importQuestionsFile(event) {
     const message = `匯入摘要：共 ${exercises.length} 個練習\n${
       exercises.map((t, i) => `${i + 1}．${t.title}`).join('\n')
     }\n\n目前課程有 ${S.course.exercises.length} 個練習、${groupCount} 個組別。匯入後將完全取代目前的練習內容；已存在的組別答案中，欄位不符的部分將會清空。確定匯入？`;
-    if (!confirm(message)) return;
+    if (!(await askConfirm(message, { title: '匯入題目', okLabel: '匯入並取代', danger: true }))) return;
     // 先把舊課程升級到 v2：改寫 exercisesJson 之後，題目就都帶著 qid，舊的數字 key 會失去退回來源。
     await migrateCourseIfNeeded(S.session.code);
     const updates = { exercisesJson: JSON.stringify(exercises) };
@@ -997,7 +1022,7 @@ export async function importAnswersFile(event) {
     const mapping = matchByQid
       ? ''
       : '這份備份沒有可對應的題目 ID（舊版備份或來自其他課程），將依題號順序對應到目前的第一題、第二題……請先確認題目順序相同。\n\n';
-    if (!confirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。\n${archiveWarning}確定匯入？`)) return;
+    if (!(await askConfirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。\n${archiveWarning}確定匯入？`, { title: '匯入答案備份', okLabel: '匯入並覆寫', danger: true }))) return;
 
     const updates = {};
     const removedGids = [];
@@ -1082,14 +1107,18 @@ export function joinURL(code) {
   return location.origin + location.pathname.replace(/index\.html$/, '') + '?c=' + encodeURIComponent(code);
 }
 
-/** 沒有組別又不允許學員自訂組名時先問一次；回傳 false 表示講師選擇先回去開組 */
-function confirmJoinWithoutGroups() {
+/** 沒有組別又不允許學員自訂組名時先問一次；回傳 Promise<boolean>，false 表示講師選擇先回去開組。呼叫端一律 await。 */
+async function confirmJoinWithoutGroups() {
   // 學員掃碼只會看到等待畫面。講師常常是「先投影 QR、再想到要開組」，在這裡先問一次比讓全班卡在等待畫面便宜得多。
   if (S.course.allowStudentGroupNames || Object.keys(S.course.groups).length) return true;
-  return confirm('目前還沒有任何小組，學員掃碼後只會看到等待畫面。要繼續顯示 QR Code 嗎？（取消則回控制台新增組別）');
+  return askConfirm('目前還沒有任何小組，學員掃碼後只會看到等待畫面。要繼續顯示 QR Code 嗎？（取消則回控制台新增組別）', {
+    title: '還沒有任何小組', okLabel: '仍要顯示 QR Code', cancelLabel: '回控制台新增組別',
+  });
 }
 
 let closeJoinDialog = null;
+// 「沒有組別」提示窗開著的期間，擋住第二次按「顯示 QR」（控制台鈕與投影舞台的代碼鈕都會走到這裡）。
+let joinAsking = false;
 
 /**
  * 全螢幕的學員加入頁。options：
@@ -1097,9 +1126,15 @@ let closeJoinDialog = null;
  *   backLabel    關閉鈕的字（投影舞台上要寫「返回投影畫面」）
  *   onClose      關閉後要做什麼（投影視窗用來通知控制台）
  */
-export function openJoinQR(options = {}) {
-  if (S.joinOpen) return;
-  if (!options.skipConfirm && !confirmJoinWithoutGroups()) return;
+export async function openJoinQR(options = {}) {
+  if (S.joinOpen || joinAsking) return;
+  // skipConfirm（投影視窗收到指令）時不經過任何 await，維持同步開啟，緊接著呼叫 closeJoinQR() 也關得掉。
+  if (!options.skipConfirm) {
+    joinAsking = true;
+    let ok = false;
+    try { ok = await confirmJoinWithoutGroups(); } finally { joinAsking = false; }
+    if (!ok || S.joinOpen || !S.session || !S.course) return;
+  }
   S.joinOpen = true;
   const url = joinURL(S.session.code);
   const dialog = document.createElement('dialog');
@@ -1148,10 +1183,14 @@ function paintJoinButton() {
   b.title = remote ? '在投影視窗顯示學員加入的 QR Code' : '在這台電腦全螢幕顯示學員加入的 QR Code';
 }
 
-function onJoinQRButton() {
-  if (!projectorConnected()) { openJoinQR(); return; }
+async function onJoinQRButton() {
+  if (!projectorConnected()) { await openJoinQR(); return; }
   if (projQrOpen) { publishJoinQR(false); projQrOpen = false; paintJoinButton(); return; }
-  if (!confirmJoinWithoutGroups()) return;
+  if (joinAsking) return;
+  joinAsking = true;
+  let ok = false;
+  try { ok = await confirmJoinWithoutGroups(); } finally { joinAsking = false; }
+  if (!ok || projQrOpen) return;
   publishJoinQR(true);
   projQrOpen = true;
   paintJoinButton();

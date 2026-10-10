@@ -10,6 +10,7 @@ import {
 import { enteredGroups, clearActivityForQuestion, clearEnteredForQuestion } from './live.js';
 // 循環 import（editor → render → teacher → editor）：只在函式體內使用，不在模組頂層執行期取值。
 import { rerender } from './render.js';
+import { askConfirm } from './dialog.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 12. 題目編輯器與封存／還原（功能二）
@@ -420,10 +421,23 @@ async function doSave() {
   }
 }
 
+/**
+ * 「關閉」鈕、「取消」鈕與 <dialog> 的 cancel 事件（Esc）都走這裡。
+ * cancel 事件已在 openEditor 裡同步 preventDefault，所以 Esc 不會在提示窗問完之前就把編輯器關掉。
+ * editor.asking：提示窗開著的期間再按一次（或再按 Esc）不會疊出第二個提示窗。
+ */
 async function doCancel() {
-  if (!editor || editor.busy) return;
+  if (!editor || editor.busy || editor.asking) return;
+  const current = editor;
   if (editor.mode === 'replace') {
-    if (!confirm('取消修改會：解除原題的封存、刪掉這一份修改中的複本，以及剛剛為它產生的封存紀錄，等同這次修改沒有發生過。確定取消？')) return;
+    current.asking = true;
+    let ok = false;
+    try {
+      ok = await askConfirm('取消修改會：解除原題的封存、刪掉這一份修改中的複本，以及剛剛為它產生的封存紀錄，等同這次修改沒有發生過。確定取消？', {
+        title: '取消修改', okLabel: '取消這次修改', cancelLabel: '繼續編輯', danger: true,
+      });
+    } finally { current.asking = false; }
+    if (!ok || editor !== current || editor.busy) return;
     setEditorBusy(true);
     try {
       const outcome = await cancelEdit(editor.code, editor.qid);
@@ -438,7 +452,16 @@ async function doCancel() {
     }
     return;
   }
-  if (editor.dirty && !confirm('尚未儲存的題目修改會被捨棄，確定關閉編輯器？')) return;
+  if (editor.dirty) {
+    current.asking = true;
+    let ok = false;
+    try {
+      ok = await askConfirm('尚未儲存的題目修改會被捨棄，確定關閉編輯器？', {
+        title: '關閉編輯器', okLabel: '捨棄並關閉', cancelLabel: '繼續編輯', danger: true,
+      });
+    } finally { current.asking = false; }
+    if (!ok || editor !== current || editor.busy) return;
+  }
   closeEditor();
 }
 
@@ -472,25 +495,37 @@ function openEditor(config) {
  * 規劃文件的判準是「進入即視為正在作答，不論有沒有輸入」，所以依據是 live 的「已進入」標記
  * （live/<CODE>/entered/<gid>/<qid>），不是活動標記——活動標記只在欄位被碰過時才寫，
  * 學員可能進了題目卻一個字都還沒打，那也算正在作答。
- * 回傳 true 表示可以繼續關閉。
+ * 回傳 Promise<boolean>，true 表示可以繼續關閉；沒有任何小組進入時直接回傳 true、不開提示窗。
+ * 呼叫端一律 await。
  */
-export function confirmLockQuestion(qid) {
+export async function confirmLockQuestion(qid) {
   const exDef = S.course.byQid[qid];
   if (!exDef) return false;
+  // 課程裡一組都還沒有（課前準備階段）就不必問：沒有人可能在作答。
+  if (!Object.keys(S.course.groups).length) return true;
+  const n = exNumber(qid);
+  const label = `${n >= 0 ? exLabel(n) + '｜' : ''}${exDef.title || ''}`;
   const names = enteredGroups(qid)
     .map((gid) => (S.course.groups[gid] ? S.course.groups[gid].name : ''))
     .filter(Boolean);
-  if (!names.length) return true;
   const answered = groupsAnswered(qid);
-  return confirm(`已經有 ${names.length} 組進入這一題：${names.join('、')}${
-    answered ? `（其中 ${answered} 組已有儲存的內容）` : '（尚無人按過儲存）'
-  }。
+  // 「已進入」標記只是輔助判斷（可能漏記，例如學員端寫入失敗），所以不論有沒有偵測到都提醒講師口頭確認。
+  const who = names.length
+    ? `目前偵測到 ${names.length} 組進入過這一題：${names.join('、')}${
+      answered ? `（其中 ${answered} 組已有儲存的內容）` : '（尚無人按過儲存）'
+    }。`
+    : '目前沒有偵測到小組進入這一題，但仍可能有組別正在作答。';
+  return askConfirm(`**關閉前，請先口頭詢問各組：是否都已按下「儲存」？**
 
-關閉之後他們會立刻被切成「本題尚未開放」的畫面，**畫面上還沒按儲存的內容會留在他們的裝置上，但沒辦法再儲存**；已儲存的答案不受影響。
+${who}
 
-如果你接下來要修改這一題：原題與各組已儲存的答案會被封存，各組只看得到自己那一份、可以複製到新題，匯出檔則不會包含它們。
+關閉之後學員會立刻看到「本題尚未開放」，畫面上還沒按儲存的內容會留在他們的裝置上，但沒辦法再儲存；已儲存的答案不受影響。
 
-確定現在關閉？`);
+如果你接下來要修改這一題：原題與各組已儲存的答案會被封存，各組只看得到自己那一份、可以複製到新題，匯出檔則不會包含它們。`, {
+    title: `關閉「${label}」`,
+    okLabel: '各組都已存檔，關閉題目',
+    cancelLabel: '還沒，先不關閉',
+  });
 }
 
 /**
@@ -526,7 +561,7 @@ export async function beginEditQuestion(code, qid) {
     });
     return;
   }
-  if (!confirm(`「${label}」已經有 ${answered} 組填過內容，因此會用「修改」的方式處理：
+  if (!(await askConfirm(`「${label}」已經有 ${answered} 組填過內容，因此會用「修改」的方式處理：
 
 1. 原題連同各組答案一起封存（封存題不佔題號，也不會出現在匯出檔）。
 2. 以原題內容複製出一題新的，由你編輯。
@@ -534,7 +569,9 @@ export async function beginEditQuestion(code, qid) {
 
 在編輯器裡按「取消修改」即可解除封存、刪掉新題，等同沒發生。之後若後悔，也可以在「已封存的題目」區塊把原題還原回來。
 
-要開始修改嗎？`)) return;
+要開始修改嗎？`, { title: '修改題目', okLabel: '開始修改' }))) return;
+  // 提示窗開著的期間，其他裝置可能已經刪掉或重新開放這一題。
+  if (!S.course || !S.course.byQid[qid] || !S.course.locks[qid]) { notify('這一題的狀態剛剛被其他裝置變更了，請重新確認後再按「編輯」。'); return; }
   try {
     const newQid = await archiveForEdit(code, qid);
     openEditor({
@@ -611,12 +648,15 @@ export function bindArchivedSection(code) {
       const qid = button.dataset.restoreEx;
       const exDef = S.course.byQid[qid];
       if (!exDef) return;
-      if (!confirm(`還原「${exDef.title || ''}」？
+      button.disabled = true;
+      if (!(await askConfirm(`還原「${exDef.title || ''}」？
 
 還原後它會回到題目清單的原本位置、標題加上「（修改前版本）」，各組在這一題的答案都會回來。
 還原的題目預設是<未開放>狀態，避免有人在一個即將被刪掉的題目上白做工。
-課程裡會同時存在原版與修改版，請自行刪掉不需要的那一題。`)) return;
-      button.disabled = true;
+課程裡會同時存在原版與修改版，請自行刪掉不需要的那一題。`, { title: '還原題目', okLabel: '還原' }))) {
+        button.disabled = false;
+        return;
+      }
       try {
         const title = await restoreExercise(code, qid);
         S.qid = qid;
@@ -630,10 +670,15 @@ export function bindArchivedSection(code) {
       const exDef = S.course.byQid[qid];
       if (!exDef) return;
       const answered = groupsAnswered(qid);
-      if (!confirm(`確定永久刪除已封存的「${exDef.title || ''}」？${
-        answered ? `\n\n這一題有 ${answered} 組的答案會一併永久刪除。` : ''
-      }\n\n刪除是唯一讓資料真正消失的動作，無法復原。學員已經在新題上看到的封存內容不受影響。`)) return;
       button.disabled = true;
+      if (!(await askConfirm(`確定永久刪除已封存的「${exDef.title || ''}」？${
+        answered ? `\n\n這一題有 ${answered} 組的答案會一併永久刪除。` : ''
+      }\n\n刪除是唯一讓資料真正消失的動作，無法復原。學員已經在新題上看到的封存內容不受影響。`, {
+        title: '永久刪除封存題', okLabel: '永久刪除', danger: true,
+      }))) {
+        button.disabled = false;
+        return;
+      }
       try {
         await deleteExercise(code, S.course, qid);
         // 跟刪除一般題目一樣：題目沒了，掛在它身上的 live 輔助標記（橘點、已進入）

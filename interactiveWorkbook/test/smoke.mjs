@@ -93,6 +93,58 @@ async function prepTab(page, tab) {
   await page.locator(`[data-prep-tab="${tab}"][aria-current="page"]`).waitFor({ timeout: 8000 });
 }
 
+/**
+ * 自製提示窗（modules/dialog.js 的 dialog.ask-window）的自動處理：行為等同以前對原生對話框的 d.accept()。
+ * 有 [data-ask-input][data-expect]（askTyped，例如刪除課程、重置課程）時先把 data-expect 填進去再按確定。
+ * 某個步驟需要自己操作提示窗（例如要填入特定文字）時，先 page.evaluate(() => { window.__askAuto = false; })，
+ * 手動 fill [data-ask-input]、click [data-ask-ok]，做完再設回 true。
+ * 用 context.addInitScript 注入，所以同一個 context 開出來的投影視窗（popup）也會套用。
+ */
+async function installAskAutoAccept(context) {
+  await context.addInitScript(() => {
+    window.__askAuto = true;
+    const handle = (dialog) => {
+      if (!dialog || dialog.dataset.askAutoSeen) return;
+      dialog.dataset.askAutoSeen = '1';
+      setTimeout(() => {
+        if (window.__askAuto === false || !dialog.isConnected) return;
+        const field = dialog.querySelector('[data-ask-input][data-expect]');
+        if (field) {
+          field.value = field.dataset.expect;
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const ok = dialog.querySelector('[data-ask-ok]');
+        if (ok) ok.click();
+      }, 0);
+    };
+    const scan = (node) => {
+      if (!(node instanceof Element)) return;
+      if (node.matches('dialog.ask-window')) handle(node);
+      node.querySelectorAll('dialog.ask-window').forEach(handle);
+    };
+    const start = () => {
+      new MutationObserver((records) => {
+        records.forEach((r) => r.addedNodes.forEach(scan));
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    };
+    if (document.documentElement) start();
+    else document.addEventListener('DOMContentLoaded', start, { once: true });
+  });
+}
+
+/**
+ * 原生 confirm/prompt/alert 已全面換成自製提示窗。這裡保留 d.accept() 當保險（萬一有漏網之魚，測試不會卡死），
+ * 但只要原生對話框出現就記成錯誤，讓測試失敗並印出訊息——以後有人又寫了原生 confirm，這裡會抓到。
+ */
+function trackNativeDialogs(page, bucket, label) {
+  page.on('dialog', (d) => {
+    // beforeunload 是「離開頁面前提醒未儲存」的瀏覽器機制，不是 confirm/prompt/alert，也無法用自製提示窗取代。
+    if (d.type() === 'beforeunload') { d.accept().catch(() => {}); return; }
+    bucket.push(`[${label}] 出現原生 ${d.type()} 對話框（應改用 modules/dialog.js）：${JSON.stringify(d.message())}`);
+    d.accept().catch(() => {});
+  });
+}
+
 function attachErrorCollectors(page, bucket, label) {
   page.on('console', (msg) => {
     if (msg.type() === 'error') bucket.push(`[${label}] console.error: ${msg.text()}`);
@@ -155,9 +207,10 @@ async function main() {
   try {
     teacherCtx = await browser.newContext({ acceptDownloads: true });
     await stubExternal(teacherCtx);
+    await installAskAutoAccept(teacherCtx);
     teacherPage = await teacherCtx.newPage();
     attachErrorCollectors(teacherPage, errors, 'teacher');
-    teacherPage.on('dialog', (d) => d.accept());
+    trackNativeDialogs(teacherPage, errors, 'teacher');
 
     // ── S1 講師建課 ──────────────────────────────────────────────────────────
     await step('S1 講師建課', async () => {
@@ -212,9 +265,10 @@ async function main() {
     await step('S4 學員加入', async () => {
       studentCtx = await browser.newContext();
       await stubExternal(studentCtx);
+      await installAskAutoAccept(studentCtx);
       studentPage = await studentCtx.newPage();
       attachErrorCollectors(studentPage, errors, 'student');
-      studentPage.on('dialog', (d) => d.accept());
+      trackNativeDialogs(studentPage, errors, 'student');
 
       await studentPage.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
       await studentPage.locator('#in-code').waitFor({ timeout: 15000 });
@@ -617,6 +671,7 @@ async function main() {
         teacherPage.locator('#open-projector').click(),
       ]);
       attachErrorCollectors(popup, errors, 'projector');
+      trackNativeDialogs(popup, errors, 'projector');
       await popup.locator('.proj-stage #proj-area').waitFor({ timeout: 10000 });
       await waitForText(teacherPage, '#proj-win-status', '已連線');
       await teacherPage.locator('[data-proj-mode="group"]').click();
@@ -741,10 +796,10 @@ async function main() {
   console.log(`共 ${results.length} 項情境，通過 ${results.length - failedSteps} 項，失敗 ${failedSteps} 項。`);
 
   if (errors.length) {
-    console.log(`\n偵測到 ${errors.length} 筆瀏覽器 console error / pageerror（任何一筆都視為測試失敗）：`);
+    console.log(`\n偵測到 ${errors.length} 筆瀏覽器 console error / pageerror / 原生對話框（任何一筆都視為測試失敗）：`);
     errors.forEach((m) => console.log(' - ' + m));
   } else {
-    console.log('未偵測到任何 console error / pageerror。');
+    console.log('未偵測到任何 console error / pageerror / 原生對話框。');
   }
 
   const failed = failedSteps > 0 || errors.length > 0;

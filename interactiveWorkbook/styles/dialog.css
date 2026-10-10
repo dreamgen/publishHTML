@@ -1,0 +1,27 @@
+/* 自製提示窗（modules/dialog.js）。外框沿用 group.css 的 .float-window，這裡只補提示窗專屬的版面。 */
+.ask-window { width: min(560px, 94vw) }
+.ask-window .float-top { padding: 16px 20px 0; border-bottom: 0 }
+.ask-window .float-top strong { font-size: 1.1rem }
+.ask-body { padding: 12px 20px 4px }
+.ask-message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7 }
+.ask-message strong { color: #8a1f1f }
+.ask-label { display: block; margin-top: 16px; font-weight: 650 }
+.ask-input { width: 100%; margin-top: 6px }
+.ask-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px 20px; flex-wrap: wrap }
+.ask-actions button { min-width: 112px }
+.ask-actions button:disabled { opacity: .45; cursor: not-allowed }
+button.danger-solid { background: #a32626; color: white; border-color: #a32626 }
+button.danger-solid:hover { background: #8a1f1f }
+
+/* 不支援 <dialog>.showModal() 的舊瀏覽器：自己畫遮罩與置中 */
+.ask-overlay {
+  position: fixed; inset: 0; z-index: 2147483000;
+  background: #0b1c2a99;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px
+}
+.ask-overlay .ask-window { position: static; margin: 0; max-height: 88dvh }
+
+@media (max-width: 600px) {
+  .ask-actions button { flex: 1 1 120px }
+}
