@@ -784,6 +784,72 @@ async function main() {
       if (check.oldOk || !check.newOk) throw Error('重設後密碼驗證不符預期：' + JSON.stringify(check));
       return '錯誤密碼與不一致都會擋下；舊密碼失效、新密碼可用';
     });
+
+    // ── S15 已有答案時：用 JSON 更新題目、保留答案 ─────────────────────────
+    await step('S15 更新題目並保留答案', async () => {
+      const dbPath = `${COURSES_PATH}/${courseCode}`;
+      const snap = async () => getAtPath(await teacherPage.evaluate(() => window.__fakedb.dump()), dbPath);
+      const before = await snap();
+      const all = JSON.parse(before.exercisesJson);
+      const active = all.filter((q) => (q.status || 'active') === 'active');
+      const groups = before.groups || {};
+      const parse = (v) => { try { return JSON.parse(v || '{}'); } catch { return {}; } };
+      // 找一題「有組別在 t1 填過內容」的題目，用來測「移除欄位 → 存成封存紀錄」
+      const target = active.find((q) => Object.values(groups).some((g) => String(parse((g.answers || {})[q.qid]).t1 || '').trim()));
+      if (!target) throw Error('前面的情境沒有留下 t1 有內容的答案，無法測試。');
+      const gidHit = Object.keys(groups).find((gid) => String(parse((groups[gid].answers || {})[target.qid]).t1 || '').trim());
+
+      // 第一次匯入：依目前順序；target 改標題並拿掉 t1；其他題原樣；最後加一題新題。
+      // （依順序對應：題數不變的部分一一對應，多出來的才是新題。）
+      const strip = ({ qid, rev, status, archiveReason, replacedBy, archivedFrom, restoredNote, ...rest }) => rest;
+      const list = active.map((q) => (q.qid === target.qid
+        ? { ...strip(q), title: '更新後的標題', fields: q.fields.filter((f) => f.key !== 't1') }
+        : strip(q)));
+      list.push({ title: '新加的一題', fields: [{ key: 'x1', label: '新欄位', type: 'text' }] });
+
+      await prepTab(teacherPage, 'q');
+      await waitForText(teacherPage, '#import-questions', '更新題目 JSON（保留答案）');
+      await teacherPage.locator('#import-questions-file').setInputFiles({
+        name: 'update.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ exercises: list }), 'utf8'),
+      });
+      await waitForText(teacherPage, '#message', '題目已更新');
+
+      const after = await snap();
+      const allAfter = JSON.parse(after.exercisesJson);
+      const tAfter = allAfter.find((q) => q.qid === target.qid);
+      if (!tAfter || tAfter.title !== '更新後的標題') throw Error('目標題沒有沿用原 qid 更新標題。');
+      if (tAfter.fields.some((f) => f.key === 't1')) throw Error('t1 欄位沒有被移除。');
+      if ((Number(tAfter.rev) || 0) <= (Number(target.rev) || 0)) throw Error('更新後題目 rev 沒有進位。');
+      // 所有答案一個位元組都不能變
+      Object.entries(groups).forEach(([gid, g]) => {
+        const a1 = JSON.stringify((g.answers || {}));
+        const a2 = JSON.stringify(((after.groups || {})[gid] || {}).answers || {});
+        if (a1 !== a2) throw Error(`組別 ${gid} 的答案在更新題目後被改動了。`);
+      });
+      // 填過 t1 的那一組，要有一筆封存紀錄存著更新前的整份答案
+      const recs = Object.values(((after.groups || {})[gidHit] || {}).archives || {}).filter((r) => r.qid === target.qid && String(r.label).includes('題目更新前'));
+      if (!recs.length) throw Error('移除欄位前填過內容的組別，沒有產生「題目更新前的答案」封存紀錄。');
+      if (!String(parse(recs[recs.length - 1].json).t1 || '').trim()) throw Error('封存紀錄裡沒有 t1 的舊答案。');
+      // 新題預設關閉
+      const fresh = allAfter.find((q) => q.title === '新加的一題');
+      if (!fresh || after.locks[fresh.qid] !== true) throw Error('新加的題目不存在或不是關閉狀態。');
+      // 第二次匯入：拿掉最後那一題新題 → 檔案比現有少一題，那一題要改為封存，不是刪除
+      await teacherPage.locator('#import-questions-file').setInputFiles({
+        name: 'update2.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ exercises: list.slice(0, -1) }), 'utf8'),
+      });
+      await waitForText(teacherPage, '#message', '封存 1 題');
+      const after2 = await snap();
+      const d = JSON.parse(after2.exercisesJson).find((q) => q.qid === fresh.qid);
+      if (!d || d.status !== 'archived' || d.archiveReason !== 'import') throw Error('檔案裡沒有的題目沒有改為封存（或被刪掉了）。');
+      const droppedQid = d.qid;
+      // 答案備份按鈕收到題目檔時，要給看得懂的訊息
+      await prepTab(teacherPage, 'd');
+      await teacherPage.locator('#import-file').setInputFiles({
+        name: 'q.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ exercises: list }), 'utf8'),
+      });
+      await waitForText(teacherPage, '#message', '這是「題目檔」');
+      return `沿用 qid、答案零改動、封存 ${recs.length} 筆舊答案${droppedQid ? '、1 題改為封存' : ''}、新題預設關閉`;
+    });
   } finally {
     if (studentCtx) await studentCtx.close().catch(() => {});
     if (teacherCtx) await teacherCtx.close().catch(() => {});

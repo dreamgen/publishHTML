@@ -14,6 +14,7 @@ import {
   deleteExercise, setLock, migrateCourseIfNeeded, answerHasContent, courseHasAnswers,
   createGroups, renameGroup, deleteGroup, mergeGroups, setAllowStudentGroupNames, changeTeacherPassword,
   clearLiveCourse, clearLiveGroup, orphanAnswerUpdates, MERGE_KEEP, MERGE_DROP, MERGE_BOTH,
+  fetchCourse, normalizeCourse, planExerciseUpdate, updateExercisesKeepAnswers,
 } from './data.js';
 import {
   TEMPLATE, validateExercisesPayload, validateAnswer, normalizeGroupName, MAX_GROUPS,
@@ -527,13 +528,13 @@ function prepQuestions(importLocked) {
         <h2>題目</h2>
         <div class="prep-head-actions">
           <button type="button" class="outline-btn" id="dl-template">下載範本 JSON</button>
-          <button type="button" class="outline-btn" id="import-questions" ${importLocked ? 'disabled' : ''}>匯入題目 JSON</button>
+          <button type="button" class="outline-btn" id="import-questions">${importLocked ? '更新題目 JSON（保留答案）' : '匯入題目 JSON'}</button>
           <input id="import-questions-file" type="file" accept=".json,application/json" hidden>
           <button type="button" class="navy-btn" id="new-exercise">＋ 新增一題</button>
         </div>
       </div>
       ${importLocked
-    ? '<div class="prep-warn">已有組別存過答案，「匯入題目 JSON」已停用。要整份重新匯入，請先在「課程設定」重置本場課程；或改用「新增一題」與各題的「編輯」。</div>'
+    ? '<div class="prep-warn">已有組別存過答案，匯入改為「更新題目（保留答案）」：依順序對應現有題目，欄位 key 沒變的答案都會保留；匯入前會先列出每一題的影響讓你確認。</div>'
     : '<p class="prep-sub">匯入題目會取代目前全部練習內容；課程開始有答案之後匯入就會停用，屆時請改用「新增一題」與各題的「編輯」。</p>'}
       ${S.course.exercises.length ? `<p class="prep-sub">目前共 ${S.course.exercises.length} 個練習</p><div class="prep-q-list">${list}</div>` : noQuestionsNotice()}
       ${archivedSection()}
@@ -903,11 +904,15 @@ export async function importQuestionsFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   try {
-    // 畫面上按鈕已經停用，這裡再擋一次：檔案選擇窗開著的時候，別的裝置可能剛好存進第一筆答案。
-    if (courseHasAnswers(S.course)) {
-      throw Error('這場課程已經有組別存過答案，匯入題目已停用（匯入是整份取代，無法分辨修改版與全新題目）。要重新匯入請先執行「重置本場課程」，或改用「新增一題」與各題的「編輯」。');
-    }
     const payload = await readJSONFile(file, 2000000, '無法讀取 JSON，請使用範本格式編輯。');
+    if (payload && typeof payload === 'object' && payload.groups && !Array.isArray(payload.exercises)) {
+      throw Error('這是「答案備份檔」，不是題目檔。要還原答案，請到「匯入／匯出答案」的「選擇 JSON 備份檔」。');
+    }
+    // 已有答案（在選檔期間才出現也算）：改走「更新題目、保留答案」，不做整份取代。
+    if (courseHasAnswers(S.course)) {
+      await updateQuestionsKeepAnswers(payload);
+      return;
+    }
     const validated = validateExercisesPayload(payload);
     const carried = validated.map((_, i) => {
       const q = payload.exercises[i] && payload.exercises[i].qid;
@@ -950,11 +955,63 @@ export async function importQuestionsFile(event) {
   }
 }
 
+/**
+ * 課程已有答案時的匯入：更新題目、保留答案。規則與資料安全的理由見 data.js 4.5 節。
+ * 先以伺服器當下資料算出逐題影響給講師確認，寫入時再以同一份 exercisesJson 做樂觀鎖。
+ */
+async function updateQuestionsKeepAnswers(payload) {
+  const validated = validateExercisesPayload(payload);
+  const incoming = validated.map((ex, i) => {
+    const q = payload.exercises[i] && payload.exercises[i].qid;
+    return { ...ex, carriedQid: typeof q === 'string' && !!q.trim() };
+  });
+  const code = S.session.code;
+  const raw = await fetchCourse(code);
+  if (!raw) throw Error('這個課程已被刪除。');
+  const base = normalizeCourse(raw);
+  const plan = planExerciseUpdate(base, incoming);
+  const groupName = (gid) => (base.groups[gid] ? base.groups[gid].name : '');
+
+  const lines = plan.rows.map((r, i) => {
+    const head = `${exLabel(i)}　${r.title}`;
+    if (r.kind === 'new') return `${head}\n　→ 新增的題目（預設關閉）`;
+    const parts = [];
+    if (r.unchanged) parts.push('沒有變動');
+    else if (r.oldTitle !== r.title) parts.push(`標題由「${r.oldTitle}」改為新標題`);
+    else parts.push('內容更新');
+    if (r.groupsWithAnswers) parts.push(`保留 ${r.groupsWithAnswers} 組答案`);
+    const hits = r.affected.filter((a) => a.groups.length).map((a) => `　・${a.why === 'removed' ? '移除' : '變更'}欄位「${a.label}」：${a.groups.map(groupName).join('、')} 填過`);
+    return [`${head}\n　→ ${parts.join('，')}`, ...hits].join('\n');
+  });
+  const archived = plan.archivedRows.map((r) => `・「${r.title}」${r.groupsWithAnswers ? `（${r.groupsWithAnswers} 組有答案）` : ''}`);
+  const snapGroups = new Set(plan.snapshots.map((x) => x.gid)).size;
+  const openChanged = plan.rows.filter((r) => r.kind === 'update' && !r.unchanged && !base.locks[r.qid]).length;
+
+  const message = `**依題目順序對應**：檔案第 1 題對應目前的練習一，以此類推。各組已存的答案都會保留，題目開關維持不變。
+
+${lines.join('\n\n')}${archived.length ? `
+
+**目前有、但檔案裡沒有的題目**會改為封存（答案保留，可在「已封存的題目」還原，不會刪除）：
+${archived.join('\n')}` : ''}${snapGroups ? `
+
+有 ${plan.snapshots.length} 筆答案填在「被移除或型別／選項改變的欄位」上。更新時會把這些組別更新前的整份答案存成封存紀錄，學員可在該題打開「封存內容」複製回來；講師的匯出檔只會包含新題目的欄位。` : ''}${openChanged ? `
+
+**有 ${openChanged} 題內容有變動、目前仍開放中**，學員畫面會立即換成新題目。建議先請各組按下儲存再更新。` : ''}`;
+
+  if (!(await askConfirm(message, { title: '更新題目（保留答案）', okLabel: '更新題目' }))) return;
+  const done = await updateExercisesKeepAnswers(code, incoming, raw.exercisesJson || '');
+  const added = done.rows.filter((r) => r.kind === 'new').length;
+  notify(`題目已更新：${done.rows.length} 題${added ? `（其中新增 ${added} 題，預設關閉）` : ''}${done.archivedRows.length ? `，封存 ${done.archivedRows.length} 題` : ''}；各組答案都已保留。`);
+}
+
 export async function importAnswersFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   try {
     const payload = await readJSONFile(file, 9500000, '無法讀取 JSON，請使用「匯出全部答案 JSON」產生的備份檔。');
+    if (payload && typeof payload === 'object' && Array.isArray(payload.exercises) && !payload.groups) {
+      throw Error(`這是「題目檔」，不是答案備份檔。要更新題目，請到「題目」區按「${courseHasAnswers(S.course) ? '更新題目 JSON（保留答案）' : '匯入題目 JSON'}」。`);
+    }
     if (!payload || typeof payload !== 'object' || !payload.groups || typeof payload.groups !== 'object') {
       throw Error('請選擇本題本匯出的 JSON 答案檔。CSV 僅供閱讀，不能還原。');
     }

@@ -1017,7 +1017,8 @@ export async function restoreExercise(code, qid) {
     if (i < 0) return { missing: true };
     const target = all[i];
     if (target.status !== 'archived') return { notArchived: true };
-    if (target.archiveReason !== 'edit') return { notEditArchive: true };
+    // 'edit'：修改題目時封存的原題；'import'：用 JSON 更新題目時，檔案裡沒有對應到而封存的題目
+    if (target.archiveReason !== 'edit' && target.archiveReason !== 'import') return { notEditArchive: true };
     if (ACTIVE(all).length >= MAX_EXERCISES) return { full: true };
     const next = all.slice();
     const restored = {
@@ -1039,4 +1040,165 @@ export async function restoreExercise(code, qid) {
   if (outcome.full) throw Error(`練習數量已達上限 ${MAX_EXERCISES} 題，無法再還原。請先刪除不需要的練習。`);
   if (!outcome.committed) throw Error('還原未完成，請再試一次。');
   return outcome.title;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 4.5 用 JSON 更新題目、保留答案（課程已有答案時的匯入路徑）
+// ──────────────────────────────────────────────────────────────────────────────
+/*
+ * 為什麼可以安全地做：答案以「題目 qid ＋ 欄位 key」存放。只要更新後的題目沿用原本的 qid，
+ * 欄位 key 沒變的答案就原封不動地接上新題目——這一步完全不改寫任何答案。
+ *
+ * 會受影響的只有「被移除或型別／選項改變的欄位」：答案 JSON 裡還留著舊值，但畫面不再顯示，
+ * 而且該組下次在這一題按儲存時，舊值會被清掉（儲存只保留現有欄位）。
+ * 所以在更新的同一個 transaction 裡，替「在這些欄位填過內容」的組別把整份舊答案存成一筆封存紀錄
+ * （與合併小組、修改題目共用同一個 archives 節點）：該組自己看得到、可複製，不進匯出檔。
+ *
+ * 對應規則：依順序對應——檔案第 i 題 ↔ 目前第 i 個（未封存的）練習，沿用它的 qid。
+ * 檔案自帶 qid 且對得上現有題目時，以檔案的 qid 為準。
+ * 檔案比現有題目多：多出來的是新題，預設關閉。
+ * 檔案比現有題目少：沒對應到的現有題目改為封存（archiveReason 'import'），答案保留、可還原，不會被刪除。
+ */
+const FIELD_SHAPE = (f) => JSON.stringify({
+  type: f.type,
+  options: f.type === 'checkbox' || f.type === 'radio' ? (f.options || []) : undefined,
+  columns: f.type === 'table' ? (f.columns || []).map((c) => [c.key, c.type || 'text']) : undefined,
+});
+
+function fieldValueHasContent(v) {
+  if (v == null) return false;
+  if (Array.isArray(v)) {
+    return v.some((item) => (item && typeof item === 'object'
+      ? Object.values(item).some((cell) => String(cell ?? '').trim())
+      : String(item ?? '').trim()));
+  }
+  return !!String(v).trim();
+}
+
+const CONTENT_KEYS = ['title', 'time', 'goal', 'notice', 'reference', 'fields'];
+const sameContent = (a, b) => JSON.stringify(CONTENT_KEYS.map((k) => a[k] ?? null))
+  === JSON.stringify(CONTENT_KEYS.map((k) => b[k] ?? null));
+
+/**
+ * 純計算：給講師預覽用，也在 transaction 內以伺服器當下資料再算一次。
+ * course 是 normalizeCourse() 的結果；incoming 是 validateExercisesPayload() 的輸出。
+ * 回傳 { rows, archivedRows, exercises, snapshots }：
+ *   rows[i] = { kind:'update'|'new', qid, title, oldTitle, unchanged, groupsWithAnswers,
+ *               affected:[{ key, label, why:'removed'|'changed', groups:[gid] }] }
+ *   archivedRows = 要改為封存的現有題目 [{ qid, title, groupsWithAnswers }]
+ *   snapshots = [{ gid, qid }] 需要替哪一組的哪一題存一份更新前的答案
+ */
+export function planExerciseUpdate(course, incoming) {
+  const active = course.exercises;
+  const activeQids = new Set(active.map((e) => e.qid));
+  const claimed = new Set();
+  // 檔案自帶、且對得上現有題目的 qid 先佔位，剩下的再依順序對應
+  incoming.forEach((ex) => { if (ex.carriedQid && activeQids.has(ex.qid)) claimed.add(ex.qid); });
+  const groups = Object.entries(course.groups || {});
+  const answeredGroups = (qid) => groups.filter(([, g]) => {
+    const a = (g.answers || {})[qid] || {};
+    return Object.values(a).some(fieldValueHasContent);
+  }).map(([gid]) => gid);
+
+  const rows = [];
+  const exercises = [];
+  const snapshots = [];
+  incoming.forEach((ex, i) => {
+    let old = null;
+    if (ex.carriedQid && activeQids.has(ex.qid)) old = course.byQid[ex.qid];
+    else if (active[i] && !claimed.has(active[i].qid)) { old = active[i]; claimed.add(old.qid); }
+    if (!old) {
+      // 新題：避免與任何既有 qid（含封存題）撞號
+      let qid = ex.qid;
+      while (course.byQid[qid] || exercises.some((e) => e.qid === qid)) qid = randomId(8);
+      exercises.push({ ...ex, qid, rev: 0, status: 'active', isNew: true });
+      rows.push({ kind: 'new', qid, title: ex.title, affected: [], groupsWithAnswers: 0 });
+      return;
+    }
+    const oldFields = Object.fromEntries((old.fields || []).map((f) => [f.key, f]));
+    const newFields = Object.fromEntries((ex.fields || []).map((f) => [f.key, f]));
+    const affected = [];
+    Object.values(oldFields).forEach((f) => {
+      const nf = newFields[f.key];
+      const why = !nf ? 'removed' : (FIELD_SHAPE(nf) !== FIELD_SHAPE(f) ? 'changed' : '');
+      if (!why) return;
+      const hit = groups.filter(([, g]) => fieldValueHasContent(((g.answers || {})[old.qid] || {})[f.key]))
+        .map(([gid]) => gid);
+      affected.push({ key: f.key, label: f.label, why, groups: hit });
+    });
+    const snapGids = new Set(affected.flatMap((a) => a.groups));
+    snapGids.forEach((gid) => snapshots.push({ gid, qid: old.qid }));
+    exercises.push({ ...ex, qid: old.qid });
+    rows.push({
+      kind: 'update',
+      qid: old.qid,
+      title: ex.title,
+      oldTitle: old.title,
+      unchanged: sameContent(ex, old),
+      groupsWithAnswers: answeredGroups(old.qid).length,
+      affected,
+    });
+  });
+  const archivedRows = active.filter((e) => !claimed.has(e.qid))
+    .map((e) => ({ qid: e.qid, title: e.title, groupsWithAnswers: answeredGroups(e.qid).length }));
+  return { rows, archivedRows, exercises, snapshots };
+}
+
+/**
+ * 寫入。baseJson 是講師看預覽當下的 exercisesJson：若伺服器上已經不同（別台裝置剛改過題目），
+ * 就中止並請講師重新匯入一次，避免依過期的預覽做決定（樂觀鎖，與單題編輯同一套規矩）。
+ */
+export async function updateExercisesKeepAnswers(code, incoming, baseJson) {
+  await authReady;
+  await migrateCourseIfNeeded(code);
+  const stamp = Date.now();
+  const label = `題目更新前的答案（${new Date(stamp).toLocaleString('zh-TW')}）`;
+  let summary = null;
+  const outcome = await courseTransaction(code, (current) => {
+    if ((current.exercisesJson || '') !== (baseJson || '')) return { conflict: true };
+    const course = normalizeCourse(current);
+    const plan = planExerciseUpdate(course, incoming);
+    const all = parseExercises(current.exercisesJson);
+    const byQid = Object.fromEntries(all.map((e) => [e.qid, e]));
+    const locks = { ...(current.locks || {}) };
+
+    const mapped = plan.exercises.map((ex) => {
+      const { isNew, carriedQid, ...content } = ex;
+      if (isNew) { locks[content.qid] = true; return { ...content, rev: 0, status: 'active' }; }
+      const stored = byQid[content.qid];
+      return withIdentity(content, stored, (Number(stored.rev) || 0) + 1);
+    });
+    const archiveSet = new Set(plan.archivedRows.map((r) => r.qid));
+    const keptQids = new Set(mapped.map((e) => e.qid));
+    const rest = all.filter((e) => !keptQids.has(e.qid)).map((e) => (archiveSet.has(e.qid)
+      ? { ...e, status: 'archived', archiveReason: 'import', rev: (Number(e.rev) || 0) + 1 }
+      : e));
+
+    const groupsNext = { ...(current.groups || {}) };
+    plan.snapshots.forEach(({ gid, qid }) => {
+      const g = groupsNext[gid];
+      if (!g) return;
+      const raw = (g.answers || {})[qid];
+      if (raw == null) return;
+      groupsNext[gid] = {
+        ...g,
+        archives: {
+          ...(g.archives || {}),
+          [randomId(8)]: { label, savedAt: stamp, qid, json: typeof raw === 'string' ? raw : JSON.stringify(raw) },
+        },
+      };
+    });
+
+    summary = plan;
+    return {
+      value: {
+        ...writeExercises(current, [...mapped, ...rest], { locks }),
+        ...(current.groups ? { groups: groupsNext } : {}),
+      },
+    };
+  });
+  if (outcome.missingCourse) throw Error('這個課程已被刪除。');
+  if (outcome.conflict) throw Error('題目在你檢視預覽之後被其他裝置改過了。為了避免依過期的預覽更新，這次沒有寫入任何東西；請再匯入一次，確認新的預覽後再更新。');
+  if (!outcome.committed) throw Error('題目更新未完成，請再試一次。');
+  return summary;
 }

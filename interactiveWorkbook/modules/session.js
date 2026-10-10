@@ -95,7 +95,8 @@ export function applySnapshot(raw) {
     group.name,
     Object.keys(group.archives || {}).length,
     S.course.exercises.map((e2) => [
-      e2.qid, e2.title, !!S.course.locks[e2.qid], group.revision[e2.qid] || 0, !!group.complete[e2.qid],
+      // e2.rev：講師修改題目或用 JSON 更新題目（欄位變了、標題沒變）時也要重畫
+      e2.qid, e2.title, e2.rev || 0, !!S.course.locks[e2.qid], group.revision[e2.qid] || 0, !!group.complete[e2.qid],
     ]),
   ]);
   if (signature === S.lastStudentSignature && !structural) return;

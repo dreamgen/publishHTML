@@ -619,11 +619,11 @@ export function beginNewQuestion(code) {
 // 不是權限管制——還原之後講師自然就看得到），所以這裡只顯示「幾組有答案」當作判斷依據。
 // ──────────────────────────────────────────────────────────────────────────────
 export function archivedSection() {
-  const list = (S.course.archived || []).filter((exDef) => exDef.archiveReason === 'edit');
+  const list = (S.course.archived || []).filter((exDef) => exDef.archiveReason === 'edit' || exDef.archiveReason === 'import');
   if (!list.length) return '';
   return `<section class="manage card archived-card">
     <h2>已封存的題目（${list.length}）</h2>
-    <p>這些是因為「修改」而封存的舊版本。封存題不佔題號、不出現在學員的題目切換列，答案也不會進匯出檔。
+    <p>這些是因為「修改」而封存的舊版本，或用 JSON 更新題目時檔案裡沒有對應到的題目。封存題不佔題號、不出現在學員的題目切換列，答案也不會進匯出檔。
       還原之後就是一般題目（預設關閉、標題會加上「${E('（修改前版本）')}」以便分辨），可以再修改，也可以直接刪除。
       課程裡同時留著原版與修改版時，最後請自行刪掉不需要的那一題。</p>
     <div class="archived-list">${list.map((exDef) => {
@@ -631,7 +631,8 @@ export function archivedSection() {
     const answered = groupsAnswered(exDef.qid);
     return `<div class="gate-row archived-row">
         <div><b>${E(exDef.title || '')}</b><div class="muted">已封存${
-  replacement ? ` · 由「${E(replacement.title || '')}」取代` : ' · 取代它的題目已被刪除'
+  exDef.archiveReason === 'import' ? ' · 用 JSON 更新題目時，檔案裡沒有這一題'
+    : (replacement ? ` · 由「${E(replacement.title || '')}」取代` : ' · 取代它的題目已被刪除')
 }${answered ? ` · ${answered} 組有答案` : ' · 沒有任何一組填過'}</div></div>
         <div class="toolbar">
           <button type="button" data-restore-ex="${E(exDef.qid)}">還原</button>
