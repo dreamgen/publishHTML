@@ -259,21 +259,16 @@ export async function migrateCourseIfNeeded(code) {
     let already = false;
     let missing = false;
     const result = await runTransaction(courseRef(code), (current) => {
-      if (current === null) { missing = true; return undefined; } // 中止，稍後再確認
+      already = false; missing = false;
+      if (current === null) { missing = true; return null; } // 不中止，讓伺服器帶真值重跑（見 groupsTransaction 上方說明）
       if (Number(current.schemaVersion) === SCHEMA_VERSION) { already = true; return undefined; }
       return migratedCourseNode(current);
-    });
+    }, TX_OPTS);
     return { committed: !!(result && result.committed), already, missing };
   };
 
-  let outcome = await runOnce();
-  if (outcome.missing) {
-    const again = await get(courseRef(code));
-    if (!again.exists()) return false;
-    if (Number((again.val() || {}).schemaVersion) === SCHEMA_VERSION) return false;
-    outcome = await runOnce();
-  }
-  return outcome.committed && !outcome.already;
+  const outcome = await runOnce();
+  return outcome.committed && !outcome.already && !outcome.missing;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -352,22 +347,23 @@ export async function clearLiveCourse(code) {
  * 因此中止後再向伺服器確認一次，真的沒有 groups 節點才回報 missing。
  * apply(groups) 回傳 { value } 表示要寫入，回傳 { missing: true } 或其他不含 value 的物件表示中止。
  */
+/*
+ * 關於 RTDB transaction 的「第一次給 null」：
+ * 回呼第一次拿到的是這台裝置的本機快取。沒有 onValue 監聽覆蓋該路徑時（例如學員還在入口畫面），
+ * 快取是空的，第一次一定是 null；而 get() 不會留下快取，所以「中止 → get() → 再試」會再拿到 null。
+ * 正確做法：看到 null 時**不要中止**，回傳 null（若伺服器上真的是 null，寫入 null 等於什麼都不做）。
+ * 伺服器若有資料，會發現與本機假設不同，帶著真值重跑回呼。applyLocally:false 避免本機監聽先看到那個暫時的 null。
+ */
+const TX_OPTS = { applyLocally: false };
+
 async function groupsTransaction(code, apply) {
-  const once = async () => {
-    let outcome = { missing: true };
-    const result = await runTransaction(courseRef(code, 'groups'), (groups) => {
-      if (groups === null) { outcome = { missing: true, fromNull: true }; return undefined; }
-      outcome = apply(groups) || {};
-      return Object.prototype.hasOwnProperty.call(outcome, 'value') ? outcome.value : undefined;
-    });
-    return { ...outcome, committed: !!(result && result.committed) };
-  };
-  let outcome = await once();
-  if (outcome.fromNull) {
-    const snap = await get(courseRef(code, 'groups'));
-    if (snap.exists()) outcome = await once();
-  }
-  return outcome;
+  let outcome = { missing: true };
+  const result = await runTransaction(courseRef(code, 'groups'), (groups) => {
+    if (groups === null) { outcome = { missing: true }; return null; } // 見上方說明：不中止
+    outcome = apply(groups) || {};
+    return Object.prototype.hasOwnProperty.call(outcome, 'value') ? outcome.value : undefined;
+  }, TX_OPTS);
+  return { ...outcome, committed: !!(result && result.committed) };
 }
 
 /** 入口畫面用：只取組別清單與「是否允許學員自訂組名」，不需要整份題目 */
@@ -439,7 +435,7 @@ export async function createGroups(code, names) {
     });
     if (!created.length) return undefined; // 全部都已存在或已達上限：不必寫入
     return next;
-  });
+ }, TX_OPTS);
   return { created, skipped, overflow };
 }
 
@@ -592,8 +588,8 @@ export async function joinGroup(code, target, author) {
   let full = false;
   let blocked = false;
   await runTransaction(courseRef(code, 'groups'), (groups) => {
-    const current = groups || {};
     gid = null; created = false; full = false; blocked = false;
+    const current = groups || {};
     const found = Object.keys(current).find((k) => {
       const g = current[k] || {};
       return ((g.nameKey || normalizeGroupName(g.name || '')) === nameKey);
@@ -602,7 +598,9 @@ export async function joinGroup(code, target, author) {
       gid = found;
       return { ...current, [found]: { ...current[found], author: who } };
     }
-    if (!allowNames) { blocked = true; return undefined; }
+    // 本機沒有快取時第一次會是 null：這時不能判定「找不到這一組」而中止——
+    // 回傳 null 讓伺服器帶真值重跑（見 groupsTransaction 上方說明）。
+    if (!allowNames) { blocked = true; return groups === null ? null : undefined; }
     if (Object.keys(current).length >= MAX_GROUPS) { full = true; return undefined; }
     gid = randomId(8);
     created = true;
@@ -612,7 +610,7 @@ export async function joinGroup(code, target, author) {
         name: wantName, nameKey, author: who, createdAt: Date.now(),
       },
     };
-  });
+ }, TX_OPTS);
   if (blocked) throw Error('這場課程的組別由講師預先建立，找不到你輸入的這一組。請回上一步從清單中選擇，或請講師新增這一組。');
   if (full) throw Error(`這場課程的組別數已達上限 ${MAX_GROUPS} 組，無法再新增。請從現有的組別中選擇，或請講師先整理組別。`);
   if (!gid) throw Error('加入組別失敗，請再試一次。');
@@ -718,7 +716,8 @@ export async function saveAnswerOnce(code, gid, qid, json, expectedRevision, com
   let conflict = false;
   let missing = false;
   const result = await runTransaction(courseRef(code, `groups/${gid}`), (current) => {
-    if (current === null) { missing = true; return undefined; } // 中止，稍後再確認
+    conflict = false; missing = false;
+    if (current === null) { missing = true; return null; } // 不中止，讓伺服器帶真值重跑（見 groupsTransaction 上方說明）
     const rev = revisionOf(current, qid);
     if (rev !== expectedRevision) { conflict = true; return undefined; } // 中止：有較新的答案
     return {
@@ -729,7 +728,7 @@ export async function saveAnswerOnce(code, gid, qid, json, expectedRevision, com
       updated: { ...(current.updated || {}), [qid]: Date.now() },
       ...(author ? { author } : {}),
     };
-  });
+  }, TX_OPTS);
   return { result, conflict, missing };
 }
 
@@ -797,23 +796,14 @@ export function courseHasAnswers(courseData) {
  * apply(current) 回傳 { value } 表示要寫入，回傳其他東西表示中止（原因由呼叫端判讀）。
  */
 async function courseTransaction(code, apply) {
-  const once = async () => {
-    let outcome = { fromNull: true };
-    const result = await runTransaction(courseRef(code), (current) => {
-      if (current === null) { outcome = { fromNull: true }; return undefined; }
-      outcome = apply(current) || {};
-      return Object.prototype.hasOwnProperty.call(outcome, 'value') ? outcome.value : undefined;
-    });
-    return { ...outcome, committed: !!(result && result.committed) };
-  };
-  let outcome = await once();
-  if (outcome.fromNull) {
-    const snap = await get(courseRef(code));
-    if (!snap.exists()) return { missingCourse: true, committed: false };
-    outcome = await once();
-    if (outcome.fromNull) return { unreadable: true, committed: false };
-  }
-  return outcome;
+  let outcome = { missingCourse: true };
+  const result = await runTransaction(courseRef(code), (current) => {
+    if (current === null) { outcome = { missingCourse: true }; return null; } // 不中止（見 groupsTransaction 上方說明）
+    outcome = apply(current) || {};
+    return Object.prototype.hasOwnProperty.call(outcome, 'value') ? outcome.value : undefined;
+  }, TX_OPTS);
+  if (outcome.missingCourse) return { missingCourse: true, committed: false };
+  return { ...outcome, committed: !!(result && result.committed) };
 }
 
 const ACTIVE = (all) => all.filter((exDef) => exDef.status === 'active');

@@ -112,7 +112,7 @@ async function lockTransaction(code, gid, apply) {
     const result = await runTransaction(node, (current) => {
       outcome = apply(current) || {};
       return Object.prototype.hasOwnProperty.call(outcome, 'value') ? outcome.value : undefined;
-    });
+    }, { applyLocally: false });
     return { ...outcome, committed: !!(result && result.committed) };
   };
   let outcome = await once();
@@ -157,7 +157,8 @@ export async function releaseLock(code, gid) {
   if (!code || !gid) return { ok: false, reason: 'invalid' };
   const me = deviceId();
   const outcome = await lockTransaction(code, gid, (current) => {
-    if (current === null) return { fromNull: true, reason: 'none' };
+    // 看到 null 不中止：回傳刪除（伺服器真的沒有鎖時等於什麼都不做；有鎖時會帶真值重跑）
+    if (current === null) return { value: null, reason: 'none' };
     if (current.holder !== me) return { reason: 'notMine' };
     return { value: null };
   });

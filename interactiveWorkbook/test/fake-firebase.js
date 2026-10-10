@@ -137,20 +137,34 @@ export function onValue(refObj, cb, errCb) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// runTransaction：先取得真實值、呼叫 updater，undefined 代表中止。
-// nullFirstTransaction（見 window.__fakedb）打開時，模擬 RTDB 常見的
-// 「第一次以 null 呼叫、之後才用真正的值重跑一次」路徑。
+// runTransaction：模擬真正 RTDB 的行為——
+// 回呼的第一次呼叫拿的是「本機快取」。只有當這台裝置正有 onValue 監聽覆蓋這個路徑時，
+// 本機才有快取；否則（例如學員還在入口畫面）第一次一定拿到 null。
+// 若回呼此時回傳 undefined（中止），交易就結束、不會重跑——這正是真實環境會踩到的坑。
+// 回傳任何其他值（包含 null）時，伺服器發現值不同，會帶真值重跑回呼。
+// （get() 不會留下快取，所以「中止後 get() 再試一次」一樣會再拿到 null。）
+// nullFirstTransaction 打開時，即使有監聽也強制走 null-first。
 // ──────────────────────────────────────────────────────────────────────────────
+function hasCoveringListener(pathStr) {
+  const parts = splitPath(pathStr);
+  for (const l of listeners) {
+    if (l.parts.length <= parts.length && l.parts.every((p, i) => p === parts[i])) return true;
+  }
+  return false;
+}
+
 export async function runTransaction(refObj, updater) {
   const pathStr = refObj._path;
   let current = await apiGet(pathStr);
+  const cached = hasCoveringListener(pathStr) && !(window.__fakedb && window.__fakedb.nullFirstTransaction);
+  const isNull = current === undefined || current === null;
 
-  if (window.__fakedb && window.__fakedb.nullFirstTransaction) {
+  if (!cached && !isNull) {
     const firstResult = updater(null);
     if (firstResult === undefined) {
-      return { committed: false, snapshot: makeSnapshot(current === undefined ? null : current) };
+      return { committed: false, snapshot: makeSnapshot(current) };
     }
-    current = await apiGet(pathStr); // 用真正的值重跑一次
+    current = await apiGet(pathStr); // 伺服器值不同 → 帶真值重跑
   }
 
   const result = updater(current === undefined ? null : current);
