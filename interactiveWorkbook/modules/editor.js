@@ -32,6 +32,7 @@ const TYPE_LABEL = {
   checkbox: '複選（checkbox）',
   list: '清單（可自行增列）',
   table: '表格（可自行增列）',
+  image: '圖片（1 張）',
 };
 
 const COLUMN_TYPE_LABEL = { text: '文字', number: '數字', date: '日期' };

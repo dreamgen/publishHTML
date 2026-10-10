@@ -4,7 +4,12 @@ import { randomId } from './util.js';
 // 3. 題目 JSON 範本與驗證
 // ──────────────────────────────────────────────────────────────────────────────
 export const QID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'radio', 'checkbox', 'list', 'table'];
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'radio', 'checkbox', 'list', 'table', 'image'];
+/**
+ * 圖片欄位的值是圖片 ID（images.js 用 randomId(10) 產生的 20 碼十六進位字串）。
+ * 驗證放寬到 8–40 碼，但只允許小寫十六進位：ID 會被拼進資料庫路徑，不能讓任意字串進去。
+ */
+export const IMAGE_ID_PATTERN = /^[0-9a-f]{8,40}$/;
 export const COLUMN_TYPES = ['text', 'number', 'date'];
 export const MAX_EXERCISES = 30;
 export const MAX_FIELDS = 40;
@@ -60,6 +65,7 @@ export const TEMPLATE = {
         { key: 'see', label: '看到的資料與變化', type: 'textarea', required: true },
         { key: 'questions', label: '想知道的問題（至少四個）', type: 'list', itemType: 'textarea', itemLabel: '問題', minItems: 4, required: true },
         { key: 'action', label: '我們的一個行動', type: 'textarea', required: true },
+        { key: 'photo', label: '小組討論的白板照片（選填）', type: 'image', hint: '用手機拍下白板或海報上傳，每個圖片欄位 1 張。' },
       ],
     },
     {
@@ -305,6 +311,12 @@ export function validateAnswer(exDef, answer, complete) {
         if (field.minItems != null && filled < field.minItems) throw Error(`「${label}」至少要填 ${field.minItems} 項。`);
         else if (field.required && field.minItems == null && filled === 0) throw Error(`請填寫「${label}」。`);
       }
+      out[key] = v;
+    } else if (type === 'image') {
+      // 值是圖片 ID（圖片本體在 images/<CODE>/… 子樹）。格式不對就清成空字串，
+      // 不讓整份存檔失敗——欄位只是變回「未上傳」，其他欄位的內容照常保住。
+      if (typeof v !== 'string' || !IMAGE_ID_PATTERN.test(v)) v = '';
+      if (complete && field.required) need(v, `請上傳「${label}」的圖片。`);
       out[key] = v;
     } else if (type === 'table') {
       const colKeys = field.columns.map((c) => c.key);

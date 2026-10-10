@@ -32,6 +32,9 @@ import {
   beginEditQuestion, beginNewQuestion, confirmLockQuestion, archivedSection, bindArchivedSection,
 } from './editor.js';
 import { askConfirm, askText, askTyped } from './dialog.js';
+import {
+  deleteImagesForCourse, deleteImagesForGroup, deleteImagesForQuestion, imageIdsIn, isImageId,
+} from './images.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 9. 講師控制台
@@ -58,6 +61,9 @@ export function answerRows(fields, a) {
     else if (f.type === 'table') {
       const used = (a[f.key] || []).filter((r) => Object.values(r).some((x) => String(x || '').trim()));
       v = used.map((r, i) => `${i + 1}．` + f.columns.map((c) => `${c.label}：${r[c.key] || '未填'}`).join('｜')).join('\n');
+    } else if (f.type === 'image') {
+      // 值是圖片 ID，文字化（CSV、封存視窗、展開文字）只標示有沒有圖，不輸出 ID 或圖片內容。
+      v = isImageId(a[f.key]) ? '［已上傳圖片］' : '';
     } else v = a[f.key] || '';
     return [f.label, v];
   });
@@ -681,6 +687,11 @@ async function clearQuestionAnswers(button, qid) {
       updates[`groups/${gid}/revision/${qid}`] = (S.course.groups[gid].revision[qid] || 0) + 1;
     });
     await update(courseRef(S.session.code), updates);
+    // 答案清掉了，這一題的圖片也不再被任何答案引用；只留下本組封存紀錄（archives）還引用的那幾張。
+    const keep = new Set();
+    Object.values(S.course.groups).forEach((g) => Object.values(g.archives || {})
+      .forEach((rec) => imageIdsIn(rec.json).forEach((id) => keep.add(id))));
+    await deleteImagesForQuestion(S.session.code, qid, { gids: Object.keys(S.course.groups), keep }).catch(() => {});
     // 答案清掉了，活動標記也要跟著清：否則橘點會留在一個已經沒有答案的欄位上，變成假訊號。
     await clearActivityForQuestion(S.session.code, qid);
     // 「已進入」標記同理：不清的話，接下來關閉這一題時還會彈出「已經有 N 組進入這一題」的假警訊。
@@ -826,6 +837,7 @@ function bindPrepPane() {
       try {
         await remove(courseRef(code));
         await clearLiveCourse(code).catch(() => { /* live 是易變資料，清不掉不影響課程已被刪除的事實 */ });
+        await deleteImagesForCourse(code).catch(() => { /* 同上：課程已刪除，圖片清不掉只是留下垃圾 */ });
         forgetCourse(code);
         notify('課程已刪除。');
       } catch (e) { notify(e.message); }
@@ -843,6 +855,8 @@ function bindPrepPane() {
         S.course.all.forEach((exDef) => { updates[`locks/${exDef.qid}`] = true; });
         await update(courseRef(S.session.code), updates);
         await clearLiveCourse(S.session.code).catch(() => { /* 同上：清不掉只是留下垃圾，不影響重置結果 */ });
+        // 全部組別都沒了，images/<CODE> 底下的圖片不會再被任何答案引用。
+        await deleteImagesForCourse(S.session.code).catch(() => {});
         S.groupFilter = 'all';
         notify('課程已重置，全部組別與答案已清空。');
       } catch (e) { notify(e.message); }
@@ -1024,6 +1038,7 @@ export async function importAnswersFile(event) {
       ? payload.questions.map((q) => (q && typeof q.qid === 'string' ? q.qid : '')).filter(Boolean)
       : [];
     const matchByQid = backupQids.some((qid) => !!S.course.byQid[qid]);
+    let imagesDropped = 0;
     const prepared = incoming.map((g) => {
       const name = String(g.name || '').trim();
       const author = String(g.author || '').trim();
@@ -1046,6 +1061,11 @@ export async function importAnswersFile(event) {
         } catch {
           try { clean = validateAnswer(exDef, raw && typeof raw === 'object' ? raw : {}, false); ok = false; } catch { clean = {}; ok = false; }
         }
+        // 圖片不在備份檔裡（匯出時就沒放），備份裡的圖片 ID 指向的是舊組別底下的圖，匯入後一定讀不到，
+        // 留著只會顯示「圖片讀取失敗」，所以清成「未上傳」。
+        (exDef.fields || []).forEach((f) => {
+          if (f.type === 'image' && clean[f.key]) { clean[f.key] = ''; imagesDropped += 1; }
+        });
         answers[exDef.qid] = JSON.stringify(clean);
         complete[exDef.qid] = ok;
         const u = pick(g.updated, exDef, i);
@@ -1076,10 +1096,13 @@ export async function importAnswersFile(event) {
       ? `\n注意：被取代的組別中有 ${losingArchives} 組帶有封存內容（來自合併小組或講師修改題目），這些封存內容會一併永久消失；備份檔裡沒有它們，匯入後無法復原。\n`
       : '';
     const preview = prepared.slice(0, 12).map((g) => g.name).join('\n') + (prepared.length > 12 ? `\n…其餘 ${prepared.length - 12} 組` : '');
+    const imageNote = imagesDropped
+      ? `備份檔不含圖片，有 ${imagesDropped} 個圖片欄位匯入後會是「未上傳」，需要的話請學員重新上傳。\n`
+      : '';
     const mapping = matchByQid
       ? ''
       : '這份備份沒有可對應的題目 ID（舊版備份或來自其他課程），將依題號順序對應到目前的第一題、第二題……請先確認題目順序相同。\n\n';
-    if (!(await askConfirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。\n${archiveWarning}確定匯入？`, { title: '匯入答案備份', okLabel: '匯入並覆寫', danger: true }))) return;
+    if (!(await askConfirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。\n${archiveWarning}${imageNote}確定匯入？`, { title: '匯入答案備份', okLabel: '匯入並覆寫', danger: true }))) return;
 
     const updates = {};
     const removedGids = [];
@@ -1093,6 +1116,8 @@ export async function importAnswersFile(event) {
     // 被取代的組別已經不存在了，它們在 live/<CODE> 的活動標記、已進入與編輯鎖要一併清掉（同 deleteGroup）。
     // 清不掉只是留下不會被讀到的垃圾，不該因此把已經完成的匯入報成失敗。
     await Promise.all(removedGids.map((gid) => clearLiveGroup(S.session.code, gid).catch(() => {})));
+    // 被取代組別的圖片也一併清掉（新組別是新的 gid，舊圖不會再被任何答案引用）。
+    await Promise.all(removedGids.map((gid) => deleteImagesForGroup(S.session.code, gid).catch(() => {})));
     S.groupFilter = 'all';
     notify(`已匯入 ${prepared.length} 組答案。`);
   } catch (e) {
@@ -1153,7 +1178,9 @@ export function exportData(format) {
       const cell = (v) => '"' + String(v).replace(/^[=+@\-\t\r]/, "'$&").replace(/"/g, '""') + '"';
       downloadBlob('﻿' + rows.map((r) => r.map(cell).join(',')).join('\r\n'), `${S.course.name || '互動題本'}_各組答案_${stamp}.csv`, 'text/csv');
     }
-    notify('已匯出檔案。');
+    // 圖片欄位在匯出檔裡只保留圖片 ID，不放圖片內容（每張約 200KB，整班匯出會暴增）。
+    const hasImageField = list.some((exDef) => (exDef.fields || []).some((f) => f.type === 'image'));
+    notify(hasImageField ? '已匯出檔案。圖片不包含在匯出檔中。' : '已匯出檔案。');
   } catch (e) { notify(e.message); }
 }
 

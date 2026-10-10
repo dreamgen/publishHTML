@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * smoke.mjs — 「互動題本」PWA 的無頭煙霧測試（S1–S14）。
+ * smoke.mjs — 「互動題本」PWA 的無頭煙霧測試（S1–S17）。
  *
  * 用法：
  *   IW_SRC=/tmp/iw IW_BASE_URL=http://127.0.0.1:8791 node smoke.mjs
@@ -84,6 +84,18 @@ async function teacherMode(page, mode) {
   await btn.waitFor({ timeout: 8000 });
   if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
   await page.locator(`.console-grid.${mode === 'live' ? 'is-live' : 'is-prep'}`).waitFor({ timeout: 8000 });
+}
+
+/** 取得元素外框；剛好碰上整頁重畫時元素會被換掉、外框為 null，稍等重試。 */
+async function stableBox(loc, tries = 20) {
+  for (let i = 0; i < tries; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const b = await loc.boundingBox().catch(() => null);
+    if (b && b.width > 0) return b;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw Error('等不到元素出現在畫面上（可能一直在重畫）。');
 }
 
 async function prepTab(page, tab) {
@@ -849,6 +861,276 @@ async function main() {
       });
       await waitForText(teacherPage, '#message', '這是「題目檔」');
       return `沿用 qid、答案零改動、封存 ${recs.length} 筆舊答案${droppedQid ? '、1 題改為封存' : ''}、新題預設關閉`;
+    });
+
+    // ── S16 練習很多時的切換列（窄螢幕、滑鼠） ─────────────────────────────
+    // 曾發生：選到第六題之後的練習，整頁重畫後捲動位置歸零，看起來像跳回練習一；滑鼠也沒有捲軸可拉。
+    await step('S16 練習切換列捲動', async () => {
+      const dbPath = `${COURSES_PATH}/${courseCode}`;
+      const node = getAtPath(await teacherPage.evaluate(() => window.__fakedb.dump()), dbPath);
+      const active = JSON.parse(node.exercisesJson).filter((q) => (q.status || 'active') === 'active');
+      // 用「更新題目」補到 10 題，再全部開放
+      const strip = ({ qid, rev, status, archiveReason, replacedBy, archivedFrom, restoredNote, ...rest }) => rest;
+      const list = active.map(strip);
+      while (list.length < 10) list.push({ title: `捲動測試題 ${list.length + 1}`, fields: [{ key: 'a', label: '回答', type: 'text' }] });
+      await prepTab(teacherPage, 'q');
+      await teacherPage.locator('#import-questions-file').setInputFiles({
+        name: 'ten.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ exercises: list }), 'utf8'),
+      });
+      await waitForText(teacherPage, '#message', '題目已更新');
+      await teacherPage.evaluate(async (code) => {
+        const { fetchCourse, normalizeCourse, setLock } = await import('./modules/data.js');
+        const c = normalizeCourse(await fetchCourse(code));
+        for (const ex of c.exercises) await setLock(code, ex.qid, false); // eslint-disable-line no-await-in-loop
+      }, courseCode);
+
+      await studentPage.setViewportSize({ width: 420, height: 800 });
+      await studentPage.reload({ waitUntil: 'domcontentloaded' });
+      const tabs = studentPage.locator('.tabs [data-qid]');
+      await studentPage.waitForFunction(() => document.querySelectorAll('.tabs [data-qid]').length >= 10, null, { timeout: 10000 });
+      const nav = studentPage.locator('.tabs-bar .tabs');
+      // 樣式載入、版面穩定後才量
+      await studentPage.waitForFunction(() => {
+        const el = document.querySelector('.tabs-bar .tabs');
+        return el && el.scrollWidth > el.clientWidth + 2;
+      }, null, { timeout: 8000 }).catch(() => { throw Error('窄螢幕下 10 題的切換列沒有超出畫面，測不到捲動。'); });
+      await studentPage.locator('.tabs-bar.is-overflow [data-tabs-step="1"]').waitFor({ timeout: 5000 });
+
+      // 滾輪：上下滾要轉成橫向捲動
+      const box = await stableBox(nav);
+      await studentPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      const l0 = await nav.evaluate((el) => el.scrollLeft);
+      await studentPage.mouse.wheel(0, 300);
+      await studentPage.waitForTimeout(200);
+      const l1 = await nav.evaluate((el) => el.scrollLeft);
+      if (!(l1 > l0)) throw Error('滑鼠滾輪沒有讓切換列橫向捲動。');
+
+      // 箭頭往右按到能看到第八題，再用滑鼠點它
+      const eighth = tabs.nth(7);
+      const qid8 = await eighth.getAttribute('data-qid');
+      for (let k = 0; k < 6; k += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await eighth.evaluate((el) => { const n = el.parentElement.getBoundingClientRect(); const b = el.getBoundingClientRect(); return b.left >= n.left && b.right <= n.right; })) break;
+        // eslint-disable-next-line no-await-in-loop
+        await studentPage.locator('[data-tabs-step="1"]').click();
+        // eslint-disable-next-line no-await-in-loop
+        await studentPage.waitForTimeout(450);
+      }
+      await eighth.click();
+      await studentPage.waitForTimeout(500);
+      const cur = studentPage.locator('.tabs [aria-current="step"]');
+      if ((await cur.getAttribute('data-qid')) !== qid8) throw Error('點第八題之後，目前題目不是第八題。');
+      const visible = await cur.evaluate((el) => { const n = el.parentElement.getBoundingClientRect(); const b = el.getBoundingClientRect(); return b.left >= n.left - 1 && b.right <= n.right + 1; });
+      if (!visible) throw Error('切到第八題後，它被捲出畫面（看起來像跳回練習一）。');
+
+      // 拖曳：按住往左拉要能捲動，放開後不能誤切題目
+      const before = await nav.evaluate((el) => el.scrollLeft);
+      const b2 = await stableBox(nav);
+      await studentPage.mouse.move(b2.x + b2.width * 0.3, b2.y + b2.height / 2);
+      await studentPage.mouse.down();
+      await studentPage.mouse.move(b2.x + b2.width * 0.8, b2.y + b2.height / 2, { steps: 8 });
+      await studentPage.mouse.up();
+      await studentPage.waitForTimeout(300);
+      const after = await nav.evaluate((el) => el.scrollLeft);
+      if (!(after < before)) throw Error('按住拖曳沒有讓切換列捲動。');
+      if ((await studentPage.locator('.tabs [aria-current="step"]').getAttribute('data-qid')) !== qid8) throw Error('拖曳放開時誤切了題目。');
+
+      await studentPage.setViewportSize({ width: 1280, height: 800 });
+      return '滾輪、箭頭、拖曳都能捲動；選到第八題後仍留在畫面內';
+    });
+
+    // ── S17 圖片欄位 ────────────────────────────────────────────────────────
+    // 圖片存在獨立子樹 images/<CODE>/<gid>/<qid>/<imgId>，答案只存 ID；上傳後要按儲存才算數，
+    // 存檔前又換一張要立刻刪掉前一張，存檔後被換掉的舊圖要刪掉；投影顯示縮圖；匯出不含圖片內容。
+    await step('S17 圖片欄位', async () => {
+      const dbPath = `${COURSES_PATH}/${courseCode}`;
+      const imgRoot = `artifacts/interactiveWorkbook/public/data/images/${courseCode}`;
+      const dump = () => teacherPage.evaluate(() => window.__fakedb.dump());
+      const node0 = getAtPath(await dump(), dbPath);
+      const active = JSON.parse(node0.exercisesJson).filter((q) => (q.status || 'active') === 'active');
+      const target = active[active.length - 1];
+      const qid = target.qid;
+
+      // 1. 用「更新題目（保留答案）」替最後一題加一個圖片欄位，並確保它開放
+      const strip = ({ qid: _q, rev, status, archiveReason, replacedBy, archivedFrom, restoredNote, ...rest }) => rest;
+      const list = active.map((q) => (q.qid === qid
+        ? { ...strip(q), fields: [...q.fields, { key: 'photo1', label: '小組照片', type: 'image' }] }
+        : strip(q)));
+      await prepTab(teacherPage, 'q');
+      await waitForText(teacherPage, '#import-questions', '更新題目 JSON（保留答案）');
+      await teacherPage.locator('#import-questions-file').setInputFiles({
+        name: 'image.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ exercises: list }), 'utf8'),
+      });
+      await waitForText(teacherPage, '#message', '題目已更新');
+      await teacherPage.evaluate(async ({ code, q }) => {
+        const { setLock } = await import('./modules/data.js');
+        await setLock(code, q, false);
+      }, { code: courseCode, q: qid });
+
+      // 學員進入那一題，並確定握有編輯權
+      const tab = studentPage.locator(`.tabs [data-qid="${qid}"]`);
+      await tab.waitFor({ timeout: 10000 });
+      await tab.click();
+      const input = studentPage.locator('input[data-image-input="photo1"]');
+      await input.waitFor({ state: 'attached', timeout: 10000 });
+      const grab = studentPage.locator('#editlock-action[data-action="acquire"], #editlock-action[data-action="takeover"]');
+      if (await grab.count()) {
+        await grab.first().click();
+        await studentPage.locator('#editlock-action[data-action="release"]').waitFor({ timeout: 8000 });
+      }
+      if (await studentPage.locator('input[data-image-input="photo1"]').isDisabled()) throw Error('學員握有編輯權，但圖片上傳按鈕是停用的。');
+
+      // 2. 在學員頁畫一張 canvas 轉 PNG（有雜訊，壓縮器得真的調品質）
+      const makePng = (w, h, seed) => studentPage.evaluate(({ w: W, h: H, seed: s0 }) => {
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+        const grad = ctx.createLinearGradient(0, 0, W, H);
+        grad.addColorStop(0, `hsl(${(s0 * 70) % 360},70%,60%)`);
+        grad.addColorStop(1, `hsl(${(s0 * 70 + 160) % 360},70%,40%)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        let x = s0 * 9973;
+        const rnd = () => { x = (x * 16807) % 2147483647; return x / 2147483647; };
+        for (let i = 0; i < 6000; i += 1) {
+          ctx.fillStyle = `rgba(${Math.floor(rnd() * 255)},${Math.floor(rnd() * 255)},${Math.floor(rnd() * 255)},0.6)`;
+          ctx.fillRect(rnd() * W, rnd() * H, 4 + rnd() * 40, 4 + rnd() * 40);
+        }
+        ctx.fillStyle = '#000';
+        ctx.font = `${Math.round(H / 8)}px sans-serif`;
+        ctx.fillText(`測試圖 ${s0}`, W / 10, H / 2);
+        return c.toDataURL('image/png').split(',')[1];
+      }, { w, h, seed });
+      const upload = async (b64, name) => {
+        await studentPage.locator('input[data-image-input="photo1"]').setInputFiles({
+          name, mimeType: 'image/png', buffer: Buffer.from(b64, 'base64'),
+        });
+      };
+      const thumbId = () => studentPage.locator('[data-image-field="photo1"] .img-thumb').getAttribute('data-img-id').catch(() => null);
+      const waitThumb = async (notId) => {
+        const end = Date.now() + 20000;
+        while (Date.now() < end) {
+          // eslint-disable-next-line no-await-in-loop
+          const id = await thumbId();
+          // eslint-disable-next-line no-await-in-loop
+          if (id && id !== notId && await studentPage.locator(`[data-image-field="photo1"] .img-thumb[data-img-id="${id}"].is-loaded img`).count()) return id;
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        throw Error('逾時：上傳後沒有出現縮圖預覽。');
+      };
+      const groupNow = async () => {
+        const n = getAtPath(await dump(), dbPath);
+        const [gid, g] = Object.entries(n.groups || {}).find(([, x]) => x.name === '測試組') || [];
+        if (!gid) throw Error('找不到「測試組」。');
+        return { gid, g };
+      };
+      const imagesOf = async (gid) => getAtPath(await dump(), `${imgRoot}/${gid}/${qid}`) || {};
+      const waitAnswer = async (gid, want) => {
+        const end = Date.now() + 10000;
+        let last = null;
+        while (Date.now() < end) {
+          // eslint-disable-next-line no-await-in-loop
+          const { g } = await groupNow();
+          try { last = JSON.parse(((g.answers || {})[qid]) || '{}').photo1; } catch { last = null; }
+          if (last === want) return;
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        throw Error(`答案的 photo1 應該是 ${want}，實際是 ${last}`);
+      };
+
+      const png1 = await makePng(2000, 1500, 1);
+      await upload(png1, 'photo1.png');
+      // 3. 等縮圖出現 → 按儲存 → 檢查資料庫
+      const id1 = await waitThumb(null);
+      await waitForText(studentPage, '#save-state', '尚未儲存');
+      await studentPage.locator('#save').click();
+      await waitForText(studentPage, '#save-state', '已儲存');
+      const { gid } = await groupNow();
+      await waitAnswer(gid, id1);
+      if (!/^[0-9a-f]{20}$/.test(id1)) throw Error('答案裡的 photo1 不是圖片 ID：' + id1);
+      const rec1 = (await imagesOf(gid))[id1];
+      if (!rec1) throw Error('images 子樹找不到上傳的圖片。');
+      if (!String(rec1.data).startsWith('data:image/jpeg')) throw Error('圖片不是 JPEG dataURL：' + String(rec1.data).slice(0, 30));
+      if (rec1.data.length >= 700000) throw Error('圖片 dataURL 過大：' + rec1.data.length);
+      if (Math.max(rec1.w, rec1.h) > 1600) throw Error(`圖片長邊超過 1600：${rec1.w}×${rec1.h}`);
+      const courseNode = getAtPath(await dump(), dbPath);
+      if (JSON.stringify(courseNode).includes('data:image')) throw Error('課程節點裡出現了圖片內容，圖片應該只在 images 子樹。');
+      const info1 = `PNG ${Math.round(png1.length * 0.75 / 1024)}KB → JPEG ${rec1.w}×${rec1.h}、dataURL ${Math.round(rec1.data.length / 1024)}KB（約 ${Math.round(rec1.bytes / 1024)}KB）`;
+
+      // 4. 講師全覽模式出現 <img>；單題模式（圖片欄位）是縮圖格；點縮圖可放大
+      await teacherMode(teacherPage, 'live');
+      await teacherPage.locator(`[data-select-ex="${qid}"]`).click();
+      await teacherPage.locator(`[data-select-ex="${qid}"][aria-current="true"]`).waitFor({ timeout: 8000 });
+      await teacherPage.locator('[data-proj-mode="all"]').click();
+      await teacherPage.locator('#proj-area .img-thumb').first().scrollIntoViewIfNeeded();
+      await teacherPage.locator('#proj-area .img-thumb img').first().waitFor({ timeout: 10000 });
+      await teacherPage.locator('[data-proj-mode="single"]').click();
+      await teacherPage.locator('[data-proj-field="photo1"]').click();
+      await teacherPage.locator('#proj-area .proj-img-grid .img-thumb').first().scrollIntoViewIfNeeded();
+      await teacherPage.locator('#proj-area .proj-img-grid .img-thumb img').first().waitFor({ timeout: 10000 });
+      await teacherPage.locator('#proj-area .proj-img-grid .img-thumb').first().click();
+      await teacherPage.locator('dialog.image-viewer[open] img').waitFor({ timeout: 5000 });
+      await teacherPage.locator('dialog.image-viewer [data-close]').click();
+      await teacherPage.locator('dialog.image-viewer').waitFor({ state: 'detached', timeout: 5000 });
+      // 狀態點：有圖就是綠點
+      await teacherPage.locator('[data-proj-mode="dots"]').click();
+      await teacherPage.locator(`#dot-${gid}-${qid}-photo1.is-filled`).waitFor({ timeout: 5000 });
+
+      // 5. 學員更換：先換成第二張（未儲存），再換第三張 → 第二張要立刻刪；儲存後第一張（舊的已存圖）也要刪
+      await upload(await makePng(1200, 1800, 2), 'photo2.png');
+      const id2 = await waitThumb(id1);
+      if (!(await imagesOf(gid))[id2]) throw Error('第二張圖沒有上傳到 images 子樹。');
+      await upload(await makePng(1600, 900, 3), 'photo3.png');
+      const id3 = await waitThumb(id2);
+      {
+        const end = Date.now() + 6000;
+        while ((await imagesOf(gid))[id2] && Date.now() < end) await new Promise((r) => setTimeout(r, 150)); // eslint-disable-line no-await-in-loop
+      }
+      const mid = await imagesOf(gid);
+      if (mid[id2]) throw Error('存檔前又換了一張，前一張（從未儲存）沒有被刪掉。');
+      if (!mid[id1]) throw Error('還沒儲存就把已存答案引用的舊圖刪掉了。');
+      await studentPage.locator('#save').click();
+      await waitAnswer(gid, id3);
+      {
+        const end = Date.now() + 6000;
+        while ((await imagesOf(gid))[id1] && Date.now() < end) await new Promise((r) => setTimeout(r, 150)); // eslint-disable-line no-await-in-loop
+      }
+      const after = await imagesOf(gid);
+      const left = Object.keys(after);
+      if (after[id1]) throw Error('換圖並儲存後，舊圖沒有被刪掉。');
+      if (!after[id3] || left.length !== 1) throw Error('換圖儲存後 images 子樹應該只剩新圖，實際：' + left.join(','));
+
+      // 6. 匯出 JSON／CSV 都不含圖片內容；JSON 保留 ID、CSV 標示「［已上傳圖片］」
+      await prepTab(teacherPage, 'd');
+      const [dlJson] = await Promise.all([teacherPage.waitForEvent('download'), teacherPage.locator('#export-json').click()]);
+      const jsonText = fs.readFileSync(await dlJson.path(), 'utf8');
+      await waitForText(teacherPage, '#message', '圖片不包含在匯出檔中');
+      const [dlCsv] = await Promise.all([teacherPage.waitForEvent('download'), teacherPage.locator('#export-csv').click()]);
+      const csvText = fs.readFileSync(await dlCsv.path(), 'utf8');
+      if (jsonText.includes('data:image') || csvText.includes('data:image')) throw Error('匯出檔含有圖片內容（data:image）。');
+      const exported = JSON.parse(jsonText);
+      const eg = Object.values(exported.groups || {}).find((x) => x.name === '測試組');
+      if (!eg || (eg.answers[qid] || {}).photo1 !== id3) throw Error('JSON 匯出沒有保留圖片 ID。');
+      if (!csvText.includes('［已上傳圖片］')) throw Error('CSV 沒有標示「［已上傳圖片］」。');
+      const rec3 = after[id3];
+      // 投影視窗（另開的視窗）也要載得出圖片：縮圖是進入畫面才載入，要確認在投影視窗的捲動區裡也會觸發
+      await teacherMode(teacherPage, 'live');
+      let proj = teacherPage.context().pages().find((pg) => pg !== teacherPage && !pg.isClosed() && /proj/i.test(pg.url()));
+      if (!proj) {
+        [proj] = await Promise.all([
+          teacherPage.waitForEvent('popup'),
+          teacherPage.locator('#open-projector').click(),
+        ]);
+        attachErrorCollectors(proj, errors, 'projector-img');
+        trackNativeDialogs(proj, errors, 'projector-img');
+      }
+      await proj.locator('#proj-area').waitFor({ timeout: 10000 });
+      await teacherPage.locator('[data-proj-mode="all"]').click();
+      await proj.waitForFunction(() => [...document.querySelectorAll('#proj-area img')].some((im) => im.complete && im.naturalWidth > 0), null, { timeout: 10000 })
+        .catch(() => { throw Error('投影視窗的全覽模式沒有載入出圖片。'); });
+      return `${info1}；第三張 ${rec3.w}×${rec3.h}、${Math.round(rec3.data.length / 1024)}KB；未儲存的換圖立即刪、儲存後舊圖刪；全覽／單題縮圖與放大正常；投影視窗載得出圖片；匯出不含圖片`;
     });
   } finally {
     if (studentCtx) await studentCtx.close().catch(() => {});

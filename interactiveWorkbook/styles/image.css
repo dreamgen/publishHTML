@@ -1,0 +1,67 @@
+/* 圖片欄位（type: "image"）：學員作答畫面、投影縮圖、圖片檢視視窗。
+   邏輯在 modules/images.js（縮圖佔位與延遲載入）與 modules/student.js（上傳／更換／移除）。 */
+
+/* ── 學員作答畫面 ── */
+.image-field .img-field-body { display: flex; flex-wrap: wrap; align-items: center; gap: 14px }
+.image-field .img-empty {
+  width: 160px; height: 120px; border: 2px dashed #b6c6d2; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; color: #5a6876; font-size: .9rem; background: #f7fafc
+}
+.image-field .img-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
+/* 「上傳圖片／更換」是 label 包住 file input，外觀做成跟一般按鈕一樣 */
+.img-pick {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  min-height: 54px; padding: 10px 20px; border: 1px solid #124e73; border-radius: 9px;
+  background: #124e73; color: white; font-weight: 650; cursor: pointer
+}
+.img-pick:hover { background: #0f4262 }
+.img-pick input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; opacity: 0; cursor: pointer }
+.img-pick:focus-within { outline: 3px solid #d0911d; outline-offset: 3px }
+.img-pick.is-busy, fieldset:disabled .img-pick { opacity: .5; cursor: not-allowed }
+fieldset:disabled .img-pick input[type=file] { cursor: not-allowed }
+.image-field .img-status { margin: 6px 0 0; min-height: 1.4em; font-weight: 650; color: #8a5a00 }
+
+/* ── 縮圖（學員與投影共用） ── */
+.img-thumb {
+  display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  border: 1px solid #b6c6d2; border-radius: 10px; background: #eef3f7; cursor: zoom-in; padding: 0
+}
+.img-thumb:focus-visible { outline: 3px solid #d0911d; outline-offset: 3px }
+.img-thumb img { display: block; width: 100%; height: 100%; object-fit: contain }
+.img-thumb .img-thumb-wait { padding: 8px; color: #5a6876; font-size: .85rem; text-align: center }
+.img-thumb.is-error { border-color: #c88; background: #fbeeee; cursor: pointer }
+.img-thumb.is-error .img-thumb-wait { color: #a32626; font-weight: 650 }
+.img-thumb-student { width: 200px; height: 150px }
+
+/* ── 投影：控制台中欄（小字監看）── */
+.proj-area .img-thumb-proj { width: 100%; max-width: 240px; aspect-ratio: 4 / 3 }
+.proj-area .proj-img-cell { vertical-align: middle }
+.proj-area .proj-img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px }
+.proj-area .proj-img-card { border: 1px solid #e1dbcf; border-radius: 12px; background: #fff; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px }
+.proj-area .proj-img-card h3 { margin: 0; font-size: 1em; display: flex; align-items: baseline; gap: .6em; flex-wrap: wrap }
+.proj-area .proj-img-card .proj-group-state { font-size: .75em; color: #5a6876 }
+.proj-area .proj-img-card .img-thumb-proj { max-width: none }
+.proj-one-row .img-thumb-proj { max-width: 360px }
+
+/* ── 投影舞台：縮圖要大到後排看得見；文字維持 28px 下限 ── */
+.proj-stage .img-thumb { border-width: 2px; border-color: var(--line, #b6c6d2); background: var(--panel, #fff) }
+.proj-stage .img-thumb .img-thumb-wait { font-size: max(28px, .8em) }
+.proj-stage .proj-area .img-thumb-proj { max-width: 420px }
+.proj-stage .proj-overview .img-thumb-proj { max-width: 260px }
+.proj-stage .proj-one-row .img-thumb-proj { max-width: 720px }
+.proj-stage .proj-area .proj-img-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px }
+.proj-stage .proj-area .proj-img-card { background: var(--panel, #fff); border: 2px solid var(--line, #e1dbcf); border-radius: 18px; padding: 20px 24px; gap: 14px }
+.proj-stage .proj-area .proj-img-card h3 { font-size: max(28px, calc(36px * var(--k, 1))); line-height: 1.2 }
+.proj-stage .proj-area .proj-img-card .proj-group-state { font-size: max(28px, calc(24px * var(--k, 1))) }
+.proj-stage .proj-area .proj-img-card .img-thumb-proj { max-width: none }
+
+/* ── 圖片檢視視窗（ui.js 的 imageViewer）── */
+.float-window.image-viewer { width: min(1400px, 96vw); max-height: 96dvh }
+.image-viewer-body { display: flex; align-items: center; justify-content: center; background: #10202d; padding: 12px; overflow: auto }
+.image-viewer-body img { display: block; max-width: 100%; max-height: calc(96dvh - 90px); object-fit: contain }
+
+@media (max-width: 760px) {
+  .img-thumb-student { width: 100%; max-width: 320px; height: auto; aspect-ratio: 4 / 3 }
+  .image-field .img-actions { width: 100% }
+  .image-field .img-actions > * { flex: 1 1 120px }
+}

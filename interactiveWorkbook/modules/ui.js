@@ -45,11 +45,108 @@ export function tabs() {
   if (!S.course.exercises.length) return '';
   const group = myGroup();
   // 按鈕帶的是 qid（穩定 ID），畫面上的「練習一／二／三」才是隨 active 陣列現算的題號。
-  return `<nav class="tabs" aria-label="切換練習">${S.course.exercises.map((t, i) => `<button data-qid="${E(t.qid)}" class="${
+  // 外層 .tabs-bar 放左右箭頭：練習很多時是一條橫向捲動列，滑鼠使用者沒有手指可滑，需要按鈕與滾輪。
+  return `<div class="tabs-bar"><button type="button" class="tabs-arrow" data-tabs-step="-1" aria-label="往前捲動練習清單" tabindex="-1">‹</button><nav class="tabs" aria-label="切換練習">${S.course.exercises.map((t, i) => `<button data-qid="${E(t.qid)}" class="${
     S.qid === t.qid ? 'active' : ''
   }" ${S.qid === t.qid ? 'aria-current="step"' : ''} ${S.session.role === 'student' && S.course.locks[t.qid] ? 'disabled' : ''}>${exLabel(i)}<span>${E(t.title)}</span>${
     S.course.locks[t.qid] ? ' · 未開放' : ' · 已開放'
-  }${S.session.role === 'student' && group && group.complete[t.qid] ? ' ✓' : ''}</button>`).join('')}</nav>`;
+  }${S.session.role === 'student' && group && group.complete[t.qid] ? ' ✓' : ''}</button>`).join('')}</nav><button type="button" class="tabs-arrow" data-tabs-step="1" aria-label="往後捲動練習清單" tabindex="-1">›</button></div>`;
+}
+
+/*
+ * 練習切換列的捲動行為。
+ * 整頁重畫（innerHTML）會把橫向捲動位置歸零：選到第六題之後的練習，重畫後就被捲出畫面，
+ * 看起來像「跳回練習一」。所以每次畫完：先回到上一次的捲動位置，若目前這一題仍不在可視範圍，就把它捲到中間。
+ * 滑鼠操作：左右箭頭、垂直滾輪轉成橫向捲動、按住拖曳。拖曳超過門檻後放開不算點擊，避免誤切題目。
+ */
+let tabsScrollLeft = 0;
+let tabsSync = null;
+let tabsReveal = null;
+let tabsResizeBound = false;
+
+function setupTabStrip() {
+  const nav = document.querySelector('.tabs-bar .tabs');
+  if (!nav) { tabsSync = null; return; }
+  const bar = nav.parentElement;
+  const prev = bar.querySelector('[data-tabs-step="-1"]');
+  const next = bar.querySelector('[data-tabs-step="1"]');
+  const maxScroll = () => Math.max(0, nav.scrollWidth - nav.clientWidth);
+  const sync = () => {
+    if (!nav.isConnected) return;
+    const max = maxScroll();
+    const overflow = max > 2;
+    bar.classList.toggle('is-overflow', overflow);
+    if (prev) prev.disabled = !overflow || nav.scrollLeft <= 2;
+    if (next) next.disabled = !overflow || nav.scrollLeft >= max - 2;
+  };
+  // 目前這一題若不在可視範圍，就把它捲到中間
+  const reveal = () => {
+    if (!nav.isConnected) return;
+    const active = nav.querySelector('button.active');
+    if (!active) return;
+    const navBox = nav.getBoundingClientRect();
+    const box = active.getBoundingClientRect();
+    if (box.left < navBox.left || box.right > navBox.right) {
+      const offset = box.left - navBox.left + nav.scrollLeft;
+      nav.scrollLeft = Math.max(0, Math.min(maxScroll(), offset - (nav.clientWidth - box.width) / 2));
+    }
+    tabsScrollLeft = nav.scrollLeft;
+  };
+  tabsSync = sync;
+  tabsReveal = reveal;
+  if (!tabsResizeBound) {
+    tabsResizeBound = true;
+    // 視窗寬度改變（手機轉向、拖拉視窗）時，可視範圍跟著變，目前這一題可能被擠出畫面
+    window.addEventListener('resize', () => { if (tabsReveal) tabsReveal(); if (tabsSync) tabsSync(); });
+  }
+
+  nav.scrollLeft = Math.min(tabsScrollLeft, maxScroll());
+  reveal();
+  sync();
+
+  nav.addEventListener('scroll', () => { tabsScrollLeft = nav.scrollLeft; sync(); }, { passive: true });
+  [prev, next].forEach((btn) => {
+    if (!btn) return;
+    btn.onclick = () => nav.scrollBy({ left: Number(btn.dataset.tabsStep) * Math.max(120, nav.clientWidth * 0.7), behavior: 'smooth' });
+  });
+  // 滑鼠滾輪：只有可以橫向捲動、而且使用者是上下滾時才接手，不然維持整頁上下捲。
+  nav.addEventListener('wheel', (e) => {
+    if (maxScroll() <= 2 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    const before = nav.scrollLeft;
+    nav.scrollLeft += e.deltaY;
+    if (nav.scrollLeft !== before) e.preventDefault(); // 捲到底就放行，讓頁面繼續上下捲
+  }, { passive: false });
+  // 按住拖曳（只處理滑鼠；觸控本來就能滑）
+  let drag = null;
+  let suppressClick = false;
+  nav.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    drag = { x: e.clientX, left: nav.scrollLeft, moved: false, id: e.pointerId };
+  });
+  nav.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) > 6) {
+      drag.moved = true;
+      bar.classList.add('is-dragging');
+      try { nav.setPointerCapture(e.pointerId); } catch { /* 忽略 */ }
+    }
+    if (drag.moved) nav.scrollLeft = drag.left - dx;
+  });
+  const endDrag = () => {
+    if (drag && drag.moved) suppressClick = true;
+    drag = null;
+    bar.classList.remove('is-dragging');
+  };
+  nav.addEventListener('pointerup', endDrag);
+  nav.addEventListener('pointercancel', endDrag);
+  // 捕獲階段攔下拖曳結束時那一次 click，不讓它傳到題目按鈕
+  nav.addEventListener('click', (e) => {
+    if (!suppressClick) return;
+    suppressClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 }
 
 export function noQuestionsNotice() {
@@ -96,7 +193,8 @@ export function bindIdentityBar() {
 }
 
 export function bindTabs() {
-  document.querySelectorAll('[data-qid]').forEach((b) => {
+  setupTabStrip();
+  document.querySelectorAll('.tabs [data-qid]').forEach((b) => {
     b.onclick = async () => {
       if (S.busy) return;
       const target = b.dataset.qid;
@@ -209,5 +307,15 @@ export function archiveWindow(records, options = {}) {
       copyText(rec.text || '', b.closest('.archive-record').querySelector('.float-text'));
     };
   });
+  return close;
+}
+
+/**
+ * 圖片檢視浮動視窗：點縮圖放大（學員作答畫面與投影共用，呼叫端在 images.js 的 hydrateImages）。
+ * 外框沿用 .float-window，圖片依視窗大小等比縮放（樣式在 styles/image.css）。
+ */
+export function imageViewer(title, dataUrl) {
+  const { close } = openFloat('float-window image-viewer', `<div class="float-top"><strong>${E(title)}</strong><button type="button" data-close>關閉</button></div>
+    <div class="float-body image-viewer-body"><img src="${E(dataUrl)}" alt="${E(title)}"></div>`);
   return close;
 }

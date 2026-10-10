@@ -23,7 +23,11 @@
       "interactiveWorkbook": {
         "public": { "data": {
           "courses": { "$code": { ".read": "auth != null", ".write": "auth != null" } },
-          "live": { "$code": { ".read": "auth != null", ".write": "auth != null" } }
+          "live": { "$code": { ".read": "auth != null", ".write": "auth != null" } },
+          "images": { "$code": { ".read": "auth != null", ".write": "auth != null",
+            "$gid": { "$qid": { "$img": {
+              ".validate": "newData.child('data').isString() && newData.child('data').val().beginsWith('data:image/') && newData.child('data').val().length < 700000"
+            } } } } }
         } }
       },
       "liveInteraction": {
@@ -38,6 +42,7 @@
 
 - 只有登入（匿名登入也算）的使用者可以讀寫，且**必須指定完整的六碼代碼路徑**；沒有人能列出全部課程，等於代碼本身就是進入課程的鑰匙。
 - `live/<代碼>` 與 `courses/<代碼>` 分開存放：活動標記、編輯鎖這類每幾秒就變動的資料放在 `live`，才不會讓課程主監聽被它們不斷觸發整頁重畫。權限與 `courses` 相同。
+- `images/<代碼>/<組>/<題>/<圖片ID>` 存放圖片欄位上傳的圖（瀏覽器端先壓成長邊 ≤ 1600px、約 220KB 以內的 JPEG）。刻意不放在 `courses` 底下：課程主監聽會訂閱整個 `courses/<代碼>`，圖片放進去的話，每次有人存檔，每台裝置都要把全部圖片重新下載一次。最底層的 `.validate` 限制只能寫入 `data:image/` 開頭、長度 70 萬字元以內的資料。權限與 `courses` 相同。
 - `liveInteraction` 區塊是順便把既有連線桌遊的權限一起補回來；若不需要可以整段刪除。
 - 若日後還有其他 PWA 要共用這個資料庫，在 `artifacts` 底下再加一段同樣格式的規則即可，不要直接覆蓋整份規則。
 
@@ -109,6 +114,7 @@ https://publish-html.vercel.app/interactiveWorkbook/            ← Vercel 鏡�
 | `checkbox` | 多選 | `options`（必填）、`minSelect`、`maxSelect` |
 | `list` | 可增減的文字清單 | `itemType`（`text`／`textarea`）、`minItems`、`itemLabel` |
 | `table` | 可增減列數的表格 | `columns`（每欄 `key`／`label`／`type`）、`minRows`、`itemLabel` |
+| `image` | 上傳圖片（每個欄位固定 1 張，手機可直接拍照）；瀏覽器端自動壓縮，答案按「儲存」才算數。投影時顯示縮圖、可點開放大；CSV 只標示「［已上傳圖片］」，JSON 匯出只保留圖片 ID、不含圖片本身 | `hint` |
 
 例如「恰好選三個指標」寫成 `"minSelect": 3, "maxSelect": 3`；「至少填 8 列」寫成 `"minRows": 8`。範本 `題目範本.json`（控制台可直接下載）示範了以上每一種類型。
 
@@ -176,9 +182,9 @@ Service Worker 只快取介面本身（HTML／JS／圖示／CDN 函式庫），*
 |------|------|
 | `index.html` | 頁面骨架，不含樣式，只留 `<link>` 與開機看門狗 |
 | `app.js` | 進入點，只做開機／組裝，不含業務邏輯 |
-| `modules/` | 18 個 ES modules，實際邏輯都在這裡（見下方分工說明） |
-| `styles/` | 8 個樣式檔（`base`／`group`／`editlock`／`projection`／`editor`／`console`／`student`／`dialog`） |
-| `sw.js` | Service Worker（動態快取，stale-while-revalidate）。改版時要 bump 檔案內的 `SW_VERSION`（目前 `v15`），否則使用者拿到的是舊快取 |
+| `modules/` | 19 個 ES modules，實際邏輯都在這裡（見下方分工說明） |
+| `styles/` | 9 個樣式檔（`base`／`group`／`editlock`／`projection`／`editor`／`console`／`student`／`dialog`／`image`） |
+| `sw.js` | Service Worker（動態快取，stale-while-revalidate）。改版時要 bump 檔案內的 `SW_VERSION`（目前 `v17`），否則使用者拿到的是舊快取 |
 | `manifest.webmanifest` | PWA 安裝設定 |
 | `icons/` | 192／512 SVG 圖示 |
 | `題目範本.json` | 範例題目，可直接匯入 |

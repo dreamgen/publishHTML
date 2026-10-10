@@ -65,6 +65,7 @@ export function ref(_db, pathStr) {
 }
 export const courseRef = (code, sub = '') => ref(null, `${COURSES}/${code}${sub ? '/' + sub : ''}`);
 export const liveRef = (code, sub = '') => ref(null, `${DB_ROOT}/live/${code}${sub ? '/' + sub : ''}`);
+export const imageRef = (code, sub = '') => ref(null, `${DB_ROOT}/images/${code}${sub ? '/' + sub : ''}`);
 
 function makeSnapshot(value) {
   const v = value === undefined ? null : value;

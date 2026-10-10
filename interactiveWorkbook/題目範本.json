@@ -29,7 +29,8 @@
       "fields": [
         { "key": "see", "label": "看到的資料與變化", "type": "textarea", "required": true },
         { "key": "questions", "label": "想知道的問題（至少四個）", "type": "list", "itemType": "textarea", "itemLabel": "問題", "minItems": 4, "required": true },
-        { "key": "action", "label": "我們的一個行動", "type": "textarea", "required": true }
+        { "key": "action", "label": "我們的一個行動", "type": "textarea", "required": true },
+        { "key": "photo", "label": "小組討論的白板照片（選填）", "type": "image", "hint": "用手機拍下白板或海報上傳，每個圖片欄位 1 張。" }
       ]
     },
     {

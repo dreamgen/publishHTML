@@ -32,7 +32,7 @@ body.student-mode #logout { min-height: 44px; padding: 0 14px; border-radius: 9p
 body.student-mode main.wrap { max-width: 760px; padding: 0 0 180px; display: flex; flex-direction: column }
 /* 編輯權橫幅在 markup 裡排在身分列前面；視覺上讓身分列緊接深藍頁首，橫幅放到練習切換下方 */
 body.student-mode main.wrap > .identity { order: -3 }
-body.student-mode main.wrap > .tabs { order: -2 }
+body.student-mode main.wrap > .tabs-bar { order: -2 }
 body.student-mode main.wrap > .editlock { order: -1; margin: 12px 16px 0; border-radius: 10px }
 
 body.student-mode .identity {
@@ -50,21 +50,59 @@ body.student-mode .identity-item b { font-size: 17px }
 body.student-mode .identity #fix-identity { min-height: 44px; padding: 0 14px; border-radius: 9px; border: 1px solid #44607d; background: transparent; color: #f6f4ef; font-size: 14px }
 
 /* ── 練習切換：可以左右滑的膠囊，不再換行擠成好幾排 ───────────────────────── */
-body.student-mode .tabs {
+body.student-mode .tabs-bar {
   display: flex;
-  gap: 8px;
-  margin: 0;
-  padding: 12px 14px;
-  overflow-x: auto;
+  align-items: center;
+  gap: 4px;
   background: #efece5;
   border-bottom: 1px solid #e1dbcf;
-  scrollbar-width: none;
   position: sticky;
   top: 0;
   z-index: 4
 }
 
+body.student-mode .tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-behavior: auto
+}
+
 body.student-mode .tabs::-webkit-scrollbar { display: none }
+
+/* 左右箭頭：只在清單超出畫面時出現；觸控螢幕直接滑，不佔空間 */
+body.student-mode .tabs-arrow { display: none }
+body.student-mode .tabs-bar.is-dragging .tabs { cursor: grabbing; user-select: none }
+@media (hover: hover) and (pointer: fine) {
+  body.student-mode .tabs-bar.is-overflow .tabs-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 40px;
+    min-height: 40px;
+    margin: 0 4px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid #d9d2c4;
+    background: #fff;
+    color: #14263a;
+    font-size: 24px;
+    line-height: 1
+  }
+  body.student-mode .tabs-bar.is-overflow .tabs-arrow:disabled { opacity: .35; cursor: default }
+  body.student-mode .tabs-bar.is-overflow .tabs { padding-left: 4px; padding-right: 4px; cursor: grab }
+  /* 滑鼠使用者看得到一條細捲軸，知道後面還有題目 */
+  body.student-mode .tabs { scrollbar-width: thin; scrollbar-color: #c9c1b2 transparent }
+  body.student-mode .tabs::-webkit-scrollbar { display: block; height: 6px }
+  body.student-mode .tabs::-webkit-scrollbar-thumb { background: #c9c1b2; border-radius: 3px }
+}
+
 
 body.student-mode .tabs button {
   flex: 0 0 auto;
@@ -175,5 +213,5 @@ body.student-mode .savebar #reload { color: #5a6876 }
 }
 
 @media print {
-  body.student-mode .tabs { position: static }
+  body.student-mode .tabs-bar { position: static }
 }

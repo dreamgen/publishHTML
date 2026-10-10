@@ -43,3 +43,9 @@ export const authReady = new Promise((resolve, reject) => {
 
 export const courseRef = (code, sub = '') => ref(db, `${COURSES}/${code}${sub ? '/' + sub : ''}`);
 export const liveRef = (code, sub = '') => ref(db, `${DB_ROOT}/live/${code}${sub ? '/' + sub : ''}`);
+/**
+ * 圖片欄位的獨立子樹 images/<CODE>/<gid>/<qid>/<imgId>（見 images.js）。
+ * 不可以放在 courses/<CODE> 底下：主監聽訂閱整個課程節點，圖片放進去的話，
+ * 每台裝置在任何人存檔時都會把所有圖片重新下載一次。這裡只在要顯示時用 get() 單張讀取。
+ */
+export const imageRef = (code, sub = '') => ref(db, `${DB_ROOT}/images/${code}${sub ? '/' + sub : ''}`);

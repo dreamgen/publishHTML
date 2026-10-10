@@ -15,6 +15,9 @@ import {
 // 循環 import（student → teacher → ui → student）：只在函式體內使用，不在模組頂層執行期取值。
 import { answerText } from './teacher.js';
 import { askConfirm } from './dialog.js';
+import {
+  uploadImage, deleteImage, imageIdsIn, thumbHTML, hydrateImages,
+} from './images.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 8. 學員作答畫面
@@ -31,7 +34,129 @@ export function applyDefaults() {
       S.draft[f.key] = Array.from({ length: n }, () => Object.fromEntries(f.columns.map((c) => [c.key, ''])));
     }
     if (['text', 'textarea', 'number', 'date'].includes(f.type) && S.draft[f.key] == null) S.draft[f.key] = '';
+    if (f.type === 'image' && typeof S.draft[f.key] !== 'string') S.draft[f.key] = '';
   });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 圖片欄位（每個欄位 1 張）
+//
+// 上傳只是先把圖片放進 images/<CODE>/<gid>/<qid>/<imgId>，答案仍要按「儲存」才算數（與其他欄位一致）。
+// 「已上傳、還沒儲存」的圖記在 pendingUploads：它從未被任何已存答案引用，所以
+//   - 存檔前又換一張或按移除 → 立即刪掉前一張；
+//   - 草稿被捨棄（切題確認捨棄、重新載入本題、離開本組）→ 在下一次畫面重畫／離開時刪掉。
+// 已存答案裡的舊圖，要等新答案存檔成功之後才刪（見 saveDraft），而且封存紀錄還引用它時不刪。
+// ──────────────────────────────────────────────────────────────────────────────
+/** `${qid}|${key}` → { code, gid, qid, key, imgId }：已上傳但還沒存進答案的圖片 */
+const pendingUploads = new Map();
+/** `${qid}|${key}` → 目前狀態文字（壓縮中…／上傳中…）；放模組層級，重畫也不會掉 */
+const uploadState = new Map();
+
+const imgSlot = (qid, key) => `${qid}|${key}`;
+
+function dropPending(p) {
+  pendingUploads.delete(imgSlot(p.qid, p.key));
+  deleteImage(p.code, p.gid, p.qid, p.imgId).catch(() => { /* 清不掉只是留下該組底下的垃圾，刪組／重置時會一併清 */ });
+}
+
+/** 草稿已經不再引用的未儲存上傳（切題、重新載入、換組）一律刪掉 */
+function prunePending() {
+  pendingUploads.forEach((p) => {
+    const stillHere = S.session && S.session.code === p.code && S.session.gid === p.gid
+      && S.qid === p.qid && S.draft[p.key] === p.imgId;
+    if (!stillHere) dropPending(p);
+  });
+}
+
+/** 離開本組（或更正身分）時：這台裝置所有未儲存的上傳都不會再被引用 */
+function flushPending(session) {
+  pendingUploads.forEach((p) => { if (!session || (p.code === session.code && p.gid === session.gid)) dropPending(p); });
+}
+
+function paintImageStatus(key, text) {
+  const el = document.querySelector(`[data-image-status="${CSS.escape(key)}"]`);
+  if (el) el.textContent = text;
+}
+
+export function renderImageField(f) {
+  const imgId = S.draft[f.key] || '';
+  const slot = imgSlot(S.qid, f.key);
+  const busy = uploadState.get(slot) || '';
+  const pending = pendingUploads.get(slot);
+  const statusText = busy || (pending && pending.imgId === imgId ? '已上傳，請記得按「儲存」才算數。' : '');
+  const id = 'img-' + f.key.replace(/[^\w-]/g, '_');
+  return `<div class="form-field image-field" data-image-field="${E(f.key)}"><label for="${id}">${E(f.label)}${
+    f.required ? ' <span aria-hidden="true">＊</span>' : ''}</label>${
+    f.hint ? `<p class="muted">${E(f.hint)}</p>` : ''
+  }<div class="img-field-body">${
+    imgId
+      ? thumbHTML({
+        code: S.session.code, gid: S.session.gid, qid: S.qid, imgId, title: f.label, cls: 'img-thumb-student',
+      })
+      : '<div class="img-empty">尚未上傳圖片</div>'
+  }<div class="img-actions"><label class="img-pick${busy ? ' is-busy' : ''}"><input id="${id}" type="file" accept="image/*" data-image-input="${E(f.key)}"${busy ? ' disabled' : ''}><span>${
+    imgId ? '更換' : '上傳圖片'
+  }</span></label>${
+    imgId ? `<button type="button" class="danger small" data-image-remove="${E(f.key)}"${busy ? ' disabled' : ''}>移除</button>` : ''
+  }</div></div><p class="muted img-status" role="status" data-image-status="${E(f.key)}">${E(statusText)}</p></div>`;
+}
+
+async function onImagePicked(input) {
+  const key = input.dataset.imageInput;
+  const file = input.files && input.files[0];
+  input.value = ''; // 同一個檔案再選一次也要觸發 change
+  if (!file || !S.session || !S.session.gid) return;
+  if (!canEdit(S.session.gid) || S.course.locks[S.qid]) {
+    notify('你目前沒有編輯權（或這一題已關閉），沒辦法上傳圖片。');
+    return;
+  }
+  const { code, gid } = S.session;
+  const qid = S.qid;
+  const slot = imgSlot(qid, key);
+  if (uploadState.has(slot)) return;
+  touchMine();
+  markActivity(code, gid, qid, key);
+  uploadState.set(slot, '壓縮中…');
+  renderStudent();
+  try {
+    const imgId = await uploadImage(code, gid, qid, key, file, (stage) => {
+      const text = stage === 'upload' ? '上傳中…' : '壓縮中…';
+      uploadState.set(slot, text);
+      paintImageStatus(key, text);
+    });
+    // 上傳期間已經離開這一題／這一組：這張圖不會再被引用，直接刪掉。
+    if (!S.session || S.session.code !== code || S.session.gid !== gid || S.qid !== qid) {
+      deleteImage(code, gid, qid, imgId).catch(() => {});
+      return;
+    }
+    const prev = pendingUploads.get(slot);
+    if (prev && prev.imgId !== imgId) dropPending(prev); // 存檔前又換了一張：前一張從未被引用，立即刪
+    pendingUploads.set(slot, {
+      code, gid, qid, key, imgId,
+    });
+    S.draft[key] = imgId;
+    markDirty();
+  } catch (e) {
+    notify((e && e.message) || '圖片上傳失敗，請再試一次。');
+  } finally {
+    uploadState.delete(slot);
+    if (S.session && S.session.role === 'student' && S.qid === qid) renderStudent();
+  }
+}
+
+function bindImageFields() {
+  document.querySelectorAll('[data-image-input]').forEach((el) => el.addEventListener('change', () => onImagePicked(el)));
+  document.querySelectorAll('[data-image-remove]').forEach((el) => el.addEventListener('click', () => {
+    const key = el.dataset.imageRemove;
+    const slot = imgSlot(S.qid, key);
+    const pending = pendingUploads.get(slot);
+    if (pending && pending.imgId === S.draft[key]) dropPending(pending); // 還沒存過的那張直接刪
+    // 已存答案裡的那張要等存檔成功才刪（不按儲存就等於沒移除）
+    S.draft[key] = '';
+    markDirty();
+    renderStudent();
+  }));
+  hydrateImages(document.querySelector('#fields'));
 }
 
 export function fieldBox(key, label, type, value, opts = {}) {
@@ -102,6 +227,7 @@ export function renderField(f) {
   if (f.type === 'radio' || f.type === 'checkbox') return renderChoiceField(f);
   if (f.type === 'list') return renderListField(f);
   if (f.type === 'table') return renderTableField(f);
+  if (f.type === 'image') return renderImageField(f);
   const inputType = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : f.type === 'text' ? 'text' : 'textarea';
   return fieldBox(f.key, f.label, inputType, S.draft[f.key], { required: f.required, hint: f.hint });
 }
@@ -182,6 +308,7 @@ function bindLeaveRelease() {
       const before = S.session;
       const result = await original.call(button, ev);
       if (before && before.gid && !S.session) {
+        flushPending(before);
         releaseLock(before.code, before.gid);
         resetEditLock();
       }
@@ -206,6 +333,7 @@ function bindTabTouch() {
 export function renderStudent() {
   const group = myGroup();
   if (!group) return;
+  prunePending();
   if (!S.course.exercises.length) {
     unmountEditLock();
     shell(`${identityBar()}${noQuestionsNotice()}`);
@@ -327,6 +455,7 @@ export function bindFieldEvents() {
   document.querySelectorAll('[data-table-remove]').forEach((el) => el.addEventListener('click', () => {
     S.draft[el.dataset.tableRemove].splice(Number(el.dataset.idx), 1); markDirty(); renderStudent();
   }));
+  bindImageFields();
   bindActivityMarks();
 }
 
@@ -353,10 +482,15 @@ function bindActivityMarks() {
     ['[data-checkbox]', 'checkbox'],
     ['[data-list]', 'list'],
     ['[data-table]', 'table'],
+    ['[data-image-input]', 'imageInput'],
   ].forEach(([selector, prop]) => {
     document.querySelectorAll(selector).forEach((el) => {
       el.addEventListener('focus', () => mark(el.dataset[prop]));
     });
+  });
+  // 圖片欄位的檔案選擇框藏在「上傳圖片」按鈕（label）裡，點按鈕時不一定會先 focus，所以 click 也算。
+  document.querySelectorAll('[data-image-input]').forEach((el) => {
+    el.addEventListener('click', () => mark(el.dataset.imageInput));
   });
 }
 
@@ -366,6 +500,29 @@ export function markDirty() {
   touchMine();
   const el = document.querySelector('#save-state');
   if (el) el.textContent = '尚未儲存，請按儲存草稿';
+}
+
+/**
+ * 存檔成功後的圖片清理：
+ * - 這一題的未儲存上傳：已被新答案引用的轉為正式（從 pending 移除）；沒被引用的（例如格式不對被清掉）刪掉。
+ * - 原本已存答案裡、新答案不再引用的舊圖：刪掉——但本組封存紀錄（archives）的 json 還引用它時保留，
+ *   封存紀錄要能看到當時的圖。失敗不提示：答案已經存好，留下的只是該組底下的垃圾，刪組／重置時會一併清。
+ */
+function cleanupImagesAfterSave(qid, previousIds, cleaned) {
+  const { code, gid } = S.session;
+  const nowIds = imageIdsIn(cleaned);
+  pendingUploads.forEach((p) => {
+    if (p.qid !== qid || p.code !== code || p.gid !== gid) return;
+    if (nowIds.has(p.imgId)) pendingUploads.delete(imgSlot(p.qid, p.key));
+    else dropPending(p);
+  });
+  const group = myGroup();
+  const archived = Object.values((group && group.archives) || {}).map((rec) => String(rec.json || ''));
+  previousIds.forEach((id) => {
+    if (nowIds.has(id)) return;
+    if (archived.some((json) => json.includes(id))) return;
+    deleteImage(code, gid, qid, id).catch(() => {});
+  });
 }
 
 export async function saveDraft(complete) {
@@ -389,10 +546,14 @@ export async function saveDraft(complete) {
   try {
     const cleaned = validateAnswer(currentEx(), S.draft, complete);
     const group = myGroup();
+    // 存檔成功後要比對：原本已存的答案裡有哪些圖被換掉／移除了（見下方清理）。
+    const savedQid = S.qid;
+    const previousIds = imageIdsIn(group.answers[savedQid] || {});
     // 記下「這次是誰存的」：同組多人輪流操作時，講師匯出才看得出最後由誰送出。
     const savedBy = (S.session && S.session.author) || group.author;
     const newRevision = await saveAnswer(S.session.code, S.session.gid, S.qid, cleaned, S.revision, complete, savedBy);
     S.revision = newRevision;
+    cleanupImagesAfterSave(savedQid, previousIds, cleaned);
     S.draft = structuredClone(cleaned);
     applyDefaults();
     S.dirty = false;

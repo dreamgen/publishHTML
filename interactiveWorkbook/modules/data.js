@@ -6,6 +6,9 @@ import {
 } from './util.js';
 import { normalizeGroupName, MAX_GROUPS, MAX_EXERCISES } from './schema.js';
 import { rememberCourse } from './storage.js';
+import {
+  deleteImagesForGroup, deleteImagesForQuestion, copyGroupImages, deleteImage, imageIdsIn,
+} from './images.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 4. 資料層
@@ -479,6 +482,8 @@ export async function deleteGroup(code, gid) {
   // 小組本身已經刪掉了，live 清不掉只是留下不會被讀到的垃圾。
   // 這裡不往外丟錯，否則畫面會顯示「刪除失敗」，與實際結果不符。
   await clearLiveGroup(code, gid).catch(() => {});
+  // 圖片欄位的圖在獨立子樹 images/<CODE>/<gid>，同樣要一併清掉，理由同上。
+  await deleteImagesForGroup(code, gid).catch(() => {});
 }
 
 export const MERGE_KEEP = 'keep';
@@ -501,6 +506,12 @@ export async function mergeGroups(code, keepGid, dropGid, perQuestionChoice, fin
   await authReady;
   if (!keepGid || !dropGid || keepGid === dropGid) throw Error('請選擇兩個不同的小組再合併。');
   const choices = perQuestionChoice || {};
+  // 圖片：答案裡只存 imgId，圖片路徑由「答案所在的組」決定（images/<CODE>/<gid>/<qid>/<imgId>）。
+  // 被採用（或兩者皆保留而存成封存）的那一份答案搬到保留組之後，路徑要對得上，所以
+  // **先**把被併入組的圖片原樣（同 qid、同 imgId）複製到保留組底下——先複製再合併，
+  // 合併生效的那一刻保留組就已經讀得到圖，不會有一段「圖片讀取失敗」的空窗；引用也不必改寫。
+  // 合併完成後，複製過來但沒被採用的刪掉，再刪掉被併入組的整個圖片子樹。
+  const copied = await copyGroupImages(code, dropGid, keepGid);
   const outcome = await groupsTransaction(code, (groups) => {
     const keep = groups[keepGid];
     const drop = groups[dropGid];
@@ -546,8 +557,21 @@ export async function mergeGroups(code, keepGid, dropGid, perQuestionChoice, fin
     delete next[dropGid];
     return { value: next };
   });
-  if (outcome.missing) throw Error('要合併的兩組之中有一組已經不存在，可能已被其他裝置刪除。請重新整理後再確認一次。');
+  if (outcome.missing || !outcome.committed || !outcome.value || !outcome.value[keepGid]) {
+    // 合併沒有發生：剛剛複製到保留組的圖片沒有任何答案引用，收回。
+    await Promise.all(copied.map(({ qid, imgId }) => deleteImage(code, keepGid, qid, imgId).catch(() => {})));
+    if (outcome.missing) throw Error('要合併的兩組之中有一組已經不存在，可能已被其他裝置刪除。請重新整理後再確認一次。');
+    throw Error('合併未完成，請再試一次。');
+  }
   await clearLiveGroup(code, dropGid).catch(() => {}); // 同 deleteGroup：合併已經完成，清不掉 live 不算失敗
+  // 保留組最終的答案與封存紀錄還引用哪些圖：沒被引用的複製品刪掉（例如講師選了「保留原本那份」）。
+  const kept = outcome.value[keepGid];
+  const referenced = new Set();
+  Object.values(kept.answers || {}).forEach((a) => imageIdsIn(a).forEach((id) => referenced.add(id)));
+  Object.values(kept.archives || {}).forEach((rec) => imageIdsIn((rec || {}).json).forEach((id) => referenced.add(id)));
+  await Promise.all(copied.filter(({ imgId }) => !referenced.has(imgId))
+    .map(({ qid, imgId }) => deleteImage(code, keepGid, qid, imgId).catch(() => {})));
+  await deleteImagesForGroup(code, dropGid).catch(() => {});
 }
 
 /**
@@ -638,6 +662,9 @@ export async function deleteExercise(code, courseData, qid) {
   if (!target) throw Error('找不到這個練習，可能已被其他裝置刪除。');
   await authReady;
   await migrateCourseIfNeeded(code);
+  // 圖片清理要用：哪些組、以及刪完之後還留著的封存紀錄（掛在別題、來源是這一題）引用了哪些圖。
+  let imageGids = [];
+  const keepImages = new Set();
   // 跟其他題目寫入路徑一樣走 transaction：用**伺服器當下**的 exercisesJson 重新算要保留的題目，
   // 不拿本機快照整份覆寫——否則別台裝置剛新增的題目會被這次刪除順手吃掉。
   const outcome = await courseTransaction(code, (current) => {
@@ -669,8 +696,10 @@ export async function deleteExercise(code, courseData, qid) {
         });
         g.archives = Object.keys(kept).length ? kept : null;
       }
+      Object.values(g.archives || {}).forEach((rec) => imageIdsIn((rec || {}).json).forEach((id) => keepImages.add(id)));
       groups[gid] = g;
     });
+    imageGids = Object.keys(groups);
 
     const extra = { locks: Object.keys(locks).length ? locks : null };
     if (Object.keys(groups).length) extra.groups = groups;
@@ -679,6 +708,9 @@ export async function deleteExercise(code, courseData, qid) {
   if (outcome.missingCourse) throw Error('這個課程已被刪除。');
   if (outcome.alreadyGone) return; // 伺服器上已經沒有這一題，視為完成
   if (!outcome.committed) throw Error('刪除練習未完成，請再試一次。');
+  // 這一題的圖片（images/<CODE>/<gid>/<qid>）不再被任何答案引用；別題上的封存紀錄還引用的那幾張留著。
+  // 題目已經刪掉了，清不掉只是留下垃圾，不往外丟錯。
+  await deleteImagesForQuestion(code, qid, { gids: imageGids, keep: keepImages }).catch(() => {});
 }
 
 /**
@@ -952,6 +984,7 @@ export async function archiveForEdit(code, qid) {
  */
 export async function cancelEdit(code, newQid) {
   await authReady;
+  let imageGids = [];
   const outcome = await courseTransaction(code, (current) => {
     const all = parseExercises(current.exercisesJson);
     const i = all.findIndex((exDef) => exDef.qid === newQid);
@@ -992,6 +1025,7 @@ export async function cancelEdit(code, newQid) {
       groups[gid] = g;
     });
 
+    imageGids = Object.keys(groups);
     const extra = { locks: Object.keys(locks).length ? locks : null };
     if (Object.keys(groups).length) extra.groups = groups;
     return { value: writeExercises(current, next, extra), orphaned };
@@ -999,6 +1033,8 @@ export async function cancelEdit(code, newQid) {
   if (outcome.missingCourse) throw Error('這個課程已被刪除。');
   if (outcome.missing) throw Error('要取消的這一題已不存在，可能已被其他裝置處理過。請重新載入頁面確認。');
   if (!outcome.committed) throw Error('取消修改未完成，請再試一次。');
+  // 新題被刪掉了，它底下若有圖片（理論上新題是關閉的、不會有人上傳）也一併清，不留孤兒。
+  await deleteImagesForQuestion(code, newQid, { gids: imageGids }).catch(() => {});
   return { orphaned: !!outcome.orphaned };
 }
 

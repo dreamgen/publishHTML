@@ -16,6 +16,7 @@ import { onLiveChange, hasActivity } from './live.js';
 import { loadJSON, saveJSON } from './storage.js';
 import { rerender } from './render.js';
 import { answerRows, hasContent, sortedGroups } from './teacher.js';
+import { isImageId, thumbHTML, hydrateImages } from './images.js';
 import {
   isProjectorWindow, onProjState, setSnapshotProvider, publishProjState, bindProjectorStatus, startProjectorBeacon,
   publishScreens, onScreens, projectorConnected,
@@ -201,6 +202,18 @@ function cellHTML(title, text, max, extraClass = '') {
   return `<td class="answer ${extraClass}">${E(cut.shown)}${expandButton(cut.truncated, title, value)}</td>`;
 }
 
+/**
+ * 圖片欄位的縮圖（每個欄位 1 張）。只放佔位，圖片在元素進入畫面時才讀（images.js 的 hydrateImages），
+ * 所以全覽模式就算有幾十格，也不會一次把全部圖片下載下來。沒上傳回傳空字串，由呼叫端顯示「尚未上傳」。
+ */
+function imageThumb(gid, g, field) {
+  const imgId = ((g.answers || {})[S.qid] || {})[field.key];
+  if (!isImageId(imgId)) return '';
+  return thumbHTML({
+    code: S.session.code, gid, qid: S.qid, imgId, title: `${g.name}｜${field.label}`, cls: 'img-thumb-proj',
+  });
+}
+
 function groupHeadHTML(g) {
   // 完成狀態放在組名下方，不另外用顏色表示：投影距離下四色難辨。
   return `<th scope="col"><span class="proj-group-name">${E(g.name)}</span><span class="proj-group-state">${E(groupStatus(g, S.qid))}</span></th>`;
@@ -244,11 +257,17 @@ function legendHTML() {
 function renderOneGroup(list, fields) {
   if (!list.length) return emptyNotice('目前沒有可顯示的組別。');
   if (!fields.length) return emptyNotice('這一題沒有作答欄位。');
-  const [, g] = list[0];
+  const [gid, g] = list[0];
   const rows = answerRows(fields, g.answers[S.qid] || {});
   return `<div class="proj-one">
       <div class="proj-one-head"><b class="proj-one-name">${E(g.name)}</b><span class="proj-group-state">${E(groupStatus(g, S.qid))}</span></div>
-      ${rows.map(([label, text]) => {
+      ${rows.map(([label, text], i) => {
+    if (fields[i].type === 'image') {
+      const thumb = imageThumb(gid, g, fields[i]);
+      return `<div class="proj-one-row"><span class="proj-one-label">${E(label)}</span>${
+        thumb ? `<span class="answer">${thumb}</span>` : '<span class="answer empty">— 尚未上傳</span>'
+      }</div>`;
+    }
     const value = String(text || '');
     const cut = truncate(value, MAX_ONE_GROUP);
     return `<div class="proj-one-row"><span class="proj-one-label">${E(label)}</span>${
@@ -268,7 +287,11 @@ function renderRowsTable(list, fields, max, modeClass) {
   const qid = S.qid;
   const cache = new Map(list.map(([gid, g]) => [gid, answerRows(fields, g.answers[qid] || {})]));
   const body = fields.map((f, i) => `<tr><th scope="row">${E(f.label)}</th>${
-    list.map(([gid, g]) => cellHTML(`${g.name}｜${f.label}`, cache.get(gid)[i][1], max)).join('')
+    list.map(([gid, g]) => {
+      if (f.type !== 'image') return cellHTML(`${g.name}｜${f.label}`, cache.get(gid)[i][1], max);
+      const thumb = imageThumb(gid, g, f);
+      return thumb ? `<td class="answer proj-img-cell">${thumb}</td>` : '<td class="answer empty">— 尚未上傳</td>';
+    }).join('')
   }</tr>`).join('');
   return `<div class="table-scroll"><table class="data-table proj-table ${modeClass}"><thead><tr><th scope="col">作答欄位</th>${
     list.map(([, g]) => groupHeadHTML(g)).join('')
@@ -312,12 +335,24 @@ function renderMergedList(list, field) {
   }).join('')}</ol>`;
 }
 
+/** 單題模式的圖片欄位：各組縮圖格狀排列，點縮圖放大 */
+function renderImageGrid(list, field) {
+  const qid = S.qid;
+  return `<div class="proj-img-grid">${list.map(([gid, g]) => {
+    const thumb = imageThumb(gid, g, field);
+    return `<article class="proj-img-card"><h3>${E(g.name)}<span class="proj-group-state">${E(groupStatus(g, qid))}</span></h3>${
+      thumb || '<div class="answer empty">— 尚未上傳</div>'
+    }</article>`;
+  }).join('')}</div>`;
+}
+
 function renderSingleField(list, fields) {
   if (!list.length) return emptyNotice('目前沒有可顯示的組別。');
   const field = fields.find((f) => f.key === S.projField);
   if (!field) return emptyNotice('這一題沒有作答欄位。');
   if (field.type === 'checkbox') return renderCheckboxMatrix(list, field);
   if (field.type === 'list') return renderMergedList(list, field);
+  if (field.type === 'image') return renderImageGrid(list, field);
   // 表格題在這裡也走這條文字路徑：「工作項目」是各組自由輸入的文字，列與列之間無法對齊，
   // 強行攤平成矩陣只會排出一張對不起來的表；字數必然超額，因此依賴截斷加展開。
   const qid = S.qid;
@@ -423,6 +458,7 @@ function fieldHint(f) {
     return `${pick}：${shown}${more}`;
   }
   if (f.type === 'list') return f.minItems ? `至少 ${f.minItems} 項` : '可列多項';
+  if (f.type === 'image') return '上傳 1 張圖片';
   if (f.type === 'table') {
     const cols = (f.columns || []).map((c) => c.label).join('、');
     return `表格：${cols}${f.minRows ? `（至少 ${f.minRows} 列）` : ''}`;
@@ -913,6 +949,7 @@ export function bindProjection() {
     };
   });
   bindDotCells(root);
+  hydrateImages(root);
   if (document.querySelector('#proj-win-status')) bindProjectorStatus();
   if (isProjectorWindow) startProjectorBeacon();
 
