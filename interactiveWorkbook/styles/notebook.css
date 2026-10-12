@@ -24,13 +24,23 @@
 .nb-menu-popover{position:absolute;top:calc(100% + 4px);right:0;min-width:210px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,.15);padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px;z-index:20}
 .nb-menu-popover label{display:flex;flex-direction:column;gap:4px;font-weight:600;color:#475569;margin:0;font-size:12px}
 .nb-menu-popover select{width:100%;padding:5px 8px;font-size:13px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc}
+.nb-menu-reorder{display:flex;gap:6px}
+.nb-move-btn{flex:1;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:5px 8px;font-size:12px;color:#334155;cursor:pointer;text-align:center;transition:background .15s,border-color .15s}
+.nb-move-btn:hover:not(:disabled){background:#e2e8f0;border-color:#94a3b8}
+.nb-move-btn:disabled{opacity:.4;cursor:not-allowed}
 .nb-menu-divider{height:1px;background:#e2e8f0;margin:2px 0}
 .nb-menu-popover .nb-delete{background:transparent;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;text-align:center;cursor:pointer;font-size:13px;transition:background .15s;width:100%}
 .nb-menu-popover .nb-delete:hover{background:#fee2e2}
+.nb-drag-handle{position:absolute;top:6px;right:34px;z-index:5;width:24px;height:26px;display:flex;align-items:center;justify-content:center;cursor:grab;color:#94a3b8;font-size:16px;user-select:none;border-radius:6px;border:none;background:transparent;padding:0;transition:background .15s,color .15s}
+.nb-drag-handle:hover{background:#edf2f7;color:#17334c}
+.nb-drag-handle:active{cursor:grabbing}
+.nb-paragraph.is-dragging{opacity:.45}
+.nb-paragraph.drop-target-before::before{content:'';position:absolute;top:-5px;left:0;right:0;height:3px;background:#2563eb;border-radius:2px;z-index:10}
+.nb-paragraph.drop-target-after::after{content:'';position:absolute;bottom:-5px;left:0;right:0;height:3px;background:#2563eb;border-radius:2px;z-index:10}
 .nb-moved:empty{display:none}
 .nb-moved{padding:4px 10px;font-size:12px;background:#fff0c9}
 .nb-editor .cm-editor{min-height:48px;font-size:15px;line-height:1.6}
-.nb-editor .cm-content{padding:8px 34px 8px 10px;font-family:inherit;min-height:48px;white-space:pre-wrap}
+.nb-editor .cm-content{padding:8px 64px 8px 10px;font-family:inherit;min-height:48px;white-space:pre-wrap}
 .nb-editor .cm-focused{outline:none}
 .nb-editor .cm-scroller{font-family:inherit}
 .nb-new-paragraph{flex:none;border:1px dashed var(--scope-border,#cbd5e1);border-left:4px dashed var(--scope-accent,#94a3b8);border-radius:8px;background:#fafbfc;padding:8px 12px;color:#64748b;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;transition:all .15s ease}

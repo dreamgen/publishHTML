@@ -56,6 +56,23 @@ export function splitParagraph(doc, id, start, end, scope) {
   }, LOCAL);
   return next;
 }
+export function moveParagraph(doc, id, targetId, place = 'before') {
+  const order = doc.getArray('order');
+  const arr = order.toArray();
+  const fromIdx = arr.indexOf(id);
+  const toIdx = arr.indexOf(targetId);
+  if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return false;
+  if (place === 'before' && fromIdx === toIdx - 1) return false;
+  if (place === 'after' && fromIdx === toIdx + 1) return false;
+  doc.transact(() => {
+    order.delete(fromIdx, 1);
+    const updated = order.toArray();
+    let insertIdx = updated.indexOf(targetId);
+    if (place === 'after') insertIdx += 1;
+    order.insert(insertIdx, [id]);
+  }, LOCAL);
+  return true;
+}
 export function plainText(doc, filter = '*', label = (s) => s?.label || '全局') {
   return paragraphs(doc).filter(({ value }) => filter === '*' || (value.get('scope')?.qid || '') === filter)
     .map(({ value }) => `【${label(value.get('scope'))}】${value.get('sourceGroup') ? '（合併自「' + value.get('sourceGroup') + '」）' : ''}\n${value.get('text').toString()}`).join('\n\n');

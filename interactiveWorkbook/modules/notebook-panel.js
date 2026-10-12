@@ -2,11 +2,16 @@ import { S, myGroup } from './state.js';
 import { E, notify } from './util.js';
 import { askConfirm } from './dialog.js';
 import { Notebook } from './notebook.js';
-import { paragraphs, addParagraph, setScope, deleteParagraph, splitParagraph, plainText } from './notebook-model.js';
+import { paragraphs, addParagraph, setScope, deleteParagraph, splitParagraph, moveParagraph, plainText } from './notebook-model.js';
 import { EditorView, EditorState, Compartment, keymap, placeholder, defaultKeymap, insertNewline, yCollab, yUndoManagerKeymap } from '../vendor/notebook-editor.js';
 
-let panel, queued = false, rows = new Map(), viewDoc;
+let panel, queued = false, rows = new Map(), viewDoc, draggedId = null;
 const state = () => S.notebook;
+function clearDropIndicators() {
+  document.querySelectorAll('.drop-target-before, .drop-target-after').forEach((el) => {
+    el.classList.remove('drop-target-before', 'drop-target-after');
+  });
+}
 function changed() {
   if (queued) return;
   queued = true; queueMicrotask(() => { queued = false; render(); });
@@ -71,6 +76,13 @@ function mount() {
     <small>討論紀錄不會自動成為正式答案，也不包含在答案匯出檔。</small></div>`;
   document.body.appendChild(panel);
   panel.querySelector('#nb-close').onclick = hide;
+  const rowList = panel.querySelector('#nb-rows');
+  rowList.addEventListener('dragover', (e) => {
+    if (draggedId) e.preventDefault();
+  });
+  rowList.addEventListener('drop', () => {
+    clearDropIndicators();
+  });
   document.addEventListener('pointerdown', (e) => {
     if (!panel || panel.hidden) return;
     const current = e.target.closest('.nb-more-menu');
@@ -164,13 +176,18 @@ function applyScopeTheme(element, scope) {
 }
 function rowFor(id, value, n) {
   const element = document.createElement('section'); element.className = 'nb-paragraph'; element.dataset.paragraphId = id;
-  element.innerHTML = `<details class="nb-more-menu">
+  element.innerHTML = `<button type="button" class="nb-drag-handle" draggable="true" title="拖曳調整順序" aria-label="拖曳調整順序">⠿</button>
+    <details class="nb-more-menu">
       <summary class="nb-more-btn" aria-label="段落選項" title="段落設定">⋮</summary>
       <div class="nb-menu-popover">
         <label class="nb-menu-label">
           <span>所屬題目</span>
           <select aria-label="段落所屬題目"></select>
         </label>
+        <div class="nb-menu-reorder">
+          <button type="button" class="nb-move-btn nb-move-up" title="上移段落">↑ 上移</button>
+          <button type="button" class="nb-move-btn nb-move-down" title="下移段落">↓ 下移</button>
+        </div>
         <div class="nb-menu-divider"></div>
         <button type="button" class="nb-delete" title="刪除此段落">刪除此段落</button>
       </div>
@@ -180,6 +197,78 @@ function rowFor(id, value, n) {
     <div class="nb-editor"></div>`;
   const menu = element.querySelector('.nb-more-menu');
   const select = element.querySelector('select');
+  const handle = element.querySelector('.nb-drag-handle');
+  const moveUpBtn = element.querySelector('.nb-move-up');
+  const moveDownBtn = element.querySelector('.nb-move-down');
+  const deleteBtn = element.querySelector('.nb-delete');
+
+  handle.addEventListener('dragstart', (e) => {
+    if (!editable()) { e.preventDefault(); return; }
+    draggedId = id;
+    element.classList.add('is-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+  });
+  handle.addEventListener('dragend', () => {
+    draggedId = null;
+    element.classList.remove('is-dragging');
+    clearDropIndicators();
+  });
+
+  element.addEventListener('dragover', (e) => {
+    if (!draggedId || draggedId === id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = element.getBoundingClientRect();
+    const isBefore = (e.clientY - rect.top) < rect.height / 2;
+    element.classList.toggle('drop-target-before', isBefore);
+    element.classList.toggle('drop-target-after', !isBefore);
+  });
+  element.addEventListener('dragleave', (e) => {
+    if (!element.contains(e.relatedTarget)) {
+      element.classList.remove('drop-target-before', 'drop-target-after');
+    }
+  });
+  element.addEventListener('drop', (e) => {
+    if (!draggedId || draggedId === id) return;
+    e.preventDefault();
+    const moving = draggedId;
+    const rect = element.getBoundingClientRect();
+    const isBefore = (e.clientY - rect.top) < rect.height / 2;
+    const place = isBefore ? 'before' : 'after';
+    clearDropIndicators();
+    draggedId = null;
+    if (editable() && state()?.controller === n) {
+      try {
+        moveParagraph(n.doc, moving, id, place);
+        changed();
+      } catch (err) {
+        notify(err.message);
+      }
+    }
+  });
+
+  moveUpBtn.onclick = () => {
+    menu.open = false;
+    if (!editable() || state()?.controller !== n) return;
+    const visible = paragraphs(n.doc).filter(({ value: v }) => matches(v));
+    const idx = visible.findIndex((p) => p.id === id);
+    if (idx > 0) {
+      moveParagraph(n.doc, id, visible[idx - 1].id, 'before');
+      changed();
+    }
+  };
+  moveDownBtn.onclick = () => {
+    menu.open = false;
+    if (!editable() || state()?.controller !== n) return;
+    const visible = paragraphs(n.doc).filter(({ value: v }) => matches(v));
+    const idx = visible.findIndex((p) => p.id === id);
+    if (idx >= 0 && idx < visible.length - 1) {
+      moveParagraph(n.doc, id, visible[idx + 1].id, 'after');
+      changed();
+    }
+  };
+
   select.onchange = () => {
     if (!editable()) return;
     const scope = availableScopes().find((s) => (s.qid || '') === select.value);
@@ -188,10 +277,16 @@ function rowFor(id, value, n) {
     menu.open = false;
     if (!matches(value)) notify(`已移至${scope.label}；可切換上方篩選查看。`);
   };
-  element.querySelector('.nb-delete').onclick = async () => {
+  deleteBtn.onclick = async () => {
     menu.open = false;
-    if (!(await askConfirm('刪除此段落會影響整組，可從「更多」復原。', { title: '刪除段落', danger: true }))) return;
-    if (state()?.controller === n && editable()) deleteParagraph(n.doc, id);
+    const isBlank = value.get('text').toString().trim() === '';
+    if (!isBlank) {
+      if (!(await askConfirm('刪除此段落會影響整組，可從「更多」復原。', { title: '刪除段落', danger: true }))) return;
+    }
+    if (state()?.controller === n && editable()) {
+      deleteParagraph(n.doc, id);
+      changed();
+    }
   };
   menu.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -212,12 +307,41 @@ function rowFor(id, value, n) {
       keymap.of([
         { key: 'Enter', run: (v) => {
           if (v.composing || !editable()) return true;
-          try {
-            const { from, to } = v.state.selection.main;
-            const next = splitParagraph(n.doc, id, from, to, newScope());
-            changed(); queueMicrotask(() => rows.get(next)?.view.focus());
-          } catch (e) { notify(e.message); }
-          return true;
+          const { from, to } = v.state.selection.main;
+          const docStr = v.state.doc.toString();
+          if (from === to && from > 0 && docStr[from - 1] === '\n') {
+            try {
+              const next = splitParagraph(n.doc, id, from - 1, to, newScope());
+              changed(); queueMicrotask(() => rows.get(next)?.view.focus());
+            } catch (e) { notify(e.message); }
+            return true;
+          }
+          return insertNewline(v);
+        } },
+        { key: 'Backspace', run: (v) => {
+          if (v.composing || !editable()) return false;
+          const { from, to } = v.state.selection.main;
+          const docStr = v.state.doc.toString();
+          if (from === 0 && to === 0 && docStr.trim() === '') {
+            const visibleRows = paragraphs(n.doc).filter(({ value: pv }) => matches(pv));
+            const currentIndex = visibleRows.findIndex((p) => p.id === id);
+            const targetRow = currentIndex > 0 ? visibleRows[currentIndex - 1] : (visibleRows[currentIndex + 1] || null);
+            const focusEnd = currentIndex > 0;
+            deleteParagraph(n.doc, id);
+            changed();
+            if (targetRow) {
+              queueMicrotask(() => {
+                const r = rows.get(targetRow.id);
+                if (r) {
+                  r.view.focus();
+                  const pos = focusEnd ? r.view.state.doc.length : 0;
+                  r.view.dispatch({ selection: { anchor: pos, head: pos } });
+                }
+              });
+            }
+            return true;
+          }
+          return false;
         } },
         { key: 'Shift-Enter', run: insertNewline },
         ...yUndoManagerKeymap, ...defaultKeymap,
@@ -225,7 +349,7 @@ function rowFor(id, value, n) {
       EditorView.domEventHandlers({ blur: () => { setTimeout(changed, 0); }, compositionend: () => { setTimeout(changed, 0); } }),
     ],
   }) });
-  return { element, select, view, value, access, menu, writable: editable() };
+  return { element, select, view, value, access, menu, handle, moveUpBtn, moveDownBtn, deleteBtn, writable: editable() };
 }
 function render() {
   const st = state(); if (!st || !panel) return;
@@ -246,6 +370,7 @@ function render() {
   for (const id of ['nb-clear', 'nb-restore']) panel.querySelector('#' + id).disabled = !editable() || !n.connected || !!n.pending.size || (id === 'nb-restore' && !n.roomRecovery);
   const list = panel.querySelector('#nb-rows'); const keep = new Set();
   let visible = 0;
+  const visibleParagraphs = paragraphs(n.doc).filter(({ value: v }) => matches(v));
   for (const { id, value } of paragraphs(n.doc, true)) {
     let row = rows.get(id);
     const active = row && (row.view.hasFocus || row.view.composing);
@@ -268,7 +393,13 @@ function render() {
     const writable = editable() && !deleted;
     if (row.writable !== writable) { row.view.dispatch({ effects: row.access.reconfigure([EditorView.editable.of(writable), EditorState.readOnly.of(!writable)]) }); row.writable = writable; }
     row.select.disabled = !writable;
-    row.element.querySelector('.nb-delete').disabled = !editable() || !!deleted;
+    row.handle.style.display = writable ? '' : 'none';
+
+    const currentIdx = visibleParagraphs.findIndex((p) => p.id === id);
+    row.moveUpBtn.disabled = !writable || currentIdx <= 0;
+    row.moveDownBtn.disabled = !writable || currentIdx < 0 || currentIdx >= visibleParagraphs.length - 1;
+
+    row.deleteBtn.disabled = !editable() || !!deleted;
     row.element.querySelector('.nb-moved').textContent = deleted ? '此段已被刪除，內容已保留，可從更多選單復原。' : !show ? `已改為${label}，結束編輯後會移出目前篩選。` : '';
     // Do not move focused CodeMirror DOM: reparenting loses selection/IME on some browsers.
     row.element.style.order = String(paragraphs(n.doc, true).findIndex((p) => p.id === id));

@@ -82,10 +82,25 @@ try {
   await a.selectOption('#nb-filter','q1'); await a.click('#nb-add');
   await rows(a).last().locator('.cm-content').fill('甲乙');
   await a.keyboard.press('End'); await a.keyboard.press('Enter');
-  await wait(async()=>await rows(a).count()===2,'Enter did not create paragraph');
+  await pause(100);
+  assert.equal(await rows(a).count(), 1, 'Single Enter should not split paragraph');
+  await a.keyboard.press('Enter');
+  await wait(async()=>await rows(a).count()===2,'Two Enters did not create paragraph');
   await a.keyboard.insertText('新段'); await a.keyboard.press('Shift+Enter'); await a.keyboard.insertText('同段');
   await synced(a); assert.equal((await contents(a)).at(-1).text,'新段\n同段'); assert.equal((await contents(a)).at(-1).scope.qid,'q1');
   console.log('PASS N4 paragraph split and within-paragraph newline');
+
+  await a.click('#nb-add');
+  await wait(async()=>await rows(a).count()===3);
+  await a.keyboard.press('Backspace');
+  await wait(async()=>await rows(a).count()===2, 'Blank paragraph Backspace did not delete');
+  console.log('PASS N4b blank paragraph backspace delete without confirm');
+
+  const pList = await contents(a);
+  await act(a, 'moveParagraph', pList[1].id, pList[0].id, 'before');
+  await synced(a);
+  assert.equal((await contents(a))[0].id, pList[1].id);
+  console.log('PASS N4c moveParagraph reorders paragraphs');
 
   await b.selectOption('#nb-filter','q1'); await wait(async()=>await rows(b).count()===2,'paragraph not replicated');
   await rows(b).last().locator('.cm-content').click();
