@@ -70,6 +70,7 @@ try {
   console.log('PASS N2 three simultaneous same-position edits converge');
 
   const id=(await contents(a))[0].id;
+  await a.locator('.nb-more-btn').first().click();
   await a.locator('.nb-paragraph select').selectOption(''); await synced(a);
   await a.click('#nb-filter'); await wait(async()=>await rows(a).count()===0,'moved paragraph remained');
   await b.selectOption('#nb-filter',''); await wait(async()=>await rows(b).count()===1,'global paragraph missing');

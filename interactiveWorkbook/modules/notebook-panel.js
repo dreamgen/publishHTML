@@ -71,6 +71,13 @@ function mount() {
     <small>討論紀錄不會自動成為正式答案，也不包含在答案匯出檔。</small></div>`;
   document.body.appendChild(panel);
   panel.querySelector('#nb-close').onclick = hide;
+  document.addEventListener('pointerdown', (e) => {
+    if (!panel || panel.hidden) return;
+    const current = e.target.closest('.nb-more-menu');
+    document.querySelectorAll('.nb-more-menu[open]').forEach((d) => {
+      if (d !== current) d.open = false;
+    });
+  });
   panel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); hide(); }
     if (e.key === 'Tab' && matchMedia('(max-width:760px)').matches) {
@@ -81,15 +88,22 @@ function mount() {
     }
   });
   panel.querySelector('#nb-filter').onchange = (e) => { state().filter = e.target.value; changed(); };
-  panel.querySelector('#nb-add').onclick = () => {
+  const triggerAdd = () => {
     if (!editable()) return;
     try {
       const scope = newScope();
       const visible = paragraphs(state().controller.doc).filter(({ value }) => matches(value));
       const id = addParagraph(state().controller.doc, scope, visible.at(-1)?.id);
-      changed(); queueMicrotask(() => rows.get(id)?.view.focus());
+      changed(); queueMicrotask(() => {
+        const row = rows.get(id);
+        if (row) {
+          row.view.focus();
+          row.element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
     } catch (e) { notify(e.message); }
   };
+  panel.querySelector('#nb-add').onclick = triggerAdd;
   const text = (all = false) => plainText(state().controller.doc, all ? '*' : state().filter, questionLabel);
   panel.querySelector('#nb-copy').onclick = async () => {
     try { await navigator.clipboard.writeText(text()); notify('已複製目前篩選內容。'); }
@@ -119,21 +133,74 @@ function mount() {
   };
 }
 function matches(value) { return state().filter === '*' || (value.get('scope')?.qid || '') === state().filter; }
+const SCOPE_PALETTE = [
+  { border: '#93c5fd', accent: '#3b82f6' }, // 練習 1: 藍
+  { border: '#86efac', accent: '#10b981' }, // 練習 2: 綠
+  { border: '#fcd34d', accent: '#f59e0b' }, // 練習 3: 琥珀
+  { border: '#c4b5fd', accent: '#8b5cf6' }, // 練習 4: 紫
+  { border: '#fca5a5', accent: '#ef4444' }, // 練習 5: 珊瑚紅
+  { border: '#67e8f9', accent: '#06b6d4' }, // 練習 6: 青
+  { border: '#fdba74', accent: '#f97316' }, // 練習 7: 橙
+  { border: '#a5b4fc', accent: '#6366f1' }, // 練習 8: 靛
+];
+function applyScopeTheme(element, scope) {
+  if (!scope?.qid) {
+    element.style.setProperty('--scope-border', '#cbd5e1');
+    element.style.setProperty('--scope-accent', '#94a3b8');
+    return;
+  }
+  const index = S.course?.exercises?.findIndex((q) => q.qid === scope.qid) ?? -1;
+  if (index >= 0 && index < SCOPE_PALETTE.length) {
+    element.style.setProperty('--scope-border', SCOPE_PALETTE[index].border);
+    element.style.setProperty('--scope-accent', SCOPE_PALETTE[index].accent);
+  } else if (index >= SCOPE_PALETTE.length) {
+    const hue = Math.round((index * 137.5 + 210) % 360);
+    element.style.setProperty('--scope-border', `hsl(${hue}, 55%, 78%)`);
+    element.style.setProperty('--scope-accent', `hsl(${hue}, 65%, 48%)`);
+  } else {
+    element.style.setProperty('--scope-border', '#e2e8f0');
+    element.style.setProperty('--scope-accent', '#a1a1aa');
+  }
+}
 function rowFor(id, value, n) {
   const element = document.createElement('section'); element.className = 'nb-paragraph'; element.dataset.paragraphId = id;
-  element.innerHTML = `<div class="nb-paragraph-head"><label><span>所屬題目</span> <select aria-label="段落所屬題目"></select></label><button class="nb-delete" title="刪除此段落">刪除</button></div><small class="nb-origin"></small><div class="nb-moved" role="status"></div><div class="nb-editor"></div>`;
+  element.innerHTML = `<details class="nb-more-menu">
+      <summary class="nb-more-btn" aria-label="段落選項" title="段落設定">⋮</summary>
+      <div class="nb-menu-popover">
+        <label class="nb-menu-label">
+          <span>所屬題目</span>
+          <select aria-label="段落所屬題目"></select>
+        </label>
+        <div class="nb-menu-divider"></div>
+        <button type="button" class="nb-delete" title="刪除此段落">刪除此段落</button>
+      </div>
+    </details>
+    <small class="nb-origin"></small>
+    <div class="nb-moved" role="status"></div>
+    <div class="nb-editor"></div>`;
+  const menu = element.querySelector('.nb-more-menu');
   const select = element.querySelector('select');
   select.onchange = () => {
     if (!editable()) return;
     const scope = availableScopes().find((s) => (s.qid || '') === select.value);
     if (!scope) return;
     setScope(n.doc, id, scope);
+    menu.open = false;
     if (!matches(value)) notify(`已移至${scope.label}；可切換上方篩選查看。`);
   };
   element.querySelector('.nb-delete').onclick = async () => {
+    menu.open = false;
     if (!(await askConfirm('刪除此段落會影響整組，可從「更多」復原。', { title: '刪除段落', danger: true }))) return;
     if (state()?.controller === n && editable()) deleteParagraph(n.doc, id);
   };
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      menu.open = false;
+      menu.querySelector('.nb-more-btn')?.focus();
+    }
+  });
   const ytext = value.get('text');
   const access = new Compartment();
   const view = new EditorView({ parent: element.querySelector('.nb-editor'), state: EditorState.create({
@@ -158,7 +225,7 @@ function rowFor(id, value, n) {
       EditorView.domEventHandlers({ blur: () => { setTimeout(changed, 0); }, compositionend: () => { setTimeout(changed, 0); } }),
     ],
   }) });
-  return { element, select, view, value, access, writable: editable() };
+  return { element, select, view, value, access, menu, writable: editable() };
 }
 function render() {
   const st = state(); if (!st || !panel) return;
@@ -189,17 +256,80 @@ function render() {
     if (!row) { row = rowFor(id, value, n); rows.set(id, row); list.appendChild(row.element); }
     const scopeHtml = options(scopes); if (row.select.innerHTML !== scopeHtml) row.select.innerHTML = scopeHtml;
     row.select.value = value.get('scope')?.qid || '';
+    const scope = value.get('scope');
+    applyScopeTheme(row.element, scope);
+    const label = questionLabel(scope);
+    const summary = row.element.querySelector('.nb-more-btn');
+    if (summary) {
+      summary.title = `段落設定（目前：${label}）`;
+      summary.setAttribute('aria-label', `段落設定，目前所屬題目：${label}`);
+    }
     row.element.querySelector('.nb-origin').textContent = value.get('sourceGroup') ? `合併自「${value.get('sourceGroup')}」` : '';
     const writable = editable() && !deleted;
     if (row.writable !== writable) { row.view.dispatch({ effects: row.access.reconfigure([EditorView.editable.of(writable), EditorState.readOnly.of(!writable)]) }); row.writable = writable; }
     row.select.disabled = !writable;
     row.element.querySelector('.nb-delete').disabled = !editable() || !!deleted;
-    row.element.querySelector('.nb-moved').textContent = deleted ? '此段已被刪除，內容已保留，可從更多選單復原。' : !show ? `已改為${questionLabel(value.get('scope'))}，結束編輯後會移出目前篩選。` : '';
+    row.element.querySelector('.nb-moved').textContent = deleted ? '此段已被刪除，內容已保留，可從更多選單復原。' : !show ? `已改為${label}，結束編輯後會移出目前篩選。` : '';
     // Do not move focused CodeMirror DOM: reparenting loses selection/IME on some browsers.
     row.element.style.order = String(paragraphs(n.doc, true).findIndex((p) => p.id === id));
   }
   for (const [id, row] of rows) if (!keep.has(id)) { row.view.destroy(); row.element.remove(); rows.delete(id); }
-  panel.querySelector('#nb-empty').hidden = visible > 0 || !n.ready;
+
+  // 記事本最後預留的新段落輸入區塊
+  let newRow = panel.querySelector('#nb-new-row');
+  if (!newRow) {
+    newRow = document.createElement('div');
+    newRow.id = 'nb-new-row';
+    newRow.className = 'nb-new-paragraph';
+    newRow.setAttribute('role', 'button');
+    newRow.setAttribute('tabindex', '0');
+    newRow.setAttribute('aria-label', '點一下輸入新段落');
+    newRow.innerHTML = `<span class="nb-new-icon" aria-hidden="true">＋</span><span class="nb-new-text">點一下直接輸入新段落…</span>`;
+    newRow.onclick = () => {
+      if (!editable()) return;
+      try {
+        const scope = newScope();
+        const visibleRows = paragraphs(n.doc).filter(({ value: v }) => matches(v));
+        const newId = addParagraph(n.doc, scope, visibleRows.at(-1)?.id);
+        changed();
+        queueMicrotask(() => {
+          const r = rows.get(newId);
+          if (r) {
+            r.view.focus();
+            r.element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        });
+      } catch (e) { notify(e.message); }
+    };
+    newRow.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        newRow.click();
+      }
+    };
+    list.appendChild(newRow);
+  }
+  newRow.style.order = '999999';
+  const canAdd = editable() && (st.filter === '*' || availableScopes().some((s) => (s.qid || '') === st.filter));
+  if (!canAdd) {
+    newRow.hidden = true;
+  } else {
+    const visibleArr = paragraphs(n.doc).filter(({ value: v }) => matches(v));
+    const lastRow = visibleArr.at(-1);
+    const lastEmpty = lastRow && lastRow.value.get('text').toString().trim() === '';
+    newRow.hidden = !!lastEmpty;
+    if (!newRow.hidden) {
+      const scope = newScope();
+      applyScopeTheme(newRow, scope);
+      const textSpan = newRow.querySelector('.nb-new-text');
+      if (textSpan) {
+        textSpan.textContent = visibleArr.length === 0
+          ? '點一下直接輸入新段落…'
+          : `點一下直接輸入新段落（${questionLabel(scope)}）…`;
+      }
+    }
+  }
+  panel.querySelector('#nb-empty').hidden = true;
 }
 export function refreshNotebook() { changed(); }
 export function openNotebook() {
