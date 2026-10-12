@@ -41,6 +41,7 @@
 .nb-moved{padding:4px 10px;font-size:12px;background:#fff0c9}
 .nb-editor .cm-editor{min-height:48px;font-size:15px;line-height:1.6}
 .nb-editor .cm-content{padding:8px 64px 8px 10px;font-family:inherit;min-height:48px;white-space:pre-wrap}
+#notebook-panel.nb-dragging-active .nb-editor{pointer-events:none}
 .nb-editor .cm-focused{outline:none}
 .nb-editor .cm-scroller{font-family:inherit}
 .nb-new-paragraph{flex:none;border:1px dashed var(--scope-border,#cbd5e1);border-left:4px dashed var(--scope-accent,#94a3b8);border-radius:8px;background:#fafbfc;padding:8px 12px;color:#64748b;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;transition:all .15s ease}

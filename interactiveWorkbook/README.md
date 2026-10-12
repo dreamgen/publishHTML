@@ -182,7 +182,7 @@ Service Worker 只快取介面本身（HTML／JS／圖示／CDN 函式庫），*
 | `app.js` | 進入點，只做開機／組裝，不含業務邏輯 |
 | `modules/` | 23 個 ES modules，實際邏輯都在這裡（見下方分工說明） |
 | `styles/` | 10 個樣式檔（`base`／`group`／`editlock`／`projection`／`editor`／`console`／`student`／`dialog`／`image`／`notebook`） |
-| `sw.js` | Service Worker（動態快取，stale-while-revalidate）。改版時要 bump 檔案內的 `SW_VERSION`（目前 `v20`），否則使用者拿到的是舊快取 |
+| `sw.js` | Service Worker（動態快取，stale-while-revalidate）。改版時要 bump 檔案內的 `SW_VERSION`（目前 `v21`），否則使用者拿到的是舊快取 |
 | `manifest.webmanifest` | PWA 安裝設定 |
 | `icons/` | 192／512 SVG 圖示 |
 | `題目範本.json` | 範例題目，可直接匯入 |

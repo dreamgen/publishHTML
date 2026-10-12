@@ -68,6 +68,7 @@ export function moveParagraph(doc, id, targetId, place = 'before') {
     order.delete(fromIdx, 1);
     const updated = order.toArray();
     let insertIdx = updated.indexOf(targetId);
+    if (insertIdx < 0) return;
     if (place === 'after') insertIdx += 1;
     order.insert(insertIdx, [id]);
   }, LOCAL);

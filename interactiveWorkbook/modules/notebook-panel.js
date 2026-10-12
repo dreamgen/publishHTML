@@ -8,6 +8,7 @@ import { EditorView, EditorState, Compartment, keymap, placeholder, defaultKeyma
 let panel, queued = false, rows = new Map(), viewDoc, draggedId = null;
 const state = () => S.notebook;
 function clearDropIndicators() {
+  panel?.classList.remove('nb-dragging-active');
   document.querySelectorAll('.drop-target-before, .drop-target-after').forEach((el) => {
     el.classList.remove('drop-target-before', 'drop-target-after');
   });
@@ -82,6 +83,13 @@ function mount() {
   });
   rowList.addEventListener('drop', () => {
     clearDropIndicators();
+  });
+  window.addEventListener('dragend', () => {
+    if (draggedId) {
+      draggedId = null;
+      document.querySelectorAll('.is-dragging').forEach((el) => el.classList.remove('is-dragging'));
+      clearDropIndicators();
+    }
   });
   document.addEventListener('pointerdown', (e) => {
     if (!panel || panel.hidden) return;
@@ -205,9 +213,10 @@ function rowFor(id, value, n) {
   handle.addEventListener('dragstart', (e) => {
     if (!editable()) { e.preventDefault(); return; }
     draggedId = id;
+    panel?.classList.add('nb-dragging-active');
     element.classList.add('is-dragging');
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.setData('application/x-notebook-paragraph', id);
   });
   handle.addEventListener('dragend', () => {
     draggedId = null;
@@ -230,8 +239,13 @@ function rowFor(id, value, n) {
     }
   });
   element.addEventListener('drop', (e) => {
-    if (!draggedId || draggedId === id) return;
+    if (!draggedId || draggedId === id) {
+      clearDropIndicators();
+      draggedId = null;
+      return;
+    }
     e.preventDefault();
+    e.stopPropagation();
     const moving = draggedId;
     const rect = element.getBoundingClientRect();
     const isBefore = (e.clientY - rect.top) < rect.height / 2;
@@ -346,7 +360,19 @@ function rowFor(id, value, n) {
         { key: 'Shift-Enter', run: insertNewline },
         ...yUndoManagerKeymap, ...defaultKeymap,
       ]), yCollab(ytext, null),
-      EditorView.domEventHandlers({ blur: () => { setTimeout(changed, 0); }, compositionend: () => { setTimeout(changed, 0); } }),
+      EditorView.domEventHandlers({
+        blur: () => { setTimeout(changed, 0); },
+        compositionend: () => { setTimeout(changed, 0); },
+        dragover: () => {
+          if (draggedId) return false;
+        },
+        drop: (e) => {
+          if (draggedId) {
+            e.preventDefault();
+            return true;
+          }
+        },
+      }),
     ],
   }) });
   return { element, select, view, value, access, menu, handle, moveUpBtn, moveDownBtn, deleteBtn, writable: editable() };
@@ -379,6 +405,7 @@ function render() {
     if (!show && !active) continue;
     keep.add(id); visible++;
     if (!row) { row = rowFor(id, value, n); rows.set(id, row); list.appendChild(row.element); }
+    else if (row.element.parentElement !== list) { list.appendChild(row.element); }
     const scopeHtml = options(scopes); if (row.select.innerHTML !== scopeHtml) row.select.innerHTML = scopeHtml;
     row.select.value = value.get('scope')?.qid || '';
     const scope = value.get('scope');
@@ -438,6 +465,33 @@ function render() {
         newRow.click();
       }
     };
+    newRow.addEventListener('dragover', (e) => {
+      if (!draggedId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      newRow.classList.add('drop-target-before');
+    });
+    newRow.addEventListener('dragleave', () => {
+      newRow.classList.remove('drop-target-before');
+    });
+    newRow.addEventListener('drop', (e) => {
+      if (!draggedId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const moving = draggedId;
+      clearDropIndicators();
+      draggedId = null;
+      const visibleRows = paragraphs(n.doc).filter(({ value: v }) => matches(v));
+      const lastVisible = visibleRows.at(-1);
+      if (lastVisible && lastVisible.id !== moving && editable() && state()?.controller === n) {
+        try {
+          moveParagraph(n.doc, moving, lastVisible.id, 'after');
+          changed();
+        } catch (err) {
+          notify(err.message);
+        }
+      }
+    });
     list.appendChild(newRow);
   }
   newRow.style.order = '999999';
