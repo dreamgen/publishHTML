@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.14",
+    "esbuild": "0.25.12",
+    "y-codemirror.next": "0.3.5",
+    "yjs": "13.6.27"
+  },
+  "name": "interactive-workbook-notebook-vendor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --format=esm --minify --legal-comments=eof --outfile=../vendor/notebook-editor.js"
+  }
+}

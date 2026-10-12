@@ -24,7 +24,7 @@ import { E } from './modules/util.js';
 // ──────────────────────────────────────────────────────────────────────────────
 // 12. 啟動
 // ──────────────────────────────────────────────────────────────────────────────
-window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (S.dirty || S.notebook?.controller.pending.size) { e.preventDefault(); e.returnValue = ''; } });
 
 function renderBootError(message) {
   shell(`<div class="login"><div class="card">

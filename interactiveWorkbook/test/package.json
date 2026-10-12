@@ -1,0 +1,16 @@
+{
+  "name": "interactive-workbook-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "notebook": "node notebook.mjs",
+    "rules": "node notebook-rules.mjs",
+    "build:emulator": "esbuild emulator-firebase.js --bundle --format=esm --outfile=emulator-firebase.bundle.js"
+  },
+  "devDependencies": {
+    "firebase": "11.6.1",
+    "@firebase/rules-unit-testing": "4.0.1",
+    "playwright": "1.56.1",
+    "esbuild": "0.25.12"
+  }
+}

@@ -58,3 +58,27 @@ IW_PORT=9000 IW_SRC=.. ./run.sh
 - `onValue` 只要寫入路徑與監聽路徑有交集就會回呼一次，不像真 RTDB 會在值沒變時省略。
 - `runTransaction` 預設直接拿真值呼叫 updater；設 `window.__fakedb.nullFirstTransaction = true` 才模擬 RTDB「第一次給 null」的路徑。
 - `serve.mjs` 會替缺少的 `manifest.webmanifest`／`icons/`／`sw.js` 補最小佔位內容，避免 404 被誤判成測試失敗。
+
+
+## 記事本測試
+
+此目錄已有 package.json／package-lock.json，先執行 `npm ci` 及 `npx playwright install chromium`。也可用 `IW_PLAYWRIGHT` 指定既有 Playwright 模組、`IW_CHROMIUM` 指定瀏覽器執行檔。
+
+原有 `run.sh`／`smoke.mjs` 驗證 18 項既有功能。記事本共 14 項情境，測試用四個獨立瀏覽器 context（同組三人＋另一組），涵蓋篩選、同段並行輸入、Enter 拆段、遠端改歸屬、離線恢復、清空復原、手機版面、合併、過期世代救回、composition 事件、刪題與刪組。建議使用真實 Firebase 模擬器執行，以驗證規則及交易語意：
+
+```sh
+# 終端 1（在 test/）
+firebase emulators:start --only database --project demo-iw-notebook --config firebase.json
+
+# 終端 2（在 test/）
+npm run build:emulator
+IW_SRC=.. IW_FIREBASE_MODULE="$PWD/emulator-firebase.bundle.js" node serve.mjs --port 8794
+
+# 終端 3（在 test/）
+IW_BASE_URL=http://127.0.0.1:8794 node notebook.mjs
+node notebook-rules.mjs
+```
+
+全部連線僅指向 `demo-iw-notebook` 的本機模擬器，不使用線上專案。`notebook-rules.mjs` 驗證授權寫入、未登入拒絕、畸形／過大資料拒絕、凍結、舊世代拒絕、刪組後拒絕與資料清理。預期拒絕案例會印出 Firebase permission_denied 警告，測試成功是正確結果。
+
+`notebook.mjs` 會輸出手機與桌面截圖到 `/tmp/iw-notebook-mobile.png`、`/tmp/iw-notebook-desktop.png`。composition 測試為瀏覽器事件模擬，仍須在實際手機注音／倉頡輸入法做人工驗收。

@@ -1,3 +1,4 @@
+import { openNotebook, confirmNotebookLeave, closeNotebook, refreshNotebook } from './notebook-panel.js';
 import { S, myGroup } from './state.js';
 import { E, exLabel, notify } from './util.js';
 import { clearSession } from './storage.js';
@@ -24,6 +25,7 @@ export function shell(body, options = {}) {
     S.session ? `<button id="logout">離開${S.session.role === 'teacher' ? '講師模式' : '本組'}</button>` : ''
   }</header>`;
   document.querySelector('#app').innerHTML = `${header}<main class="${layout ? layout : 'wrap'}">${body}</main>`;
+  refreshNotebook();
   const logout = document.querySelector('#logout');
   if (logout) {
     // async：student.js 的 bindLeaveRelease() 會 await 這個 handler，再看 S.session 是否被清掉來決定要不要釋放編輯權。
@@ -34,6 +36,7 @@ export function shell(body, options = {}) {
         if (!(await askConfirm('尚有未儲存的答案，確定離開？', { title, okLabel: '確定離開', danger: true }))) return;
         if (!S.session) return; // 提示窗開著的期間已經被其他原因登出
       }
+      if (!(await confirmNotebookLeave())) return;
       leaveSession();
     };
   }
@@ -167,10 +170,13 @@ export function identityBar() {
       <div class="identity-item"><span class="identity-label">組別</span><b>${E(group ? group.name : '')}</b></div>
       <div class="identity-item"><span class="identity-label">我的姓名</span><b>${E(myName)}</b></div>
       <button type="button" class="small" id="fix-identity">更正</button>
+      <button type="button" class="small" id="open-notebook">小組記事本</button>
     </div>`;
 }
 
 export function bindIdentityBar() {
+  const notebookButton = document.querySelector('#open-notebook');
+  if (notebookButton) notebookButton.onclick = openNotebook;
   const button = document.querySelector('#fix-identity');
   if (!button) return;
   // async：同上，bindLeaveRelease() 會 await 這個 handler。
@@ -182,7 +188,9 @@ export function bindIdentityBar() {
       }))) return;
       if (!S.session) return;
     }
+    if (!(await confirmNotebookLeave()) || !S.session) return;
     const { code } = S.session;
+    closeNotebook();
     if (S.unwatch) { S.unwatch(); S.unwatch = null; }
     // 跟 leaveSession 一樣：live/<CODE> 是另一條訂閱，不解就會留著僵尸監聽與上一個身分的緩存。
     stopWatchLive();

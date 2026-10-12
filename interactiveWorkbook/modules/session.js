@@ -1,3 +1,4 @@
+import { closeNotebook, refreshNotebook } from './notebook-panel.js';
 import {
   S, myGroup, exNumber, firstQid,
 } from './state.js';
@@ -17,6 +18,7 @@ import { disposeProjection } from './projection.js';
 export const urlCode = (new URLSearchParams(location.search).get('c') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 export function leaveSession() {
+  closeNotebook();
   if (S.unwatch) { S.unwatch(); S.unwatch = null; }
   // 投影的 live 訂閱與鍵盤監聽掛在模組層級，離開課程時要一起收掉，
   // 否則會留到下一次 live 事件才自清（projection.js 有 isConnected 自保，但那是後盾不是正解）。
@@ -32,6 +34,7 @@ export function leaveSession() {
 // 7. 即時訂閱
 // ──────────────────────────────────────────────────────────────────────────────
 export function startSession(next) {
+  closeNotebook();
   S.session = next;
   saveSession(next);
   S.qid = null; S.draft = {}; S.dirty = false; S.revision = 0; S.groupFilter = 'all'; S.lastStudentSignature = '';
@@ -54,6 +57,7 @@ export function applySnapshot(raw) {
   }
   const previousQids = S.course ? S.course.exercises.map((e2) => e2.qid).join(',') : null;
   S.course = normalizeCourse(raw);
+  refreshNotebook();
   if (S.session.courseName !== S.course.name) {
     S.session = { ...S.session, courseName: S.course.name };
     saveSession(S.session);

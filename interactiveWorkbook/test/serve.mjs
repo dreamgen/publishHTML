@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const IW_SRC = path.resolve(process.env.IW_SRC || '/tmp/iw');
-const FAKE_FIREBASE_PATH = path.join(HERE, 'fake-firebase.js');
+const FAKE_FIREBASE_PATH = process.env.IW_FIREBASE_MODULE || path.join(HERE, 'fake-firebase.js');
 
 const args = process.argv.slice(2);
 const portArgIdx = args.indexOf('--port');

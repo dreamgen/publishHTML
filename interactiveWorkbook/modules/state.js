@@ -9,6 +9,7 @@
  * 只有 qid 能在題目清單變動後仍指向同一題。「練習一／二／三」的題號由 exNumber(qid) 現算。
  */
 export const S = {
+  notebook: null,      // independent group document, panel/filter and outbox lifecycle
   session: null,      // {role:'teacher'|'student', code, gid, courseName}
   course: null,        // normalizeCourse() 的結果
   unwatch: null,        // onValue 取消訂閱

@@ -10,7 +10,7 @@
  */
 
 import fs from 'node:fs';
-import { chromium } from 'playwright';
+const { chromium } = await import(process.env.IW_PLAYWRIGHT || 'playwright');
 
 const BASE_URL = process.env.IW_BASE_URL || 'http://127.0.0.1:8791';
 const COURSES_PATH = 'artifacts/interactiveWorkbook/public/data/courses';
@@ -207,7 +207,7 @@ const QUESTIONS = {
 // 主流程
 // ──────────────────────────────────────────────────────────────────────────────
 async function main() {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.IW_CHROMIUM });
   const errors = [];
   const courseName = 'Playwright 測試課程';
   let courseCode = null;

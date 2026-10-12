@@ -1,12 +1,12 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
 import {
-  getDatabase, ref, get, set, update, remove, onValue, runTransaction,
+  getDatabase, ref, get, set, update, remove, onValue, onChildAdded, onDisconnect, runTransaction,
 } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
 
 // 其他模組共用的 RTDB 函式，統一從這裡取得，不要各自 import firebase-database.js。
 export {
-  ref, get, set, update, remove, onValue, runTransaction,
+  ref, get, set, update, remove, onValue, onChildAdded, onDisconnect, runTransaction,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -49,3 +49,7 @@ export const liveRef = (code, sub = '') => ref(db, `${DB_ROOT}/live/${code}${sub
  * 每台裝置在任何人存檔時都會把所有圖片重新下載一次。這裡只在要顯示時用 get() 單張讀取。
  */
 export const imageRef = (code, sub = '') => ref(db, `${DB_ROOT}/images/${code}${sub ? '/' + sub : ''}`);
+
+export const notebookRef = (code, sub = '') => ref(db, `${DB_ROOT}/notebooks/${code}${sub ? '/' + sub : ''}`);
+export const presenceRef = (code, sub = '') => ref(db, `${DB_ROOT}/notebookPresence/${code}${sub ? '/' + sub : ''}`);
+export const connectedRef = () => ref(db, '.info/connected');

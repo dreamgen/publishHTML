@@ -30,6 +30,7 @@ function overlaps(a, b) {
 }
 
 async function apiGet(pathStr) {
+  if (pathStr === '.info/connected') return window.__fakedb?.connected !== false;
   const res = await fetch(`${API}/get?path=${encodeURIComponent(pathStr)}`);
   if (!res.ok) throw Error('假資料庫讀取失敗：HTTP ' + res.status);
   const data = await res.json();
@@ -126,7 +127,7 @@ async function refresh(listener) {
     if (listener.errCb) listener.errCb(e instanceof Error ? e : Error(String(e)));
     return;
   }
-  listener.cb(makeSnapshot(v));
+  if (listeners.has(listener)) listener.cb(makeSnapshot(v));
 }
 
 export function onValue(refObj, cb, errCb) {
@@ -184,6 +185,8 @@ export async function runTransaction(refObj, updater) {
 // ──────────────────────────────────────────────────────────────────────────────
 window.__fakedb = Object.assign(window.__fakedb || {}, {
   nullFirstTransaction: false,
+  connected: true,
+  setConnected(value) { this.connected = value; listeners.forEach(refresh); },
   async dump() {
     const res = await fetch(`${API}/dump`);
     const data = await res.json();
@@ -198,3 +201,16 @@ window.__fakedb = Object.assign(window.__fakedb || {}, {
     if (!res.ok) throw Error('假資料庫 seed 失敗：HTTP ' + res.status);
   },
 });
+
+export const notebookRef = (code, sub = '') => ref(null, `${DB_ROOT}/notebooks/${code}${sub ? '/' + sub : ''}`);
+export const presenceRef = (code, sub = '') => ref(null, `${DB_ROOT}/notebookPresence/${code}${sub ? '/' + sub : ''}`);
+export const connectedRef = () => ref(null, '.info/connected');
+export const onDisconnect = () => ({ remove: async () => {}, cancel: async () => {} });
+export function onChildAdded(r, cb, err) {
+  const seen = new Set();
+  return onValue(r, (snap) => {
+    for (const [key, value] of Object.entries(snap.val() || {})) {
+      if (!seen.has(key)) { seen.add(key); cb({ key, ...makeSnapshot(value) }); }
+    }
+  }, err);
+}

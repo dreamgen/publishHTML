@@ -28,6 +28,57 @@
                   }
                 }
               }
+            },
+            "notebooks": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null && !newData.exists()",
+                "$gid": {
+                  ".write": "auth != null && (!newData.exists() || root.child('artifacts/interactiveWorkbook/public/data/courses').child($code).child('groups').child($gid).exists())",
+                  ".validate": "newData.hasChildren(['meta', 'base'])",
+                  "meta": {
+                    ".validate": "newData.hasChildren(['generation', 'state', 'schemaVersion']) && newData.child('generation').isString() && newData.child('generation').val().length == 32 && (newData.child('state').val() == 'ready' || newData.child('state').val() == 'frozen') && newData.child('schemaVersion').val() == 1"
+                  },
+                  "base": {
+                    ".validate": "newData.isString() && newData.val().length <= 5000000"
+                  },
+                  "updates": {
+                    "$operation": {
+                      ".validate": "newData.hasChildren(['generation', 'payload']) && newData.child('payload').isString() && newData.child('payload').val().length <= 700000 && ((data.exists() && newData.child('payload').val() == data.child('payload').val() && newData.child('generation').val() == data.child('generation').val()) || (!data.exists() && newData.child('generation').val() == newData.parent().parent().child('meta/generation').val() && newData.parent().parent().child('meta/state').val() == 'ready'))",
+                      "generation": {
+                        ".validate": "newData.isString()"
+                      },
+                      "payload": {
+                        ".validate": "newData.isString()"
+                      },
+                      "$other": {
+                        ".validate": false
+                      }
+                    }
+                  },
+                  "recovery": {
+                    ".validate": "newData.hasChildren(['payload', 'savedAt']) && newData.child('payload').isString() && newData.child('payload').val().length <= 5000000"
+                  },
+                  "merge": {
+                    ".validate": "newData.hasChildren(['dropGid', 'original']) && newData.child('dropGid').isString() && newData.child('original').isString() && newData.child('original').val().length <= 5000000"
+                  },
+                  "$other": {
+                    ".validate": false
+                  }
+                }
+              }
+            },
+            "notebookPresence": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null && !newData.exists()",
+                "$gid": {
+                  ".write": "auth != null && (!newData.exists() || root.child('artifacts/interactiveWorkbook/public/data/courses').child($code).child('groups').child($gid).exists())",
+                  "$client": {
+                    ".validate": "newData.hasChildren(['name', 'lastSeen']) && newData.child('name').isString() && newData.child('name').val().length <= 200 && newData.child('lastSeen').isNumber()"
+                  }
+                }
+              }
             }
           }
         }

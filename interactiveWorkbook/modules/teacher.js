@@ -1,3 +1,4 @@
+import { deleteNotebook, deleteNotebookPresence } from './notebook.js';
 import {
   S, currentEx, exNumber, firstQid,
 } from './state.js';
@@ -197,7 +198,7 @@ export function bindGroupManage() {
         ? `這一組在 ${answered} 個練習已經有答案，會連同小組一起永久刪除。`
         : '這一組目前還沒有任何答案。';
       button.disabled = true;
-      if (!(await askConfirm(`確定刪除「${g.name}」？\n\n${detail}\n該組的加入紀錄與封存內容也會一併移除，其他小組不受影響。此操作無法復原。`, {
+      if (!(await askConfirm(`確定刪除「${g.name}」？\n\n${detail}\n該組的記事本、加入紀錄與封存內容也會一併移除，其他小組不受影響。此操作無法復原。`, {
         title: '刪除小組', okLabel: '刪除這一組', danger: true,
       }))) { button.disabled = false; return; }
       try {
@@ -575,8 +576,8 @@ function prepSettings() {
       </div>
       <div class="danger-zone">
         <div class="danger-zone-head">無法復原的操作</div>
-        <div class="danger-zone-row"><div><b>重置本場課程</b><span>清空全部組別與答案、關閉所有練習，題目保留。</span></div><button type="button" class="danger-outline-btn" id="reset">重置…</button></div>
-        <div class="danger-zone-row"><div><b>刪除整個課程</b><span>題目、組別、答案全部刪除，需輸入課程名稱確認。</span></div><button type="button" class="danger-fill-btn" id="delete-course">刪除課程…</button></div>
+        <div class="danger-zone-row"><div><b>重置本場課程</b><span>清空全部組別、答案與記事本，關閉所有練習，題目保留。</span></div><button type="button" class="danger-outline-btn" id="reset">重置…</button></div>
+        <div class="danger-zone-row"><div><b>刪除整個課程</b><span>題目、組別、答案與記事本全部刪除，需輸入課程名稱確認。</span></div><button type="button" class="danger-fill-btn" id="delete-course">刪除課程…</button></div>
       </div>
     </section>`;
 }
@@ -827,7 +828,7 @@ function bindPrepPane() {
     document.querySelector('#delete-course').onclick = async (ev) => {
       const button = ev.currentTarget;
       button.disabled = true;
-      const ok = await askTyped(`這會永久刪除整個課程「${S.course.name}」，包含題目與所有組別答案，無法復原。`, S.course.name, {
+      const ok = await askTyped(`這會永久刪除整個課程「${S.course.name}」，包含題目、所有組別答案與記事本，無法復原。`, S.course.name, {
         title: '刪除整個課程', okLabel: '永久刪除課程',
       });
       button.disabled = false;
@@ -838,6 +839,8 @@ function bindPrepPane() {
         await remove(courseRef(code));
         await clearLiveCourse(code).catch(() => { /* live 是易變資料，清不掉不影響課程已被刪除的事實 */ });
         await deleteImagesForCourse(code).catch(() => { /* 同上：課程已刪除，圖片清不掉只是留下垃圾 */ });
+        await deleteNotebook(code, '');
+        await deleteNotebookPresence(code);
         forgetCourse(code);
         notify('課程已刪除。');
       } catch (e) { notify(e.message); }
@@ -845,7 +848,7 @@ function bindPrepPane() {
     document.querySelector('#reset').onclick = async (ev) => {
       const button = ev.currentTarget;
       button.disabled = true;
-      const ok = await askTyped('這會移除全部組別及全部練習答案，並關閉所有練習（題目保留）。', '重置課程', {
+      const ok = await askTyped('這會移除全部組別、全部練習答案及記事本，並關閉所有練習（題目保留）。', '重置課程', {
         title: '重置本場課程', okLabel: '重置課程',
       });
       button.disabled = false;
@@ -857,6 +860,8 @@ function bindPrepPane() {
         await clearLiveCourse(S.session.code).catch(() => { /* 同上：清不掉只是留下垃圾，不影響重置結果 */ });
         // 全部組別都沒了，images/<CODE> 底下的圖片不會再被任何答案引用。
         await deleteImagesForCourse(S.session.code).catch(() => {});
+        await deleteNotebook(S.session.code, '');
+        await deleteNotebookPresence(S.session.code);
         S.groupFilter = 'all';
         notify('課程已重置，全部組別與答案已清空。');
       } catch (e) { notify(e.message); }
@@ -1102,7 +1107,7 @@ export async function importAnswersFile(event) {
     const mapping = matchByQid
       ? ''
       : '這份備份沒有可對應的題目 ID（舊版備份或來自其他課程），將依題號順序對應到目前的第一題、第二題……請先確認題目順序相同。\n\n';
-    if (!(await askConfirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別需重新加入。\n${archiveWarning}${imageNote}確定匯入？`, { title: '匯入答案備份', okLabel: '匯入並覆寫', danger: true }))) return;
+    if (!(await askConfirm(`匯入摘要：共 ${prepared.length} 組\n新增 ${prepared.length - replaced} 組，同名覆寫 ${replaced} 組。\n\n${preview}\n\n${mapping}同一組別名稱的答案將由備份取代；其他組別與目前題目開關保留。被取代組別的記事本也會清除，學員需重新加入。\n${archiveWarning}${imageNote}確定匯入？`, { title: '匯入答案備份', okLabel: '匯入並覆寫', danger: true }))) return;
 
     const updates = {};
     const removedGids = [];
@@ -1118,6 +1123,7 @@ export async function importAnswersFile(event) {
     await Promise.all(removedGids.map((gid) => clearLiveGroup(S.session.code, gid).catch(() => {})));
     // 被取代組別的圖片也一併清掉（新組別是新的 gid，舊圖不會再被任何答案引用）。
     await Promise.all(removedGids.map((gid) => deleteImagesForGroup(S.session.code, gid).catch(() => {})));
+    await Promise.all(removedGids.map(async (gid) => { await deleteNotebook(S.session.code, gid); await deleteNotebookPresence(S.session.code, gid); }));
     S.groupFilter = 'all';
     notify(`已匯入 ${prepared.length} 組答案。`);
   } catch (e) {

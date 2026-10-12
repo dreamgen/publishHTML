@@ -1,3 +1,4 @@
+import { deleteNotebook, deleteNotebookPresence, withNotebookMerge } from './notebook.js';
 import {
   authReady, courseRef, liveRef, get, set, update, remove, runTransaction,
 } from './firebase.js';
@@ -484,6 +485,8 @@ export async function deleteGroup(code, gid) {
   await clearLiveGroup(code, gid).catch(() => {});
   // 圖片欄位的圖在獨立子樹 images/<CODE>/<gid>，同樣要一併清掉，理由同上。
   await deleteImagesForGroup(code, gid).catch(() => {});
+  await deleteNotebook(code, gid);
+  await deleteNotebookPresence(code, gid);
 }
 
 export const MERGE_KEEP = 'keep';
@@ -503,6 +506,10 @@ export const MERGE_BOTH = 'both';
  * finalName 是講師確認後要保留的組名（原始字串）；省略時沿用保留組現有的名稱。
  */
 export async function mergeGroups(code, keepGid, dropGid, perQuestionChoice, finalName) {
+  if (!keepGid || !dropGid || keepGid === dropGid) throw Error('請選擇兩個不同的小組再合併。');
+  return withNotebookMerge(code, keepGid, dropGid, () => mergeGroupAnswers(code, keepGid, dropGid, perQuestionChoice, finalName));
+}
+async function mergeGroupAnswers(code, keepGid, dropGid, perQuestionChoice, finalName) {
   await authReady;
   if (!keepGid || !dropGid || keepGid === dropGid) throw Error('請選擇兩個不同的小組再合併。');
   const choices = perQuestionChoice || {};

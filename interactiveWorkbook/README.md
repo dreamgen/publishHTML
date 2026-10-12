@@ -16,27 +16,7 @@
 
 到 [Firebase 主控台](https://console.firebase.google.com/) → 選擇 `pwa-boardgame` 專案 → Realtime Database → 規則，貼上本資料夾的 `database.rules.json` 內容後發布：
 
-```json
-{
-  "rules": {
-    "artifacts": {
-      "interactiveWorkbook": {
-        "public": { "data": {
-          "courses": { "$code": { ".read": "auth != null", ".write": "auth != null" } },
-          "live": { "$code": { ".read": "auth != null", ".write": "auth != null" } },
-          "images": { "$code": { ".read": "auth != null", ".write": "auth != null",
-            "$gid": { "$qid": { "$img": {
-              ".validate": "newData.child('data').isString() && newData.child('data').val().beginsWith('data:image/') && newData.child('data').val().length < 700000"
-            } } } } }
-        } }
-      },
-      "liveInteraction": {
-        "public": { "data": { ".read": "auth != null", ".write": "auth != null" } }
-      }
-    }
-  }
-}
-```
+請使用完整的 [`database.rules.json`](database.rules.json)，其中包含記事本與線上名單規則；不要沿用缺少這兩個節點的舊版規則範例。
 
 規則說明：
 
@@ -156,6 +136,24 @@ https://publish-html.vercel.app/interactiveWorkbook/            ← Vercel 鏡�
 6. 「儲存草稿」可以尚未填完；「標記完成並儲存」會依欄位設定檢查必填與數量條件。**答案不會自動儲存，離開前請按儲存。**
 7. 同題同時在多台裝置修改時，系統會擋下較舊的覆寫，並提示先複製保留畫面文字再重新載入。
 
+## 小組共編記事本
+
+學員身分列的「小組記事本」可開啟每組共用的討論筆記。所有同組成員皆可同時編輯，不需要正式答案的編輯權；記事本自動同步，正式答案仍須手動儲存。
+
+- 上方「題目篩選」提供全部、全局與各題目；各人的篩選互不影響。每段左上方可更改所屬題目或全局。
+- 篩選某題時新增段落自動歸入該題；全部／全局檢視的新段落預設為全局。修改既有段落的文字不改歸屬。
+- Enter 新增／拆出段落，Shift+Enter 在同段換行。貼上多行文字保留於同一段；自動換行不分段。
+- 切題與儲存答案不會關閉記事本。題目關閉仍可討論；題目移除或封存後筆記保留原歸屬，可改成其他題目或全局。
+- 可複製目前篩選內容、下載目前內容或整本 TXT。這些紀錄不包含在既有答案 JSON／CSV 匯出。
+- 更多選單提供清空整本、復原上次清空及復原已刪段落。清空會影響被篩選隱藏的內容；復原會先保留目前版本。合併小組保留雙方段落及歸屬，標註來源小組。
+- 「已同步」代表目前待送操作已獲資料庫確認。斷線期間的文字保留在本機，重連後補送。若別人已清空／合併，舊版本不自動回填，會提供「下載保留內容」。關閉瀏覽器或重新加入後，保留內容仍可救回，除非本機儲存被清除或不可用。
+- 本機儲存失敗會顯示提示，請立即下載或複製。離開時尚有未同步文字會提醒，並嘗試下載一份備份；瀏覽器可能限制自動下載。
+- 此功能沿用現有「信任課程參與者」模型；介面只展示本組，不代表資料庫具備可信的組別授權。不要用來記錄敏感資訊。
+
+部署需要一併更新資料庫規則及前端（Service Worker v18）。舊課程首次開啟記事本時自動建立，不變更原答案。若新節點被舊規則拒絕，畫面會顯示同步失敗；更新規則後可按「重試同步」。
+
+共編元件隨專案提供固定版本，建置方式見 [`tools/README.md`](tools/README.md)。同步使用獨立 `notebooks/<CODE>/<gid>` 與 `notebookPresence/<CODE>/<gid>` 節點；資料不會自動過期，刪組、重置與刪課程時一併清理。
+
 ## 舊課程自動遷移
 
 這次改版把答案、題目開關、revision 的 key 從題號索引改成穩定 ID（qid）。**既有的線上課程資料不會壞**：讀取時會依題目在陣列中的順序自動、決定性地補上 `L0`、`L1`…這樣的 qid，查答案時新舊 key 雙軌 fallback，遷移前舊課程一樣能正常開放、作答。真正把資料改寫成新格式是講師控制台第一次載入某個代碼時觸發的一次性動作，且是**幂等的**（重跑不會壞、不會重複遷移）。
@@ -182,9 +180,9 @@ Service Worker 只快取介面本身（HTML／JS／圖示／CDN 函式庫），*
 |------|------|
 | `index.html` | 頁面骨架，不含樣式，只留 `<link>` 與開機看門狗 |
 | `app.js` | 進入點，只做開機／組裝，不含業務邏輯 |
-| `modules/` | 19 個 ES modules，實際邏輯都在這裡（見下方分工說明） |
-| `styles/` | 9 個樣式檔（`base`／`group`／`editlock`／`projection`／`editor`／`console`／`student`／`dialog`／`image`） |
-| `sw.js` | Service Worker（動態快取，stale-while-revalidate）。改版時要 bump 檔案內的 `SW_VERSION`（目前 `v17`），否則使用者拿到的是舊快取 |
+| `modules/` | 23 個 ES modules，實際邏輯都在這裡（見下方分工說明） |
+| `styles/` | 10 個樣式檔（`base`／`group`／`editlock`／`projection`／`editor`／`console`／`student`／`dialog`／`image`／`notebook`） |
+| `sw.js` | Service Worker（動態快取，stale-while-revalidate）。改版時要 bump 檔案內的 `SW_VERSION`（目前 `v18`），否則使用者拿到的是舊快取 |
 | `manifest.webmanifest` | PWA 安裝設定 |
 | `icons/` | 192／512 SVG 圖示 |
 | `題目範本.json` | 範例題目，可直接匯入 |
