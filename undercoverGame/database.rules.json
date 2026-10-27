@@ -1,0 +1,19 @@
+{
+  "rules": {
+    "artifacts": {
+      "undercoverGame": {
+        "public": {
+          "data": {
+            "events": {
+              "$ev": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "$ev.matches(/^[A-Z0-9]{4}$/)"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

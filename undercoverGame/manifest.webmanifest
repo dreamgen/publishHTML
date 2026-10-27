@@ -1,0 +1,24 @@
+{
+  "id": "undercoverGame",
+  "name": "勿虛心假意 — 體驗遊戲結算",
+  "short_name": "體驗遊戲結算",
+  "description": "法會「勿虛心假意」體驗遊戲：控場儀表板設定梯次、列印信封 QR、控制回合；助理主持人手機掃碼綁定座位與結算，支援離線單機模式",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F1EA",
+  "theme_color": "#1F5F5B",
+  "lang": "zh-TW",
+  "categories": ["education", "games"],
+  "icons": [
+    { "src": "./icons/undercoverGame-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/undercoverGame-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/undercoverGame-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "控場講師儀表板", "short_name": "儀表板", "url": "./#/dash" },
+    { "name": "助理主持人手機", "short_name": "手機結算", "url": "./#/phone" },
+    { "name": "離線單機操作", "short_name": "離線", "url": "./#/offline" }
+  ]
+}

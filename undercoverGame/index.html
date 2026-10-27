@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>勿虛心假意 — 體驗遊戲結算</title>
+  <meta name="description" content="法會「勿虛心假意」體驗遊戲：控場儀表板與助理主持人手機掃碼結算，支援離線單機模式">
+  <meta name="theme-color" content="#1F5F5B">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/undercoverGame-192.svg">
+  <link rel="apple-touch-icon" href="./icons/undercoverGame-192.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./vendor/qrious.min.js"></script>
+  <script src="./vendor/jsQR.js" defer></script>
+</head>
+<body>
+  <div id="app"><main class="wrap"><p id="boot-status">載入中…</p></main></div>
+  <div id="toast" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    }
+    window.__ugBooted = false;
+    window.__ugReset = async function () {
+      try {
+        const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : [];
+        await Promise.all(regs.map((r) => r.unregister()));
+        if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); }
+      } catch (e) {}
+      location.reload();
+    };
+    setTimeout(() => {
+      if (window.__ugBooted) return;
+      const el = document.getElementById('boot-status');
+      if (el) el.innerHTML = '程式沒有順利啟動（可能是快取損毀）。<button class="btn" onclick="__ugReset()">清除快取並重新載入</button>';
+    }, 10000);
+  </script>
+</body>
+</html>
