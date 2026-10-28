@@ -137,7 +137,9 @@ if (await pA.locator('.p-reveal').isVisible()) throw new Error('未按住就顯�
 await shot(pA, '12-player-veil', false);
 const box = await pA.locator('.p-pad').boundingBox();
 await pA.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await pA.mouse.down();
+await pA.waitForTimeout(150); await shot(pA, '13a-player-peek-img', false);
 await pA.locator('.p-reveal').getByText('好人・有錢人').waitFor();
+await pA.waitForTimeout(900);
 const resTxt = await pA.locator('.p-res').innerText();
 if (!/特休\s*0/.test(resTxt)) throw new Error('玩家資源未同步 ' + resTxt);
 await shot(pA, '13-player-peek', false);

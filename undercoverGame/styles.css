@@ -162,3 +162,20 @@ body.player-theme{background:#171614;color:#F1ECE2}
 .notice-banner ul{margin:4px 0 0;padding-left:18px;font-size:14px;line-height:1.6}
 .notice-banner.dark{background:#2E2716;border-color:#D8C7A3;color:#F1ECE2}
 .notice-banner.dark .btn{background:#D8C7A3;color:#171614;border-color:#D8C7A3}
+
+/* 玩家版：角色圖（沉浸式背景）＋文字淡入 */
+.p-pad{position:relative;overflow:hidden}
+.p-reveal{position:absolute;inset:0}
+.p-phone.peeking .p-pad{padding:0}
+.p-phone.peeking .p-reveal{display:block}
+.p-img{position:absolute;left:-6%;top:-2%;width:112%;height:76%;object-fit:cover;object-position:50% 32%;filter:brightness(.8) saturate(.75);animation:pImgIn .25s ease-out both;pointer-events:none;-webkit-user-drag:none}
+.p-shade{position:absolute;left:0;right:0;top:28%;height:48%;background:linear-gradient(to bottom,rgba(31,29,26,0) 0%,rgba(31,29,26,.85) 55%,#1F1D1A 100%);pointer-events:none}
+.p-info{position:absolute;left:0;right:0;bottom:0;padding:18px 18px 16px;display:flex;flex-direction:column;gap:7px;opacity:0;animation:pInfoIn .45s ease-out .45s forwards}
+.p-info .p-title{font-size:26px;font-weight:900;text-shadow:0 2px 8px rgba(0,0,0,.6)}
+.p-info hr{border:0;border-top:1px solid #34312B;margin:2px 0;width:100%}
+.p-info ul{margin:0;padding-left:18px;font-size:14px;line-height:1.55;display:flex;flex-direction:column;gap:2px}
+.p-info .p-res{margin-top:4px}
+.p-info .p-res div{background:#2A2723}
+@keyframes pImgIn{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:none}}
+@keyframes pInfoIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.p-img{animation:none}.p-info{animation:none;opacity:1}}
