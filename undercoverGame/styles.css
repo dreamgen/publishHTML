@@ -179,3 +179,6 @@ body.player-theme{background:#171614;color:#F1ECE2}
 @keyframes pImgIn{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:none}}
 @keyframes pInfoIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.p-img{animation:none}.p-info{animation:none;opacity:1}}
+
+/* 揭牌後：臥底身分以紅字突顯 */
+.spy-red{color:#C62828;font-weight:900}

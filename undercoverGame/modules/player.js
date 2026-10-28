@@ -68,12 +68,16 @@ export async function mountPlayer(app) {
     title: '掃我的信封', hint: '用手遮住信封，只掃自己的',
     onResult: (t) => {
       const q = QR.parse(t);
-      if (q.type !== 'envelope') return '這不是信封 QR 碼';
-      if (!S.qr || q.v !== S.qr.version) return '這是舊版貼紙，請洽工作人員';
-      const g = S.findEnvelope(q.set, q.code);
+      // 相機掃到：UG:E:A:Q-1234:v3；手動輸入：Q-1234 或 1234
+      if (q.type !== 'envelope' && q.type !== 'code') return '這不是信封上的 QR 碼或代號，手動輸入請填 4 位數字（例如 4827）';
+      if (q.type === 'envelope' && (!S.qr || q.v !== S.qr.version)) return '這是舊版貼紙，請洽工作人員';
+      let set = q.set;
+      if (!set) set = ['A', 'B'].find((s) => S.qr && S.qr.sets && S.qr.sets[s] && S.qr.sets[s][q.code]);
+      if (!set) return `找不到代號 ${q.code}，請確認信封上的號碼`;
+      const g = S.findEnvelope(set, q.code);
       if (!g) return '這個信封還沒有被綁定到本梯次的座位，請稍候或洽工作人員';
       S.claimEnvelope(g, q.code, me).then(() => {
-        jset(LS_PLAYER, { ev: S.ev, batch: S.batch.no, g, set: q.set, code: q.code });
+        jset(LS_PLAYER, { ev: S.ev, batch: S.batch.no, g, set, code: q.code });
         render();
       }).catch((e) => {
         if (e.message === 'LOCKED') { ui.locked = true; render(); } else toast(e.message, 'bad');
@@ -176,8 +180,8 @@ export async function mountPlayer(app) {
     const map = S.mapping(p.g), role = ROLE[map[p.code]], hist = S.history(p.g, p.code);
     const seats = S.seats(p.g);
     return h('div', { class: 'phone' },
-      h('header', {}, h('div', {}, h('span', { class: 'eyebrow' }, '遊戲結束・已揭牌'), h('h1', {}, `我是 ${hist.seat} 號：${role.name}`),
-        h('p', { class: 'muted small' }, roleTitle(role.id).split('・')[0] + '・' + ROLE_TEXT[role.id].sub))),
+      h('header', {}, h('div', {}, h('span', { class: 'eyebrow' }, '遊戲結束・已揭牌'), h('h1', {}, `我是 ${hist.seat} 號：`, h('span', { class: role.camp === 'spy' ? 'spy-red' : '' }, role.name)),
+        h('p', { class: 'muted small' }, h('span', { class: role.camp === 'spy' ? 'spy-red' : '' }, roleTitle(role.id).split('・')[0]), '・' + ROLE_TEXT[role.id].sub))),
       h('main', {},
         h('section', { class: 'card' }, h('h2', {}, '我在這場遊戲中'),
           hist.log.length ? h('ol', { class: 'list' }, hist.log.map((y) => h('li', { style: { minHeight: '40px' } },
@@ -185,7 +189,10 @@ export async function mountPlayer(app) {
             h('span', { class: 'small' }, y.adjust ? '主持人修正資源' : `${MISSION[y.mid].name}・${y.timeout ? '未成行' : y.inTeam ? '出任務・' + (y.ok ? '成功' : '失敗（' + y.reason + '）') : '未出任務'}`))))
             : h('p', { class: 'muted small' }, '沒有回合紀錄。')),
         h('section', { class: 'card' }, h('h2', {}, '本組的身分'),
-          h('div', { class: 'grid g2 small' }, Object.keys(seats).map(Number).sort((a, b) => a - b).map((s) => h('span', {}, h('b', {}, s), '　', ROLE[map[seats[s]]].name)))),
+          h('div', { class: 'grid g2 small' }, Object.keys(seats).map(Number).sort((a, b) => a - b).map((s) => {
+            const r = ROLE[map[seats[s]]];
+            return h('span', { class: r.camp === 'spy' ? 'spy-red' : '' }, h('b', {}, s), '　', r.name, r.camp === 'spy' ? '（臥底）' : '');
+          }))),
         h('div', { class: 'note ok' }, '討論時想一想：你在遊戲裡說的話、舉的牌，和你心裡真正的想法一致嗎？')));
   }
 

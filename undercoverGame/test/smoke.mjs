@@ -155,6 +155,12 @@ await pB.getByText('這個信封已在另一支手機開啟').waitFor();
 await shot(pB, '14-player-locked', false);
 await dash.getByText('已開啟 1 / 6').waitFor();
 step('玩家：同一信封第二支手機被擋');
+const pctxC = await mkCtx({ width: 390, height: 844 });
+const pC = await open(`?player=${ev}`, null, pctxC);
+await pC.getByRole('button', { name: '掃我的信封' }).click();
+await pC.fill('.scan input', codeOf('A', 'sen').slice(2)); await pC.press('.scan input', 'Enter');
+await pC.getByText(`我是 ${seatOf(p1.order, 'sen')} 號`).waitFor();
+step('玩家：手動輸入 4 位數字代號可開啟');
 
 // 編輯模式：調整玩家資源、換角色、改任務條件 → 同步並提示
 await dash.getByRole('button', { name: '編輯模式' }).click();

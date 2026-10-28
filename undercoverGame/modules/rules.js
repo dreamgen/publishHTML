@@ -173,8 +173,9 @@ export const QR = {
       for (const kv of m[3].split(',')) { const [c, r] = kv.split('='); if (ROLE[r]) map['Q-' + c] = r; }
       return { type: 'map', v: +m[1], set: m[2], map };
     }
-    if ((m = t.match(/^(Q-\d{4})$/i))) return { type: 'code', code: m[1].toUpperCase() };
-    if ((m = t.match(/^\d{4}$/))) return { type: 'code', code: 'Q-' + t };
+    // 手動輸入容錯：全形數字、空白、大小寫、有無「Q-」都可以（例如 4827、q4827、Q 4827、Ｑ－４８２７）
+    const plain = t.replace(/[０-９Ｑｑ－]/g, (c) => ({ 'Ｑ': 'Q', 'ｑ': 'Q', '－': '-' }[c] || String.fromCharCode(c.charCodeAt(0) - 0xFEE0))).replace(/\s+/g, '');
+    if ((m = plain.match(/^Q?-?(\d{4})$/i))) return { type: 'code', code: 'Q-' + m[1] };
     return { type: 'unknown', text: t };
   },
 };
