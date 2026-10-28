@@ -156,3 +156,9 @@ body.player-theme{background:#171614;color:#F1ECE2}
 .p-phone.peeking .p-pad{border-color:#D8C7A3;justify-content:flex-start}
 .p-phone.peeking .p-veil,.p-phone.peeking .p-task{display:none}
 .p-phone.peeking .p-reveal{display:flex}
+
+/* 修正通知 */
+.notice-banner{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:12px 14px;border-radius:14px;background:#FFF4D6;border:2px solid #C98A12;color:#5C3D00}
+.notice-banner ul{margin:4px 0 0;padding-left:18px;font-size:14px;line-height:1.6}
+.notice-banner.dark{background:#2E2716;border-color:#D8C7A3;color:#F1ECE2}
+.notice-banner.dark .btn{background:#D8C7A3;color:#171614;border-color:#D8C7A3}

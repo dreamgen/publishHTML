@@ -93,6 +93,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
     <li><a href="#round">每回合：任務與結算</a></li>
     <li><a href="#timeout">暫停、超時與撤銷</a></li>
     <li><a href="#lookup">角色查詢與校正卡片</a></li>
+    <li><a href="#edit">編輯模式：遊戲中修正資料</a></li>
     <li><a href="#offline">離線單機模式</a></li>
     <li><a href="#player">玩家版（手機看自己的角色）</a></li>
     <li><a href="#rules">判定規則速查</a></li>
@@ -237,6 +238,22 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
     <li><b>資源使用記錄</b>：每回合有沒有出任務、成敗、扣了多少（含替別人補差額）</li>
   </ul>
   <figure class="phone"><img src="guide/phone-lookup.webp" alt="手機角色查詢畫面" loading="lazy"><figcaption>用來核對、校正學員手上的實體卡片</figcaption></figure>
+</section>
+
+<section class="sec" id="edit">
+  <h2>編輯模式：遊戲中修正資料 <span class="who dash">控場講師</span></h2>
+  <p>遊戲進行中若發現角色卡裝錯、資源抄錯，或想臨時調整難度，可在儀表板按「編輯模式」修改：</p>
+  <ul>
+    <li><b>玩家資源與角色</b>：每組每個座位的角色、目前剩餘存款與特休、體力、交通。選到已在別的座位的角色時，兩個座位會互換；換成沒綁定的信封時，資源改用該角色的初始值。</li>
+    <li><b>角色初始值</b>：13 個角色的存款、特休、體力、交通。影響之後新綁定的座位、角色查詢的初始值與列印的對照表。</li>
+    <li><b>任務條件</b>：6 個任務的存款、特休、體力、汽車與遊覽車台數。之後的結算依新條件判定。</li>
+  </ul>
+  <p>修改只在按「儲存並通知」後才生效（可填修正說明）。儲存後：</p>
+  <ul>
+    <li>儀表板與受影響組別的助理主持人手機會出現「主持人已修正資料」橫幅，列出改了什麼；請依角色查詢校正學員的角色卡。</li>
+    <li>受影響的玩家手機會提示「你的角色資料或資源已修正」；任務條件修改則提示所有玩家看最新條件。玩家端提示不含任何角色資訊。</li>
+    <li>已結算的回合紀錄不會被改寫；角色查詢的資源記錄會多一筆「修正」。</li>
+  </ul>
 </section>
 
 <section class="sec" id="offline">

@@ -4,6 +4,7 @@ import { h, toast, openScanner, iconEl } from './ui.js';
 import { EventSession, deviceId } from './session.js';
 import { ROLE, MISSION, ROLE_TEXT, roleTitle, needText, fmtNum, QR } from './rules.js';
 import { setUnmount } from './nav.js';
+import { noticeBanner } from './notice.js';
 
 const LS_PLAYER = 'ug.player';
 const PEEK_MS = 8000;
@@ -116,10 +117,11 @@ export async function mountPlayer(app) {
 
   function cardView(p) {
     const c = S.control, seat = S.seatOf(p.g, p.code);
-    const m = c.missionId ? MISSION[c.missionId] : null;
+    const m = c.missionId ? S.mission(c.missionId) : null;
     const open = S.playerCfg.open;
     const role = ROLE[S.mapping(p.g)[p.code]], text = ROLE_TEXT[role.id];
-    const ledger = (S.live(p.g).ledger || {})[p.code] || { money: role.money, leave: role.leave };
+    const eff = S.stats(p.g, p.code);
+    const ledger = { money: eff.money, leave: eff.leave };
     const pad = h('button', {
       class: 'p-pad', type: 'button', disabled: !open,
       'aria-label': open ? '按住查看我的角色，放開即隱藏' : '玩家查看尚未開放',
@@ -143,14 +145,20 @@ export async function mountPlayer(app) {
       h('div', { class: 'p-res' },
         h('div', {}, h('span', {}, '存款'), h('b', {}, fmtNum(ledger.money))),
         h('div', {}, h('span', {}, '特休'), h('b', {}, ledger.leave)),
-        h('div', {}, h('span', {}, '體力'), h('b', {}, role.power)),
-        h('div', {}, h('span', {}, '交通'), h('b', {}, role.car)))) : null);
+        h('div', {}, h('span', {}, '體力'), h('b', {}, eff.power)),
+        h('div', {}, h('span', {}, '交通'), h('b', {}, eff.car)))) : null);
     const chipText = c.round ? `第 ${c.round} 回合` : '準備中';
     return h('div', { class: 'p-phone' },
       h('header', {},
         h('div', {}, h('span', { class: 'p-label' }, `第 ${S.batch.no} 梯次・第 ${p.g} 組`), h('h1', {}, `我是 ${seat} 號`)),
         h('span', { class: 'p-chip', 'data-chip': chipText }, chipText)),
       h('main', {},
+        noticeBanner(S, 'player', (n) => {
+          const out = [];
+          if (n.groups && n.groups[p.g] && (n.groups[p.g].codes || []).includes(p.code)) out.push('你的角色資料或資源已修正，請按住確認最新內容');
+          if ((n.missions || []).length) out.push('任務條件已修正，請看最新條件');
+          return out;
+        }, { dark: true, onSeen: () => render() }),
         h('section', { class: 'p-card p-task' },
           h('span', { class: 'p-label' }, '本回合任務・大家都看得到'),
           h('b', { style: { fontSize: '18px' } }, m ? m.name : '等待控場講師發布'),
@@ -171,8 +179,8 @@ export async function mountPlayer(app) {
       h('main', {},
         h('section', { class: 'card' }, h('h2', {}, '我在這場遊戲中'),
           hist.log.length ? h('ol', { class: 'list' }, hist.log.map((y) => h('li', { style: { minHeight: '40px' } },
-            h('b', { class: 'tiny', style: { width: '48px' } }, `第 ${y.round} 回`),
-            h('span', { class: 'small' }, `${MISSION[y.mid].name}・${y.timeout ? '未成行' : y.inTeam ? '出任務・' + (y.ok ? '成功' : '失敗（' + y.reason + '）') : '未出任務'}`))))
+            h('b', { class: 'tiny', style: { width: '48px' } }, y.adjust ? '修正' : `第 ${y.round} 回`),
+            h('span', { class: 'small' }, y.adjust ? '主持人修正資源' : `${MISSION[y.mid].name}・${y.timeout ? '未成行' : y.inTeam ? '出任務・' + (y.ok ? '成功' : '失敗（' + y.reason + '）') : '未出任務'}`))))
             : h('p', { class: 'muted small' }, '沒有回合紀錄。')),
         h('section', { class: 'card' }, h('h2', {}, '本組的身分'),
           h('div', { class: 'grid g2 small' }, Object.keys(seats).map(Number).sort((a, b) => a - b).map((s) => h('span', {}, h('b', {}, s), '　', ROLE[map[seats[s]]].name)))),

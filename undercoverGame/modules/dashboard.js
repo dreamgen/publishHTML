@@ -7,6 +7,8 @@ import {
   splitGroups, composition, makeGroupCfg, generateMapping, needText, fmtNum, QR,
 } from './rules.js';
 import { spyPicker } from './spypick.js';
+import { editTab } from './editor.js';
+import { noticeBanner } from './notice.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
@@ -67,6 +69,7 @@ function dashboard(app, S) {
   let tab = S.batch ? 'control' : 'prep';
   let reveal = false;
   let form = null; // 梯次設定表單暫存
+  const editSt = { draft: null }; // 編輯模式草稿
   let lastTimeUp = false;
   let lock = null;
   wakeLock().then((l) => { lock = l; });
@@ -99,9 +102,10 @@ function dashboard(app, S) {
           h('a', { class: 'btn', href: './guide.html', target: '_blank', rel: 'noopener' }, '操作說明'),
           h('button', { class: 'btn', onclick: async () => { if (await confirmBox('切換活動', '回到活動選擇畫面（資料仍保留在雲端）。')) { lsSet(LS_EV, null); location.hash = '#/'; } } }, '切換活動'))),
       h('nav', { class: 'row', 'aria-label': '儀表板分頁' },
-        ...[['prep', '活動前準備'], ['batch', '梯次與組別'], ['control', '回合控制']].map(([k, label]) =>
-          h('button', { class: 'btn', 'aria-pressed': String(tab === k), onclick: () => { tab = k; if (k === 'batch') initForm(); render(); } }, label))),
-      tab === 'prep' ? prepTab() : tab === 'batch' ? batchTab() : controlTab(c));
+        ...[['prep', '活動前準備'], ['batch', '梯次與組別'], ['control', '回合控制'], ['edit', '編輯模式']].map(([k, label]) =>
+          h('button', { class: 'btn' + (k === 'edit' && tab !== 'edit' ? ' soft-bad' : ''), 'aria-pressed': String(tab === k), onclick: () => { if (tab === 'edit' && k !== 'edit') editSt.draft = null; tab = k; if (k === 'batch') initForm(); render(); } }, label))),
+      noticeBanner(S, 'dash', (n) => n.staff || [], { onSeen: () => render() }),
+      tab === 'prep' ? prepTab() : tab === 'batch' ? batchTab() : tab === 'edit' ? editTab(S, editSt, () => { if (!editSt.draft && tab === 'edit') tab = 'control'; render(); }) : controlTab(c));
     app.replaceChildren(root);
   };
 
@@ -198,7 +202,7 @@ function dashboard(app, S) {
         if (gs.some((g) => S.rounds(g)[r])) return toast('已有組別結算這回合，不能換任務', 'bad');
         await S.setMission(r, m.id);
       },
-    }, h('span', { class: 't' }, h('span', {}, m.tag), h('span', {}, used[m.id] ? `第 ${used[m.id]} 回合` : '')), h('span', { class: 'n' }, m.name), h('span', { class: 'c' }, needText(m)))));
+    }, h('span', { class: 't' }, h('span', {}, m.tag), h('span', {}, used[m.id] ? `第 ${used[m.id]} 回合` : '')), h('span', { class: 'n' }, m.name), h('span', { class: 'c' }, needText(S.mission(m.id))))));
 
     const loadedChips = gs.map((g) => {
       const l = S.live(g).loaded;
@@ -336,14 +340,14 @@ function dashboard(app, S) {
       h('div', { class: 'scroll-x' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, '座位'), reveal ? h('th', {}, '角色') : null, h('th', { class: 'num' }, '存款'), h('th', { class: 'num' }, '特休'), h('th', { class: 'num' }, '體力'), h('th', {}, '交通'))),
         h('tbody', {}, seatNos.map((s) => {
-          const code = seats[s], role = ROLE[map[code]], l = ledger[code] || { money: role.money, leave: role.leave };
+          const code = seats[s], role = ROLE[map[code]], st = S.stats(g, code), l = ledger[code] || { money: st.money, leave: st.leave };
           return h('tr', {},
             h('th', { scope: 'row', style: { fontSize: '18px', fontWeight: 900 } }, s),
             reveal ? h('td', {}, role.name, h('span', { class: 'muted tiny' }, '　' + KIND_LABEL[role.kind])) : null,
             h('td', { class: 'num' + (l.money === 0 ? ' zero' : '') }, fmtNum(l.money)),
             h('td', { class: 'num' + (l.leave === 0 ? ' zero' : '') }, l.leave),
-            h('td', { class: 'num' }, role.power),
-            h('td', {}, role.car));
+            h('td', { class: 'num' }, st.power),
+            h('td', {}, st.car));
         })))));
   }
 
@@ -361,7 +365,7 @@ function dashboard(app, S) {
 
   const off = S.on(() => {
     // 表單編輯中不打斷
-    if (tab === 'batch' && document.activeElement && app.contains(document.activeElement) && /SELECT|INPUT/.test(document.activeElement.tagName)) return;
+    if ((tab === 'batch' || tab === 'edit') && document.activeElement && app.contains(document.activeElement) && /SELECT|INPUT/.test(document.activeElement.tagName)) return;
     render();
   });
   setUnmount(() => { clearInterval(timer); off(); S.stop(); lock && lock.release && lock.release(); });

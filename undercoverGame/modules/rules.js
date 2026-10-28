@@ -46,7 +46,7 @@ export function needText(m) {
   if (n.leave) out.push(`特休 ${n.leave} 天`);
   if (n.power) out.push(`體力 ${n.power}`);
   if (n.cars) out.push(`汽車 ${n.cars} 台`);
-  if (n.transport) out.push('遊覽車 1 台（或汽車 3 台）');
+  if (n.transport) out.push(n.transport.map((t) => (t.bus ? `遊覽車 ${t.bus} 台` : `汽車 ${t.cars} 台`)).join('（或') + (n.transport.length > 1 ? '）' : ''));
   return out.join('、');
 }
 
@@ -188,7 +188,8 @@ const CAR_TYPES = ['轎車', '遊覽車'];
  */
 export function judge(mission, members) {
   const n = mission.need;
-  const roles = members.map((m) => ROLE[m.role]);
+  // power／car 可由成員帶入（儀表板修正後的值），沒有就用角色預設
+  const roles = members.map((m) => ({ ...ROLE[m.role], ...(m.power != null ? { power: m.power } : {}), ...(m.car ? { car: m.car } : {}) }));
   const totals = {
     money: members.reduce((s, m) => s + m.money, 0),
     leave: members.reduce((s, m) => s + m.leave, 0),
@@ -246,10 +247,21 @@ export function announce(result) {
 }
 
 /** 初始資源帳本 */
-export function initialLedger(seatCodes, mapping) {
+export const CAR_OPTIONS = ['徒步', '腳踏車', '機車', '轎車', '遊覽車'];
+
+/** 套用儀表板修正後的角色初始值 */
+export function roleWith(id, overrides) { return { ...ROLE[id], ...((overrides && overrides[id]) || {}) }; }
+/** 套用儀表板修正後的任務條件（整個 need 物件取代） */
+export function missionWith(mid, overrides) {
+  const m = MISSION[mid];
+  const o = overrides && overrides[mid];
+  return o ? { ...m, need: o } : m;
+}
+
+export function initialLedger(seatCodes, mapping, roleOverrides) {
   const ledger = {};
   for (const code of Object.values(seatCodes)) {
-    const r = ROLE[mapping[code]];
+    const r = roleWith(mapping[code], roleOverrides);
     ledger[code] = { money: r.money, leave: r.leave };
   }
   return ledger;

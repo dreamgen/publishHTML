@@ -6,6 +6,7 @@ import {
   composition, makeGroupCfg, remainingSlots, needText, fmtNum, announce, QR,
 } from './rules.js';
 import { spyPicker } from './spypick.js';
+import { noticeBanner } from './notice.js';
 import { setUnmount } from './nav.js';
 
 const LS_PHONE = 'ug.phone';
@@ -220,7 +221,15 @@ function groupApp(app, S, g, info) {
         h('span', { class: 'timer' + (remaining() <= 0 && c.status !== 'idle' ? ' late' : ''), 'data-timer': '1' }, c.status === 'idle' ? '05:00' : fmtClock(Math.max(0, remaining()))),
         h('button', { class: 'btn icon', 'aria-label': '掃信封查詢角色', onclick: () => scanLookup() }, iconEl('search')),
         offline && c.status !== 'idle' ? h('button', { class: 'btn icon', 'aria-label': c.status === 'paused' ? '繼續計時' : '暫停計時', onclick: () => (c.status === 'paused' ? S.resume() : S.pause()) }, iconEl(c.status === 'paused' ? 'play' : 'pause')) : null));
-    const wrapper = (...body) => h('div', { class: 'phone' }, h('header', {}, head), ...body);
+    const banner = offline ? null : noticeBanner(S, 'phone', (n) => {
+      const out = [];
+      if ((n.missions || []).length) out.push(...(n.staff || []).filter((t) => t.startsWith('任務')));
+      if ((n.roleInit || []).length) out.push(...(n.staff || []).filter((t) => t.startsWith('角色初始值')));
+      if (n.groups && n.groups[g]) out.push(...(n.staff || []).filter((t) => t.startsWith(`第 ${g} 組`)), '請依角色查詢校正這些學員的角色卡');
+      if (out.length) out.push(...(n.staff || []).filter((t) => t.startsWith('說明：')));
+      return out;
+    }, { onSeen: () => render() });
+    const wrapper = (...body) => h('div', { class: 'phone' }, h('header', {}, head), banner ? h('div', { style: { padding: '0 16px' } }, banner) : null, ...body);
 
     if (x) return wrapper(...resultView(r, x));
 
@@ -239,7 +248,7 @@ function groupApp(app, S, g, info) {
           class: 'mission' + (used[m.id] ? ' used' : ''), 'aria-pressed': String(c.missionId === m.id), style: { minHeight: '60px' },
           onclick: () => { if (c.status !== 'idle') return toast('計時中不能換任務', 'bad'); S.setMission(r, m.id); },
         }, h('span', { class: 'n', style: { fontSize: '14px' } }, m.name), h('span', { class: 'c' }, used[m.id] ? `第 ${used[m.id]} 回合` : m.tag)))),
-        c.missionId ? h('p', { class: 'small' }, '條件：', h('b', {}, needText(MISSION[c.missionId]))) : null,
+        c.missionId ? h('p', { class: 'small' }, '條件：', h('b', {}, needText(S.mission(c.missionId)))) : null,
         c.status === 'idle' && c.missionId ? h('button', { class: 'btn dark', onclick: () => S.startRound() }, iconEl('play'), '開始計時') : null);
     } else if (!c.missionId) {
       missionBlock = h('div', { class: 'note' }, '等待控場講師選擇本回合任務…');
@@ -262,7 +271,7 @@ function groupApp(app, S, g, info) {
         h('button', { class: 'btn', onclick: () => S.loadMission(g, r, c.missionId) }, '掃不到？直接載入目前任務'));
     } else {
       missionBlock = h('div', { class: 'note ok row between' },
-        h('span', {}, `已載入：`, h('b', {}, MISSION[c.missionId].name), `（${needText(MISSION[c.missionId])}）`));
+        h('span', {}, `已載入：`, h('b', {}, MISSION[c.missionId].name), `（${needText(S.mission(c.missionId))}）`));
     }
 
     // 掃隊員
@@ -294,7 +303,7 @@ function groupApp(app, S, g, info) {
   }
 
   function resultView(r, x) {
-    const m = MISSION[x.mid];
+    const m = S.mission(x.mid);
     const seats = S.seats(g), ledger = S.live(g).ledger || {};
     const hero = h('section', { class: 'hero ' + (x.ok ? 'ok' : 'bad') },
       h('span', { class: 'tiny' }, `第 ${r} 回合・${m.name}`),
@@ -386,13 +395,18 @@ function groupApp(app, S, g, info) {
           ...[1, 2, 3, 4].map((i) => h('span', { class: 'muted tiny', style: { textAlign: 'center' } }, `剩餘 ${i}`)),
           ...boxRow('存款', 'money', role.money), ...boxRow('特休', 'leave', role.leave)),
         over ? h('p', { class: 'note bad' }, '變動超過 4 次，卡上格子不夠，請寫在旁邊。') : null,
-        h('p', { class: 'small' }, `目前：存款 ${fmtNum(hist.money)}・特休 ${hist.leave} 天・體力 ${role.power}（不扣）・交通 ${role.car}（不扣）`)),
+        h('p', { class: 'small' }, `目前：存款 ${fmtNum(hist.money)}・特休 ${hist.leave} 天・體力 ${S.stats(g, code).power}（不扣）・交通 ${S.stats(g, code).car}（不扣）`)),
       !offline && S.playerBinding(g, code) ? h('section', { class: 'card' },
         h('div', { class: 'row between' }, h('h2', {}, '玩家手機'), h('span', { class: 'chip ok' }, '已在玩家手機開啟')),
         h('button', { class: 'btn', onclick: async () => { if (await confirmBox('重設玩家手機綁定？', '玩家換手機時使用，重設後請玩家重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code); } }, '重設手機綁定')) : null,
       h('section', { class: 'card' },
         h('h2', {}, '資源使用記錄'),
         hist.log.length ? h('ol', { class: 'list' }, hist.log.map((y) => {
+          if (y.adjust) {
+            const t = y.d.reset ? `存款 ${fmtNum(y.d.money)}・特休 ${y.d.leave}` : '';
+            return h('li', { style: { minHeight: '52px', padding: '6px 12px', background: 'var(--bad-bg)' } }, h('b', { class: 'tiny', style: { width: '44px' } }, '修正'),
+              h('div', { class: 'flex1' }, h('div', { class: 'small', style: { fontWeight: 700 } }, '主持人修正資源'), h('div', { class: 'tiny muted' }, `修正後：${t}`)));
+          }
           const m = MISSION[y.mid];
           const what = y.timeout ? '未成行（時間失敗）' : y.inTeam ? `出任務・${y.ok ? '成功' : '失敗（' + y.reason + '）'}` : '未出任務';
           const ch = [];

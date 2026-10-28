@@ -153,6 +153,34 @@ await pB.getByText('這個信封已在另一支手機開啟').waitFor();
 await shot(pB, '14-player-locked', false);
 await dash.getByText('已開啟 1 / 6').waitFor();
 step('玩家：同一信封第二支手機被擋');
+
+// 編輯模式：調整玩家資源、換角色、改任務條件 → 同步並提示
+await dash.getByRole('button', { name: '編輯模式' }).click();
+const richSeat = seatOf(p1.order, 'rich'), twoSeat = seatOf(p1.order, 'two');
+await dash.getByLabel(`${richSeat} 號存款`).first().fill('45000');
+await dash.getByLabel(`${twoSeat} 號角色`).first().selectOption('yes');
+await dash.getByLabel('大專夏令營power').fill('70');
+await shot(dash, '16-edit');
+await dash.getByRole('button', { name: '儲存並通知' }).click();
+await dash.locator('.modal').getByRole('button', { name: '儲存並通知' }).click();
+await dash.getByText('主持人已修正資料').waitFor({ timeout: 8000 }).catch(async (e) => { console.log('TOAST', await dash.locator('#toast').innerText(), errors); throw e; });
+const evd = () => db.artifacts.undercoverGame.public.data.events[ev];
+if (evd().live[1].ledger[codeOf('A', 'rich')].money !== 45000) throw new Error('資源修正未寫入');
+if (evd().live[1].seats[twoSeat] !== codeOf('A', 'yes')) throw new Error('角色修正未寫入');
+if (evd().overrides.missions.m2.power !== 70) throw new Error('任務條件未寫入');
+await shot(dash, '17-edit-notice');
+await pA.getByText('你的角色資料或資源已修正').waitFor();
+await pA.getByText('任務條件已修正').waitFor();
+await shot(pA, '18-player-notice', false);
+await pA.getByRole('button', { name: '知道了' }).click();
+const box2 = await pA.locator('.p-pad').boundingBox();
+await pA.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2); await pA.mouse.down();
+const res2 = await pA.locator('.p-res').innerText(); await pA.mouse.up();
+if (!/45,000/.test(res2)) throw new Error('玩家未同步修正後資源 ' + res2);
+await p1.ph.getByText('主持人已修正資料').waitFor();
+await shot(p1.ph, '19-phone-notice', false);
+await p1.ph.getByRole('button', { name: '知道了' }).click();
+step('編輯模式：資源、角色、任務條件已同步並提示');
 // 超時：把時間撥到 5 分鐘後
 await dash.evaluate(() => { const o = Date.now; Date.now = () => o() + 6 * 60 * 1000; });
 await dash.getByRole('button', { name: '確認超時' }).waitFor({ timeout: 3000 });

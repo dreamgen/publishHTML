@@ -30,7 +30,7 @@ export function confirmBox(title, body, okText = '確定', danger = false) {
     const wrap = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
       h('div', { class: 'modal-card' },
         h('h2', {}, title),
-        body ? h('p', { class: 'muted' }, body) : null,
+        body ? h('p', { class: 'muted', style: { whiteSpace: 'pre-line' } }, body) : null,
         h('div', { class: 'row end' },
           h('button', { class: 'btn', onclick: () => close(false) }, '取消'),
           h('button', { class: 'btn ' + (danger ? 'danger' : 'primary'), onclick: () => close(true) }, okText))));

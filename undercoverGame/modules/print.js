@@ -1,7 +1,7 @@
 // 列印頁：信封 QR 貼紙（每套 13 張）與工作人員對照表（每套 13 列）。A、B 兩套各一頁。
 import { h, qrImg, iconEl } from './ui.js';
 import { connect } from './fb.js';
-import { ROLE, KIND_LABEL, WHEN_LABEL, fmtNum, QR } from './rules.js';
+import { ROLE, KIND_LABEL, WHEN_LABEL, fmtNum, QR, roleWith } from './rules.js';
 
 export async function mountPrint(app, parts) {
   const kind = parts[0] === 'map' ? 'map' : 'labels';
@@ -12,9 +12,10 @@ export async function mountPrint(app, parts) {
   const fb = await connect();
   const snap = await fb.get(fb.evRef(ev, 'qr'));
   const q = snap.val();
+  const ov = (await fb.get(fb.evRef(ev, 'overrides/roles'))).val() || {};
   if (!q) throw new Error('這個活動還沒有 QR 碼');
   const today = new Date().toLocaleDateString('zh-TW');
-  const pages = ['A', 'B'].map((set) => (kind === 'labels' ? labelsPage(set, q, today) : mapPage(set, q, today)));
+  const pages = ['A', 'B'].map((set) => (kind === 'labels' ? labelsPage(set, q, today) : mapPage(set, q, today, ov)));
   app.replaceChildren(
     h('div', { class: 'print-bar' },
       h('a', { class: 'btn', href: '#/dash' }, iconEl('back'), '回儀表板'),
@@ -41,10 +42,10 @@ function labelsPage(set, q, today) {
       h('span', {}, `依代號排序，與角色無關。裝填請對照同版本的「${set} 套對照表」。`), h('span', {}, `列印日期 ${today}`)));
 }
 
-function mapPage(set, q, today) {
+function mapPage(set, q, today, ov) {
   const map = q.sets[set];
   const rows = sortedCodes(map).map((code) => {
-    const r = ROLE[map[code]];
+    const r = roleWith(map[code], ov);
     return h('tr', {},
       h('td', { class: 'mono', style: { fontWeight: 700 } }, code), h('td', { style: { fontWeight: 700 } }, r.name), h('td', {}, KIND_LABEL[r.kind]),
       h('td', {}, WHEN_LABEL[r.id] || '依抽選'), h('td', {}, r.car),

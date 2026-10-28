@@ -8,7 +8,7 @@
 //   live/<g>: { phone, seats: { 1: code }, ledger: { code: {money, leave} },
 //               rounds: { <r>: { mid, seats, ok, reason, deltas, timeout, at } }, loaded: { round, mid } }
 import { connect } from './fb.js';
-import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed } from './rules.js';
+import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed, roleWith, missionWith } from './rules.js';
 
 const LS_OFFLINE = 'ug.offline.v1';
 
@@ -134,7 +134,7 @@ export class EventSession {
     const p = { [`live/${g}/seats/${seat}`]: code };
     const cfg = this.groupCfg(g);
     const seats = { ...this.seats(g), [seat]: code };
-    if (Object.keys(seats).length >= cfg.size) p[`live/${g}/ledger`] = initialLedger(seats, this.mapping(g));
+    if (Object.keys(seats).length >= cfg.size) p[`live/${g}/ledger`] = initialLedger(seats, this.mapping(g), this.overrides.roles);
     await this.patch(p);
   }
   async unbindSeat(g, seat) {
@@ -145,9 +145,34 @@ export class EventSession {
 
   members(g, seatList) {
     const seats = this.seats(g), map = this.mapping(g), ledger = this.live(g).ledger || {};
-    return seatList.map((s) => { const code = seats[s]; return { seat: +s, code, role: map[code], money: ledger[code].money, leave: ledger[code].leave }; });
+    return seatList.map((s) => {
+      const code = seats[s], st = this.stats(g, code);
+      return { seat: +s, code, role: map[code], money: ledger[code].money, leave: ledger[code].leave, power: st.power, car: st.car };
+    });
   }
-  preview(g, mid, seatList) { return judge(MISSION[mid], this.members(g, seatList)); }
+  preview(g, mid, seatList) { return judge(this.mission(mid), this.members(g, seatList)); }
+
+  // ── 儀表板修正（角色初始值、任務條件、個別玩家的體力／交通）────────────
+  get overrides() { const o = (this.data && this.data.overrides) || {}; return { roles: o.roles || {}, missions: o.missions || {} }; }
+  roleBase(id) { return roleWith(id, this.overrides.roles); }
+  mission(mid) { return missionWith(mid, this.overrides.missions); }
+  /** 某位玩家目前的有效數值：角色初始值（含修正）＋個別修正（體力、交通）＋帳本（存款、特休） */
+  stats(g, code) {
+    const base = this.roleBase(this.mapping(g)[code]);
+    const adj = ((this.live(g).adjust || {})[code]) || {};
+    const l = ((this.live(g).ledger || {})[code]) || { money: base.money, leave: base.leave };
+    return { ...base, power: adj.power != null ? adj.power : base.power, car: adj.car || base.car, money: l.money, leave: l.leave };
+  }
+  get notices() {
+    const n = (this.data && this.data.notices) || {};
+    return Object.entries(n).map(([id, v]) => ({ id, ...v })).sort((a, b) => a.at - b.at);
+  }
+  /** 寫入修正並留下通知（給儀表板、助理主持人與受影響的玩家） */
+  async saveEdits(patch, notice) {
+    const at = this.now();
+    await this.patch({ ...patch, [`notices/n${at}`]: { ...notice, at } });
+  }
+
   async settle(g, round, mid, seatList) {
     if (this.rounds(g)[round]) throw new Error('這回合已經結算過；要重來請先撤銷');
     const res = this.preview(g, mid, seatList);
@@ -191,18 +216,32 @@ export class EventSession {
 
   /** 角色查詢：初始值、每回合紀錄、角色卡剩餘欄應填內容 */
   history(g, code) {
-    const role = ROLE[this.mapping(g)[code]];
+    const role = this.roleBase(this.mapping(g)[code]);
     const seat = this.seatOf(g, code);
     let money = role.money, leave = role.leave;
     const boxes = { money: [], leave: [] }, log = [];
     const rounds = this.rounds(g);
-    for (const r of Object.keys(rounds).map(Number).sort((a, b) => a - b)) {
-      const x = rounds[r];
+    const items = Object.keys(rounds).map((r) => ({ kind: 'round', r: +r, at: rounds[r].at || 0, x: rounds[r] }));
+    const adj = this.live(g).adjlog || {};
+    for (const [id, a] of Object.entries(adj)) if (a.codes && a.codes[code]) items.push({ kind: 'adj', at: a.at || 0, d: a.codes[code], id });
+    items.sort((a, b) => a.at - b.at || (a.r || 0) - (b.r || 0));
+    for (const it of items) {
+      if (it.kind === 'adj') {
+        const d = { money: it.d.money || 0, leave: it.d.leave || 0 };
+        if (it.d.reset) { money = it.d.money; leave = it.d.leave; boxes.money.push(money); boxes.leave.push(leave); }
+        else {
+          if (d.money) { money += d.money; boxes.money.push(money); }
+          if (d.leave) { leave += d.leave; boxes.leave.push(leave); }
+        }
+        log.push({ adjust: true, d: it.d, at: it.at });
+        continue;
+      }
+      const x = it.x;
       const inTeam = seat && (x.seats || []).includes(+seat);
       const d = (x.deltas || {})[code] || { money: 0, leave: 0 };
       if (d.money) { money += d.money; boxes.money.push(money); }
       if (d.leave) { leave += d.leave; boxes.leave.push(leave); }
-      log.push({ round: r, mid: x.mid, inTeam, ok: x.ok, reason: x.reason, timeout: x.timeout, d });
+      log.push({ round: it.r, mid: x.mid, inTeam, ok: x.ok, reason: x.reason, timeout: x.timeout, d });
     }
     return { role, seat, money, leave, boxes, log };
   }
