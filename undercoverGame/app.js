@@ -21,6 +21,15 @@ function home() {
 async function route() {
   const hash = location.hash || '#/';
   // 相機 App 掃組別 QR 碼開啟時，網址帶 ?join=EV.batch.g
+  const playerInfo = QR.parse(location.href);
+  if (playerInfo.type === 'player' && !hash.startsWith('#/player')) {
+    try {
+      const cur = JSON.parse(localStorage.getItem('ug.player') || 'null');
+      if (!cur || cur.ev !== playerInfo.ev) localStorage.setItem('ug.player', JSON.stringify({ ev: playerInfo.ev }));
+    } catch (e) { /* */ }
+    history.replaceState(null, '', location.pathname + '#/player');
+    return route();
+  }
   const joinInfo = QR.parse(location.href);
   if (joinInfo.type === 'join' && !hash.startsWith('#/phone')) {
     try { localStorage.setItem('ug.phone', JSON.stringify({ ev: joinInfo.ev, batch: joinInfo.batch, g: joinInfo.g })); } catch (e) { /* */ }
@@ -31,6 +40,7 @@ async function route() {
     if (hash.startsWith('#/dash')) { const m = await import('./modules/dashboard.js'); await m.mountDashboard(app); }
     else if (hash.startsWith('#/print/')) { const m = await import('./modules/print.js'); await m.mountPrint(app, hash.split('/').slice(2)); }
     else if (hash.startsWith('#/phone')) { const m = await import('./modules/phone.js'); await m.mountPhone(app, 'online'); }
+    else if (hash.startsWith('#/player')) { const m = await import('./modules/player.js'); await m.mountPlayer(app); }
     else if (hash.startsWith('#/offline')) { const m = await import('./modules/phone.js'); await m.mountPhone(app, 'offline'); }
     else home();
   } catch (e) {

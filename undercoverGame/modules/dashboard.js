@@ -171,6 +171,7 @@ function dashboard(app, S) {
                 batch: { no: form.no, total: form.total, createdAt: Date.now(), groups },
                 live: null,
                 control: { round: 1, missionId: null, status: 'idle', accum: 0, startAt: null },
+                player: { open: false, revealed: false },
               });
               tab = 'control'; render();
               toast(`已建立第 ${form.no} 梯次，請助理主持人掃組別 QR 碼`);
@@ -184,7 +185,7 @@ function dashboard(app, S) {
     if (!S.batch) return h('section', { class: 'card' }, h('p', {}, '還沒有梯次。'), h('button', { class: 'btn primary', onclick: () => { tab = 'batch'; initForm(); render(); } }, '前往梯次與組別'));
     const gs = groupsOf();
     const allReady = gs.every((g) => S.allBound(g));
-    if (!allReady || c.round === 0) return joinPanel(gs);
+    if (!allReady || c.round === 0) return h('div', { class: 'stack' }, joinPanel(gs), playerPanel(gs));
 
     const r = c.round;
     const used = {};
@@ -235,13 +236,56 @@ function dashboard(app, S) {
             },
           }, '下一回合'))),
       h('div', { class: 'row end' }, h('button', { class: 'btn', 'aria-pressed': String(reveal), onclick: () => { reveal = !reveal; render(); } }, reveal ? '隱藏角色' : '顯示角色（揭牌後）')),
-      h('div', { class: 'cols' }, gs.map((g) => groupCard(g, c))));
+      h('div', { class: 'cols' }, gs.map((g) => groupCard(g, c))),
+      playerPanel(gs));
   }
 
   function statusText(c, remaining) {
     if (c.status === 'idle') return c.missionId ? '尚未開始' : '請先選任務';
     if (c.status === 'paused') return '已暫停・各組手機同步暫停';
     return remaining <= 0 ? '已到 5 分鐘' : '進行中';
+  }
+
+  // 玩家版：入口 QR、開放／揭牌、各座位開啟狀態與重設
+  function playerPanel(gs) {
+    const pc = S.playerCfg;
+    const url = QR.player(`${location.origin}${location.pathname}`, ev);
+    const groupBox = (g) => {
+      const cfg = S.groupCfg(g), seats = S.seats(g), players = S.live(g).players || {};
+      const opened = Object.keys(seats).filter((s) => players[seats[s]]).length;
+      return h('div', { class: 'card', style: { flex: '1 1 260px' } },
+        h('div', { class: 'row between' }, h('b', {}, `第 ${g} 組`), h('span', { class: 'muted small' }, `已開啟 ${opened} / ${cfg.size}`)),
+        h('div', { class: 'grid g6' }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => {
+          const code = seats[s], on = code && players[code];
+          return h('button', {
+            class: 'btn', style: on ? { background: 'var(--ok-bg)', color: 'var(--ok-d)', borderColor: 'var(--ok-bg)' } : { borderStyle: 'dashed', color: 'var(--muted)' },
+            'aria-label': `${s} 號${on ? '已在手機開啟，點一下可重設' : '尚未開啟'}`, disabled: !on && !code ? true : null,
+            onclick: async () => {
+              if (!on) return;
+              if (await confirmBox(`重設 ${s} 號的手機綁定？`, '玩家換手機時使用。重設後需要重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code);
+            },
+          }, s);
+        })),
+        h('span', { class: 'muted tiny' }, '綠底＝已在手機開啟；點座位可重設手機綁定。只顯示是否開啟，不顯示角色。'));
+    };
+    return h('section', { class: 'card' },
+      h('div', { class: 'row between' }, h('h2', {}, '玩家版：在手機上查看自己的角色'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn ' + (pc.open ? 'primary' : ''), onclick: () => S.patch({ 'player/open': !pc.open }) }, pc.open ? '已開放・按此關閉' : '開放玩家查看'),
+          h('button', {
+            class: 'btn soft-bad', onclick: async () => {
+              if (!pc.revealed && !(await confirmBox('揭牌：公開所有身分？', '所有玩家手機會顯示自己的身分、回合紀錄與本組所有人的身分。', '揭牌', true))) return;
+              S.patch({ 'player/revealed': !pc.revealed });
+            },
+          }, pc.revealed ? '取消揭牌' : '揭牌：公開所有身分'))),
+      h('div', { class: 'cols' },
+        h('div', { style: { flex: '0 1 240px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' } },
+          qrImg(url, 180, '玩家入口 QR 碼'),
+          h('b', {}, '玩家入口'),
+          h('span', { class: 'muted tiny' }, '可投影或印在桌牌上；只能進入玩家頁，不含角色資訊。'),
+          h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, '開啟玩家頁')),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '12px', flex: '1 1 480px' } }, gs.map(groupBox))),
+      h('p', { class: 'muted small' }, pc.open ? '已開放：玩家按住畫面即可查看角色。關閉後所有玩家畫面立即蓋住。' : '尚未開放：玩家可先掃信封，但看不到角色。'));
   }
 
   function joinPanel(gs) {

@@ -36,14 +36,18 @@ const FAKE = () => {
 };
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-await ctx.exposeFunction('__fbGetAll', () => db);
-await ctx.exposeFunction('__fbSet', async (p, v) => { setAt(p, v); await broadcast(); });
-await ctx.exposeFunction('__fbUpdate', async (p, patch) => { for (const [k, v] of Object.entries(patch)) setAt(p + '/' + k, v); await broadcast(); });
-await ctx.addInitScript(FAKE);
+const mkCtx = async (viewport) => {
+  const c = await browser.newContext({ viewport });
+  await c.exposeFunction('__fbGetAll', () => db);
+  await c.exposeFunction('__fbSet', async (p, v) => { setAt(p, v); await broadcast(); });
+  await c.exposeFunction('__fbUpdate', async (p, patch) => { for (const [k, v] of Object.entries(patch)) setAt(p + '/' + k, v); await broadcast(); });
+  await c.addInitScript(FAKE);
+  return c;
+};
+const ctx = await mkCtx({ width: 1280, height: 900 });
 const errors = [];
-const open = async (hash, vp) => {
-  const p = await ctx.newPage(); if (vp) await p.setViewportSize(vp);
+const open = async (hash, vp, c = ctx) => {
+  const p = await c.newPage(); if (vp) await p.setViewportSize(vp);
   p.on('pageerror', (e) => errors.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await p.goto(BASE + hash); pages.push(p); return p;
 };
@@ -121,6 +125,34 @@ const live1 = db.artifacts.undercoverGame.public.data.events[ev].live[1];
 const L = (role) => live1.ledger[codeOf('A', role)];
 if (L('sen').leave !== 23 || L('car').leave !== 2 || L('rich').leave !== 0) throw new Error('扣除錯誤 ' + JSON.stringify(live1.ledger));
 step('第 1 組成功、扣除正確');
+
+// 玩家版：開放 → 玩家 A 掃有錢人信封 → 按住看角色；玩家 B 用另一支手機掃同一信封被擋
+await dash.getByRole('button', { name: '開放玩家查看' }).click();
+const pctxA = await mkCtx({ width: 390, height: 844 });
+const pA = await open(`?player=${ev}`, null, pctxA);
+await pA.getByRole('button', { name: '掃我的信封' }).click();
+await pA.fill('.scan input', `UG:E:A:${codeOf('A', 'rich')}:v${ver}`); await pA.press('.scan input', 'Enter');
+await pA.getByText(`我是 ${seatOf(p1.order, 'rich')} 號`).waitFor();
+if (await pA.locator('.p-reveal').isVisible()) throw new Error('未按住就顯示角色');
+await shot(pA, '12-player-veil', false);
+const box = await pA.locator('.p-pad').boundingBox();
+await pA.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await pA.mouse.down();
+await pA.locator('.p-reveal').getByText('好人・有錢人').waitFor();
+const resTxt = await pA.locator('.p-res').innerText();
+if (!/特休\s*0/.test(resTxt)) throw new Error('玩家資源未同步 ' + resTxt);
+await shot(pA, '13-player-peek', false);
+await pA.mouse.up();
+await pA.waitForTimeout(150);
+if (await pA.locator('.p-reveal').isVisible()) throw new Error('放開後仍顯示角色');
+step('玩家：按住顯示、放開蓋回、資源同步');
+const pctxB = await mkCtx({ width: 390, height: 844 });
+const pB = await open(`?player=${ev}`, null, pctxB);
+await pB.getByRole('button', { name: '掃我的信封' }).click();
+await pB.fill('.scan input', `UG:E:A:${codeOf('A', 'rich')}:v${ver}`); await pB.press('.scan input', 'Enter');
+await pB.getByText('這個信封已在另一支手機開啟').waitFor();
+await shot(pB, '14-player-locked', false);
+await dash.getByText('已開啟 1 / 6').waitFor();
+step('玩家：同一信封第二支手機被擋');
 // 超時：把時間撥到 5 分鐘後
 await dash.evaluate(() => { const o = Date.now; Date.now = () => o() + 6 * 60 * 1000; });
 await dash.getByRole('button', { name: '確認超時' }).waitFor({ timeout: 3000 });
@@ -140,6 +172,11 @@ await dash.getByRole('button', { name: '下一回合' }).click();
 await p1.ph.getByText('第 2 回合').first().waitFor();
 await shot(dash, '10-dash-r2');
 step('進入第 2 回合');
+await dash.getByRole('button', { name: '揭牌：公開所有身分' }).click();
+await dash.locator('.modal').getByRole('button', { name: '揭牌' }).click();
+await pA.getByText('遊戲結束・已揭牌').waitFor();
+await shot(pA, '15-player-end', false);
+step('玩家：揭牌後顯示身分與回顧');
 
 // 5. 離線單機
 const off = await open('#/offline', { width: 390, height: 844 });

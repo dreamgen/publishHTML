@@ -117,6 +117,32 @@ export function remainingSlots(cfg, boundRoles) {
   return { goodLeft, spyLeft };
 }
 
+// ── 玩家版角色說明（每個角色固定 2 點目標＋3 點要做的事，畫面長度一致，避免從版面看出陣營）──
+const GOOD_GOALS = ['派出對的人，完成 4 個任務中的至少 3 個', '最後指認出臥底'];
+const GOOD_COMMON = ['仔細聽每個人怎麼說', '留意每次開票誰舉 O、誰舉 X'];
+export const ROLE_TEXT = {
+  sen: { sub: '特殊大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你的特休最多，需要特休的任務常是關鍵人選'] },
+  car: { sub: '特殊大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你有遊覽車，需要汽車的任務常是關鍵人選'] },
+  pow: { sub: '特殊大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你的體力最高，需要體力的任務常是關鍵人選'] },
+  rich: { sub: '特殊大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你的存款充足，需要存款的任務常是關鍵人選'] },
+  nA: { sub: '一般大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你的資源不多，多觀察、幫大家找出臥底'] },
+  nB: { sub: '一般大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你的資源不多，多觀察、幫大家找出臥底'] },
+  nC: { sub: '一般大人', goals: GOOD_GOALS, todo: [...GOOD_COMMON, '你的資源不多，多觀察、幫大家找出臥底'] },
+  sel: { sub: '借道場的人情和資源，謀自己的名利', goals: ['想辦法被派出去，讓任務失敗', '最後不被指認出來'],
+    todo: ['只爭取需要存款的任務', '參考台詞：「我存款很夠，這次派我最保險。」', '被派中出任務時，該任務一定失敗'] },
+  yang: { sub: '嘴上答應，事後沒做，或隨便丟給別人做', goals: ['想辦法被派出去，讓任務失敗', '最後不被指認出來'],
+    todo: ['對任何任務都答應會去', '參考台詞：「交給我，沒問題！」', '被派中出任務時，該任務一定失敗'] },
+  face: { sub: '只做給別人看，挑輕避重，只求掛名好看', goals: ['想辦法被派出去，讓任務失敗', '最後不被指認出來'],
+    todo: ['只爭取需要特休或體力的任務', '參考台詞：「這種體力活我最常做，一定要派我。」', '被派中出任務時，該任務一定失敗'] },
+  lie: { sub: '為了方便或小利說謊，事雖小卻違背本心', goals: ['照指定行為干擾團隊', '最後不被指認出來'],
+    todo: ['資源很好，卻怕麻煩，極力反對自己出任務', '參考台詞：「我真的不行，這次千萬不要派我。」', '若仍被派出，資源照常計算，任務不會因你失敗'] },
+  two: { sub: '嘴上請人指正，被勸時心裡卻不服', goals: ['照指定行為干擾團隊', '最後不被指認出來'],
+    todo: ['每次投票都舉 X（反對）', '參考台詞：「你說得對，我沒意見。」（但舉 X）', '被派出時資源照常計算，任務不會因你失敗'] },
+  yes: { sub: '不問對錯，一味附和、吹捧別人', goals: ['照指定行為干擾團隊', '最後不被指認出來'],
+    todo: ['每次投票都舉 O（同意）', '參考台詞：「大家說得都有道理，我都可以。」', '被派出時資源照常計算，任務不會因你失敗'] },
+};
+export function roleTitle(id) { const r = ROLE[id]; return `${r.camp === 'spy' ? '臥底' : '好人'}・${r.name}`; }
+
 // ── QR 碼對照 ─────────────────────────────────────────────────────────────────
 /** 產生 A、B 兩套各 13 個代號，兩套代號互不重複。 */
 export function generateMapping(rnd = Math.random) {
@@ -131,12 +157,14 @@ export function generateMapping(rnd = Math.random) {
 }
 
 export const QR = {
+  player: (base, ev) => `${base}?player=${ev}`,
   envelope: (set, code, v) => `UG:E:${set}:${code}:v${v}`,
   mission: (ev, round, mid) => `UG:M:${ev}:${round}:${mid}`,
   map: (v, set, map) => `UG:MAP:v${v}:${set}:` + Object.entries(map).map(([c, r]) => `${c.slice(2)}=${r}`).join(','),
   parse(text) {
     const t = String(text || '').trim();
     let m;
+    if ((m = t.match(/[?#&]player=([A-Z0-9]{4})/i))) return { type: 'player', ev: m[1].toUpperCase() };
     if ((m = t.match(/[?#&]join=([A-Z0-9]+)\.(\d+)\.(\d+)/i))) return { type: 'join', ev: m[1].toUpperCase(), batch: +m[2], g: +m[3] };
     if ((m = t.match(/^UG:E:([AB]):(Q-\d{4}):v(\d+)$/))) return { type: 'envelope', set: m[1], code: m[2], v: +m[3] };
     if ((m = t.match(/^UG:M:([A-Z0-9]+):(\d+):(m\d)$/))) return { type: 'mission', ev: m[1], round: +m[2], mid: m[3] };

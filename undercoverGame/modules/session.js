@@ -172,6 +172,23 @@ export class EventSession {
     await this.patch(p);
   }
 
+  // ── 玩家版 ──────────────────────────────────────────
+  get playerCfg() { return (this.data && this.data.player) || { open: false, revealed: false }; }
+  /** 依信封找出所在組別（必須已被助理主持人綁定座位） */
+  findEnvelope(set, code) {
+    for (const g of Object.keys((this.batch && this.batch.groups) || {})) {
+      if (this.groupCfg(g).set === set && this.seatOf(g, code)) return +g;
+    }
+    return null;
+  }
+  playerBinding(g, code) { return ((this.live(g).players || {})[code]) || null; }
+  async claimEnvelope(g, code, device) {
+    const b = this.playerBinding(g, code);
+    if (b && b.device !== device) throw new Error('LOCKED');
+    if (!b) await this.patch({ [`live/${g}/players/${code}`]: { device, at: this.now() } });
+  }
+  async resetPlayer(g, code) { await this.patch({ [`live/${g}/players/${code}`]: null }); }
+
   /** 角色查詢：初始值、每回合紀錄、角色卡剩餘欄應填內容 */
   history(g, code) {
     const role = ROLE[this.mapping(g)[code]];

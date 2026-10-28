@@ -120,3 +120,39 @@ td.num,th.num{text-align:right;font-family:var(--mono)}
   .print-page{margin:0;break-after:page;width:210mm;height:297mm}
 }
 .stack{display:flex;flex-direction:column;gap:16px}
+
+/* ── 玩家版（深色、陣營無差別配色）── */
+body.player-theme{background:#171614;color:#F1ECE2}
+.p-phone{max-width:480px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:#171614;color:#F1ECE2;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.p-phone header{padding:22px 22px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.p-phone h1{font-size:24px;font-weight:900}
+.p-phone h2{font-size:17px;font-weight:700}
+.p-phone main{flex:1;padding:6px 22px 0;display:flex;flex-direction:column;gap:16px}
+.p-phone footer{padding:16px 22px calc(26px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px}
+.p-phone footer.center{align-items:center;text-align:center}
+.p-label{font-size:12px;color:#A8A194;letter-spacing:.08em;font-weight:500}
+.p-muted{color:#A8A194}
+.p-chip{font-size:12px;font-weight:700;color:#171614;background:#D8C7A3;padding:6px 10px;border-radius:999px;white-space:nowrap}
+.p-card{background:#23211E;border:1px solid #34312B;border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.p-card.center{align-items:center;text-align:center}
+.p-note{font-size:13px;color:#A8A194;line-height:1.7;padding:12px 14px;border-radius:14px;border:1px dashed #4A463E}
+.p-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.p-steps li{display:flex;gap:12px;align-items:flex-start;line-height:1.6}
+.p-num{flex:none;width:28px;height:28px;border-radius:999px;background:#D8C7A3;color:#171614;font-weight:900;display:flex;align-items:center;justify-content:center}
+.p-btn{min-height:58px;border-radius:16px;border:0;background:#D8C7A3;color:#171614;font-size:18px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:10px;text-decoration:none;cursor:pointer;width:100%}
+.p-btn.ghost{background:transparent;color:#F1ECE2;border:1px solid #4A463E;font-size:16px}
+.p-pad{flex:1;min-height:380px;border-radius:24px;border:2px solid #34312B;background:#1F1D1A;color:#F1ECE2;padding:20px;display:flex;flex-direction:column;justify-content:center;text-align:left;touch-action:none;cursor:pointer;font:inherit}
+.p-pad[disabled]{opacity:.7;cursor:not-allowed}
+.p-veil{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
+.p-hand{width:108px;height:108px;border-radius:999px;border:2px dashed #6B655A;display:flex;align-items:center;justify-content:center;color:#D8C7A3}
+.p-reveal{display:none;flex-direction:column;gap:8px}
+.p-reveal .p-title{font-size:24px;font-weight:900}
+.p-reveal hr{border:0;border-top:1px solid #34312B;margin:4px 0;width:100%}
+.p-reveal ul{margin:0;padding-left:20px;font-size:15px;line-height:1.6;display:flex;flex-direction:column;gap:3px}
+.p-res{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;text-align:center}
+.p-res div{display:flex;flex-direction:column;gap:2px;padding:9px 0;border-radius:12px;background:#23211E}
+.p-res span{font-size:11px;color:#A8A194}
+.p-res b{font-family:var(--mono);font-size:15px}
+.p-phone.peeking .p-pad{border-color:#D8C7A3;justify-content:flex-start}
+.p-phone.peeking .p-veil,.p-phone.peeking .p-task{display:none}
+.p-phone.peeking .p-reveal{display:flex}

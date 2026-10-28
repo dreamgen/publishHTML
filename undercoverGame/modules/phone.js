@@ -387,6 +387,9 @@ function groupApp(app, S, g, info) {
           ...boxRow('存款', 'money', role.money), ...boxRow('特休', 'leave', role.leave)),
         over ? h('p', { class: 'note bad' }, '變動超過 4 次，卡上格子不夠，請寫在旁邊。') : null,
         h('p', { class: 'small' }, `目前：存款 ${fmtNum(hist.money)}・特休 ${hist.leave} 天・體力 ${role.power}（不扣）・交通 ${role.car}（不扣）`)),
+      !offline && S.playerBinding(g, code) ? h('section', { class: 'card' },
+        h('div', { class: 'row between' }, h('h2', {}, '玩家手機'), h('span', { class: 'chip ok' }, '已在玩家手機開啟')),
+        h('button', { class: 'btn', onclick: async () => { if (await confirmBox('重設玩家手機綁定？', '玩家換手機時使用，重設後請玩家重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code); } }, '重設手機綁定')) : null,
       h('section', { class: 'card' },
         h('h2', {}, '資源使用記錄'),
         hist.log.length ? h('ol', { class: 'list' }, hist.log.map((y) => {

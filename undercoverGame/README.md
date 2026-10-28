@@ -16,6 +16,7 @@
 |---|---|---|
 | 控場講師（電腦） | `/undercoverGame/#/dash` | 建立活動、列印信封 QR、設定梯次與組別、選任務、開始／暫停、確認超時、看各組資源 |
 | 助理主持人（手機） | 掃儀表板上的組別 QR 碼 | 確認組別 → 依座位掃信封綁定 → 每回合掃任務 QR、掃 3 位隊員判定 → 抄剩餘量；隨時可掃信封查角色與記錄 |
+| 玩家（手機，僅連線） | 掃儀表板「玩家版」區塊的玩家入口 QR（`?player=活動代碼`） | 掃自己的信封 → 按住查看角色、目標、剩餘資源；揭牌後看身分與回顧 |
 | 沒網路時 | `/undercoverGame/#/offline` | 手機自行建立組別、選任務、計時與確認超時；不同步、沒有儀表板 |
 
 ## 活動前準備
@@ -52,6 +53,7 @@
 | `modules/dashboard.js` | 控場講師儀表板 |
 | `modules/print.js` | 貼紙與對照表列印頁（A4） |
 | `modules/phone.js` | 助理主持人手機（連線／離線） |
+| `modules/player.js` | 玩家版：掃自己的信封、按住查看角色（防偷看）、揭牌回顧 |
 | `modules/spypick.js` | 臥底卡抽法選擇（實體抽／儀表板抽） |
 | `modules/ui.js` | 共用元件、QR 產生（qrious）與掃描（BarcodeDetector／jsQR） |
 | `test/rules.test.mjs` | 以修正方案 6 人組試算驗證扣除：`node test/rules.test.mjs` |

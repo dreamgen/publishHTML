@@ -72,7 +72,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
 <header class="hero">
   <div class="eyebrow">勿虛心假意・體驗遊戲結算 PWA</div>
   <h1>操作說明書</h1>
-  <p class="lead">給控場講師與助理主持人的完整操作說明：從活動前列印信封 QR 碼、每梯次分組綁定，到每回合掃碼結算、角色查詢，以及現場沒網路時的離線單機模式。</p>
+  <p class="lead">給控場講師與助理主持人的完整操作說明：從活動前列印信封 QR 碼、每梯次分組綁定，到每回合掃碼結算、角色查詢、玩家版，以及現場沒網路時的離線單機模式。</p>
   <div class="actions">
     <a class="btn primary" href="./#/dash">開啟控場儀表板</a>
     <a class="btn" href="./#/phone">開啟助理主持人手機</a>
@@ -94,6 +94,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
     <li><a href="#timeout">暫停、超時與撤銷</a></li>
     <li><a href="#lookup">角色查詢與校正卡片</a></li>
     <li><a href="#offline">離線單機模式</a></li>
+    <li><a href="#player">玩家版（手機看自己的角色）</a></li>
     <li><a href="#rules">判定規則速查</a></li>
     <li><a href="#faq">常見狀況</a></li>
   </ol>
@@ -256,8 +257,27 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
   </div>
 </section>
 
+<section class="sec" id="player">
+  <h2>10. 玩家版：手機看自己的角色 <span class="who dash">控場講師</span><span class="who phone">玩家</span></h2>
+  <p>僅限連線模式。玩家用自己的手機掃自己的信封，就能在手機上查看角色、目標、要做的事與目前剩餘資源（每回合結算後自動更新）。</p>
+  <ol class="steps">
+    <li><b>控場講師</b>：「回合控制」下方的「玩家版」區塊有<b>玩家入口 QR 碼</b>，投影或印在桌牌上。按「開放玩家查看」後玩家才看得到角色；關閉後所有玩家畫面立即蓋住。</li>
+    <li><b>玩家</b>：用手機相機掃玩家入口 → 按「掃我的信封」→ 手機貼近胸前、用手遮住，掃自己的信封（須先由助理主持人完成座位綁定）。</li>
+    <li>平常畫面只顯示座位與本回合任務等公開資訊。<b>按住畫面中間</b>才顯示角色，放開立刻蓋回；切到別的 App、關螢幕或 8 秒後也會自動蓋回。</li>
+    <li>好人與臥底的畫面版面、顏色、長度都一樣，遠看無法分辨。</li>
+    <li>一個信封只能在一支手機開啟；別人掃到會顯示「已在另一支手機開啟」。玩家換手機時，可在儀表板玩家版區塊點該座位，或在助理主持人的「角色查詢」按「重設手機綁定」。</li>
+    <li>遊戲結束後按「揭牌：公開所有身分」，玩家手機會顯示自己的身分、回合紀錄與本組所有人的身分，供引導討論使用。</li>
+  </ol>
+  <div class="shots">
+    <figure class="phone"><img src="guide/player-veil.webp" alt="玩家遮蔽畫面" loading="lazy"><figcaption>平常：遮蔽畫面</figcaption></figure>
+    <figure class="phone"><img src="guide/player-peek.webp" alt="玩家按住時顯示角色" loading="lazy"><figcaption>按住時才顯示角色</figcaption></figure>
+    <figure class="phone"><img src="guide/player-locked.webp" alt="信封已在另一支手機開啟" loading="lazy"><figcaption>別人掃你的信封會被擋</figcaption></figure>
+    <figure class="phone"><img src="guide/player-end.webp" alt="揭牌後畫面" loading="lazy"><figcaption>揭牌後：身分與回顧</figcaption></figure>
+  </div>
+</section>
+
 <section class="sec" id="rules">
-  <h2>10. 判定規則速查</h2>
+  <h2>11. 判定規則速查</h2>
   <h3>判定順序（由上而下，命中即停）</h3>
   <div class="scroll"><table>
     <thead><tr><th>宣告</th><th>使用時機</th></tr></thead>
@@ -294,7 +314,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
 </section>
 
 <section class="sec" id="faq">
-  <h2>11. 常見狀況</h2>
+  <h2>12. 常見狀況</h2>
   <details><summary>相機打不開、掃不到 QR 碼</summary><p>先確認已允許相機權限、網址是 https。掃描視窗下方可以手動輸入代號，輸入 4 位數字即可（例如 <code>4827</code>）。掃隊員時也可以展開「改點座位編號」直接點號碼。</p></details>
   <details><summary>掃到「這是 vN 的舊貼紙」</summary><p>QR 碼曾被更新過，這張貼紙已作廢。請換成目前版本的貼紙與對照表。</p></details>
   <details><summary>掃到「這個信封不在本組的套別」</summary><p>第 1 組用 A 套、第 2 組用 B 套，請確認信封沒有拿錯套。</p></details>
@@ -303,6 +323,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
   <details><summary>手機顯示「這張組別 QR 碼已失效」</summary><p>控場講師已建立新梯次，請重新掃儀表板上新的組別 QR 碼。</p></details>
   <details><summary>結算掃錯人</summary><p>在結果畫面按「撤銷重掃」，資源會還原，再重新掃一次。宣告前請先確認畫面上是 3 個正確號碼。</p></details>
   <details><summary>現場網路中斷</summary><p>儀表板上方會顯示「連線中斷」。短暫斷線恢復後會自動同步；若長時間無法連線，請各組改用離線單機模式，或用紙本對照表人工判定。</p></details>
+  <details><summary>玩家說看不到角色</summary><p>確認儀表板已按「開放玩家查看」、該座位已由助理主持人綁定；若顯示「已在另一支手機開啟」，請重設該座位的手機綁定。</p></details>
   <details><summary>想換一台電腦開儀表板</summary><p>在新電腦開啟儀表板 →「開啟既有活動」，輸入 4 碼活動代碼即可。</p></details>
 </section>
 </main>
