@@ -1,6 +1,6 @@
 // node test/rules.test.mjs —— 以修正方案第一節「任務」表的 6 人組試算驗證判定與扣除
 import assert from 'node:assert/strict';
-import { ROLE, MISSION, judge, splitGroups, buildGroupRoles, generateMapping, QR } from '../modules/rules.js';
+import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR } from '../modules/rules.js';
 
 const res = {};
 const mk = (...ids) => ids.map((id) => ({ code: id, role: id, money: res[id].money, leave: res[id].leave }));
@@ -23,13 +23,16 @@ assert.deepEqual([res.rich.money, res.sen.money, res.pow.money], [39000, 14000, 
 // 3 旅遊辦道 → 有錢人 25,000、資深 2,000、有交通工具 0
 r = judge(MISSION.m3, mk('car', 'rich', 'sen')); assert.equal(r.ok, true); apply(r);
 assert.deepEqual([res.rich.money, res.sen.money, res.car.money], [25000, 2000, 0]);
-// 4 秋季祭典幫廚 → 資深 20、其他人 0
+// 4 秋季祭典幫廚（只算體力＋車輛）：體力 50＋20＋10 剛好 80、遊覽車＋轎車；不扣除
 r = judge(MISSION.m4, mk('pow', 'car', 'sen')); assert.equal(r.ok, true); apply(r);
-assert.deepEqual([res.sen.leave, res.pow.leave, res.car.leave], [20, 0, 0]);
-// 第 4 回合後好人只剩存款 27,000、特休 20 天
+assert.equal(r.totals.power, 80);
+assert.deepEqual([res.sen.leave, res.pow.leave, res.car.leave], [23, 1, 2]);
+assert.equal(judge(MISSION.m4, mk('pow', 'car', 'rich')).ok, true);
+assert.equal(judge(MISSION.m4, mk('pow', 'rich', 'sen')).reason, '體力');
+// 第 4 回合後好人剩存款 27,000、特休 26 天
 const goods = ['sen', 'car', 'pow', 'rich'];
 assert.equal(goods.reduce((s, k) => s + res[k].money, 0), 27000);
-assert.equal(goods.reduce((s, k) => s + res[k].leave, 0), 20);
+assert.equal(goods.reduce((s, k) => s + res[k].leave, 0), 26);
 
 // 失敗原因（重設資源）
 for (const id of Object.keys(res)) res[id] = { money: ROLE[id].money, leave: ROLE[id].leave };
@@ -44,9 +47,18 @@ assert.equal(judge(MISSION.m5, mk('pow', 'lie', 'sen')).ok, true);
 assert.deepEqual(splitGroups(11), [11]);
 assert.deepEqual(splitGroups(12), [6, 6]);
 assert.deepEqual(splitGroups(13), [6, 7]);
-assert.equal(buildGroupRoles(6).length, 6);
-assert.equal(buildGroupRoles(11).length, 11);
-assert.throws(() => buildGroupRoles(8, ['sel', 'two']));
+// 臥底不分型、不控比例
+assert.equal(drawSpies(8).length, 3);
+const phys = makeGroupCfg(6, 'A');
+assert.equal(phys.draw, 'physical');
+assert.equal(roleAllowed(phys, 'sel', ['sen']), null);
+assert.equal(roleAllowed(phys, 'yang', ['sel']), null); // 兩張都是破壞型也可以
+assert.match(roleAllowed(phys, 'face', ['sel', 'yang']), /臥底已滿/);
+assert.match(roleAllowed(phys, 'nA', []), /不使用/);
+const dash = makeGroupCfg(6, 'A', 'dashboard', ['two', 'yes']);
+assert.equal(roleAllowed(dash, 'yes', []), null);
+assert.match(roleAllowed(dash, 'sel', []), /不是儀表板抽中/);
+assert.throws(() => makeGroupCfg(8, 'A', 'dashboard', ['sel', 'two']));
 
 // QR
 const map = generateMapping();

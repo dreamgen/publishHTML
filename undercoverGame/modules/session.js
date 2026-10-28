@@ -8,7 +8,7 @@
 //   live/<g>: { phone, seats: { 1: code }, ledger: { code: {money, leave} },
 //               rounds: { <r>: { mid, seats, ok, reason, deltas, timeout, at } }, loaded: { round, mid } }
 import { connect } from './fb.js';
-import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger } from './rules.js';
+import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed } from './rules.js';
 
 const LS_OFFLINE = 'ug.offline.v1';
 
@@ -117,18 +117,20 @@ export class EventSession {
   }
 
   // ── 手機：綁定、結算、撤銷 ─────────────────────────────
+  /** 已綁定座位的角色（實體抽時，臥底以掃到的為準） */
+  boundRoles(g) { const map = this.mapping(g); return Object.values(this.seats(g)).map((c) => map[c]); }
   checkEnvelope(g, code) {
     const map = this.mapping(g), cfg = this.groupCfg(g);
     const role = map[code];
     if (!role) return { error: '這個 QR 碼不在本組的信封套別裡（可能是另一套或舊版本）' };
-    if (!cfg.roles.includes(role)) return { error: '這個信封的角色本組沒有使用，請換一個信封', role };
-    return { role };
+    const exist = this.seatOf(g, code);
+    if (exist) return { error: `這個信封已綁定在 ${exist} 號`, role };
+    const err = roleAllowed(cfg, role, this.boundRoles(g));
+    return err ? { error: err, role } : { role };
   }
   async bindSeat(g, seat, code) {
     const chk = this.checkEnvelope(g, code);
     if (chk.error) throw new Error(chk.error);
-    const exist = this.seatOf(g, code);
-    if (exist) throw new Error(`這個信封已綁定在 ${exist} 號`);
     const p = { [`live/${g}/seats/${seat}`]: code };
     const cfg = this.groupCfg(g);
     const seats = { ...this.seats(g), [seat]: code };

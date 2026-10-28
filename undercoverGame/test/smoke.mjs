@@ -65,13 +65,16 @@ await dash.goto(BASE + '#/dash'); await dash.getByRole('button', { name: '梯次
 await dash.getByRole('button', { name: '梯次與組別' }).click();
 await dash.fill('input[type=number]', '12'); await dash.locator('input[type=number]').dispatchEvent('change');
 await dash.getByText('分組：6＋6 人').waitFor();
+await dash.getByRole('button', { name: '儀表板抽' }).nth(1).click(); // 第 2 組改儀表板抽
 await dash.getByRole('button', { name: '建立本梯次' }).click();
 await dash.getByText('第 1 組・6 人・A 套').waitFor();
 await shot(dash, '4-join');
 const batch = db.artifacts.undercoverGame.public.data.events[ev].batch;
 const sets = db.artifacts.undercoverGame.public.data.events[ev].qr.sets;
 const ver = db.artifacts.undercoverGame.public.data.events[ev].qr.version;
-step('組別角色 ' + JSON.stringify(batch.groups[1].roles));
+const SPY_ORDER = ['sel', 'two', 'yang', 'yes', 'face', 'lie'];
+const rolesOf = (cfg) => [...cfg.good, ...(cfg.spies || SPY_ORDER.slice(0, cfg.spyCount))];
+step('第 1 組 ' + JSON.stringify(rolesOf(batch.groups[1])) + '・抽法 ' + batch.groups[1].draw);
 
 // 3. 兩支手機加入、綁定（用手動輸入代替相機）
 const codeOf = (set, role) => Object.keys(sets[set]).find((c) => sets[set][c] === role);
@@ -81,7 +84,7 @@ for (const g of [1, 2]) {
   await ph.getByRole('button', { name: '確認，開始綁定座位' }).click({ timeout: 8000 }).catch(async (e) => { console.log(await ph.evaluate(() => location.href + ' | ' + document.body.innerText)); throw e; });
   const cfg = batch.groups[g];
   // 座位順序：依角色陣列打散
-  const order = [...cfg.roles];
+  const order = rolesOf(cfg);
   await ph.getByRole('button', { name: /號座位的信封/ }).first().click();
   for (const role of order) {
     await ph.fill('.scan input', `UG:E:${cfg.set}:${codeOf(cfg.set, role)}:v${ver}`);
@@ -141,13 +144,13 @@ await off.getByRole('button', { name: '切換為離線並開始綁定' }).click(
 const offData = await off.evaluate(() => JSON.parse(localStorage.getItem('ug.offline.v1')));
 const og = offData.myGroup, oc = offData.batch.groups[og];
 await off.getByRole('button', { name: /號座位的信封/ }).first().click();
-for (const role of oc.roles) { await off.fill('.scan input', codeOf(oc.set, role)); await off.press('.scan input', 'Enter'); await off.waitForTimeout(80); }
+for (const role of rolesOf(oc)) { await off.fill('.scan input', codeOf(oc.set, role)); await off.press('.scan input', 'Enter'); await off.waitForTimeout(80); }
 await off.waitForSelector('.scan', { state: 'detached' });
 await off.getByRole('button', { name: /大專夏令營/ }).click();
 await off.getByRole('button', { name: '開始計時' }).click();
 await off.locator('summary').click();
-const spy = oc.roles.find((r) => ['sel', 'yang', 'face'].includes(r));
-for (const role of ['pow', 'rich', spy]) await off.getByRole('button', { name: String(oc.roles.indexOf(role) + 1), exact: true }).click();
+const ocRoles = rolesOf(oc); const spy = 'sel';
+for (const role of ['pow', 'rich', spy]) await off.getByRole('button', { name: String(ocRoles.indexOf(role) + 1), exact: true }).click();
 await off.getByRole('button', { name: '判定結果' }).click();
 await off.getByText('「任務失敗，原因：人。」').waitFor();
 await shot(off, '11-offline-fail');

@@ -3,9 +3,10 @@ import { h, toast, confirmBox, qrImg, iconEl, fmtClock, wakeLock } from './ui.js
 import { EventSession } from './session.js';
 import { connect } from './fb.js';
 import {
-  ROLE, MISSIONS, MISSION, SABOTAGE, DISRUPT, ROUND_LIMIT_MS, KIND_LABEL,
-  splitGroups, composition, buildGroupRoles, shuffle, generateMapping, needText, fmtNum, QR,
+  ROLE, MISSIONS, MISSION, ROUND_LIMIT_MS, KIND_LABEL,
+  splitGroups, composition, makeGroupCfg, generateMapping, needText, fmtNum, QR,
 } from './rules.js';
+import { spyPicker } from './spypick.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
@@ -76,17 +77,14 @@ function dashboard(app, S) {
   const initForm = () => {
     const b = S.batch;
     const total = b ? b.total : 12;
-    form = { no: b ? b.no + 1 : 1, total, spies: {} };
+    form = { no: b ? b.no + 1 : 1, total, picks: {} };
     rollSpies();
   };
   const rollSpies = () => {
     let sizes;
     try { sizes = splitGroups(form.total); } catch (e) { form.error = e.message; form.sizes = []; return; }
-    form.error = null; form.sizes = sizes; form.spies = {};
-    sizes.forEach((size, i) => {
-      const c = composition(size);
-      form.spies[i + 1] = [...shuffle(SABOTAGE).slice(0, c.sab), ...shuffle(DISRUPT).slice(0, c.dis)];
-    });
+    form.error = null; form.sizes = sizes; form.picks = {};
+    sizes.forEach((size, i) => { form.picks[i + 1] = { draw: 'physical', spies: null }; });
   };
 
   const render = () => {
@@ -140,17 +138,10 @@ function dashboard(app, S) {
     const b = S.batch;
     const groupCards = form.sizes.map((size, i) => {
       const g = i + 1, c = composition(size), set = g === 1 ? 'A' : 'B';
-      const picks = form.spies[g];
-      const sel = (idx, pool) => h('select', {
-        'aria-label': pool === SABOTAGE ? '破壞型' : '干擾型',
-        onchange: (e) => { picks[idx] = e.target.value; },
-      }, pool.map((id) => h('option', { value: id, selected: picks[idx] === id }, ROLE[id].name)));
       return h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `好人 ${c.good.length}・臥底 ${c.sab + c.dis}・信封 ${set} 套`)),
+        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `好人 ${c.good.length}・臥底 ${c.spies}・信封 ${set} 套`)),
         h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '好人　'), c.good.map((id) => ROLE[id].name).join('、')),
-        h('div', { class: 'grid g2' },
-          ...picks.slice(0, c.sab).map((_, k) => h('label', { class: 'field' }, `破壞型 ${k + 1}`, sel(k, SABOTAGE))),
-          ...picks.slice(c.sab).map((_, k) => h('label', { class: 'field' }, `干擾型 ${k + 1}`, sel(c.sab + k, DISRUPT)))));
+        spyPicker(size, form.picks[g], render));
     });
     return h('div', { class: 'stack' },
       h('section', { class: 'card' },
@@ -158,8 +149,7 @@ function dashboard(app, S) {
           h('label', { class: 'field' }, '梯次',
             h('select', { onchange: (e) => { form.no = +e.target.value; } }, [1, 2, 3, 4, 5, 6, 7, 8].map((n) => h('option', { value: n, selected: form.no === n }, `第 ${n} 梯次`)))),
           h('label', { class: 'field' }, '本梯次總人數',
-            h('input', { type: 'number', min: 6, max: 22, value: form.total, onchange: (e) => { form.total = +e.target.value; rollSpies(); render(); } })),
-          h('button', { class: 'btn', onclick: () => { rollSpies(); render(); } }, '重新抽選臥底')),
+            h('input', { type: 'number', min: 6, max: 22, value: form.total, onchange: (e) => { form.total = +e.target.value; rollSpies(); render(); } }))),
         form.error ? h('p', { class: 'note bad' }, form.error)
           : h('p', { class: 'muted small' }, `分組：${form.sizes.join('＋')} 人。規則：11 人以下 1 組；12 人分 6＋6；13 人分 6＋7。每組依人數自動帶入好壞比例。`)),
       ...groupCards,
@@ -171,9 +161,9 @@ function dashboard(app, S) {
               const groups = {};
               form.sizes.forEach((size, i) => {
                 const g = i + 1;
-                const spies = form.spies[g];
-                if (new Set(spies).size !== spies.length) throw new Error(`第 ${g} 組臥底重複，請重新選擇`);
-                groups[g] = { size, set: g === 1 ? 'A' : 'B', roles: buildGroupRoles(size, spies) };
+                const pk = form.picks[g];
+                try { groups[g] = makeGroupCfg(size, g === 1 ? 'A' : 'B', pk.draw, pk.draw === 'dashboard' ? pk.spies : null); }
+                catch (err) { throw new Error(`第 ${g} 組：${err.message}`); }
               });
               if (b && !(await confirmBox(`建立第 ${form.no} 梯次？`, '目前各組的綁定與結算記錄會清除。', '建立', true))) return;
               await S.patch({
@@ -263,7 +253,9 @@ function dashboard(app, S) {
         qrImg(url, 200, `第 ${g} 組加入用 QR 碼`),
         h('span', { class: 'chip ' + (live.phone ? 'ok' : '') }, live.phone ? `手機已加入・綁定 ${bound}/${cfg.size}` : '等待手機掃描'),
         h('p', { class: 'muted tiny' }, '助理主持人用手機相機或本程式掃描加入。QR 碼不含角色資訊。'),
-        h('details', {}, h('summary', { class: 'small' }, '本組角色（請勿外流）'), h('p', { class: 'small' }, cfg.roles.map((id) => ROLE[id].name).join('、'))));
+        h('details', {}, h('summary', { class: 'small' }, '本組角色（請勿外流）'),
+          h('p', { class: 'small' }, '好人：', cfg.good.map((id) => ROLE[id].name).join('、')),
+          h('p', { class: 'small' }, '臥底：', cfg.draw === 'dashboard' ? cfg.spies.map((id) => ROLE[id].name).join('、') : `實體抽 ${cfg.spyCount} 張，綁定時以掃到的為準`)));
     }).concat([h('section', { class: 'card' },
       h('h2', {}, '等待全部組別綁定完成'),
       h('p', { class: 'muted small' }, '每組手機加入後，依座位編號逐一掃信封。全部組別都綁定完成，才會出現回合控制。'))]));

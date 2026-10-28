@@ -20,6 +20,7 @@ export const ROLE = Object.fromEntries(ROLES.map((r) => [r.id, r]));
 export const SABOTAGE = ROLES.filter((r) => r.kind === 'sabotage').map((r) => r.id);
 export const DISRUPT = ROLES.filter((r) => r.kind === 'disrupt').map((r) => r.id);
 export const SPECIALS = ['sen', 'car', 'pow', 'rich'];
+export const SPIES = ROLES.filter((r) => r.camp === 'spy').map((r) => r.id);
 
 export const KIND_LABEL = { special: '好人・特殊大人', normal: '好人・一般大人', sabotage: '臥底・破壞型', disrupt: '臥底・干擾型' };
 export const WHEN_LABEL = { sen: '每組必用', car: '每組必用', pow: '每組必用', rich: '每組必用', nA: '7 人以上', nB: '9 人以上', nC: '11 人' };
@@ -31,7 +32,7 @@ export const MISSIONS = [
   { id: 'm1', name: '輪值司機', tag: '任務', need: { leave: 15, cars: 2 } },
   { id: 'm2', name: '大專夏令營', tag: '任務', need: { power: 60, money: 18000 } },
   { id: 'm3', name: '旅遊辦道', tag: '任務', need: { money: 36000, transport: [{ bus: 1 }, { cars: 3 }] } },
-  { id: 'm4', name: '秋季祭典幫廚', tag: '任務', need: { power: 80, leave: 6, cars: 2 } },
+  { id: 'm4', name: '秋季祭典幫廚', tag: '任務', need: { power: 80, cars: 2 } },
   { id: 'm5', name: '災後復原', tag: '備用', need: { power: 100, leave: 12 } },
 ];
 export const MISSION = Object.fromEntries(MISSIONS.map((m) => [m.id, m]));
@@ -59,18 +60,19 @@ export function splitGroups(total) {
   return Array.from({ length: g }, (_, i) => base + (i >= g - extra ? 1 : 0));
 }
 
+// 每組人數 → 好人角色與臥底人數。臥底不分破壞型／干擾型，從 6 種臥底中隨機抽，不控制比例。
 const COMPOSE = {
-  6: { normals: [], sab: 1, dis: 1 },
-  7: { normals: ['nA'], sab: 1, dis: 1 },
-  8: { normals: ['nA'], sab: 2, dis: 1 },
-  9: { normals: ['nA', 'nB'], sab: 2, dis: 1 },
-  10: { normals: ['nA', 'nB'], sab: 2, dis: 2 },
-  11: { normals: ['nA', 'nB', 'nC'], sab: 2, dis: 2 },
+  6: { normals: [], spies: 2 },
+  7: { normals: ['nA'], spies: 2 },
+  8: { normals: ['nA'], spies: 3 },
+  9: { normals: ['nA', 'nB'], spies: 3 },
+  10: { normals: ['nA', 'nB'], spies: 4 },
+  11: { normals: ['nA', 'nB', 'nC'], spies: 4 },
 };
 export function composition(size) {
   const c = COMPOSE[size];
   if (!c) throw new Error('每組人數須為 6～11 人');
-  return { good: [...SPECIALS, ...c.normals], sab: c.sab, dis: c.dis };
+  return { good: [...SPECIALS, ...c.normals], spies: c.spies };
 }
 
 export function shuffle(arr, rnd = Math.random) {
@@ -79,14 +81,40 @@ export function shuffle(arr, rnd = Math.random) {
   return a;
 }
 
-/** 依人數產生一組角色；spies 可指定（陣列），否則隨機抽選。 */
-export function buildGroupRoles(size, spies) {
+export function drawSpies(size, rnd = Math.random) { return shuffle(SPIES, rnd).slice(0, composition(size).spies); }
+
+/**
+ * 建立一組的設定。
+ * draw = 'physical'（預設，實體抽臥底卡：綁定座位時掃到哪張臥底就是哪張）
+ *      | 'dashboard'（由儀表板／手機事先抽定，spies 為臥底角色陣列）
+ */
+export function makeGroupCfg(size, set, draw = 'physical', spies = null) {
   const c = composition(size);
-  const sab = spies ? spies.filter((s) => SABOTAGE.includes(s)) : shuffle(SABOTAGE).slice(0, c.sab);
-  const dis = spies ? spies.filter((s) => DISRUPT.includes(s)) : shuffle(DISRUPT).slice(0, c.dis);
-  if (sab.length !== c.sab || dis.length !== c.dis) throw new Error(`${size} 人組需破壞型 ${c.sab} 位、干擾型 ${c.dis} 位`);
-  if (new Set([...sab, ...dis]).size !== sab.length + dis.length) throw new Error('臥底不可重複');
-  return [...c.good, ...sab, ...dis];
+  const cfg = { size, set, draw, good: c.good, spyCount: c.spies };
+  if (draw === 'dashboard') {
+    const list = spies || drawSpies(size);
+    if (list.length !== c.spies) throw new Error(`${size} 人組需要 ${c.spies} 位臥底`);
+    if (new Set(list).size !== list.length || list.some((id) => !SPIES.includes(id))) throw new Error('臥底不可重複');
+    cfg.spies = list;
+  }
+  return cfg;
+}
+
+/** 這個角色能不能綁進本組。boundRoles：已綁定座位的角色。回傳錯誤訊息或 null。 */
+export function roleAllowed(cfg, role, boundRoles) {
+  if (!ROLE[role]) return '不明的角色';
+  if (boundRoles.includes(role)) return '這個角色已經綁定過了';
+  if (ROLE[role].camp === 'good') return cfg.good.includes(role) ? null : `這個好人角色 ${cfg.size} 人組不使用，請換一個信封`;
+  if (cfg.draw === 'dashboard') return cfg.spies.includes(role) ? null : '這張臥底卡不是儀表板抽中的，請換一個信封';
+  const spiesBound = boundRoles.filter((r) => ROLE[r].camp === 'spy').length;
+  return spiesBound < cfg.spyCount ? null : `本組臥底已滿 ${cfg.spyCount} 位，請換好人的信封`;
+}
+
+/** 綁定完成前，好人與臥底各還差幾位 */
+export function remainingSlots(cfg, boundRoles) {
+  const goodLeft = cfg.good.filter((r) => !boundRoles.includes(r)).length;
+  const spyLeft = cfg.spyCount - boundRoles.filter((r) => ROLE[r].camp === 'spy').length;
+  return { goodLeft, spyLeft };
 }
 
 // ── QR 碼對照 ─────────────────────────────────────────────────────────────────

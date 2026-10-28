@@ -2,9 +2,10 @@
 import { h, toast, confirmBox, openScanner, iconEl, fmtClock } from './ui.js';
 import { EventSession, deviceId, loadOffline, saveOffline, clearOffline } from './session.js';
 import {
-  ROLE, MISSIONS, MISSION, SABOTAGE, DISRUPT, ROUND_LIMIT_MS, KIND_LABEL, REASON_ORDER,
-  composition, buildGroupRoles, shuffle, needText, fmtNum, announce, QR,
+  ROLE, MISSIONS, MISSION, ROUND_LIMIT_MS, KIND_LABEL, REASON_ORDER,
+  composition, makeGroupCfg, remainingSlots, needText, fmtNum, announce, QR,
 } from './rules.js';
+import { spyPicker } from './spypick.js';
 import { setUnmount } from './nav.js';
 
 const LS_PHONE = 'ug.phone';
@@ -70,15 +71,12 @@ function offlineEntry(app) {
     return groupApp(app, S, data.myGroup || 1, null);
   }
   const maps = jget(LS_MAPS);
-  const st = { no: 1, g: 1, size: 6, set: 'A', spies: null };
-  const roll = () => { const c = composition(st.size); st.spies = [...shuffle(SABOTAGE).slice(0, c.sab), ...shuffle(DISRUPT).slice(0, c.dis)]; };
-  roll();
+  const st = { no: 1, g: 1, size: 6, set: 'A', pick: { draw: 'physical', spies: null } };
+  const roll = () => { st.pick.spies = null; };
   let mapsNow = maps;
   const render = () => {
     const c = composition(st.size);
     const have = mapsNow && mapsNow.sets && mapsNow.sets[st.set];
-    const sel = (idx, pool) => h('select', { 'aria-label': pool === SABOTAGE ? '破壞型' : '干擾型', onchange: (e) => { st.spies[idx] = e.target.value; } },
-      pool.map((id) => h('option', { value: id, selected: st.spies[idx] === id }, ROLE[id].name)));
     app.replaceChildren(shell('單機建立組別', null,
       h('div', { class: 'note bad' }, '離線後本組只在這支手機運作，不再同步，也沒有儀表板。任務、計時與超時都由你在手機上決定。'),
       h('div', { class: 'grid g2' },
@@ -87,11 +85,9 @@ function offlineEntry(app) {
       h('div', { class: 'field' }, h('span', {}, '本組人數'),
         h('div', { class: 'grid g6' }, [6, 7, 8, 9, 10, 11].map((n) => h('button', { class: 'btn', 'aria-pressed': String(st.size === n), onclick: () => { st.size = n; roll(); render(); } }, n)))),
       h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `好人 ${c.good.length}・臥底 ${c.sab + c.dis}`)),
+        h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `好人 ${c.good.length}・臥底 ${c.spies}`)),
         h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '好人　'), c.good.map((id) => ROLE[id].name).join('、')),
-        h('div', { class: 'grid g2' },
-          ...Array.from({ length: c.sab }, (_, k) => h('label', { class: 'field' }, `破壞型 ${k + 1}`, sel(k, SABOTAGE))),
-          ...Array.from({ length: c.dis }, (_, k) => h('label', { class: 'field' }, `干擾型 ${k + 1}`, sel(c.sab + k, DISRUPT)))),
+        spyPicker(st.size, st.pick, render, '手機抽'),
         h('label', { class: 'field' }, '信封套別', h('select', { onchange: (e) => { st.set = e.target.value; render(); } }, ['A', 'B'].map((s) => h('option', { value: s, selected: st.set === s }, `${s} 套`)))),
         have ? h('div', { class: 'note ok' }, `${st.set} 套 v${mapsNow.version} 對照已在手機上`)
           : h('div', { class: 'note bad' }, `手機上沒有 ${st.set} 套的對照。請掃對照表或儀表板上的「離線載入 QR 碼」。`),
@@ -113,12 +109,11 @@ function offlineEntry(app) {
         h('button', {
           class: 'btn dark big', disabled: !have, onclick: () => {
             try {
-              if (new Set(st.spies).size !== st.spies.length) throw new Error('臥底重複，請重新選擇');
-              const roles = buildGroupRoles(st.size, st.spies);
+              const cfg = makeGroupCfg(st.size, st.set, st.pick.draw, st.pick.draw === 'dashboard' ? st.pick.spies : null);
               const data = {
                 myGroup: st.g, createdAt: Date.now(),
                 qr: { version: mapsNow.version, sets: { [st.set]: mapsNow.sets[st.set] } },
-                batch: { no: st.no, total: st.size, groups: { [st.g]: { size: st.size, set: st.set, roles } } },
+                batch: { no: st.no, total: st.size, groups: { [st.g]: cfg } },
                 control: { round: 1, missionId: null, status: 'idle', accum: 0, startAt: null },
                 live: { [st.g]: { phone: { id: deviceId(), at: Date.now() } } },
               };
@@ -199,6 +194,8 @@ function groupApp(app, S, g, info) {
     let closer = () => {};
     return shell('掃碼綁定座位', sub(),
       h('div', { class: 'row between' }, h('span', { class: 'muted small' }, '座位順序（順時針）・角色不顯示'), h('b', { class: 'mono' }, `${bound.length} / ${cfg.size}`)),
+      (() => { const r = remainingSlots(cfg, S.boundRoles(g)); return h('p', { class: 'muted tiny' },
+        `還需好人 ${r.goodLeft} 位・臥底 ${r.spyLeft} 位${cfg.draw === 'dashboard' ? '（只收儀表板抽中的臥底卡）' : '（實體抽，以掃到的為準）'}`); })(),
       h('ol', { class: 'list' }, Array.from({ length: cfg.size }, (_, i) => {
         const s = i + 1, code = seats[s];
         return h('li', { class: code ? '' : s === next ? 'cur' : 'todo' },
