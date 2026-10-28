@@ -53,7 +53,7 @@ function entry(app) {
     lsSet(LS_EV, v); mountDashboard(app);
   };
   app.replaceChildren(h('main', { class: 'wrap', style: { maxWidth: '720px' } },
-    h('header', {}, h('div', {}, h('span', { class: 'eyebrow' }, '勿虛心假意・控場講師'), h('h1', {}, '儀表板')), h('a', { class: 'btn', href: '#/' }, iconEl('back'), '首頁')),
+    h('header', {}, h('div', {}, h('span', { class: 'eyebrow' }, '勿虛心假意・控場講師'), h('h1', {}, '儀表板')), h('div', { class: 'row' }, h('a', { class: 'btn', href: './guide.html', target: '_blank', rel: 'noopener' }, '操作說明'), h('a', { class: 'btn', href: '#/' }, iconEl('back'), '首頁'))),
     h('section', { class: 'card' },
       h('h2', {}, '建立新活動'),
       h('p', { class: 'muted small' }, '整場活動（所有梯次）用同一個活動。建立時會產生 A、B 兩套各 13 個信封 QR 碼。'),
@@ -96,6 +96,7 @@ function dashboard(app, S) {
         h('div', { class: 'row' },
           h('span', { class: 'chip ' + (S.online ? 'ok' : 'bad') }, S.online ? '已連線' : '連線中斷'),
           h('span', { class: 'chip bad' }, '請勿投影此畫面'),
+          h('a', { class: 'btn', href: './guide.html', target: '_blank', rel: 'noopener' }, '操作說明'),
           h('button', { class: 'btn', onclick: async () => { if (await confirmBox('切換活動', '回到活動選擇畫面（資料仍保留在雲端）。')) { lsSet(LS_EV, null); location.hash = '#/'; } } }, '切換活動'))),
       h('nav', { class: 'row', 'aria-label': '儀表板分頁' },
         ...[['prep', '活動前準備'], ['batch', '梯次與組別'], ['control', '回合控制']].map(([k, label]) =>

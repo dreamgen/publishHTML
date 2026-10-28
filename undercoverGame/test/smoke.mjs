@@ -48,7 +48,8 @@ const open = async (hash, vp) => {
   await p.goto(BASE + hash); pages.push(p); return p;
 };
 const step = (s) => console.log('•', s);
-const shot = (p, n) => p.screenshot({ path: `/tmp/ug-${n}.png`, fullPage: true });
+const SHOTS = process.env.SHOTS || '/tmp';
+const shot = async (p, n, full = true) => { await p.evaluate(() => { const t = document.getElementById('toast'); if (t) t.innerHTML = ''; }); return p.screenshot({ path: `${SHOTS}/ug-${n}.png`, fullPage: full }); };
 
 // 1. 儀表板建立活動
 const dash = await open('#/dash');
@@ -65,6 +66,7 @@ await dash.goto(BASE + '#/dash'); await dash.getByRole('button', { name: '梯次
 await dash.getByRole('button', { name: '梯次與組別' }).click();
 await dash.fill('input[type=number]', '12'); await dash.locator('input[type=number]').dispatchEvent('change');
 await dash.getByText('分組：6＋6 人').waitFor();
+await shot(dash, '3b-batch');
 await dash.getByRole('button', { name: '儀表板抽' }).nth(1).click(); // 第 2 組改儀表板抽
 await dash.getByRole('button', { name: '建立本梯次' }).click();
 await dash.getByText('第 1 組・6 人・A 套').waitFor();
@@ -81,12 +83,14 @@ const codeOf = (set, role) => Object.keys(sets[set]).find((c) => sets[set][c] ==
 const phones = [];
 for (const g of [1, 2]) {
   const ph = await open(`?join=${ev}.1.${g}`, { width: 390, height: 844 });
+  if (g === 1) { await ph.getByRole('button', { name: '確認，開始綁定座位' }).waitFor(); await shot(ph, '4b-confirm', false); }
   await ph.getByRole('button', { name: '確認，開始綁定座位' }).click({ timeout: 8000 }).catch(async (e) => { console.log(await ph.evaluate(() => location.href + ' | ' + document.body.innerText)); throw e; });
   const cfg = batch.groups[g];
   // 座位順序：依角色陣列打散
   const order = rolesOf(cfg);
   await ph.getByRole('button', { name: /號座位的信封/ }).first().click();
-  for (const role of order) {
+  for (const [k, role] of order.entries()) {
+    if (g === 1 && k === 3) { await ph.locator('.scan').getByRole('button', { name: '關閉' }).click(); await ph.waitForTimeout(300); await shot(ph, '4c-bind', false); await ph.getByRole('button', { name: /號座位的信封/ }).first().click(); }
     await ph.fill('.scan input', `UG:E:${cfg.set}:${codeOf(cfg.set, role)}:v${ver}`);
     await ph.press('.scan input', 'Enter');
     await ph.waitForTimeout(150);
@@ -109,6 +113,7 @@ const p1 = phones[0];
 const seatOf = (order, role) => order.indexOf(role) + 1;
 await p1.ph.locator('summary').click();
 for (const role of ['sen', 'car', 'rich']) await p1.ph.getByRole('button', { name: String(seatOf(p1.order, role)), exact: true }).click();
+await shot(p1.ph, '5b-settle', false);
 await p1.ph.getByRole('button', { name: '判定結果' }).click();
 await p1.ph.getByText('任務成功').first().waitFor();
 await shot(p1.ph, '6-success');
@@ -140,6 +145,7 @@ step('進入第 2 回合');
 const off = await open('#/offline', { width: 390, height: 844 });
 await off.evaluate((m) => localStorage.setItem('ug.maps', JSON.stringify(m)), { version: ver, sets });
 await off.reload();
+await shot(off, '11a-offline-setup', false);
 await off.getByRole('button', { name: '切換為離線並開始綁定' }).click();
 const offData = await off.evaluate(() => JSON.parse(localStorage.getItem('ug.offline.v1')));
 const og = offData.myGroup, oc = offData.batch.groups[og];
@@ -151,6 +157,7 @@ await off.getByRole('button', { name: '開始計時' }).click();
 await off.locator('summary').click();
 const ocRoles = rolesOf(oc); const spy = 'sel';
 for (const role of ['pow', 'rich', spy]) await off.getByRole('button', { name: String(ocRoles.indexOf(role) + 1), exact: true }).click();
+await shot(off, '11b-offline-round', false);
 await off.getByRole('button', { name: '判定結果' }).click();
 await off.getByText('「任務失敗，原因：人。」').waitFor();
 await shot(off, '11-offline-fail');

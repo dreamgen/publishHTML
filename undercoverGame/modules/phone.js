@@ -59,6 +59,7 @@ function scanJoin(app) {
       h('p', {}, '請掃描儀表板「回合控制」頁上的組別 QR 碼。也可以直接用手機相機掃，會自動開啟本程式。'),
       h('button', { class: 'btn primary big', onclick: doScan }, iconEl('scan'), '掃組別 QR 碼')),
     h('a', { class: 'btn', href: '#/offline' }, '現場沒網路？改用離線單機操作'),
+    h('a', { class: 'btn', href: './guide.html#join' }, '操作說明'),
     h('a', { class: 'btn', href: '#/' }, iconEl('back'), '回首頁')));
 }
 

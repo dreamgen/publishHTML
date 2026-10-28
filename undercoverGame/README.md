@@ -6,6 +6,10 @@
 - 同步：Firebase Realtime Database（沿用 `pwa-boardgame` 專案，匿名登入），資料放在 `artifacts/undercoverGame/public/data/events/<活動代碼>`
 - 離線單機模式完全不需要網路，資料只存在該支手機（localStorage）
 
+## 操作說明書
+
+[`guide.html`](guide.html)：給控場講師與助理主持人的完整操作說明（含畫面截圖），可從儀表板右上角「操作說明」開啟，也可直接分享網址或列印。截圖放在 `guide/`，由 `SHOTS=<資料夾> node test/smoke.mjs` 產生。
+
 ## 誰用哪個畫面
 
 | 角色 | 網址 | 用途 |

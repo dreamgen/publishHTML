@@ -3,7 +3,7 @@
  * 策略：Stale-While-Revalidate。安裝時預先快取自家檔案，讓離線單機模式第一次就能用。
  * Firebase 即時連線一律不快取。Scope: /undercoverGame/
  */
-const SW_VERSION = 'v2';
+const SW_VERSION = 'v3';
 const CACHE_NAME = `undercoverGame-${SW_VERSION}`;
 const SHARED_CACHE = `undercoverGame-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
@@ -12,7 +12,7 @@ const PRECACHE = [
   './modules/rules.js', './modules/ui.js', './modules/session.js', './modules/fb.js', './modules/nav.js',
   './modules/dashboard.js', './modules/spypick.js', './modules/phone.js', './modules/print.js',
   './vendor/jsQR.js', './vendor/qrious.min.js',
-  './icons/undercoverGame-192.svg', './icons/undercoverGame-512.svg',
+  './icons/undercoverGame-192.svg', './icons/undercoverGame-512.svg', './guide.html',
 ];
 const LIVE_HOSTS = ['firebasedatabase.app', 'firebaseio.com', 'googleapis.com', 'firebaseinstallations', 'identitytoolkit', 'securetoken'];
 
