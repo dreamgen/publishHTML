@@ -9,6 +9,7 @@ import {
 import { spyPicker } from './spypick.js';
 import { editTab } from './editor.js';
 import { noticeBanner } from './notice.js';
+import { voteBox } from './vote.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
@@ -336,7 +337,7 @@ function dashboard(app, S) {
     const seatNos = Object.keys(seats).map(Number).sort((a, b) => a - b);
     return h('section', { class: 'card' },
       h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${cfg.size} 人`), h('span', { class: 'muted small' }, `成功 ${ok}・失敗 ${bad}`)),
-      status, strip,
+      status, !x && c.missionId ? voteBox(S, g) : null, strip,
       h('div', { class: 'scroll-x' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, '座位'), reveal ? h('th', {}, '角色') : null, h('th', { class: 'num' }, '存款'), h('th', { class: 'num' }, '特休'), h('th', { class: 'num' }, '體力'), h('th', {}, '交通'))),
         h('tbody', {}, seatNos.map((s) => {

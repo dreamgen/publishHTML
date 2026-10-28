@@ -7,6 +7,7 @@ import {
 } from './rules.js';
 import { spyPicker } from './spypick.js';
 import { noticeBanner } from './notice.js';
+import { voteBox } from './vote.js';
 import { setUnmount } from './nav.js';
 
 const LS_PHONE = 'ug.phone';
@@ -286,15 +287,18 @@ function groupApp(app, S, g, info) {
       h('details', { open: ui.manual, ontoggle: (e) => { ui.manual = e.target.open; } }, h('summary', { class: 'small muted' }, '掃不到？改點座位編號'),
         h('div', { class: 'grid g6', style: { marginTop: '8px' } }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => h('button', {
           class: 'btn', 'aria-pressed': String(ui.picks.includes(s)),
-          onclick: () => { if (ui.picks.includes(s)) ui.picks = ui.picks.filter((y) => y !== s); else if (ui.picks.length < 3) ui.picks.push(s); render(); },
+          onclick: () => { if (ui.picks.includes(s)) ui.picks = ui.picks.filter((y) => y !== s); else if (ui.picks.length < 3) ui.picks.push(s); autoVote(); render(); },
         }, s)))),
       h('p', { class: 'muted tiny' }, '宣告前請確認這 3 個號碼正確。結算時全場禁言，只宣告成敗與原因類別，不說是誰。')) : null;
 
-    return wrapper(h('main', {}, timeAlert, pausedNote, missionBlock, teamBlock),
+    const voteBlock = ready && !offline ? voteBox(S, g, { team: ui.picks }) : null;
+    return wrapper(h('main', {}, timeAlert, pausedNote, missionBlock, teamBlock, voteBlock),
       h('footer', {},
         ready ? h('button', {
           class: 'btn primary big', disabled: ui.picks.length !== 3, onclick: async () => {
             if (c.status === 'idle' && !(await confirmBox('回合尚未開始計時', '仍要直接結算嗎？'))) return;
+            const vt = offline ? null : S.tally(g);
+            if (vt && vt.round === r && !(vt.status === 'closed' && vt.passed) && !(await confirmBox('表決尚未通過', '這組名單的 O／X 表決還沒通過，仍要直接判定嗎？'))) return;
             try { await S.settle(g, r, c.missionId, ui.picks); ui.picks = []; ui.checked = false; } catch (e) { toast(e.message, 'bad'); }
           },
         }, '判定結果') : null,
@@ -339,6 +343,14 @@ function groupApp(app, S, g, info) {
           : h('div', { class: 'note', style: { textAlign: 'center' } }, c.round === r ? '等待控場講師進入下一回合…' : ''))];
   }
 
+  // 掃滿 3 位就自動開始表決（連線且有玩家開手機時）
+  function autoVote() {
+    if (offline || ui.picks.length !== 3 || !S.phoneSeats(g).length) return;
+    const v = S.vote(g), team = [...ui.picks].sort((a, b) => a - b);
+    if (v && v.round === S.control.round && v.status === 'open' && JSON.stringify([...(v.team || [])].sort((a, b) => a - b)) === JSON.stringify(team)) return;
+    S.openVote(g, ui.picks).catch((e) => toast(e.message, 'bad'));
+  }
+
   // 掃隊員
   function scanTeam() {
     openScanner({
@@ -350,6 +362,7 @@ function groupApp(app, S, g, info) {
         if (!seat) return '這個信封不在本組';
         if (ui.picks.includes(+seat)) return `${seat} 號已經掃過了`;
         ui.picks.push(+seat);
+        autoVote();
         setTimeout(render);
         if (ui.picks.length >= 3) return true;
         return 'keep';

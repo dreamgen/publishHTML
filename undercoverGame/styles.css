@@ -182,3 +182,20 @@ body.player-theme{background:#171614;color:#F1ECE2}
 
 /* 揭牌後：臥底身分以紅字突顯 */
 .spy-red{color:#C62828;font-weight:900}
+
+/* O／X 表決 */
+.vote-box{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:14px;border:1px solid var(--line2);background:#fff}
+.vote-box.pass{background:var(--ok-bg);border-color:var(--ok)}
+.vote-box.fail{background:var(--bad-bg);border-color:var(--bad-line)}
+.vote-chip{display:inline-flex;gap:4px;align-items:center;font-size:13px;padding:4px 8px;border-radius:8px;border:1px solid var(--line2);background:#fff}
+.vote-chip.o{background:#1F5F5B;color:#fff;border-color:#1F5F5B}
+.vote-chip.x{background:#A3401A;color:#fff;border-color:#A3401A}
+.vote-chip.wait{border-style:dashed;color:var(--muted)}
+.p-vote-btns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.p-vbtn{min-height:84px;border-radius:18px;border:2px solid #D8C7A3;background:#23211E;color:#F1ECE2;font-size:44px;font-weight:900;cursor:pointer}
+.p-vbtn[disabled]{opacity:.25;cursor:not-allowed}
+.p-vote.pass{border-color:#5FD08A}
+.p-vote.fail{border-color:#FF8A80}
+/* 玩家資源顏色 */
+.p-res b.res-down{color:#5FD08A}
+.p-res b.res-zero{color:#FF6B6B}

@@ -141,6 +141,8 @@ export const ROLE_TEXT = {
   yes: { sub: '不問對錯，一味附和、吹捧別人', goals: ['照指定行為干擾團隊', '最後不被指認出來'],
     todo: ['每次投票都舉 O（同意）', '參考台詞：「大家說得都有道理，我都可以。」', '被派出時資源照常計算，任務不會因你失敗'] },
 };
+/** 角色的表決限制：口是心非只能投 X、鄉愿討好只能投 O */
+export const VOTE_LOCK = { two: 'X', yes: 'O' };
 export function roleTitle(id) { const r = ROLE[id]; return `${r.camp === 'spy' ? '臥底' : '好人'}・${r.name}`; }
 
 // ── QR 碼對照 ─────────────────────────────────────────────────────────────────

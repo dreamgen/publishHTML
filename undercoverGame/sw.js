@@ -3,14 +3,14 @@
  * 策略：Stale-While-Revalidate。安裝時預先快取自家檔案，讓離線單機模式第一次就能用。
  * Firebase 即時連線一律不快取。Scope: /undercoverGame/
  */
-const SW_VERSION = 'v9';
+const SW_VERSION = 'v10';
 const CACHE_NAME = `undercoverGame-${SW_VERSION}`;
 const SHARED_CACHE = `undercoverGame-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
 const PRECACHE = [
   './', './index.html', './app.js', './styles.css', './manifest.webmanifest',
   './modules/rules.js', './modules/ui.js', './modules/session.js', './modules/fb.js', './modules/nav.js',
-  './modules/dashboard.js', './modules/spypick.js', './modules/phone.js', './modules/print.js', './modules/player.js', './modules/editor.js', './modules/notice.js',
+  './modules/dashboard.js', './modules/spypick.js', './modules/phone.js', './modules/print.js', './modules/player.js', './modules/editor.js', './modules/notice.js', './modules/vote.js',
   './vendor/jsQR.js', './vendor/qrious.min.js',
   './icons/undercoverGame-192.svg', './icons/undercoverGame-512.svg', './guide.html',
   ...['sen', 'car', 'pow', 'rich', 'nA', 'nB', 'nC', 'sel', 'yang', 'face', 'lie', 'two', 'yes'].map((r) => `./roles/role-${r}.jpg`),
@@ -34,10 +34,22 @@ self.addEventListener('fetch', (event) => {
   if (LIVE_HOSTS.some((h) => url.hostname.includes(h)) && !url.hostname.includes('fonts.googleapis.com')) return;
   const isOwn = url.origin === self.location.origin;
   const cacheName = isOwn ? CACHE_NAME : SHARED_CACHE;
-  event.respondWith(
-    caches.open(cacheName).then((cache) =>
-      cache.match(request, { ignoreSearch: isOwn && request.mode === 'navigate' }).then((cached) => {
-        const net = fetch(request).then((res) => { if (res && (res.ok || res.type === 'opaque')) cache.put(request, res.clone()); return res; }).catch(() => null);
-        return cached || net.then((r) => r || (request.mode === 'navigate' ? cache.match('./index.html') : Response.error()));
-      })));
+  // 自家的程式與頁面（html/js/css/json）：網路優先，確保部署後立刻拿到新版；沒網路才用快取。
+  // 圖片與第三方函式庫：快取優先（不常變動，省流量）。
+  const codeLike = isOwn && (request.mode === 'navigate' || /\.(html|js|mjs|css|json|webmanifest)$/.test(url.pathname) || url.pathname.endsWith('/'));
+  event.respondWith(caches.open(cacheName).then(async (cache) => {
+    if (codeLike) {
+      try {
+        const res = await fetch(request, { cache: 'no-cache' });
+        if (res && res.ok) cache.put(request, res.clone());
+        return res;
+      } catch (e) {
+        const cached = await cache.match(request, { ignoreSearch: request.mode === 'navigate' });
+        return cached || (request.mode === 'navigate' ? cache.match('./index.html') : Response.error());
+      }
+    }
+    const cached = await cache.match(request);
+    const net = fetch(request).then((res) => { if (res && (res.ok || res.type === 'opaque')) cache.put(request, res.clone()); return res; }).catch(() => null);
+    return cached || (await net) || Response.error();
+  }));
 });

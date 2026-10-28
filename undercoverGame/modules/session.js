@@ -214,6 +214,43 @@ export class EventSession {
   }
   async resetPlayer(g, code) { await this.patch({ [`live/${g}/players/${code}`]: null }); }
 
+  // ── O／X 表決（玩家手機投票，助理主持人與儀表板看統計）──────────────
+  vote(g) { return this.live(g).vote || null; }
+  /** 有開啟玩家手機的座位（應投票的人） */
+  phoneSeats(g) {
+    const seats = this.seats(g), players = this.live(g).players || {};
+    return Object.keys(seats).filter((s) => players[seats[s]]).map(Number).sort((a, b) => a - b);
+  }
+  async openVote(g, team = []) {
+    const at = this.now();
+    await this.patch({ [`live/${g}/vote`]: { id: `v${at}`, round: this.control.round, team: team.map(Number), voters: this.phoneSeats(g), status: 'open', votes: {}, at } });
+  }
+  /** 統計：required 為開表決時有手機的座位，加上之後才投票的座位 */
+  tally(g) {
+    const v = this.vote(g);
+    if (!v) return null;
+    const votes = v.votes || {};
+    const voted = Object.keys(votes).map(Number);
+    const required = [...new Set([...(v.voters || []), ...voted])].sort((a, b) => a - b);
+    const o = voted.filter((s) => votes[s] === 'O').length, x = voted.filter((s) => votes[s] === 'X').length;
+    const pending = required.filter((s) => !votes[s]);
+    return { ...v, o, x, pending, required, passed: o > x };
+  }
+  async castVote(g, voteId, seat, choice) {
+    const v = this.vote(g);
+    if (!v || v.id !== voteId || v.status !== 'open') throw new Error('這次表決已經結束');
+    if (!['O', 'X'].includes(choice)) throw new Error('只能投 O 或 X');
+    await this.patch({ [`live/${g}/vote/votes/${seat}`]: choice });
+    const t = this.tally(g);
+    if (t && t.status === 'open' && !t.pending.length) await this.closeVote(g);
+  }
+  async closeVote(g) {
+    const t = this.tally(g);
+    if (!t || t.status !== 'open') return;
+    await this.patch({ [`live/${g}/vote/status`]: 'closed', [`live/${g}/vote/result`]: t.passed ? 'pass' : 'fail', [`live/${g}/vote/closedAt`]: this.now() });
+  }
+  async clearVote(g) { await this.patch({ [`live/${g}/vote`]: null }); }
+
   /** 角色查詢：初始值、每回合紀錄、角色卡剩餘欄應填內容 */
   history(g, code) {
     const role = this.roleBase(this.mapping(g)[code]);

@@ -4,6 +4,7 @@ import { QR } from './modules/rules.js';
 import { runUnmount } from './modules/nav.js';
 
 const app = document.getElementById('app');
+export const APP_VERSION = 'v10';
 
 function home() {
   const joined = (() => { try { return JSON.parse(localStorage.getItem('ug.phone') || 'null'); } catch (e) { return null; } })();
@@ -15,7 +16,8 @@ function home() {
       h('a', { class: 'tile', href: '#/dash' }, h('b', {}, '控場講師儀表板'), h('span', { class: 'muted small' }, dashEv ? `繼續活動 ${dashEv}` : '建立活動、設定梯次、列印信封、控制回合')),
       h('a', { class: 'tile', href: '#/phone' }, h('b', {}, '助理主持人手機'), h('span', { class: 'muted small' }, joined ? `繼續：活動 ${joined.ev}・第 ${joined.batch} 梯次・第 ${joined.g} 組` : '掃組別 QR 碼加入')),
       h('a', { class: 'tile', href: '#/offline' }, h('b', {}, '離線單機操作'), h('span', { class: 'muted small' }, '不連網、不同步，各組手機獨立操作')),
-      h('a', { class: 'tile', href: './guide.html' }, h('b', {}, '操作說明書'), h('span', { class: 'muted small' }, '給控場講師與助理主持人的完整說明，可分享、可列印')))));
+      h('a', { class: 'tile', href: './guide.html' }, h('b', {}, '操作說明書'), h('span', { class: 'muted small' }, '給控場講師與助理主持人的完整說明，可分享、可列印'))),
+    h('p', { class: 'muted tiny' }, `程式版本 ${APP_VERSION}`)));
 }
 
 async function route() {

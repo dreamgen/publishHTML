@@ -21,7 +21,17 @@
   <script type="module" src="./app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => reg.update()).catch(() => {});
+      });
+      // 新版 Service Worker 接手時：剛開啟頁面（10 秒內）就自動重新載入一次，避免繼續用到舊程式
+      const bootAt = Date.now();
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (window.__ugReloaded || !hadController) return;
+        if (Date.now() - bootAt < 10000) { window.__ugReloaded = true; location.reload(); }
+        else { const t = document.getElementById('toast'); if (t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = '已有新版本，重新整理頁面即可更新'; t.append(d); } }
+      });
     }
     window.__ugBooted = false;
     window.__ugReset = async function () {

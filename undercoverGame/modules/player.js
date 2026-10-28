@@ -2,7 +2,7 @@
 // 防偷看：平常遮蔽、按住才顯示、放開／切 App／8 秒自動蓋回；好人與臥底版面一致；一個信封只綁一支手機。
 import { h, toast, openScanner, iconEl } from './ui.js';
 import { EventSession, deviceId } from './session.js';
-import { ROLE, MISSION, ROLE_TEXT, roleTitle, needText, fmtNum, QR } from './rules.js';
+import { ROLE, MISSION, ROLE_TEXT, VOTE_LOCK, roleTitle, needText, fmtNum, QR } from './rules.js';
 import { setUnmount } from './nav.js';
 import { noticeBanner } from './notice.js';
 
@@ -107,7 +107,9 @@ export async function mountPlayer(app) {
           step(3, '只掃自己的信封。每個信封只能在一支手機上開啟。'))),
       h('p', { class: 'p-note' }, '掃完後畫面會先蓋住。要看角色時，按住畫面中間才會顯示，放開立刻蓋回。'),
       S.playerCfg.open ? null : h('p', { class: 'p-note' }, '玩家查看尚未開放，可以先掃描，開放後即可查看。'),
-      h('footer', {}, h('button', { class: 'p-btn', onclick: scan }, iconEl('scan'), '掃我的信封')));
+      h('footer', {}, h('button', { class: 'p-btn', onclick: scan }, iconEl('scan'), '掃我的信封'),
+        h('span', { class: 'p-muted small', style: { textAlign: 'center' } }, '相機掃不到時，可在掃描視窗下方輸入信封上的 4 位數字'),
+        h('span', { class: 'p-muted', style: { textAlign: 'center', fontSize: '11px' } }, '程式版本 v10')));
   }
 
   function lockedView() {
@@ -149,8 +151,8 @@ export async function mountPlayer(app) {
         h('span', { class: 'p-label' }, '我的目標'), h('ul', {}, text.goals.map((t) => h('li', {}, t))),
         h('span', { class: 'p-label' }, '我要做的事'), h('ul', {}, text.todo.map((t) => h('li', {}, t))),
         h('div', { class: 'p-res' },
-          h('div', {}, h('span', {}, '存款'), h('b', {}, fmtNum(ledger.money))),
-          h('div', {}, h('span', {}, '特休'), h('b', {}, ledger.leave)),
+          h('div', {}, h('span', {}, '存款'), h('b', { class: resCls(ledger.money, S.roleBase(role.id).money) }, fmtNum(ledger.money))),
+          h('div', {}, h('span', {}, '特休'), h('b', { class: resCls(ledger.leave, S.roleBase(role.id).leave) }, ledger.leave)),
           h('div', {}, h('span', {}, '體力'), h('b', {}, eff.power)),
           h('div', {}, h('span', {}, '交通'), h('b', {}, eff.car))))) : null);
     const chipText = c.round ? `第 ${c.round} 回合` : '準備中';
@@ -165,6 +167,7 @@ export async function mountPlayer(app) {
           if ((n.missions || []).length) out.push('任務條件已修正，請看最新條件');
           return out;
         }, { dark: true, onSeen: () => render() }),
+        votePanel(p, role, seat),
         h('section', { class: 'p-card p-task' },
           h('span', { class: 'p-label' }, '本回合任務・大家都看得到'),
           h('b', { style: { fontSize: '18px' } }, m ? m.name : '等待控場講師發布'),
@@ -173,6 +176,38 @@ export async function mountPlayer(app) {
       h('footer', { class: 'center' },
         h('span', { class: 'p-muted small' }, '切到別的 App、關螢幕或 8 秒後都會自動蓋回'),
         h('span', { class: 'p-muted small' }, '發言時只能說程度，不能說數字')));
+  }
+
+  // 資源顏色：因任務成功扣除過＝綠色，歸零＝紅色
+  function resCls(v, base) { return v === 0 ? 'res-zero' : v < base ? 'res-down' : ''; }
+
+  // O／X 表決面板（平常畫面顯示，按住查看角色時隱藏）
+  function votePanel(p, role, seat) {
+    const t = S.tally(p.g);
+    if (!t || t.round !== S.control.round) return null;
+    const mine = (t.votes || {})[seat];
+    const team = t.team && t.team.length ? `出任務名單：${t.team.join('・')} 號` : '對目前提出的名單表決';
+    if (t.status === 'closed') {
+      return h('section', { class: 'p-card p-task p-vote ' + (t.passed ? 'pass' : 'fail') },
+        h('span', { class: 'p-label' }, '表決結果'),
+        h('b', { style: { fontSize: '20px' } }, t.passed ? '通過：隊伍出發' : '否決：重新協調名單'),
+        h('span', { class: 'p-muted' }, `O ${t.o}・X ${t.x}`));
+    }
+    if (mine) {
+      return h('section', { class: 'p-card p-task p-vote' },
+        h('span', { class: 'p-label' }, '表決中'),
+        h('b', {}, `你已投 ${mine}`),
+        h('span', { class: 'p-muted small' }, `${team}・已投 ${t.o + t.x} 人，等待 ${t.pending.length} 人`));
+    }
+    const lock = VOTE_LOCK[role.id];
+    const cast = (v) => S.castVote(p.g, t.id, seat, v).catch((e) => toast(e.message, 'bad'));
+    return h('section', { class: 'p-card p-task p-vote' },
+      h('span', { class: 'p-label' }, '請表決'),
+      h('span', {}, team),
+      h('div', { class: 'p-vote-btns' },
+        h('button', { class: 'p-vbtn o', type: 'button', disabled: lock === 'X', onclick: () => cast('O'), 'aria-label': '投 O（同意）' }, 'O'),
+        h('button', { class: 'p-vbtn x', type: 'button', disabled: lock === 'O', onclick: () => cast('X'), 'aria-label': '投 X（反對）' }, 'X')),
+      lock ? h('span', { class: 'p-muted small' }, '有一個選項目前不能選') : null);
   }
 
   function endView(p) {
