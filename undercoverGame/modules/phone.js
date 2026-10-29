@@ -8,6 +8,7 @@ import {
 import { spyPicker } from './spypick.js';
 import { noticeBanner } from './notice.js';
 import { voteBox } from './vote.js';
+import { handPanel } from './hand.js';
 import { setUnmount } from './nav.js';
 
 const LS_PHONE = 'ug.phone';
@@ -90,7 +91,7 @@ function offlineEntry(app) {
       h('section', { class: 'card' },
         h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}`)),
         h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '真誠大人　'), c.good.map((id) => ROLE[id].name).join('、')),
-        spyPicker(st.size, st.pick, render, '手機抽'),
+        spyPicker(st.size, st.pick, render, 'dashboard'),
         h('label', { class: 'field' }, '信封套別', h('select', { onchange: (e) => { st.set = e.target.value; render(); } }, ['A', 'B'].map((s) => h('option', { value: s, selected: st.set === s }, `${s} 套`)))),
         have ? h('div', { class: 'note ok' }, `${st.set} 套 v${mapsNow.version} 對照已在手機上`)
           : h('div', { class: 'note bad' }, `手機上沒有 ${st.set} 套的對照。請掃對照表或儀表板上的「離線載入 QR 碼」。`),
@@ -133,7 +134,8 @@ function offlineEntry(app) {
 // ── 組別主程式（連線／離線共用）────────────────────────────
 function groupApp(app, S, g, info) {
   const offline = S.mode === 'offline';
-  const ui = { picks: [], lookup: null, confirmed: offline || !!(info && info.confirmed), checked: false };
+  const ui = { picks: [], lookup: null, confirmed: offline || !!(info && info.confirmed), checked: false, hand: {}, lookupPick: false };
+  const auto = () => !offline && S.isAuto(g);
   let lastUp = false;
 
   const sub = () => `第 ${S.batch.no} 梯次・第 ${g} 組${offline ? '・離線' : ''}`;
@@ -146,7 +148,9 @@ function groupApp(app, S, g, info) {
       return;
     }
     if (ui.lookup) return app.replaceChildren(lookupScreen());
+    if (ui.lookupPick) return app.replaceChildren(lookupPickScreen());
     if (!ui.confirmed) return app.replaceChildren(confirmScreen());
+    if (auto() && !S.handLocked(g)) return app.replaceChildren(handScreen());
     if (!S.allBound(g)) return app.replaceChildren(bindScreen());
     app.replaceChildren(roundScreen());
   };
@@ -159,7 +163,8 @@ function groupApp(app, S, g, info) {
         h('span', { class: 'eyebrow', style: { color: 'var(--ok)' } }, '已辨識組別'),
         h('h2', { style: { fontSize: '24px', fontWeight: 900 } }, `第 ${S.batch.no} 梯次・第 ${g} 組`),
         h('p', { class: 'muted' }, `${cfg.size} 人・本梯次共 ${Object.keys(S.batch.groups).length} 組`),
-        h('p', { class: 'small' }, `座位 1～${cfg.size} 號（順時針）・信封 ${cfg.set} 套（v${S.qr.version}）・回合由控場講師儀表板同步`),
+        h('p', { class: 'small' }, cfg.draw === 'auto' ? `座位 1～${cfg.size} 號（順時針）・自動抽角色（無實體卡片，不用綁定）・回合由控場講師儀表板同步`
+          : `座位 1～${cfg.size} 號（順時針）・信封 ${cfg.set} 套（v${S.qr.version}）・回合由控場講師儀表板同步`),
         h('div', { class: 'note' }, '角色組成只在儀表板設定，手機不顯示誰是虛偽大人。')),
       h('footer', {},
         h('button', {
@@ -167,8 +172,27 @@ function groupApp(app, S, g, info) {
             await S.patch({ [`live/${g}/phone`]: { id: deviceId(), at: Date.now() } });
             ui.confirmed = true; jset(LS_PHONE, { ...info, confirmed: true }); render();
           },
-        }, '確認，開始綁定座位'),
+        }, cfg.draw === 'auto' ? '確認，開始發角色卡' : '確認，開始綁定座位'),
         h('button', { class: 'btn', onclick: () => { jset(LS_PHONE, null); S.stop(); scanJoin(app); } }, '不是這組，重新掃描')));
+  }
+
+  // 自動抽角色：發角色卡（逐一顯示座位 QR）
+  function handScreen() {
+    return shell('發角色卡', sub(),
+      handPanel(S, g, ui.hand, render, { qrSize: 210 }),
+      h('p', { class: 'muted tiny' }, '全組領取後，由控場講師或這裡按「開放查看角色」。開放後才會進入回合畫面。'));
+  }
+  // 自動抽角色：沒有信封，角色查詢改點座位號
+  function lookupPickScreen() {
+    const cfg = S.groupCfg(g), seats = S.seats(g);
+    return shell('角色查詢', sub(),
+      h('section', { class: 'card' },
+        h('h2', {}, '點要查詢的座位'),
+        h('div', { class: 'grid g6' }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => h('button', {
+          class: 'btn', onclick: () => { ui.lookupPick = false; ui.lookup = { code: seats[s], hide: true }; render(); },
+        }, s))),
+        h('p', { class: 'muted tiny' }, '查詢畫面預設遮住角色，按「顯」才顯示。沒有手機的玩家，可以在這裡顯示給他本人看。')),
+      h('footer', {}, h('button', { class: 'btn', onclick: () => { ui.lookupPick = false; render(); } }, '返回')));
   }
 
   // 座位綁定
@@ -220,7 +244,7 @@ function groupApp(app, S, g, info) {
       h('div', {}, h('span', { class: 'eyebrow' }, sub()), h('h1', {}, `第 ${r} 回合`)),
       h('div', { class: 'row', style: { gap: '6px' } },
         h('span', { class: 'timer' + (remaining() <= 0 && c.status !== 'idle' ? ' late' : ''), 'data-timer': '1' }, c.status === 'idle' ? '05:00' : fmtClock(Math.max(0, remaining()))),
-        h('button', { class: 'btn icon', 'aria-label': '掃信封查詢角色', onclick: () => scanLookup() }, iconEl('search')),
+        h('button', { class: 'btn icon', 'aria-label': auto() ? '查詢角色' : '掃信封查詢角色', onclick: () => (auto() ? (ui.lookupPick = true, render()) : scanLookup()) }, iconEl('search')),
         offline && c.status !== 'idle' ? h('button', { class: 'btn icon', 'aria-label': c.status === 'paused' ? '繼續計時' : '暫停計時', onclick: () => (c.status === 'paused' ? S.resume() : S.pause()) }, iconEl(c.status === 'paused' ? 'play' : 'pause')) : null));
     const banner = offline ? null : noticeBanner(S, 'phone', (n) => {
       const out = [];
@@ -282,13 +306,17 @@ function groupApp(app, S, g, info) {
       h('div', { class: 'grid g3' }, [0, 1, 2].map((i) => {
         const s = ui.picks[i];
         return s ? h('button', { class: 'seat', 'aria-label': `移除 ${s} 號`, onclick: () => { ui.picks.splice(i, 1); render(); } }, h('span', { class: 'tiny muted' }, '座位'), h('span', { class: 'big-num' }, s), h('span', { class: 'tiny muted' }, '點一下移除'))
-          : h('button', { class: 'seat empty', onclick: () => scanTeam() }, iconEl('scan'), `掃第 ${i + 1} 位`);
+          : auto() ? h('div', { class: 'seat empty' }, `第 ${i + 1} 位`) : h('button', { class: 'seat empty', onclick: () => scanTeam() }, iconEl('scan'), `掃第 ${i + 1} 位`);
       })),
-      h('details', { open: ui.manual, ontoggle: (e) => { ui.manual = e.target.open; } }, h('summary', { class: 'small muted' }, '掃不到？改點座位編號'),
-        h('div', { class: 'grid g6', style: { marginTop: '8px' } }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => h('button', {
+      (() => {
+        const grid = h('div', { class: 'grid g6', style: { marginTop: '8px' } }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => h('button', {
           class: 'btn', 'aria-pressed': String(ui.picks.includes(s)),
           onclick: () => { if (ui.picks.includes(s)) ui.picks = ui.picks.filter((y) => y !== s); else if (ui.picks.length < 3) ui.picks.push(s); autoVote(); render(); },
-        }, s)))),
+        }, s)));
+        // 自動抽角色沒有信封：直接點座位號
+        return auto() ? h('div', {}, h('p', { class: 'small muted' }, '本組沒有信封，直接點出任務的座位號'), grid)
+          : h('details', { open: ui.manual, ontoggle: (e) => { ui.manual = e.target.open; } }, h('summary', { class: 'small muted' }, '掃不到？改點座位編號'), grid);
+      })(),
       h('p', { class: 'muted tiny' }, '宣告前請確認這 3 個號碼正確。結算時全場禁言，只宣告成敗與原因類別，不說是誰。')) : null;
 
     const voteBlock = ready ? voteBox(S, g, { team: ui.picks, offline }) : null;
@@ -322,9 +350,9 @@ function groupApp(app, S, g, info) {
         return h('tr', {}, h('th', { scope: 'row', style: { fontSize: '22px', fontWeight: 900 } }, s), cell('money', ''), cell('leave', ' 天'));
       });
       body.push(h('section', { class: 'card', style: { padding: 0, gap: 0 } },
-        h('div', { class: 'row between', style: { padding: '12px 16px' } }, h('h2', {}, '請抄到角色卡背面'), h('span', { class: 'muted tiny' }, '剩餘量')),
+        h('div', { class: 'row between', style: { padding: '12px 16px' } }, h('h2', {}, auto() ? '剩餘量（玩家手機已同步）' : '請抄到角色卡背面'), h('span', { class: 'muted tiny' }, '剩餘量')),
         h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, '座位'), h('th', {}, '存款'), h('th', {}, '特休'))), h('tbody', {}, rows))),
-      h('label', { class: 'card', style: { flexDirection: 'row', alignItems: 'center' } },
+      auto() ? null : h('label', { class: 'card', style: { flexDirection: 'row', alignItems: 'center' } },
         h('input', { type: 'checkbox', checked: ui.checked, onchange: (e) => { ui.checked = e.target.checked; }, style: { width: '22px', height: '22px', accentColor: 'var(--ok)' } }),
         '已幫 3 位學員在角色卡填好剩餘量'));
       if (x.thief) {
@@ -405,12 +433,12 @@ function groupApp(app, S, g, info) {
         h('div', { style: { width: '60px', height: '60px', borderRadius: '14px', background: 'var(--bg)', color: 'var(--ink)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } },
           h('span', { class: 'tiny muted' }, '座位'), h('b', { style: { fontSize: '26px' } }, hist.seat || '-')),
         h('div', { class: 'flex1' },
-          h('div', { class: 'mono tiny', style: { color: '#BDB6A8' } }, `${code}・${S.groupCfg(g).set} 套 v${S.qr.version}`),
+          h('div', { class: 'mono tiny', style: { color: '#BDB6A8' } }, auto() ? '自動抽角色・無實體卡片' : `${code}・${S.groupCfg(g).set} 套 v${S.qr.version}`),
           h('div', { style: { fontSize: '22px', fontWeight: 900 } }, hide ? '••••••' : role.name),
           h('div', { class: 'small', style: { color: '#D8D2C5' } }, hide ? '角色已隱藏' : KIND_LABEL[role.kind])),
         h('button', { class: 'btn icon', style: { background: 'transparent', color: 'var(--bg)', borderColor: '#4A4740' }, 'aria-label': hide ? '顯示角色' : '隱藏角色', onclick: () => { ui.lookup.hide = !hide; render(); } }, hide ? '顯' : '隱')),
       h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, '角色卡背面應填內容'), h('span', { class: 'muted tiny' }, '用來校正實體卡')),
+        h('div', { class: 'row between' }, h('h2', {}, auto() ? '資源變化' : '角色卡背面應填內容'), h('span', { class: 'muted tiny' }, auto() ? '玩家手機會同步顯示' : '用來校正實體卡')),
         h('div', { class: 'boxes' },
           h('span', { class: 'muted' }, '項目'), h('span', { class: 'muted tiny', style: { textAlign: 'center' } }, '初始'),
           ...[1, 2, 3, 4].map((i) => h('span', { class: 'muted tiny', style: { textAlign: 'center' } }, `剩餘 ${i}`)),
@@ -419,7 +447,7 @@ function groupApp(app, S, g, info) {
         h('p', { class: 'small' }, `目前：存款 ${fmtNum(hist.money)}・特休 ${hist.leave} 天・體力 ${S.stats(g, code).power}（不扣）・交通 ${S.stats(g, code).car}（不扣）`)),
       !offline && S.playerBinding(g, code) ? h('section', { class: 'card' },
         h('div', { class: 'row between' }, h('h2', {}, '玩家手機'), h('span', { class: 'chip ok' }, '已在玩家手機開啟')),
-        h('button', { class: 'btn', onclick: async () => { if (await confirmBox('重設玩家手機綁定？', '玩家換手機時使用，重設後請玩家重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code); } }, '重設手機綁定')) : null,
+        h('button', { class: 'btn', onclick: async () => { if (await confirmBox('重設玩家手機綁定？', auto() ? '玩家換手機時使用，重設後請在儀表板或發卡畫面重新顯示他的座位 QR。' : '玩家換手機時使用，重設後請玩家重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code); } }, '重設手機綁定')) : null,
       h('section', { class: 'card' },
         h('h2', {}, '資源使用記錄'),
         hist.log.length ? h('ol', { class: 'list' }, hist.log.map((y) => {
@@ -439,7 +467,8 @@ function groupApp(app, S, g, info) {
       h('footer', {},
         h('span', { class: 'tiny', style: { textAlign: 'center', color: 'var(--bad-d)' } }, '此畫面含角色身分，請勿讓學員看到'),
         h('div', { class: 'row' },
-          h('button', { class: 'btn flex1', onclick: () => { ui.lookup = null; scanLookup(); } }, iconEl('scan'), '再掃一個'),
+          auto() ? h('button', { class: 'btn flex1', onclick: () => { ui.lookup = null; ui.lookupPick = true; render(); } }, '查另一位')
+            : h('button', { class: 'btn flex1', onclick: () => { ui.lookup = null; scanLookup(); } }, iconEl('scan'), '再掃一個'),
           h('button', { class: 'btn dark flex1', style: { minHeight: '48px' }, onclick: () => { ui.lookup = null; render(); } }, '卡片已校正，返回'))));
   }
 

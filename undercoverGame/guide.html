@@ -90,6 +90,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
     <li><a href="#prep">活動前準備</a></li>
     <li><a href="#batch">每梯次：分組與抽虛偽大人</a></li>
     <li><a href="#join">手機加入與綁定座位</a></li>
+    <li><a href="#auto">自動抽角色（無實體卡片）</a></li>
     <li><a href="#round">每回合：任務與結算</a></li>
     <li><a href="#timeout">暫停、超時與撤銷</a></li>
     <li><a href="#lookup">角色查詢與校正卡片</a></li>
@@ -154,9 +155,9 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
     <li>每組選擇<b>虛偽大人卡抽法</b>：
       <ul>
         <li><b>實體抽（預設）</b>：學員從 6 張虛偽大人卡中實體抽出。綁定座位時掃到哪張虛偽大人就是哪張。</li>
-        <li><b>儀表板抽</b>：儀表板先隨機抽定（可手動改、可重新抽）。綁定時只接受抽中的虛偽大人卡。</li>
+        <li><b>自動抽角色（無實體卡片）</b>：大家只用手機玩、沒印 QR 碼時使用。系統自動抽虛偽大人（可手動改、可重新抽），建立後把全部角色隨機排到 1～N 號座位，不用信封、不用綁定。發卡方式見<a href="#auto">自動抽角色</a>。</li>
       </ul>
-      虛偽大人<b>不控制破壞型與干擾型的比例</b>，但<b>每組至少要有 1 位破壞型</b>（圖謀私利、陽奉陰違、表面工夫）。儀表板抽一定會抽到破壞型；實體抽時，綁定到最後一個虛偽大人名額若還沒有破壞型，系統只接受破壞型的信封。
+      虛偽大人<b>不控制破壞型與干擾型的比例</b>，但<b>每組至少要有 1 位破壞型</b>（圖謀私利、陽奉陰違、表面工夫）。自動抽角色一定會抽到破壞型；實體抽時，綁定到最後一個虛偽大人名額若還沒有破壞型，系統只接受破壞型的信封。
     </li>
     <li>按「建立本梯次」。「回合控制」分頁會出現各組的加入 QR 碼。建立新梯次會清除上一梯次的綁定與結算記錄。</li>
   </ol>
@@ -171,8 +172,8 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
       <tr><td>11</td><td>特殊大人 4＋A、B、C</td><td>4</td></tr>
     </tbody>
   </table></div>
-  <figure><img src="guide/dash-batch.webp" alt="梯次與組別設定畫面" loading="lazy"><figcaption>每組可選「實體抽（預設）」或「儀表板抽」</figcaption></figure>
-  <div class="tip"><b>取信封</b>依對照表「使用時機」欄，從該套 13 個信封中取出本組要用的真誠大人信封，加上學員抽到（或儀表板抽中）的虛偽大人信封。用不到的信封每梯次結束後放回本套。</div>
+  <figure><img src="guide/dash-batch.webp" alt="梯次與組別設定畫面" loading="lazy"><figcaption>每組可選「實體抽（預設）」或「自動抽角色（無實體卡片）」</figcaption></figure>
+  <div class="tip"><b>取信封</b>依對照表「使用時機」欄，從該套 13 個信封中取出本組要用的真誠大人信封，加上學員抽到的虛偽大人信封（自動抽角色的組別不用信封）。用不到的信封每梯次結束後放回本套。</div>
 </section>
 
 <section class="sec" id="join">
@@ -180,7 +181,7 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
   <ol class="steps">
     <li><b>加入組別</b>：用手機相機或本程式「掃組別 QR 碼」，掃儀表板上自己那一組的 QR 碼。畫面顯示「第 N 梯次・第 N 組」與人數，確認無誤後按「確認，開始綁定座位」。</li>
     <li><b>綁定座位</b>：學員抽完信封、依座位編號坐定後，從 1 號開始順時針，按「掃 N 號座位的信封」逐一掃。掃描視窗會保持開啟，可以連續掃下一位。</li>
-    <li>畫面上方顯示「還需真誠大人 x 位・虛偽大人 y 位」。掃到不該出現的信封時會提示換信封，例如這個人數用不到的真誠大人、虛偽大人已滿額、最後一個虛偽大人名額卻還沒有破壞型，或儀表板抽時掃到沒抽中的虛偽大人卡。</li>
+    <li>畫面上方顯示「還需真誠大人 x 位・虛偽大人 y 位」。掃到不該出現的信封時會提示換信封，例如這個人數用不到的真誠大人、虛偽大人已滿額，或最後一個虛偽大人名額卻還沒有破壞型。</li>
     <li>掃錯可按「重掃上一位」。全員綁定完成後，儀表板才會出現回合控制。</li>
   </ol>
   <div class="shots">
@@ -188,6 +189,31 @@ footer.foot{max-width:1180px;margin:0 auto;padding:0 16px 40px;color:var(--muted
     <figure class="phone"><img src="guide/phone-bind.webp" alt="手機掃碼綁定座位畫面" loading="lazy"><figcaption>依座位逐一掃信封；畫面不顯示角色</figcaption></figure>
   </div>
   <figure><img src="guide/dash-join.webp" alt="儀表板各組加入 QR 碼" loading="lazy"><figcaption>儀表板顯示各組 QR 碼，以及手機是否已加入、綁定進度</figcaption></figure>
+</section>
+
+<section class="sec" id="auto">
+  <h2>自動抽角色（無實體卡片） <span class="who dash">控場講師</span><span class="who phone">助理主持人</span><span class="who phone">玩家</span></h2>
+  <p>大家只用手機玩、沒有印 QR 碼時使用。需要網路；離線單機只能用實體抽。</p>
+  <ol class="steps">
+    <li><b>建立</b>：「梯次與組別」選「自動抽角色（無實體卡片）」，確認虛偽大人（可手動改，至少 1 位破壞型）後建立。系統把全部角色隨機排到 1～N 號座位。</li>
+    <li><b>發角色卡</b>，兩種方式可混用：
+      <ul>
+        <li>工作人員在「回合控制」或助理主持人手機的「發角色卡」畫面，逐一按座位號顯示座位 QR，請該號玩家用自己的手機掃描（相機直接掃即可）。領走後自動跳到下一個還沒領的號碼。</li>
+        <li>玩家掃「玩家入口」後，自己選組別與座位號。</li>
+      </ul>
+    </li>
+    <li>領取後玩家手機只顯示「我是 N 號」與入座進度，<b>看不到角色</b>。選錯可以按「選錯了，改座位」；號碼被別人選走時會提示，工作人員點該座位即可重設。</li>
+    <li>全組領完，請大家舉起手機核對號碼和座位牌一致，再按<b>「開放查看角色」</b>。開放後玩家按住畫面才看得到角色。有人沒手機時可按「強制開放」，再由助理主持人手機的「角色查詢」點座位號，顯示給他本人看。</li>
+    <li>全部組別都開放後，才會出現回合控制。結算時沒有信封，助理主持人直接點出任務的座位號；角色查詢也改成點座位號。</li>
+  </ol>
+  <div class="tip"><b>防偷看規則</b>
+    <ul>
+      <li>座位 QR 只含座位與隨機碼，不含角色；重設座位會換新隨機碼，舊的 QR（含截圖）立即失效。請勿把發卡區投影出來。</li>
+      <li>一支手機在同一梯次只能領一個座位；兩人同時搶同一號，晚到的會被擋下。</li>
+      <li>開放前可以「重新隨機排座位」（已領取的手機留在原號碼，只換角色）。開放過一次後就鎖定：不能重排、不能自選或改座位，只能由工作人員顯示座位 QR 或重設。</li>
+      <li>儀表板的座位角色表預設遮蔽，按「顯示座位角色（勿投影）」才看得到。</li>
+    </ul>
+  </div>
 </section>
 
 <section class="sec" id="round">

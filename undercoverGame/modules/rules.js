@@ -95,20 +95,31 @@ export function drawSpies(size, rnd = Math.random) {
 /**
  * 建立一組的設定。
  * draw = 'physical'（預設，實體抽臥底卡：綁定座位時掃到哪張臥底就是哪張）
- *      | 'dashboard'（由儀表板／手機事先抽定，spies 為臥底角色陣列）
+ *      | 'dashboard'（離線手機抽：事先抽定，spies 為虛偽大人角色陣列）
  */
-export function makeGroupCfg(size, set, draw = 'physical', spies = null) {
+export function makeGroupCfg(size, set, draw = 'physical', spies = null, rnd = Math.random) {
   const c = composition(size);
   const cfg = { size, set, draw, good: c.good, spyCount: c.spies };
-  if (draw === 'dashboard') {
+  if (draw === 'dashboard' || draw === 'auto') {
     const list = spies || drawSpies(size);
     if (list.length !== c.spies) throw new Error(`${size} 人組需要 ${c.spies} 位虛偽大人`);
     if (new Set(list).size !== list.length || list.some((id) => !SPIES.includes(id))) throw new Error('虛偽大人不可重複');
     if (!list.some((id) => SABOTAGE.includes(id))) throw new Error('每組至少要有 1 位破壞型虛偽大人');
     cfg.spies = list;
+    // 自動抽角色（無實體卡片）：全部角色隨機排到 1～N 號座位，seatRoles[i] 為 i+1 號的角色
+    if (draw === 'auto') cfg.seatRoles = shuffle([...c.good, ...list], rnd);
   }
   return cfg;
 }
+
+/** 自動抽角色：依 seatRoles 與 QR 對照表算出座位 → 代號（同一套對照表，代號只在系統內部使用） */
+export function autoSeats(cfg, mapping) {
+  const codeOf = Object.fromEntries(Object.entries(mapping).map(([code, role]) => [role, code]));
+  const seats = {};
+  cfg.seatRoles.forEach((role, i) => { seats[i + 1] = codeOf[role]; });
+  return seats;
+}
+export function makeNonce(rnd = Math.random) { return Math.floor(rnd() * 36 ** 6).toString(36).padStart(6, '0'); }
 
 /** 這個角色能不能綁進本組。boundRoles：已綁定座位的角色。回傳錯誤訊息或 null。 */
 export function roleAllowed(cfg, role, boundRoles) {
@@ -174,12 +185,14 @@ export function generateMapping(rnd = Math.random) {
 
 export const QR = {
   player: (base, ev) => `${base}?player=${ev}`,
+  seat: (base, ev, batch, g, seat, nonce) => `${base}?player=${ev}&seat=${batch}.${g}.${seat}.${nonce}`,
   envelope: (set, code, v) => `UG:E:${set}:${code}:v${v}`,
   mission: (ev, round, mid) => `UG:M:${ev}:${round}:${mid}`,
   map: (v, set, map) => `UG:MAP:v${v}:${set}:` + Object.entries(map).map(([c, r]) => `${c.slice(2)}=${r}`).join(','),
   parse(text) {
     const t = String(text || '').trim();
     let m;
+    if ((m = t.match(/[?#&]player=([A-Z0-9]{4})&seat=(\d+)\.(\d+)\.(\d+)\.([a-z0-9]+)/i))) return { type: 'seat', ev: m[1].toUpperCase(), batch: +m[2], g: +m[3], seat: +m[4], nonce: m[5].toLowerCase() };
     if ((m = t.match(/[?#&]player=([A-Z0-9]{4})/i))) return { type: 'player', ev: m[1].toUpperCase() };
     if ((m = t.match(/[?#&]join=([A-Z0-9]+)\.(\d+)\.(\d+)/i))) return { type: 'join', ev: m[1].toUpperCase(), batch: +m[2], g: +m[3] };
     if ((m = t.match(/^UG:E:([AB]):(Q-\d{4}):v(\d+)$/))) return { type: 'envelope', set: m[1], code: m[2], v: +m[3] };

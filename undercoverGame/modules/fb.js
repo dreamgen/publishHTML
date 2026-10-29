@@ -34,7 +34,7 @@ export function connect() {
     const evRef = (ev, sub = '') => dbm.ref(db, `${DB_ROOT}/events/${ev}${sub ? '/' + sub : ''}`);
     return {
       ref: (p) => dbm.ref(db, p), get: dbm.get, set: dbm.set, update: dbm.update, remove: dbm.remove,
-      onValue: dbm.onValue, serverTimestamp: dbm.serverTimestamp, evRef,
+      onValue: dbm.onValue, serverTimestamp: dbm.serverTimestamp, runTransaction: dbm.runTransaction, evRef,
       connectedRef: () => dbm.ref(db, '.info/connected'),
       offsetRef: () => dbm.ref(db, '.info/serverTimeOffset'),
     };

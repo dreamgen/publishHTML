@@ -8,7 +8,7 @@
 //   live/<g>: { phone, seats: { 1: code }, ledger: { code: {money, leave} },
 //               rounds: { <r>: { mid, seats, ok, reason, deltas, timeout, at } }, loaded: { round, mid } }
 import { connect } from './fb.js';
-import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed, roleWith, missionWith, VETO_LIMIT } from './rules.js';
+import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed, roleWith, missionWith, VETO_LIMIT, autoSeats, makeNonce, shuffle } from './rules.js';
 
 const LS_OFFLINE = 'ug.offline.v1';
 
@@ -208,11 +208,109 @@ export class EventSession {
   }
   playerBinding(g, code) { return ((this.live(g).players || {})[code]) || null; }
   async claimEnvelope(g, code, device) {
-    const b = this.playerBinding(g, code);
-    if (b && b.device !== device) throw new Error('LOCKED');
-    if (!b) await this.patch({ [`live/${g}/players/${code}`]: { device, at: this.now() } });
+    if (this.isAuto(g)) throw new Error('本組沒有信封，請掃座位 QR 碼或選座位號');
+    await this.claimSlot(g, code, { device, at: this.now() });
   }
-  async resetPlayer(g, code) { await this.patch({ [`live/${g}/players/${code}`]: null }); }
+  /** 玩家能不能看角色：實體抽看全場「開放玩家查看」；自動抽角色看本組「開放查看」 */
+  viewOpen(g) { return this.isAuto(g) ? this.handOpen(g) : !!this.playerCfg.open; }
+  async resetPlayer(g, code) {
+    const p = { [`live/${g}/players/${code}`]: null };
+    // 自動抽角色：重設時換一組隨機碼，舊的座位 QR（含截圖）就失效
+    const seat = this.isAuto(g) && this.seatOf(g, code);
+    if (seat) p[`live/${g}/tokens/${seat}`] = makeNonce();
+    await this.patch(p);
+  }
+  /** 寫入手機綁定，避免兩支手機同時搶同一個座位：有交易功能就用交易，否則寫入後再讀回確認 */
+  async claimSlot(g, code, rec) {
+    const path = `live/${g}/players/${code}`;
+    if (this.fb && this.fb.runTransaction) {
+      const res = await this.fb.runTransaction(this.fb.evRef(this.ev, path), (cur) => (cur && cur.device !== rec.device ? undefined : (cur || rec)));
+      const v = res.snapshot.val();
+      if (!res.committed || !v || v.device !== rec.device) throw new Error('LOCKED');
+      return;
+    }
+    const b = this.playerBinding(g, code);
+    if (b && b.device !== rec.device) throw new Error('LOCKED');
+    if (!b) await this.patch({ [path]: rec });
+    const after = this.playerBinding(g, code);
+    if (after && after.device !== rec.device) throw new Error('LOCKED');
+  }
+
+  // ── 自動抽角色（無實體卡片）：玩家用手機領座位，全組領完後控場開放查看 ──────
+  isAuto(g) { const c = this.groupCfg(g); return !!c && c.draw === 'auto'; }
+  handOpen(g) { return !!this.live(g).handOpen; }
+  /** 曾經開放過：之後就算暫時蓋住，也不能再自選或改座位 */
+  handLocked(g) { return !!this.live(g).handOpened; }
+  tokens(g) { return this.live(g).tokens || {}; }
+  /** 已領取的座位號 */
+  claimedSeats(g) {
+    const seats = this.seats(g), players = this.live(g).players || {};
+    return Object.keys(seats).filter((s) => players[seats[s]]).map(Number).sort((a, b) => a - b);
+  }
+  /** 建立梯次時，自動抽角色組別的初始資料（座位、帳本、座位 QR 隨機碼） */
+  autoLive(cfg) {
+    const mapping = this.qr.sets[cfg.set];
+    const seats = autoSeats(cfg, mapping);
+    const tokens = {};
+    for (const s of Object.keys(seats)) tokens[s] = makeNonce();
+    return { seats, ledger: initialLedger(seats, mapping, this.overrides.roles), tokens, handOpen: false };
+  }
+  /** 這支手機目前在本梯次領了哪個座位 */
+  myClaim(device) {
+    for (const g of Object.keys((this.batch && this.batch.groups) || {})) {
+      const players = this.live(g).players || {};
+      for (const [code, b] of Object.entries(players)) if (b && b.device === device) return { g: +g, code, seat: +this.seatOf(g, code) };
+    }
+    return null;
+  }
+  /**
+   * 玩家領座位。nonce：掃工作人員顯示的座位 QR 才有；自選座位不帶。
+   * 開放查看後只能用座位 QR 領（避免開放後亂選偷看別人的角色）。
+   */
+  async claimSeat(g, seat, device, nonce = null) {
+    const cfg = this.groupCfg(g);
+    if (!cfg || cfg.draw !== 'auto') throw new Error('這一組不是自動抽角色，請掃自己的信封');
+    seat = Number(seat);
+    if (!(seat >= 1 && seat <= cfg.size)) throw new Error(`座位號碼是 1～${cfg.size}`);
+    if (nonce) { if (this.tokens(g)[seat] !== nonce) throw new Error('這個座位 QR 碼已失效，請工作人員重新顯示'); }
+    else if (this.handLocked(g)) throw new Error('已開放查看，不能再自己選座位；請找工作人員顯示你的座位 QR 碼');
+    const code = this.seats(g)[seat];
+    const cur = this.playerBinding(g, code);
+    if (cur && cur.device !== device) throw new Error('TAKEN');
+    const old = this.myClaim(device);
+    if (old && !(old.g === +g && old.code === code)) {
+      if (this.handLocked(old.g)) throw new Error(`這支手機已經領了第 ${old.g} 組 ${old.seat} 號，要換座位請找工作人員重設`);
+      await this.patch({ [`live/${old.g}/players/${old.code}`]: null });
+    }
+    try { await this.claimSlot(g, code, { device, at: this.now(), seat }); } catch (e) { throw new Error(e.message === 'LOCKED' ? 'TAKEN' : e.message); }
+    return { g: +g, code, seat };
+  }
+  /** 玩家自己放掉座位（開放查看前，選錯時改座位） */
+  async releaseSeat(g, code, device) {
+    if (this.handLocked(g)) throw new Error('已開放查看，請找工作人員重設');
+    const b = this.playerBinding(g, code);
+    if (b && b.device === device) await this.patch({ [`live/${g}/players/${code}`]: null });
+  }
+  /** 開放前重新隨機排座位：已領座位的手機留在原座位號，只換角色 */
+  async reshuffleSeats(g) {
+    if (this.handLocked(g)) throw new Error('已開放查看過，不能重排座位');
+    if (Object.keys(this.rounds(g)).length) throw new Error('已經開始結算，不能重排座位');
+    const cfg = this.groupCfg(g), oldSeats = this.seats(g), players = this.live(g).players || {};
+    const seatRoles = shuffle(cfg.seatRoles);
+    const next = this.autoLive({ ...cfg, seatRoles });
+    const moved = {};
+    for (const [s, code] of Object.entries(oldSeats)) if (players[code]) moved[next.seats[s]] = players[code];
+    await this.patch({
+      [`batch/groups/${g}/seatRoles`]: seatRoles,
+      [`live/${g}/seats`]: next.seats, [`live/${g}/ledger`]: next.ledger, [`live/${g}/players`]: moved,
+    });
+  }
+  async openHand(g, force = false) {
+    const cfg = this.groupCfg(g);
+    if (!force && this.claimedSeats(g).length < cfg.size) throw new Error('還有座位沒領取');
+    await this.patch({ [`live/${g}/handOpen`]: true, [`live/${g}/handOpened`]: true });
+  }
+  async closeHand(g) { await this.patch({ [`live/${g}/handOpen`]: false }); }
 
   // ── O／X 表決（玩家手機投票，助理主持人與儀表板看統計）──────────────
   vote(g) { return this.live(g).vote || null; }

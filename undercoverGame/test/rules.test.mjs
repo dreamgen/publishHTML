@@ -1,6 +1,6 @@
 // node test/rules.test.mjs —— 以修正方案第一節「任務」表的 6 人組試算驗證判定與扣除
 import assert from 'node:assert/strict';
-import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR } from '../modules/rules.js';
+import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR, autoSeats } from '../modules/rules.js';
 
 const res = {};
 const mk = (...ids) => ids.map((id) => ({ code: id, role: id, money: res[id].money, leave: res[id].leave }));
@@ -96,4 +96,18 @@ const back = QR.parse(QR.map(3, 'A', map.A));
 assert.deepEqual(back.map, map.A);
 assert.deepEqual(QR.parse('https://x/undercoverGame/?join=AB12.2.1'), { type: 'join', ev: 'AB12', batch: 2, g: 1 });
 assert.equal(QR.parse('UG:E:A:Q-4827:v3').code, 'Q-4827');
+// 自動抽角色（無實體卡片）：全部角色隨機排座位，至少 1 位破壞型
+for (let i = 0; i < 50; i++) {
+  const ac = makeGroupCfg(9, 'B', 'auto');
+  assert.equal(ac.seatRoles.length, 9);
+  assert.deepEqual([...ac.seatRoles].sort(), [...ac.good, ...ac.spies].sort());
+  assert.ok(ac.spies.some((id) => ROLE[id].kind === 'sabotage'));
+}
+assert.throws(() => makeGroupCfg(6, 'A', 'auto', ['two', 'yes']), /破壞型/);
+const amap = generateMapping().A, acfg = makeGroupCfg(7, 'A', 'auto');
+const aseats = autoSeats(acfg, amap);
+for (let k = 1; k <= 7; k++) assert.equal(amap[aseats[k]], acfg.seatRoles[k - 1]);
+const sq = QR.parse(QR.seat('https://x.io/undercoverGame/', 'AB12', 3, 2, 5, 'k3j9a0'));
+assert.deepEqual(sq, { type: 'seat', ev: 'AB12', batch: 3, g: 2, seat: 5, nonce: 'k3j9a0' });
+assert.equal(QR.parse('https://x.io/?player=AB12').type, 'player');
 console.log('rules tests passed');

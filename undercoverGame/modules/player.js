@@ -28,6 +28,9 @@ export async function mountPlayer(app) {
     return;
   }
   const me = deviceId();
+  // 用手機相機直接掃座位 QR 開啟時，app.js 會把座位資訊暫存在 seatTok
+  const pendingSeat = info.seatTok || null;
+  if (pendingSeat) jset(LS_PLAYER, { ...info, seatTok: undefined });
   const ui = { peek: false, timer: 0 };
 
   // 只切換 class，不重畫 DOM，避免按住中元素被替換而收不到放開事件
@@ -55,19 +58,37 @@ export async function mountPlayer(app) {
 
   // 目前綁定的信封是否仍有效（梯次可能已更換）
   const current = () => {
+    if (!S.batch) return null;
     const p = jget(LS_PLAYER);
-    if (!p || !p.code || !S.batch) return null;
-    const g = S.findEnvelope(p.set, p.code);
-    if (!g || g !== p.g || p.batch !== S.batch.no) return null;
-    const b = S.playerBinding(g, p.code);
-    if (!b || b.device !== me) return null;
-    return p;
+    if (p && p.code) {
+      const g = S.findEnvelope(p.set, p.code);
+      const b = g && S.playerBinding(g, p.code);
+      if (g && g === p.g && p.batch === S.batch.no && b && b.device === me) return p;
+    }
+    // 自動抽角色被重排座位、或本機紀錄遺失時，依資料庫裡這支手機的綁定找回
+    const c = S.myClaim(me);
+    if (!c) return null;
+    const q = { ev: S.ev, batch: S.batch.no, g: c.g, set: S.groupCfg(c.g).set, code: c.code };
+    jset(LS_PLAYER, q);
+    return q;
+  };
+  const save = (r) => jset(LS_PLAYER, { ev: S.ev, batch: S.batch.no, g: r.g, set: S.groupCfg(r.g).set, code: r.code });
+  // 自動抽角色：領座位（掃座位 QR 帶 nonce；自選不帶）
+  const takeSeat = (g, seat, nonce = null) => S.claimSeat(g, seat, me, nonce).then((r) => { save(r); ui.pick = null; render(); }).catch((e) => {
+    if (e.message === 'TAKEN') { ui.taken = { g, seat }; render(); } else toast(e.message, 'bad');
+  });
+  const useSeatQr = (q) => {
+    if (q.ev !== S.ev) return '這是別的活動的座位 QR 碼';
+    if (!S.batch || q.batch !== S.batch.no) return '這個座位 QR 碼已過期（梯次已更換）';
+    takeSeat(q.g, q.seat, q.nonce);
+    return true;
   };
 
-  const scan = () => openScanner({
-    title: '掃我的信封', hint: '用手遮住信封，只掃自己的',
+  const scan = (title = '掃我的信封', hint = '用手遮住信封，只掃自己的') => openScanner({
+    title, hint,
     onResult: (t) => {
       const q = QR.parse(t);
+      if (q.type === 'seat') return useSeatQr(q);
       // 相機掃到：UG:E:A:Q-1234:v3；手動輸入：Q-1234 或 1234
       if (q.type !== 'envelope' && q.type !== 'code') return '這不是信封上的 QR 碼或代號，手動輸入請填 4 位數字（例如 4827）';
       if (q.type === 'envelope' && (!S.qr || q.v !== S.qr.version)) return '這是舊版貼紙，請洽工作人員';
@@ -76,6 +97,7 @@ export async function mountPlayer(app) {
       if (!set) return `找不到代號 ${q.code}，請確認信封上的號碼`;
       const g = S.findEnvelope(set, q.code);
       if (!g) return '這個信封還沒有被綁定到本梯次的座位，請稍候或洽工作人員';
+      if (S.isAuto(g)) return '本組沒有信封，請掃工作人員給你的座位 QR 碼，或在畫面上選座位號';
       S.claimEnvelope(g, q.code, me).then(() => {
         jset(LS_PLAYER, { ev: S.ev, batch: S.batch.no, g, set, code: q.code });
         render();
@@ -90,9 +112,11 @@ export async function mountPlayer(app) {
     ui.peek = false; clearTimeout(ui.timer);
     if (!S.batch) return app.replaceChildren(pshell('查看我的角色', null, h('section', { class: 'p-card' }, h('p', {}, '工作人員還在準備本梯次，請稍候。'))));
     if (ui.locked) { ui.locked = false; return app.replaceChildren(lockedView()); }
+    if (ui.taken) { const t = ui.taken; ui.taken = null; return app.replaceChildren(takenView(t)); }
     const p = current();
-    if (!p) return app.replaceChildren(entryView());
+    if (!p) return app.replaceChildren(autoGroups().length ? autoEntryView() : entryView());
     if (S.playerCfg.revealed) return app.replaceChildren(endView(p));
+    if (S.isAuto(p.g) && !S.handOpen(p.g)) return app.replaceChildren(waitView(p));
     app.replaceChildren(cardView(p));
   }
 
@@ -107,9 +131,64 @@ export async function mountPlayer(app) {
           step(3, '只掃自己的信封。每個信封只能在一支手機上開啟。'))),
       h('p', { class: 'p-note' }, '掃完後畫面會先蓋住。要看角色時，按住畫面中間才會顯示，放開立刻蓋回。'),
       S.playerCfg.open ? null : h('p', { class: 'p-note' }, '玩家查看尚未開放，可以先掃描，開放後即可查看。'),
-      h('footer', {}, h('button', { class: 'p-btn', onclick: scan }, iconEl('scan'), '掃我的信封'),
+      h('footer', {}, h('button', { class: 'p-btn', onclick: () => scan() }, iconEl('scan'), '掃我的信封'),
         h('span', { class: 'p-muted small', style: { textAlign: 'center' } }, '相機掃不到時，可在掃描視窗下方輸入信封上的 4 位數字'),
-        h('span', { class: 'p-muted', style: { textAlign: 'center', fontSize: '11px' } }, '程式版本 v10')));
+        h('span', { class: 'p-muted', style: { textAlign: 'center', fontSize: '11px' } }, `程式版本 ${window.__UG_VERSION || ''}`)));
+  }
+
+  // ── 自動抽角色（無實體卡片）──────────────────────────────
+  const autoGroups = () => Object.keys((S.batch && S.batch.groups) || {}).map(Number).filter((g) => S.isAuto(g)).sort();
+  function autoEntryView() {
+    const gs = autoGroups(), hasPhysical = Object.keys(S.batch.groups).length > gs.length;
+    const pickable = gs.filter((g) => !S.handLocked(g));
+    if (!ui.pick || !pickable.includes(ui.pick.g)) ui.pick = { g: pickable[0] || gs[0], seat: null };
+    const g = ui.pick.g, cfg = S.groupCfg(g), claimed = S.claimedSeats(g);
+    const selfOk = pickable.includes(g);
+    return pshell('領取我的角色卡', `第 ${S.batch.no} 梯次`,
+      h('button', { class: 'p-btn', onclick: () => scan('掃座位 QR 碼', '掃工作人員手機或螢幕上顯示的、你的座位 QR 碼') }, iconEl('scan'), '掃工作人員給我的座位 QR'),
+      selfOk ? h('div', { class: 'p-or' }, h('span', {}), '或自己選', h('span', {})) : null,
+      selfOk ? h('section', { class: 'p-card' },
+        gs.length > 1 ? h('fieldset', { class: 'p-field' }, h('legend', {}, '我在第幾組'),
+          h('div', { class: 'p-grid2' }, gs.map((n) => h('button', {
+            class: 'p-opt', type: 'button', 'aria-pressed': String(n === g), disabled: !pickable.includes(n),
+            onclick: () => { ui.pick = { g: n, seat: null }; render(); },
+          }, `第 ${n} 組`)))) : null,
+        h('fieldset', { class: 'p-field' }, h('legend', {}, '我的座位號碼（看桌上的號碼牌）'),
+          h('div', { class: 'p-grid4' }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => h('button', {
+            class: 'p-opt mono' + (claimed.includes(s) ? ' taken' : ''), type: 'button', 'aria-pressed': String(ui.pick.seat === s),
+            disabled: claimed.includes(s), 'aria-label': `${s} 號${claimed.includes(s) ? '（已有人領）' : ''}`,
+            onclick: () => { ui.pick.seat = s; render(); },
+          }, s))),
+          h('span', { class: 'p-muted small' }, '劃線的號碼已經有人領了。'))) 
+        : h('p', { class: 'p-note' }, '本組已開放查看，不能再自己選座位。請舉手請工作人員顯示你的座位 QR 碼。'),
+      hasPhysical ? h('button', { class: 'p-btn ghost', onclick: () => scan() }, '我有信封：掃我的信封') : null,
+      h('footer', {},
+        selfOk ? h('button', { class: 'p-btn', disabled: !ui.pick.seat, onclick: () => takeSeat(g, ui.pick.seat) }, ui.pick.seat ? `確認：我是第 ${g} 組 ${ui.pick.seat} 號` : '請先選座位號碼') : null,
+        h('span', { class: 'p-muted small', style: { textAlign: 'center' } }, '全組都領取、主持人開放後才會看到角色；選錯可以再改')));
+  }
+  function waitView(p) {
+    const cfg = S.groupCfg(p.g), seat = S.seatOf(p.g, p.code), n = S.claimedSeats(p.g).length;
+    return pshell('已領取座位', `第 ${S.batch.no} 梯次・第 ${p.g} 組`,
+      h('section', { class: 'p-card center p-me' },
+        h('span', { class: 'p-muted' }, '我是'), h('b', { class: 'mono' }, seat), h('span', { style: { fontWeight: 700 } }, '號'),
+        h('span', { class: 'p-muted small' }, '主持人請大家舉起手機核對時，確認這個號碼和你的座位牌一樣。')),
+      h('section', { class: 'p-card', 'aria-live': 'polite' },
+        h('div', { class: 'row between' }, h('b', {}, '等全組入座'), h('span', { class: 'p-muted' }, `${n} / ${cfg.size} 已領取`)),
+        h('div', { class: 'p-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(cfg.size), 'aria-valuenow': String(n), 'aria-label': '入座進度' },
+          h('span', { style: { width: `${Math.round((n / cfg.size) * 100)}%` } })),
+        h('span', { class: 'p-muted small' }, '角色還沒有顯示。全組都領取、主持人按「開放查看」後，這裡會換成按住查看的角色卡。')),
+      S.handLocked(p.g) ? h('p', { class: 'p-note' }, '主持人暫時蓋住了畫面，請稍候。') : null,
+      h('footer', {},
+        S.handLocked(p.g) ? null : h('button', { class: 'p-btn ghost', onclick: () => S.releaseSeat(p.g, p.code, me).then(() => { jset(LS_PLAYER, { ev: S.ev }); render(); }).catch((e) => toast(e.message, 'bad')) }, '選錯了，改座位'),
+        h('span', { class: 'p-muted small', style: { textAlign: 'center' } }, '開放查看後就不能自己改，請找工作人員')));
+  }
+  function takenView(t) {
+    return pshell('這個座位已經有人領了', `第 ${S.batch.no} 梯次・第 ${t.g} 組・${t.seat} 號`,
+      h('section', { class: 'p-card', role: 'alert' },
+        h('h2', {}, '先確認你坐的號碼'),
+        h('ul', {}, h('li', {}, '看桌上的座位牌，再選一次。'), h('li', {}, `確定是 ${t.seat} 號：可能有人選錯，請舉手找工作人員重設。`))),
+      h('p', { class: 'p-note' }, '開放查看前，誰都看不到角色，所以選錯不會洩漏身分。'),
+      h('footer', {}, h('button', { class: 'p-btn', onclick: () => render() }, '重新選座位')));
   }
 
   function lockedView() {
@@ -124,7 +203,7 @@ export async function mountPlayer(app) {
   function cardView(p) {
     const c = S.control, seat = S.seatOf(p.g, p.code);
     const m = c.missionId ? S.mission(c.missionId) : null;
-    const open = S.playerCfg.open;
+    const open = S.viewOpen(p.g);
     const role = ROLE[S.mapping(p.g)[p.code]], text = ROLE_TEXT[role.id];
     const eff = S.stats(p.g, p.code);
     const ledger = { money: eff.money, leave: eff.leave };
@@ -249,6 +328,7 @@ export async function mountPlayer(app) {
     document.body.classList.remove('player-theme');
   });
   render();
+  if (pendingSeat) { const r = useSeatQr(pendingSeat); if (r !== true) toast(r, 'bad'); }
 }
 
 function pshell(title, sub, ...body) {

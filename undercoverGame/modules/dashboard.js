@@ -10,6 +10,7 @@ import { spyPicker } from './spypick.js';
 import { editTab } from './editor.js';
 import { noticeBanner } from './notice.js';
 import { voteBox } from './vote.js';
+import { handPanel } from './hand.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
@@ -71,6 +72,7 @@ function dashboard(app, S) {
   let reveal = false;
   let form = null; // 梯次設定表單暫存
   const editSt = { draft: null }; // 編輯模式草稿
+  const handSt = {}; // 自動抽角色：各組發卡面板狀態
   let lastTimeUp = false;
   let lock = null;
   wakeLock().then((l) => { lock = l; });
@@ -145,7 +147,7 @@ function dashboard(app, S) {
     const groupCards = form.sizes.map((size, i) => {
       const g = i + 1, c = composition(size), set = g === 1 ? 'A' : 'B';
       return h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}・信封 ${set} 套`)),
+        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}・${form.picks[g].draw === 'auto' ? '不用信封' : `信封 ${set} 套`}`)),
         h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '真誠大人　'), c.good.map((id) => ROLE[id].name).join('、')),
         spyPicker(size, form.picks[g], render));
     });
@@ -155,7 +157,7 @@ function dashboard(app, S) {
           h('label', { class: 'field' }, '梯次',
             h('select', { onchange: (e) => { form.no = +e.target.value; } }, [1, 2, 3, 4, 5, 6, 7, 8].map((n) => h('option', { value: n, selected: form.no === n }, `第 ${n} 梯次`)))),
           h('label', { class: 'field' }, '本梯次總人數',
-            h('input', { type: 'number', min: 6, max: 22, value: form.total, onchange: (e) => { form.total = +e.target.value; rollSpies(); render(); } }))),
+            h('input', { type: 'number', min: 6, max: 22, value: form.total, onchange: (e) => { if (+e.target.value === form.total) return; form.total = +e.target.value; rollSpies(); render(); } }))),
         form.error ? h('p', { class: 'note bad' }, form.error)
           : h('p', { class: 'muted small' }, `分組：${form.sizes.join('＋')} 人。規則：11 人以下 1 組；12 人分 6＋6；13 人分 6＋7。每組依人數自動帶入好壞比例。`)),
       ...groupCards,
@@ -168,18 +170,21 @@ function dashboard(app, S) {
               form.sizes.forEach((size, i) => {
                 const g = i + 1;
                 const pk = form.picks[g];
-                try { groups[g] = makeGroupCfg(size, g === 1 ? 'A' : 'B', pk.draw, pk.draw === 'dashboard' ? pk.spies : null); }
+                try { groups[g] = makeGroupCfg(size, g === 1 ? 'A' : 'B', pk.draw, pk.draw !== 'physical' ? pk.spies : null); }
                 catch (err) { throw new Error(`第 ${g} 組：${err.message}`); }
               });
+              // 自動抽角色的組別：座位、帳本與座位 QR 隨機碼在建立時就準備好，不需要掃碼綁定
+              const live = {};
+              for (const [g, cfg] of Object.entries(groups)) if (cfg.draw === 'auto') live[g] = S.autoLive(cfg);
               if (b && !(await confirmBox(`建立第 ${form.no} 梯次？`, '目前各組的綁定與結算記錄會清除。', '建立', true))) return;
               await S.patch({
                 batch: { no: form.no, total: form.total, createdAt: Date.now(), groups },
-                live: null,
+                live: Object.keys(live).length ? live : null,
                 control: { round: 1, missionId: null, status: 'idle', accum: 0, startAt: null },
                 player: { open: false, revealed: false },
               });
               tab = 'control'; render();
-              toast(`已建立第 ${form.no} 梯次，請助理主持人掃組別 QR 碼`);
+              toast(Object.keys(live).length ? `已建立第 ${form.no} 梯次，請發角色卡給玩家` : `已建立第 ${form.no} 梯次，請助理主持人掃組別 QR 碼`);
             } catch (e) { toast(e.message, 'bad'); }
           },
         }, '建立本梯次')));
@@ -190,7 +195,12 @@ function dashboard(app, S) {
     if (!S.batch) return h('section', { class: 'card' }, h('p', {}, '還沒有梯次。'), h('button', { class: 'btn primary', onclick: () => { tab = 'batch'; initForm(); render(); } }, '前往梯次與組別'));
     const gs = groupsOf();
     const allReady = gs.every((g) => S.allBound(g));
-    if (!allReady || c.round === 0) return h('div', { class: 'stack' }, joinPanel(gs), playerPanel(gs));
+    const handPending = gs.filter((g) => S.isAuto(g) && !S.handLocked(g));
+    if (!allReady || c.round === 0 || handPending.length) {
+      return h('div', { class: 'stack' },
+        ...handPending.map((g) => handPanel(S, g, (handSt[g] = handSt[g] || {}), render, { staffRoles: true })),
+        joinPanel(gs, handPending), playerPanel(gs));
+    }
 
     const r = c.round;
     const used = {};
@@ -259,7 +269,10 @@ function dashboard(app, S) {
       const cfg = S.groupCfg(g), seats = S.seats(g), players = S.live(g).players || {};
       const opened = Object.keys(seats).filter((s) => players[seats[s]]).length;
       return h('div', { class: 'card', style: { flex: '1 1 260px' } },
-        h('div', { class: 'row between' }, h('b', {}, `第 ${g} 組`), h('span', { class: 'muted small' }, `已開啟 ${opened} / ${cfg.size}`)),
+        h('div', { class: 'row between' }, h('b', {}, `第 ${g} 組${cfg.draw === 'auto' ? '・自動抽角色' : ''}`), h('span', { class: 'muted small' }, `已開啟 ${opened} / ${cfg.size}`)),
+        cfg.draw === 'auto' ? h('div', { class: 'row between' },
+          h('span', { class: 'chip ' + (S.handOpen(g) ? 'ok' : '') }, S.handOpen(g) ? '本組已開放查看' : '本組尚未開放'),
+          h('button', { class: 'btn', onclick: () => (S.handOpen(g) ? S.closeHand(g) : S.openHand(g, S.handLocked(g))).catch((e) => toast(e.message, 'bad')) }, S.handOpen(g) ? '蓋住本組玩家畫面' : '開放本組查看')) : null,
         h('div', { class: 'grid g6' }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => {
           const code = seats[s], on = code && players[code];
           return h('button', {
@@ -267,7 +280,7 @@ function dashboard(app, S) {
             'aria-label': `${s} 號${on ? '已在手機開啟，點一下可重設' : '尚未開啟'}`, disabled: !on && !code ? true : null,
             onclick: async () => {
               if (!on) return;
-              if (await confirmBox(`重設 ${s} 號的手機綁定？`, '玩家換手機時使用。重設後需要重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code);
+              if (await confirmBox(`重設 ${s} 號的手機綁定？`, cfg.draw === 'auto' ? '玩家換手機或選錯號時使用。重設後舊的座位 QR 失效，請重新顯示座位 QR 讓玩家領取。' : '玩家換手機時使用。重設後需要重新掃自己的信封。', '重設', true)) S.resetPlayer(g, code);
             },
           }, s);
         })),
@@ -276,7 +289,7 @@ function dashboard(app, S) {
     return h('section', { class: 'card' },
       h('div', { class: 'row between' }, h('h2', {}, '玩家版：在手機上查看自己的角色'),
         h('div', { class: 'row' },
-          h('button', { class: 'btn ' + (pc.open ? 'primary' : ''), onclick: () => S.patch({ 'player/open': !pc.open }) }, pc.open ? '已開放・按此關閉' : '開放玩家查看'),
+          gs.some((g) => !S.isAuto(g)) ? h('button', { class: 'btn ' + (pc.open ? 'primary' : ''), onclick: () => S.patch({ 'player/open': !pc.open }) }, pc.open ? '已開放・按此關閉' : '開放玩家查看') : null,
           h('button', {
             class: 'btn soft-bad', onclick: async () => {
               if (!pc.revealed && !(await confirmBox('揭牌：公開所有身分？', '所有玩家手機會顯示自己的身分、回合紀錄與本組所有人的身分。', '揭牌', true))) return;
@@ -290,25 +303,26 @@ function dashboard(app, S) {
           h('span', { class: 'muted tiny' }, '可投影或印在桌牌上；只能進入玩家頁，不含角色資訊。'),
           h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, '開啟玩家頁')),
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '12px', flex: '1 1 480px' } }, gs.map(groupBox))),
-      h('p', { class: 'muted small' }, pc.open ? '已開放：玩家按住畫面即可查看角色。關閉後所有玩家畫面立即蓋住。' : '尚未開放：玩家可先掃信封，但看不到角色。'));
+      h('p', { class: 'muted small' }, gs.some((g) => S.isAuto(g)) ? '自動抽角色的組別：玩家掃入口後領自己的座位（或掃工作人員顯示的座位 QR），各組分開「開放查看」。' : null,
+        gs.some((g) => !S.isAuto(g)) ? (pc.open ? '實體抽的組別已開放：玩家按住畫面即可查看角色。關閉後玩家畫面立即蓋住。' : '實體抽的組別尚未開放：玩家可先掃信封，但看不到角色。') : null));
   }
 
-  function joinPanel(gs) {
+  function joinPanel(gs, handPending = []) {
     return h('div', { class: 'cols' }, gs.map((g) => {
-      const cfg = S.groupCfg(g), live = S.live(g);
+      const cfg = S.groupCfg(g), live = S.live(g), auto = cfg.draw === 'auto';
       const bound = Object.keys(live.seats || {}).length;
       const url = `${location.origin}${location.pathname}?join=${ev}.${S.batch.no}.${g}`;
       return h('section', { class: 'card', style: { alignItems: 'center', textAlign: 'center' } },
-        h('h2', {}, `第 ${g} 組・${cfg.size} 人・${cfg.set} 套`),
+        h('h2', {}, `第 ${g} 組・${cfg.size} 人・${auto ? '自動抽角色' : cfg.set + ' 套'}`),
         qrImg(url, 200, `第 ${g} 組加入用 QR 碼`),
-        h('span', { class: 'chip ' + (live.phone ? 'ok' : '') }, live.phone ? `手機已加入・綁定 ${bound}/${cfg.size}` : '等待手機掃描'),
+        h('span', { class: 'chip ' + (live.phone ? 'ok' : '') }, live.phone ? (auto ? '手機已加入・免綁定' : `手機已加入・綁定 ${bound}/${cfg.size}`) : '等待手機掃描'),
         h('p', { class: 'muted tiny' }, '助理主持人用手機相機或本程式掃描加入。QR 碼不含角色資訊。'),
         h('details', {}, h('summary', { class: 'small' }, '本組角色（請勿外流）'),
           h('p', { class: 'small' }, '真誠大人：', cfg.good.map((id) => ROLE[id].name).join('、')),
-          h('p', { class: 'small' }, '虛偽大人：', cfg.draw === 'dashboard' ? cfg.spies.map((id) => ROLE[id].name).join('、') : `實體抽 ${cfg.spyCount} 張，綁定時以掃到的為準`)));
+          h('p', { class: 'small' }, '虛偽大人：', cfg.spies ? cfg.spies.map((id) => ROLE[id].name).join('、') : `實體抽 ${cfg.spyCount} 張，綁定時以掃到的為準`)));
     }).concat([h('section', { class: 'card' },
-      h('h2', {}, '等待全部組別綁定完成'),
-      h('p', { class: 'muted small' }, '每組手機加入後，依座位編號逐一掃信封。全部組別都綁定完成，才會出現回合控制。'))]));
+      h('h2', {}, handPending.length ? '等待發角色卡與綁定完成' : '等待全部組別綁定完成'),
+      h('p', { class: 'muted small' }, '實體抽的組別：手機加入後依座位編號逐一掃信封。自動抽角色的組別：不用綁定，玩家領完角色卡並按「開放查看角色」。全部完成後才會出現回合控制。'))]));
   }
 
   function groupCard(g, c) {

@@ -202,3 +202,29 @@ body.player-theme{background:#171614;color:#F1ECE2}
 /* 玩家資源顏色 */
 .p-res b.res-down{color:#5FD08A}
 .p-res b.res-zero{color:#FF6B6B}
+/* 自動抽角色：發角色卡 */
+.hand-seat{min-height:60px;flex-direction:column;gap:2px;padding:4px;border-style:dashed;color:var(--muted)}
+.hand-seat b{font-size:20px}
+.hand-seat.done{background:var(--ok-bg);color:var(--ok-d);border:1px solid var(--ok-bg)}
+.hand-seat.on{background:var(--ink);color:#fff;border:1px solid var(--ink)}
+.hand-qr{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:14px;border-radius:14px;background:var(--bg)}
+.hand-no{font-size:44px;line-height:1}
+.hand-role{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-height:44px}
+.hand-role b{font-size:18px;width:24px}
+.qr-full{position:fixed;inset:0;z-index:60;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:16px}
+/* 玩家：選座位 */
+.p-or{display:flex;align-items:center;gap:10px;color:#A8A194;font-size:13px}
+.p-or span{flex:1;height:1px;background:#34312B}
+.p-field{margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:8px}
+.p-field legend{font-size:15px;font-weight:700;margin-bottom:8px;padding:0}
+.p-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.p-grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.p-opt{min-height:52px;border-radius:12px;border:1px solid #4A463E;background:#23211E;color:#F1ECE2;font-size:18px;font-weight:700;cursor:pointer}
+.p-opt[aria-pressed="true"]{background:#D8C7A3;color:#171614;border-color:#D8C7A3}
+.p-opt.taken,.p-opt:disabled{background:#1E1D1B;color:#5C574E;border-style:dashed;text-decoration:line-through;cursor:not-allowed}
+.p-btn:disabled{opacity:.5;cursor:not-allowed}
+.p-me{gap:6px;padding:24px 16px}
+.p-me b{font-size:96px;line-height:1}
+.p-bar{height:8px;border-radius:999px;background:#34312B;overflow:hidden}
+.p-bar span{display:block;height:100%;background:#D8C7A3}
+.hand-seat .tiny{font-size:10px;white-space:nowrap}

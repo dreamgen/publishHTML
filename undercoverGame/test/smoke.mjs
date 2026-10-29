@@ -71,7 +71,6 @@ await dash.getByRole('button', { name: '梯次與組別' }).click();
 await dash.fill('input[type=number]', '12'); await dash.locator('input[type=number]').dispatchEvent('change');
 await dash.getByText('分組：6＋6 人').waitFor();
 await shot(dash, '3b-batch');
-await dash.getByRole('button', { name: '儀表板抽' }).nth(1).click(); // 第 2 組改儀表板抽
 await dash.getByRole('button', { name: '建立本梯次' }).click();
 await dash.getByText('第 1 組・6 人・A 套').waitFor();
 await shot(dash, '4-join');
@@ -243,6 +242,86 @@ await dash.locator('.modal').getByRole('button', { name: '揭牌' }).click();
 await pA.getByText('遊戲結束・已揭牌').waitFor();
 await shot(pA, '15-player-end', false);
 step('玩家：揭牌後顯示身分與回顧');
+
+// 6. 自動抽角色（無實體卡片）：7 人 1 組
+await dash.getByRole('button', { name: '梯次與組別' }).click();
+await dash.fill('input[type=number]', '7'); await dash.locator('input[type=number]').dispatchEvent('change');
+await dash.getByRole('button', { name: '自動抽角色（無實體卡片）' }).click();
+await dash.getByRole('button', { name: '建立本梯次' }).click();
+await dash.locator('.modal').getByRole('button', { name: '建立' }).click();
+await dash.getByText('第 1 組・發角色卡').waitFor({ timeout: 5000 }).catch(async (e) => { await shot(dash, 'dbg-hand'); console.log(await dash.evaluate(() => document.body.innerText.slice(0, 1500))); throw e; });
+const acfg = evd().batch.groups[1];
+if (acfg.draw !== 'auto' || acfg.seatRoles.length !== 7 || !acfg.seatRoles.some((r) => ['sel', 'yang', 'face'].includes(r))) throw new Error('自動抽角色設定不對 ' + JSON.stringify(acfg));
+if (Object.keys(evd().live[1].seats).length !== 7) throw new Error('座位沒有自動排好');
+await shot(dash, '30-dash-hand');
+const pctxH = await mkCtx({ width: 390, height: 844 });
+const ph2 = await open(`?join=${ev}.${evd().batch.no}.1`, null, pctxH);
+await ph2.getByRole('button', { name: '確認，開始發角色卡' }).click();
+await ph2.locator('.hand').getByText('第 1 組・發角色卡').waitFor();
+await shot(ph2, '35-phone-hand', false);
+const pickSeat = async (pg, n) => { await pg.getByRole('button', { name: `${n} 號`, exact: true }).click(); await pg.getByRole('button', { name: `確認：我是第 1 組 ${n} 號` }).click(); };
+await pA.reload(); await pA.getByText('領取我的角色卡').waitFor();
+await shot(pA, '31-player-pick', false);
+await pickSeat(pA, 1);
+await pA.getByText('等全組入座').waitFor();
+if (await pA.locator('.p-pad').count()) throw new Error('開放前不應出現角色卡');
+await pC.reload(); await pC.getByText('領取我的角色卡').waitFor();
+if (!(await pC.getByRole('button', { name: '1 號（已有人領）' }).isDisabled())) throw new Error('已領的座位應不能選');
+await pickSeat(pC, 2);
+await pC.getByText('等全組入座').waitFor();
+// 用相機直接掃座位 QR（網址）開啟
+const pctxE = await mkCtx({ width: 390, height: 844 });
+const tok3 = evd().live[1].tokens[3];
+const pE = await open(`?player=${ev}&seat=${evd().batch.no}.1.3.${tok3}`, null, pctxE);
+await pE.getByText('等全組入座').waitFor();
+await pE.locator('.p-me').getByText('3', { exact: true }).waitFor();
+await shot(pE, '32-player-wait', false);
+// 選錯改座位
+await pC.getByRole('button', { name: '選錯了，改座位' }).click();
+await pickSeat(pC, 4);
+await pC.locator('.p-me').getByText('4', { exact: true }).waitFor();
+// 舊的座位 QR 被重設後失效
+await dash.getByRole('button', { name: '3 號已領取，點一下可重設' }).click();
+await dash.locator('.modal').getByRole('button', { name: '重設' }).click();
+await pE.getByText('領取我的角色卡').waitFor();
+await pE.goto(BASE + `?player=${ev}&seat=${evd().batch.no}.1.3.${tok3}`);
+await pE.getByText('已失效').first().waitFor();
+await pE.goto(BASE + `?player=${ev}&seat=${evd().batch.no}.1.3.${evd().live[1].tokens[3]}`);
+await pE.getByText('等全組入座').waitFor();
+// 重排座位：已領的手機留在原號碼
+await dash.getByRole('button', { name: '重新隨機排座位' }).click();
+await dash.locator('.modal').getByRole('button', { name: '重排' }).click();
+await dash.waitForTimeout(300);
+await pA.locator('.p-me').getByText('1', { exact: true }).waitFor();
+await dash.getByText('已領取 3 / 7').waitFor();
+if (!(await dash.getByRole('button', { name: '還差 4 位・無法開放' }).isDisabled())) throw new Error('沒到齊不應能開放');
+await shot(dash, '33-dash-hand-progress');
+await dash.getByRole('button', { name: '強制開放' }).click();
+await dash.locator('.modal').getByRole('button', { name: '強制開放' }).click();
+await dash.getByText('第 1 回合：選擇任務').waitFor();
+await dash.getByRole('button', { name: /輪值司機/ }).click();
+await ph2.getByRole('button', { name: '掃不到？直接載入目前任務' }).click();
+await ph2.getByText('本組沒有信封，直接點出任務的座位號').waitFor();
+for (const n of [1, 2, 3]) await ph2.locator('.grid.g6').getByRole('button', { name: String(n), exact: true }).click();
+await shot(ph2, '36-phone-auto-round', false);
+await ph2.getByRole('button', { name: '查詢角色' }).click();
+await ph2.getByRole('button', { name: '2', exact: true }).click();
+await ph2.getByText('角色已隱藏').waitFor();
+await ph2.getByRole('button', { name: '卡片已校正，返回' }).click();
+// 開放後：按住看角色＝系統排在 1 號的角色
+const role1 = evd().batch.groups[1].seatRoles[0];
+const boxA = await pA.locator('.p-pad').boundingBox();
+await pA.mouse.move(boxA.x + boxA.width / 2, boxA.y + boxA.height / 2); await pA.mouse.down();
+const t1 = await pA.locator('.p-reveal .p-title').innerText();
+await pA.mouse.up();
+const ROLE_NAME = { sen: '資深老道親', car: '有交通工具', pow: '體力怪', rich: '有錢人', nA: '一般大人 A', nB: '一般大人 B', nC: '一般大人 C', sel: '圖謀私利', yang: '陽奉陰違', face: '表面工夫', lie: '圖方便說謊', two: '口是心非', yes: '鄉愿討好' };
+if (!t1.endsWith(ROLE_NAME[role1])) throw new Error(`1 號角色不符：畫面 ${t1}，應為 ${role1}`);
+// 開放後不能自選
+const pctxF = await mkCtx({ width: 390, height: 844 });
+const pF = await open(`?player=${ev}`, null, pctxF);
+await pF.getByText('本組已開放查看，不能再自己選座位').waitFor();
+await shot(pF, '34-player-after-open', false);
+step('自動抽角色：自選／座位 QR 領取、搶同號被擋、改座位、重設使舊 QR 失效、重排保留座位、強制開放、角色正確、開放後不能自選');
 
 // 5. 離線單機
 const off = await open('#/offline', { width: 390, height: 844 });

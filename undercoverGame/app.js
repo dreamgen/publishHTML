@@ -4,7 +4,8 @@ import { QR } from './modules/rules.js';
 import { runUnmount } from './modules/nav.js';
 
 const app = document.getElementById('app');
-export const APP_VERSION = 'v12';
+export const APP_VERSION = 'v13';
+window.__UG_VERSION = APP_VERSION;
 
 function home() {
   const joined = (() => { try { return JSON.parse(localStorage.getItem('ug.phone') || 'null'); } catch (e) { return null; } })();
@@ -24,10 +25,13 @@ async function route() {
   const hash = location.hash || '#/';
   // 相機 App 掃組別 QR 碼開啟時，網址帶 ?join=EV.batch.g
   const playerInfo = QR.parse(location.href);
-  if (playerInfo.type === 'player' && !hash.startsWith('#/player')) {
+  if ((playerInfo.type === 'player' || playerInfo.type === 'seat') && !hash.startsWith('#/player')) {
     try {
-      const cur = JSON.parse(localStorage.getItem('ug.player') || 'null');
-      if (!cur || cur.ev !== playerInfo.ev) localStorage.setItem('ug.player', JSON.stringify({ ev: playerInfo.ev }));
+      let cur = JSON.parse(localStorage.getItem('ug.player') || 'null');
+      if (!cur || cur.ev !== playerInfo.ev) cur = { ev: playerInfo.ev };
+      // 自動抽角色：用手機相機掃座位 QR 開啟 → 進玩家頁後自動領這個座位
+      if (playerInfo.type === 'seat') cur.seatTok = playerInfo;
+      localStorage.setItem('ug.player', JSON.stringify(cur));
     } catch (e) { /* */ }
     history.replaceState(null, '', location.pathname + '#/player');
     return route();
