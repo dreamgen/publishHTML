@@ -9,6 +9,7 @@ import { spyPicker } from './spypick.js';
 import { noticeBanner } from './notice.js';
 import { voteBox } from './vote.js';
 import { handPanel } from './hand.js';
+import { handoverCard, handoverVote } from './handover.js';
 import { setUnmount } from './nav.js';
 
 const LS_PHONE = 'ug.phone';
@@ -146,6 +147,13 @@ function groupApp(app, S, g, info) {
       app.replaceChildren(shell('梯次已更換', null, h('p', {}, '控場講師已建立新梯次，請重新掃組別 QR 碼。'),
         h('button', { class: 'btn primary big', onclick: () => { jset(LS_PHONE, null); location.hash = '#/phone'; location.reload(); } }, '重新加入')));
       return;
+    }
+    // 交給玩家：沒手機的玩家借這支手機看角色卡或投票（玩家版畫面）
+    document.body.classList.toggle('player-theme', !!ui.handover);
+    if (ui.handover) {
+      const { code, mode } = ui.handover;
+      const exit = () => { ui.handover = null; render(); };
+      return app.replaceChildren(mode === 'vote' ? handoverVote(S, g, code, exit) : handoverCard(S, g, code, exit));
     }
     if (ui.lookup) return app.replaceChildren(lookupScreen());
     if (ui.lookupPick) return app.replaceChildren(lookupPickScreen());
@@ -319,7 +327,7 @@ function groupApp(app, S, g, info) {
       })(),
       h('p', { class: 'muted tiny' }, '宣告前請確認這 3 個號碼正確。結算時全場禁言，只宣告成敗與原因類別，不說是誰。')) : null;
 
-    const voteBlock = ready ? voteBox(S, g, { team: ui.picks, offline }) : null;
+    const voteBlock = ready ? voteBox(S, g, { team: ui.picks, offline, onProxy: (s) => { ui.handover = { code: S.seats(g)[s], mode: 'vote' }; render(); } }) : null;
     return wrapper(h('main', {}, timeAlert, pausedNote, missionBlock, teamBlock, voteBlock),
       h('footer', {},
         ready ? h('button', {
@@ -438,6 +446,10 @@ function groupApp(app, S, g, info) {
           h('div', { class: 'small', style: { color: '#D8D2C5' } }, hide ? '角色已隱藏' : KIND_LABEL[role.kind])),
         h('button', { class: 'btn icon', style: { background: 'transparent', color: 'var(--bg)', borderColor: '#4A4740' }, 'aria-label': hide ? '顯示角色' : '隱藏角色', onclick: () => { ui.lookup.hide = !hide; render(); } }, hide ? '顯' : '隱')),
       h('section', { class: 'card' },
+        h('div', { class: 'row between' }, h('h2', {}, '沒手機的玩家'), h('span', { class: 'muted tiny' }, '畫面與玩家版相同')),
+        h('button', { class: 'btn dark big', onclick: () => { ui.handover = { code, mode: 'card' }; render(); } }, `交給 ${hist.seat || ''} 號查看角色卡`),
+        h('p', { class: 'muted tiny' }, '切換成玩家版角色卡：按住才顯示、放開蓋回；要長按「工作人員收回」才回到這裡。')),
+      h('section', { class: 'card' },
         h('div', { class: 'row between' }, h('h2', {}, auto() ? '資源變化' : '角色卡背面應填內容'), h('span', { class: 'muted tiny' }, auto() ? '玩家手機會同步顯示' : '用來校正實體卡')),
         h('div', { class: 'boxes' },
           h('span', { class: 'muted' }, '項目'), h('span', { class: 'muted tiny', style: { textAlign: 'center' } }, '初始'),
@@ -490,6 +502,6 @@ function groupApp(app, S, g, info) {
     if (document.querySelector('.modal.scan')) return; // 掃描中不重畫，避免關掉相機
     render();
   });
-  setUnmount(() => { clearInterval(tick); off(); S.stop(); });
+  setUnmount(() => { clearInterval(tick); off(); S.stop(); document.body.classList.remove('player-theme'); });
   render();
 }

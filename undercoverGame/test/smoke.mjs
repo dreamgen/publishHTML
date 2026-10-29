@@ -225,9 +225,22 @@ await shot(pD, '20-player-vote', false);
 await pA.getByRole('button', { name: '投 O（同意）' }).click();
 await pC.getByRole('button', { name: '投 X（反對）' }).click();
 await pA.getByText('你已投 O').waitFor();
-await dash.getByText('O 1・X 1・未投 1').waitFor();
+await dash.getByText('O 1・X 1・未投 4').waitFor();
 await shot(dash, '21-dash-vote');
 await pD.getByRole('button', { name: '投 O（同意）' }).click();
+await dash.getByText('O 2・X 1・未投 3').waitFor();
+// 沒手機的座位：助理主持人把手機輪流交給本人投票（玩家版畫面，不記名）
+const longPress = async (pg, name) => { const b = await pg.getByRole('button', { name }).boundingBox(); await pg.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await pg.mouse.down(); await pg.waitForTimeout(1200); await pg.mouse.up(); };
+for (let k = 0; k < 3; k++) {
+  await p1.ph.getByRole('button', { name: /^交給 \d+ 號投票$/ }).first().click();
+  await p1.ph.getByText('請表決（不記名）').waitFor();
+  if (k === 0) await shot(p1.ph, '23-proxy-vote', false);
+  const oBtn = p1.ph.getByRole('button', { name: '投 O（同意）' });
+  if (await oBtn.isDisabled()) await p1.ph.getByRole('button', { name: '投 X（反對）' }).click(); else await oBtn.click();
+  await p1.ph.getByText('已投票').waitFor();
+  await longPress(p1.ph, '工作人員收回（長按 1 秒）');
+  await p1.ph.getByText(/不記名|表決通過/).first().waitFor();
+}
 await p1.ph.getByText('表決通過：隊伍出發').waitFor();
 await dash.getByText('表決通過：隊伍出發').waitFor();
 await pA.getByText('通過：隊伍出發').waitFor();
@@ -243,6 +256,7 @@ await pA.getByText('遊戲結束・已揭牌').waitFor();
 await shot(pA, '15-player-end', false);
 step('玩家：揭牌後顯示身分與回顧');
 
+const ROLE_NAME = { sen: '資深老道親', car: '有交通工具', pow: '體力怪', rich: '有錢人', nA: '一般大人 A', nB: '一般大人 B', nC: '一般大人 C', sel: '圖謀私利', yang: '陽奉陰違', face: '表面工夫', lie: '圖方便說謊', two: '口是心非', yes: '鄉愿討好' };
 // 6. 自動抽角色（無實體卡片）：7 人 1 組
 await dash.getByRole('button', { name: '梯次與組別' }).click();
 await dash.fill('input[type=number]', '7'); await dash.locator('input[type=number]').dispatchEvent('change');
@@ -307,6 +321,22 @@ await shot(ph2, '36-phone-auto-round', false);
 await ph2.getByRole('button', { name: '查詢角色' }).click();
 await ph2.getByRole('button', { name: '2', exact: true }).click();
 await ph2.getByText('角色已隱藏').waitFor();
+// 沒手機的玩家：交給本人看角色卡（玩家版，按住才顯示）
+await ph2.getByRole('button', { name: '交給 2 號查看角色卡' }).click();
+await ph2.getByText('按住查看我的角色').waitFor();
+if (await ph2.locator('.p-reveal').isVisible()) throw new Error('交給玩家：未按住就顯示角色');
+const bx = await ph2.locator('.p-pad').boundingBox();
+await ph2.mouse.move(bx.x + bx.width / 2, bx.y + bx.height / 2); await ph2.mouse.down();
+const t2 = await ph2.locator('.p-reveal .p-title').innerText();
+await ph2.waitForTimeout(1200); await shot(ph2, '37-handover-card', false);
+await ph2.mouse.up();
+const role2 = evd().batch.groups[1].seatRoles[1];
+if (!t2.endsWith(ROLE_NAME[role2])) throw new Error(`交給玩家：2 號角色不符 ${t2}`);
+const lb = await ph2.getByRole('button', { name: '工作人員收回（長按 1 秒）' }).boundingBox();
+await ph2.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2); await ph2.mouse.down(); await ph2.waitForTimeout(300); await ph2.mouse.up();
+if (!(await ph2.getByText('按住查看我的角色').isVisible())) throw new Error('短按不應收回');
+await ph2.mouse.down(); await ph2.waitForTimeout(1200); await ph2.mouse.up();
+await ph2.getByText('角色查詢').first().waitFor();
 await ph2.getByRole('button', { name: '卡片已校正，返回' }).click();
 // 開放後：按住看角色＝系統排在 1 號的角色
 const role1 = evd().batch.groups[1].seatRoles[0];
@@ -314,7 +344,6 @@ const boxA = await pA.locator('.p-pad').boundingBox();
 await pA.mouse.move(boxA.x + boxA.width / 2, boxA.y + boxA.height / 2); await pA.mouse.down();
 const t1 = await pA.locator('.p-reveal .p-title').innerText();
 await pA.mouse.up();
-const ROLE_NAME = { sen: '資深老道親', car: '有交通工具', pow: '體力怪', rich: '有錢人', nA: '一般大人 A', nB: '一般大人 B', nC: '一般大人 C', sel: '圖謀私利', yang: '陽奉陰違', face: '表面工夫', lie: '圖方便說謊', two: '口是心非', yes: '鄉愿討好' };
 if (!t1.endsWith(ROLE_NAME[role1])) throw new Error(`1 號角色不符：畫面 ${t1}，應為 ${role1}`);
 // 開放後不能自選
 const pctxF = await mkCtx({ width: 390, height: 844 });

@@ -228,3 +228,9 @@ body.player-theme{background:#171614;color:#F1ECE2}
 .p-bar{height:8px;border-radius:999px;background:#34312B;overflow:hidden}
 .p-bar span{display:block;height:100%;background:#D8C7A3}
 .hand-seat .tiny{font-size:10px;white-space:nowrap}
+/* 交給玩家（借助理主持人手機） */
+.p-hold{position:relative;overflow:hidden}
+.p-hold .p-hold-bar{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(216,199,163,.25)}
+.p-hold.holding .p-hold-bar{width:100%;transition:width 1s linear}
+.p-hold span:last-child{position:relative}
+.proxy-box{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:10px;border:1px dashed var(--line2);background:#fff}

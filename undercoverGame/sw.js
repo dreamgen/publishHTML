@@ -3,14 +3,14 @@
  * 策略：Stale-While-Revalidate。安裝時預先快取自家檔案，讓離線單機模式第一次就能用。
  * Firebase 即時連線一律不快取。Scope: /undercoverGame/
  */
-const SW_VERSION = 'v13';
+const SW_VERSION = 'v14';
 const CACHE_NAME = `undercoverGame-${SW_VERSION}`;
 const SHARED_CACHE = `undercoverGame-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];
 const PRECACHE = [
   './', './index.html', './app.js', './styles.css', './manifest.webmanifest',
   './modules/rules.js', './modules/ui.js', './modules/session.js', './modules/fb.js', './modules/nav.js',
-  './modules/dashboard.js', './modules/spypick.js', './modules/phone.js', './modules/print.js', './modules/player.js', './modules/editor.js', './modules/notice.js', './modules/vote.js', './modules/hand.js',
+  './modules/dashboard.js', './modules/spypick.js', './modules/phone.js', './modules/print.js', './modules/player.js', './modules/editor.js', './modules/notice.js', './modules/vote.js', './modules/hand.js', './modules/handover.js',
   './vendor/jsQR.js', './vendor/qrious.min.js',
   './icons/undercoverGame-192.svg', './icons/undercoverGame-512.svg', './guide.html',
   ...['sen', 'car', 'pow', 'rich', 'nA', 'nB', 'nC', 'sel', 'yang', 'face', 'lie', 'two', 'yes'].map((r) => `./roles/role-${r}.jpg`),

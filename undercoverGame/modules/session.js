@@ -321,9 +321,9 @@ export class EventSession {
   }
   async openVote(g, team = []) {
     const at = this.now();
-    await this.patch({ [`live/${g}/vote`]: { id: `v${at}`, round: this.control.round, team: team.map(Number), voters: this.phoneSeats(g), status: 'open', votes: {}, at } });
+    await this.patch({ [`live/${g}/vote`]: { id: `v${at}`, round: this.control.round, team: team.map(Number), voters: Object.keys(this.seats(g)).map(Number).sort((a, b) => a - b), status: 'open', votes: {}, at } });
   }
-  /** 統計：required 為開表決時有手機的座位，加上之後才投票的座位 */
+  /** 統計：required 為全組座位（沒手機的人由助理主持人手機輪流交給本人投票） */
   tally(g) {
     const v = this.vote(g);
     if (!v) return null;

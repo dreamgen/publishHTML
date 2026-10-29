@@ -31,7 +31,7 @@ export function voteBox(S, g, opts = {}) {
       capRow,
       h('p', { class: 'muted small' }, opts.offline ? '由隊長提出 3 人名單，收完 O／X 小紙片後登記結果。'
         : opts.team ? '掃滿 3 位出任務的人會自動開始手機表決；用紙本時，收完小紙片直接登記結果。' : '名單提出後可開始手機表決，或收完 O／X 小紙片直接登記結果。'),
-      opts.offline ? null : h('button', { class: 'btn', onclick: start, disabled: !phoneSeats.length }, '開始手機表決'),
+      opts.offline ? null : h('button', { class: 'btn', onclick: start, disabled: !phoneSeats.length && !opts.onProxy }, '開始手機表決'),
       paperRow);
   }
   const closed = t.status === 'closed';
@@ -45,8 +45,12 @@ export function voteBox(S, g, opts = {}) {
     closed || t.paper ? null : h('div', { class: 'row', style: { gap: '6px' } },
       t.required.map((s) => h('span', { class: 'vote-chip ' + ((t.votes || {})[s] ? 'done' : 'wait') }, `${s}`, h('b', {}, (t.votes || {})[s] ? '已投' : '…')))),
     closed ? null : h('p', { class: 'muted tiny' }, t.pending.length ? `等待 ${t.pending.join('、')} 號投票；全部投完會自動計票。只顯示票數，不顯示誰投什麼。` : ''),
+    // 沒手機的座位：助理主持人把手機輪流交給本人投票
+    !closed && opts.onProxy && t.pending.some((s) => !phoneSeats.includes(s)) ? h('div', { class: 'proxy-box' },
+      h('b', { class: 'small' }, '沒手機的座位：把這支手機輪流交給本人投票'),
+      h('div', { class: 'row', style: { gap: '6px' } }, t.pending.filter((s) => !phoneSeats.includes(s)).map((s) => h('button', { class: 'btn', onclick: () => opts.onProxy(s) }, `交給 ${s} 號投票`)))) : null,
     h('div', { class: 'row' },
-      closed ? (vetoed || t.passed ? null : (opts.offline ? null : h('button', { class: 'btn', onclick: start, disabled: !phoneSeats.length }, '重新手機表決')))
+      closed ? (vetoed || t.passed ? null : (opts.offline ? null : h('button', { class: 'btn', onclick: start, disabled: !phoneSeats.length && !opts.onProxy }, '重新手機表決')))
         : h('button', { class: 'btn', onclick: () => S.closeVote(g) }, '結束表決並計票'),
       closed ? null : h('button', { class: 'btn', onclick: () => S.clearVote(g) }, '取消這次表決')),
     closed && !vetoed && !t.passed ? paperRow : null);
