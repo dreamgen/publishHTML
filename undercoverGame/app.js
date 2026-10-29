@@ -4,7 +4,7 @@ import { QR } from './modules/rules.js';
 import { runUnmount } from './modules/nav.js';
 
 const app = document.getElementById('app');
-export const APP_VERSION = 'v10';
+export const APP_VERSION = 'v12';
 
 function home() {
   const joined = (() => { try { return JSON.parse(localStorage.getItem('ug.phone') || 'null'); } catch (e) { return null; } })();

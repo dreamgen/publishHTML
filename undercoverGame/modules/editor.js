@@ -88,7 +88,7 @@ export function editTab(S, st, rerender) {
   // 2. 角色初始值
   const roleRows = ROLES.map((r) => {
     const o = d.roles[r.id];
-    return h('tr', {}, h('th', { scope: 'row' }, r.name, h('div', { class: 'tiny muted' }, r.camp === 'spy' ? '臥底' : '好人')),
+    return h('tr', {}, h('th', { scope: 'row' }, r.name, h('div', { class: 'tiny muted' }, r.camp === 'spy' ? '虛偽大人' : '真誠大人')),
       h('td', {}, input(o, 'money', { label: `${r.name}存款` })), h('td', {}, input(o, 'leave', { label: `${r.name}特休`, w: '64px' })),
       h('td', {}, input(o, 'power', { label: `${r.name}體力`, w: '64px' })), h('td', {}, carSel(o, `${r.name}交通`)));
   });

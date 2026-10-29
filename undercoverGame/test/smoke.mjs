@@ -138,7 +138,7 @@ await shot(pA, '12-player-veil', false);
 const box = await pA.locator('.p-pad').boundingBox();
 await pA.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await pA.mouse.down();
 await pA.waitForTimeout(150); await shot(pA, '13a-player-peek-img', false);
-await pA.locator('.p-reveal').getByText('好人・有錢人').waitFor();
+await pA.locator('.p-reveal').getByText('真誠大人・有錢人').waitFor();
 await pA.waitForTimeout(900);
 const resTxt = await pA.locator('.p-res').innerText();
 if (!/特休\s*0/.test(resTxt)) throw new Error('玩家資源未同步 ' + resTxt);
@@ -232,6 +232,8 @@ await pD.getByRole('button', { name: '投 O（同意）' }).click();
 await p1.ph.getByText('表決通過：隊伍出發').waitFor();
 await dash.getByText('表決通過：隊伍出發').waitFor();
 await pA.getByText('通過：隊伍出發').waitFor();
+await p1.ph.locator('.cap-row').getByText('2 號').waitFor(); // 表決結束 → 換下一位隊長
+if (await dash.locator('.vote-chip.o, .vote-chip.x').count()) throw new Error('不記名表決不應顯示每人投什麼');
 await shot(p1.ph, '22-phone-vote', false);
 const cls = await pA.evaluate(() => [...document.querySelectorAll('.p-res b')].map((b) => b.className));
 if (cls[0] !== 'res-down' || cls[1] !== 'res-zero') throw new Error('資源顏色不對 ' + JSON.stringify(cls));
@@ -260,9 +262,22 @@ const ocRoles = rolesOf(oc); const spy = 'sel';
 for (const role of ['pow', 'rich', spy]) await off.getByRole('button', { name: String(ocRoles.indexOf(role) + 1), exact: true }).click();
 await shot(off, '11b-offline-round', false);
 await off.getByRole('button', { name: '判定結果' }).click();
-await off.getByText('「任務失敗，原因：人。」').waitFor();
+await off.getByText('「任務失敗，原因：金額。」').waitFor();
+await off.getByText('圖謀私利拿走了隊伍的存款').waitFor();
 await shot(off, '11-offline-fail');
-step('離線：破壞型被派中 → 原因「人」');
+const offL = await off.evaluate(() => JSON.parse(localStorage.getItem('ug.offline.v1')));
+const lg = offL.live[og].ledger, sc = offL.live[og].seats;
+const LM = (role) => lg[sc[ocRoles.indexOf(role) + 1]].money;
+if (LM('sel') !== 18000 || LM('pow') !== 0 || LM('rich') !== 39000) throw new Error('圖謀私利扣款不對 ' + JSON.stringify([LM('sel'), LM('pow'), LM('rich')]));
+step('離線：圖謀私利被派中 → 存款全歸他（6,000→18,000），原因「金額」');
+// 第 2 回合：紙本表決否決 3 次 → 無法派人
+await off.getByRole('button', { name: '下一回合：第 2 回合' }).click();
+await off.getByRole('button', { name: /輪值司機/ }).click();
+await off.getByRole('button', { name: '開始計時' }).click();
+for (let i = 0; i < 3; i++) { await off.getByRole('button', { name: 'X 過半或平手・否決' }).click(); await off.waitForTimeout(150); }
+await off.getByText('「任務失敗，原因：無法派人。」').waitFor();
+await shot(off, '11c-offline-veto');
+step('離線：紙本表決否決 3 次 → 原因「無法派人」，隊長每次輪替');
 
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : '沒有頁面錯誤');
 await browser.close();

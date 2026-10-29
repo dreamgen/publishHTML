@@ -116,7 +116,7 @@ function dashboard(app, S) {
     return h('div', { class: 'cols' },
       h('section', { class: 'card' },
         h('h2', {}, '信封 QR 碼（全場固定）'),
-        h('p', { class: 'muted small' }, 'A、B 兩套各 13 個 QR 碼，固定對應 6 種臥底與 7 位好人（特殊大人 4、一般大人 A、B、C），所有梯次共用。每梯次依人數從套內取出要用的信封。'),
+        h('p', { class: 'muted small' }, 'A、B 兩套各 13 個 QR 碼，固定對應 6 種虛偽大人與 7 位真誠大人（特殊大人 4、一般大人 A、B、C），所有梯次共用。每梯次依人數從套內取出要用的信封。'),
         h('div', { class: 'row' }, h('span', { class: 'chip' }, `目前版本 v${q.version}`), h('span', { class: 'muted tiny' }, '建立於 ' + new Date(q.updatedAt).toLocaleString('zh-TW'))),
         h('div', { class: 'row' },
           h('a', { class: 'btn dark', href: '#/print/labels' }, iconEl('print'), '列印貼紙（A、B 套）'),
@@ -145,8 +145,8 @@ function dashboard(app, S) {
     const groupCards = form.sizes.map((size, i) => {
       const g = i + 1, c = composition(size), set = g === 1 ? 'A' : 'B';
       return h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `好人 ${c.good.length}・臥底 ${c.spies}・信封 ${set} 套`)),
-        h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '好人　'), c.good.map((id) => ROLE[id].name).join('、')),
+        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}・信封 ${set} 套`)),
+        h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '真誠大人　'), c.good.map((id) => ROLE[id].name).join('、')),
         spyPicker(size, form.picks[g], render));
     });
     return h('div', { class: 'stack' },
@@ -304,8 +304,8 @@ function dashboard(app, S) {
         h('span', { class: 'chip ' + (live.phone ? 'ok' : '') }, live.phone ? `手機已加入・綁定 ${bound}/${cfg.size}` : '等待手機掃描'),
         h('p', { class: 'muted tiny' }, '助理主持人用手機相機或本程式掃描加入。QR 碼不含角色資訊。'),
         h('details', {}, h('summary', { class: 'small' }, '本組角色（請勿外流）'),
-          h('p', { class: 'small' }, '好人：', cfg.good.map((id) => ROLE[id].name).join('、')),
-          h('p', { class: 'small' }, '臥底：', cfg.draw === 'dashboard' ? cfg.spies.map((id) => ROLE[id].name).join('、') : `實體抽 ${cfg.spyCount} 張，綁定時以掃到的為準`)));
+          h('p', { class: 'small' }, '真誠大人：', cfg.good.map((id) => ROLE[id].name).join('、')),
+          h('p', { class: 'small' }, '虛偽大人：', cfg.draw === 'dashboard' ? cfg.spies.map((id) => ROLE[id].name).join('、') : `實體抽 ${cfg.spyCount} 張，綁定時以掃到的為準`)));
     }).concat([h('section', { class: 'card' },
       h('h2', {}, '等待全部組別綁定完成'),
       h('p', { class: 'muted small' }, '每組手機加入後，依座位編號逐一掃信封。全部組別都綁定完成，才會出現回合控制。'))]));
@@ -326,9 +326,9 @@ function dashboard(app, S) {
     let status = null;
     if (x) {
       status = x.timeout
-        ? h('div', { class: 'alert', style: { background: 'var(--bad)', color: '#fff', borderColor: 'var(--bad)' } }, h('b', {}, '已超時：「任務失敗，原因：時間。」不扣除資源'),
+        ? h('div', { class: 'alert', style: { background: 'var(--bad)', color: '#fff', borderColor: 'var(--bad)' } }, h('b', {}, x.vetoed ? '表決否決 3 次：「任務失敗，原因：無法派人。」不扣除資源' : '已超時：「任務失敗，原因：時間。」不扣除資源'),
           h('button', { class: 'btn', onclick: () => S.undo(g, r) }, '撤銷'))
-        : h('div', { class: 'note ' + (x.ok ? 'ok' : 'bad') }, `已結算：${x.ok ? '任務成功' : '任務失敗，原因：' + x.reason}（出任務 ${x.seats.join('・')} 號）`);
+        : h('div', { class: 'note ' + (x.ok ? 'ok' : 'bad') }, `已結算：${x.ok ? '任務成功' : '任務失敗，原因：' + x.reason}（出任務 ${x.seats.join('・')} 號）${x.thief ? `・圖謀私利拿走存款 ${fmtNum(x.stolen)}` : ''}`);
     } else if (S.timeUp()) {
       status = h('div', { class: 'alert', role: 'alert' },
         h('div', {}, h('b', {}, '5 分鐘到，尚未成行'), h('p', { class: 'small' }, '按下確認才算超時；可先觀察是否正在表決')),

@@ -1,8 +1,8 @@
 // 玩家版（僅線上）：玩家掃自己的信封，在手機上按住查看自己的角色。
-// 防偷看：平常遮蔽、按住才顯示、放開／切 App／8 秒自動蓋回；好人與臥底版面一致；一個信封只綁一支手機。
+// 防偷看：平常遮蔽、按住才顯示、放開／切 App／8 秒自動蓋回；真誠大人與虛偽大人版面一致；一個信封只綁一支手機。
 import { h, toast, openScanner, iconEl } from './ui.js';
 import { EventSession, deviceId } from './session.js';
-import { ROLE, MISSION, ROLE_TEXT, VOTE_LOCK, roleTitle, needText, fmtNum, QR } from './rules.js';
+import { ROLE, MISSION, ROLE_TEXT, VOTE_LOCK, VETO_LIMIT, roleTitle, needText, fmtNum, QR } from './rules.js';
 import { setUnmount } from './nav.js';
 import { noticeBanner } from './notice.js';
 
@@ -184,13 +184,23 @@ export async function mountPlayer(app) {
   // O／X 表決面板（平常畫面顯示，按住查看角色時隱藏）
   function votePanel(p, role, seat) {
     const t = S.tally(p.g);
-    if (!t || t.round !== S.control.round) return null;
+    const cap = S.captain(p.g);
+    if (!t || t.round !== S.control.round) {
+      return S.control.missionId ? h('section', { class: 'p-card p-task p-vote' },
+        h('span', { class: 'p-label' }, '輪值隊長'), h('b', { style: { fontSize: '20px' } }, `${cap} 號`),
+        h('span', { class: 'p-muted small' }, `由隊長提出 3 人名單；本回合已否決 ${S.voteFails(p.g)} 次（${VETO_LIMIT} 次就無法派人）`)) : null;
+    }
+    if (t.paper) {
+      return h('section', { class: 'p-card p-task p-vote ' + (t.passed ? 'pass' : 'fail') },
+        h('span', { class: 'p-label' }, '表決結果'),
+        h('b', { style: { fontSize: '20px' } }, t.passed ? '通過：隊伍出發' : `否決：換 ${cap} 號當隊長`));
+    }
     const mine = (t.votes || {})[seat];
-    const team = t.team && t.team.length ? `出任務名單：${t.team.join('・')} 號` : '對目前提出的名單表決';
+    const team = (t.team && t.team.length ? `出任務名單：${t.team.join('・')} 號` : '對隊長提出的名單表決') + '（不記名）';
     if (t.status === 'closed') {
       return h('section', { class: 'p-card p-task p-vote ' + (t.passed ? 'pass' : 'fail') },
         h('span', { class: 'p-label' }, '表決結果'),
-        h('b', { style: { fontSize: '20px' } }, t.passed ? '通過：隊伍出發' : '否決：重新協調名單'),
+        h('b', { style: { fontSize: '20px' } }, t.passed ? '通過：隊伍出發' : `否決：換 ${cap} 號當隊長`),
         h('span', { class: 'p-muted' }, `O ${t.o}・X ${t.x}`));
     }
     if (mine) {
@@ -221,12 +231,12 @@ export async function mountPlayer(app) {
         h('section', { class: 'card' }, h('h2', {}, '我在這場遊戲中'),
           hist.log.length ? h('ol', { class: 'list' }, hist.log.map((y) => h('li', { style: { minHeight: '40px' } },
             h('b', { class: 'tiny', style: { width: '48px' } }, y.adjust ? '修正' : `第 ${y.round} 回`),
-            h('span', { class: 'small' }, y.adjust ? '主持人修正資源' : `${MISSION[y.mid].name}・${y.timeout ? '未成行' : y.inTeam ? '出任務・' + (y.ok ? '成功' : '失敗（' + y.reason + '）') : '未出任務'}`))))
+            h('span', { class: 'small' }, y.adjust ? '主持人修正資源' : `${MISSION[y.mid].name}・${y.timeout ? `未成行（${y.reason}）` : y.inTeam ? '出任務・' + (y.ok ? '成功' : '失敗（' + y.reason + '）') : '未出任務'}`))))
             : h('p', { class: 'muted small' }, '沒有回合紀錄。')),
         h('section', { class: 'card' }, h('h2', {}, '本組的身分'),
           h('div', { class: 'grid g2 small' }, Object.keys(seats).map(Number).sort((a, b) => a - b).map((s) => {
             const r = ROLE[map[seats[s]]];
-            return h('span', { class: r.camp === 'spy' ? 'spy-red' : '' }, h('b', {}, s), '　', r.name, r.camp === 'spy' ? '（臥底）' : '');
+            return h('span', { class: r.camp === 'spy' ? 'spy-red' : '' }, h('b', {}, s), '　', r.name, r.camp === 'spy' ? '（虛偽大人）' : '');
           }))),
         h('div', { class: 'note ok' }, '討論時想一想：你在遊戲裡說的話、舉的牌，和你心裡真正的想法一致嗎？')));
   }

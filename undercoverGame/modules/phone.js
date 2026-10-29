@@ -88,8 +88,8 @@ function offlineEntry(app) {
       h('div', { class: 'field' }, h('span', {}, '本組人數'),
         h('div', { class: 'grid g6' }, [6, 7, 8, 9, 10, 11].map((n) => h('button', { class: 'btn', 'aria-pressed': String(st.size === n), onclick: () => { st.size = n; roll(); render(); } }, n)))),
       h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `好人 ${c.good.length}・臥底 ${c.spies}`)),
-        h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '好人　'), c.good.map((id) => ROLE[id].name).join('、')),
+        h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}`)),
+        h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '真誠大人　'), c.good.map((id) => ROLE[id].name).join('、')),
         spyPicker(st.size, st.pick, render, '手機抽'),
         h('label', { class: 'field' }, '信封套別', h('select', { onchange: (e) => { st.set = e.target.value; render(); } }, ['A', 'B'].map((s) => h('option', { value: s, selected: st.set === s }, `${s} 套`)))),
         have ? h('div', { class: 'note ok' }, `${st.set} 套 v${mapsNow.version} 對照已在手機上`)
@@ -160,7 +160,7 @@ function groupApp(app, S, g, info) {
         h('h2', { style: { fontSize: '24px', fontWeight: 900 } }, `第 ${S.batch.no} 梯次・第 ${g} 組`),
         h('p', { class: 'muted' }, `${cfg.size} 人・本梯次共 ${Object.keys(S.batch.groups).length} 組`),
         h('p', { class: 'small' }, `座位 1～${cfg.size} 號（順時針）・信封 ${cfg.set} 套（v${S.qr.version}）・回合由控場講師儀表板同步`),
-        h('div', { class: 'note' }, '角色組成只在儀表板設定，手機不顯示誰是臥底。')),
+        h('div', { class: 'note' }, '角色組成只在儀表板設定，手機不顯示誰是虛偽大人。')),
       h('footer', {},
         h('button', {
           class: 'btn primary big', onclick: async () => {
@@ -198,7 +198,7 @@ function groupApp(app, S, g, info) {
     return shell('掃碼綁定座位', sub(),
       h('div', { class: 'row between' }, h('span', { class: 'muted small' }, '座位順序（順時針）・角色不顯示'), h('b', { class: 'mono' }, `${bound.length} / ${cfg.size}`)),
       (() => { const r = remainingSlots(cfg, S.boundRoles(g)); return h('p', { class: 'muted tiny' },
-        `還需好人 ${r.goodLeft} 位・臥底 ${r.spyLeft} 位${cfg.draw === 'dashboard' ? '（只收儀表板抽中的臥底卡）' : '（實體抽，以掃到的為準）'}`); })(),
+        `還需真誠大人 ${r.goodLeft} 位・虛偽大人 ${r.spyLeft} 位${cfg.draw === 'dashboard' ? '（只收儀表板抽中的虛偽大人卡）' : '（實體抽，以掃到的為準）'}`); })(),
       h('ol', { class: 'list' }, Array.from({ length: cfg.size }, (_, i) => {
         const s = i + 1, code = seats[s];
         return h('li', { class: code ? '' : s === next ? 'cur' : 'todo' },
@@ -291,13 +291,13 @@ function groupApp(app, S, g, info) {
         }, s)))),
       h('p', { class: 'muted tiny' }, '宣告前請確認這 3 個號碼正確。結算時全場禁言，只宣告成敗與原因類別，不說是誰。')) : null;
 
-    const voteBlock = ready && !offline ? voteBox(S, g, { team: ui.picks }) : null;
+    const voteBlock = ready ? voteBox(S, g, { team: ui.picks, offline }) : null;
     return wrapper(h('main', {}, timeAlert, pausedNote, missionBlock, teamBlock, voteBlock),
       h('footer', {},
         ready ? h('button', {
           class: 'btn primary big', disabled: ui.picks.length !== 3, onclick: async () => {
             if (c.status === 'idle' && !(await confirmBox('回合尚未開始計時', '仍要直接結算嗎？'))) return;
-            const vt = offline ? null : S.tally(g);
+            const vt = S.tally(g);
             if (vt && vt.round === r && !(vt.status === 'closed' && vt.passed) && !(await confirmBox('表決尚未通過', '這組名單的 O／X 表決還沒通過，仍要直接判定嗎？'))) return;
             try { await S.settle(g, r, c.missionId, ui.picks); ui.picks = []; ui.checked = false; } catch (e) { toast(e.message, 'bad'); }
           },
@@ -314,10 +314,11 @@ function groupApp(app, S, g, info) {
       h('h1', { style: { fontSize: '32px' } }, x.ok ? '任務成功' : '任務失敗'),
       h('div', { class: 'say' }, h('div', { class: 'tiny', style: { opacity: .85 } }, x.ok ? '控場講師宣告' : '控場講師宣告（只說類別，不說是誰）'), announce(x)));
     const body = [];
-    if (x.ok) {
+    if (x.ok || x.thief) {
       const rows = (x.seats || []).map((s) => {
         const code = seats[s], d = x.deltas[code] || { money: 0, leave: 0 }, l = ledger[code];
-        const cell = (key, unit) => (m.need[key] ? h('td', {}, h('b', { class: 'mono' + (l[key] === 0 ? ' zero' : ''), style: { fontSize: '20px' } }, key === 'money' ? fmtNum(l[key]) : l[key]), h('div', { class: 'tiny muted' }, `扣 ${fmtNum(-d[key])}${unit}`)) : h('td', { class: 'muted' }, '不變'));
+        const diff = (v, unit) => (v < 0 ? `扣 ${fmtNum(-v)}${unit}` : v > 0 ? `得 ${fmtNum(v)}${unit}` : '不變');
+        const cell = (key, unit) => (m.need[key] && (x.ok || key === 'money') ? h('td', {}, h('b', { class: 'mono' + (l[key] === 0 ? ' zero' : ''), style: { fontSize: '20px' } }, key === 'money' ? fmtNum(l[key]) : l[key]), h('div', { class: 'tiny ' + (d[key] > 0 ? 'bad-t' : 'muted') }, diff(d[key], unit))) : h('td', { class: 'muted' }, '不變'));
         return h('tr', {}, h('th', { scope: 'row', style: { fontSize: '22px', fontWeight: 900 } }, s), cell('money', ''), cell('leave', ' 天'));
       });
       body.push(h('section', { class: 'card', style: { padding: 0, gap: 0 } },
@@ -326,12 +327,19 @@ function groupApp(app, S, g, info) {
       h('label', { class: 'card', style: { flexDirection: 'row', alignItems: 'center' } },
         h('input', { type: 'checkbox', checked: ui.checked, onchange: (e) => { ui.checked = e.target.checked; }, style: { width: '22px', height: '22px', accentColor: 'var(--ok)' } }),
         '已幫 3 位學員在角色卡填好剩餘量'));
+      if (x.thief) {
+        const ts = Object.entries(seats).find(([, c]) => c === x.thief);
+        body.unshift(h('section', { class: 'card', style: { borderColor: 'var(--bad)', background: 'var(--bad-bg)' } },
+          h('h2', {}, '圖謀私利拿走了隊伍的存款'),
+          h('p', { class: 'small' }, `出任務的人照常分攤存款，但錢全歸 ${ts ? ts[0] + ' 號（' : '（'}圖謀私利），他淨得 ${fmtNum(x.stolen)} 元；特休不扣。`),
+          h('p', { class: 'tiny muted' }, '只給主持人看，宣告時只說原因類別，不說是誰；揭牌時可展示「錢被拐走」。')));
+      }
     } else {
       body.push(h('section', { class: 'card' },
         h('h2', {}, '判定順序'),
         h('ol', { class: 'list' }, REASON_ORDER.map(([k, t]) => h('li', { class: k === x.reason ? 'cur' : '', style: k === x.reason ? { borderColor: 'var(--bad)', background: 'var(--bad-bg)' } : {} },
-          h('b', { style: { width: '44px' } }, k), h('span', { class: 'small' }, t), k === x.reason ? h('span', { class: 'chip bad' }, '命中') : null))),
-        h('p', { class: 'small' }, x.timeout ? '未成行，不扣除資源。' : `出任務 ${x.seats.join('・')} 號・失敗不扣除資源`)));
+          h('b', { style: { minWidth: '64px', whiteSpace: 'nowrap' } }, k), h('span', { class: 'small' }, t), k === x.reason ? h('span', { class: 'chip bad' }, '命中') : null))),
+        h('p', { class: 'small' }, x.vetoed ? '同一回合表決否決 3 次，無法派人，不扣除資源。' : x.timeout ? '未成行，不扣除資源。' : `出任務 ${x.seats.join('・')} 號・失敗不扣除資源`)));
     }
     const c = S.control;
     return [h('main', {}, hero, ...body),
@@ -347,7 +355,7 @@ function groupApp(app, S, g, info) {
   function autoVote() {
     if (offline || ui.picks.length !== 3 || !S.phoneSeats(g).length) return;
     const v = S.vote(g), team = [...ui.picks].sort((a, b) => a - b);
-    if (v && v.round === S.control.round && v.status === 'open' && JSON.stringify([...(v.team || [])].sort((a, b) => a - b)) === JSON.stringify(team)) return;
+    if (v && v.round === S.control.round && !v.paper && JSON.stringify([...(v.team || [])].sort((a, b) => a - b)) === JSON.stringify(team)) return;
     S.openVote(g, ui.picks).catch((e) => toast(e.message, 'bad'));
   }
 
@@ -421,7 +429,7 @@ function groupApp(app, S, g, info) {
               h('div', { class: 'flex1' }, h('div', { class: 'small', style: { fontWeight: 700 } }, '主持人修正資源'), h('div', { class: 'tiny muted' }, `修正後：${t}`)));
           }
           const m = MISSION[y.mid];
-          const what = y.timeout ? '未成行（時間失敗）' : y.inTeam ? `出任務・${y.ok ? '成功' : '失敗（' + y.reason + '）'}` : '未出任務';
+          const what = y.timeout ? `未成行（${y.reason}）` : y.inTeam ? `出任務・${y.ok ? '成功' : '失敗（' + y.reason + '）'}` : '未出任務';
           const ch = [];
           if (y.d.money) ch.push(`存款 ${fmtNum(y.d.money)}`);
           if (y.d.leave) ch.push(`特休 ${y.d.leave}`);

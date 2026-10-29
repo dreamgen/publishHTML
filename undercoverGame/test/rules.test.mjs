@@ -36,7 +36,29 @@ assert.equal(goods.reduce((s, k) => s + res[k].leave, 0), 26);
 
 // 失敗原因（重設資源）
 for (const id of Object.keys(res)) res[id] = { money: ROLE[id].money, leave: ROLE[id].leave };
-assert.equal(judge(MISSION.m2, mk('pow', 'rich', 'sel')).reason, '人');
+// 圖謀私利：任務要存款 → 照常分攤收錢，錢全歸他，任務因「金額」失敗；特休不扣
+r = judge(MISSION.m2, mk('pow', 'rich', 'sel'));
+assert.equal(r.ok, false); assert.equal(r.reason, '金額');
+assert.deepEqual(r.deltas.pow, { money: -1000, leave: 0 });   // 只有 1,000，扣到 0
+assert.deepEqual(r.deltas.rich, { money: -11000, leave: 0 }); // 6,000＋補差額 5,000
+assert.deepEqual(r.deltas.sel, { money: 12000, leave: 0 });   // 自己付 6,000，收走 18,000
+assert.equal(r.stolen, 12000); assert.equal(r.thief, 'sel');
+assert.equal(Object.values(r.deltas).reduce((s, d) => s + d.money, 0), 0); // 錢只是換手，總量不變
+// 存款合計不夠需求時，收到多少就拿走多少
+const poor = [{ code: 'a', role: 'sel', money: 0, leave: 7 }, { code: 'b', role: 'nA', money: 3000, leave: 7 }, { code: 'c', role: 'nB', money: 2000, leave: 7 }];
+r = judge(MISSION.m3, poor);
+assert.equal(r.reason, '金額'); assert.equal(r.deltas.a.money, 5000); assert.equal(r.deltas.b.money, -3000); assert.equal(r.deltas.c.money, -2000);
+// 任務不需要存款 → 和其他破壞型一樣，原因「人」、不扣除
+r = judge(MISSION.m1, mk('sel', 'sen', 'car'));
+assert.equal(r.reason, '人'); assert.deepEqual(r.deltas, {});
+// 隊上另有陽奉陰違／表面工夫 → 「人」優先，不扣除，圖謀私利拿不到錢
+res.yang = { money: ROLE.yang.money, leave: ROLE.yang.leave };
+res.face = { money: ROLE.face.money, leave: ROLE.face.leave };
+for (const other of ['yang', 'face']) {
+  r = judge(MISSION.m2, mk(other, 'rich', 'sel'));
+  assert.equal(r.reason, '人'); assert.deepEqual(r.deltas, {}); assert.equal(r.thief, undefined);
+}
+assert.equal(judge(MISSION.m2, mk('pow', 'rich', 'yang')).reason, '人');
 assert.equal(judge(MISSION.m5, mk('pow', 'car', 'sen')).reason, '體力');
 assert.equal(judge(MISSION.m1, mk('pow', 'two', 'car')).reason, '交通');
 // 災後復原：體力怪 50＋圖方便說謊 40＋10
@@ -49,15 +71,21 @@ assert.deepEqual(splitGroups(12), [6, 6]);
 assert.deepEqual(splitGroups(13), [6, 7]);
 // 臥底不分型、不控比例
 assert.equal(drawSpies(8).length, 3);
+// 每組至少 1 位破壞型
+for (let i = 0; i < 300; i++) for (const n of [6, 8, 10]) assert.ok(drawSpies(n).some((id) => ROLE[id].kind === 'sabotage'));
+assert.throws(() => makeGroupCfg(6, 'A', 'dashboard', ['two', 'yes']), /破壞型/);
 const phys = makeGroupCfg(6, 'A');
 assert.equal(phys.draw, 'physical');
 assert.equal(roleAllowed(phys, 'sel', ['sen']), null);
 assert.equal(roleAllowed(phys, 'yang', ['sel']), null); // 兩張都是破壞型也可以
-assert.match(roleAllowed(phys, 'face', ['sel', 'yang']), /臥底已滿/);
+assert.match(roleAllowed(phys, 'face', ['sel', 'yang']), /虛偽大人已滿/);
+assert.match(roleAllowed(phys, 'yes', ['two']), /破壞型/); // 最後一個名額還沒有破壞型 → 不能再放干擾型
+assert.equal(roleAllowed(phys, 'sel', ['two']), null);
+assert.equal(roleAllowed(phys, 'two', ['yang']), null);
 assert.match(roleAllowed(phys, 'nA', []), /不使用/);
-const dash = makeGroupCfg(6, 'A', 'dashboard', ['two', 'yes']);
-assert.equal(roleAllowed(dash, 'yes', []), null);
-assert.match(roleAllowed(dash, 'sel', []), /不是儀表板抽中/);
+const dash = makeGroupCfg(6, 'A', 'dashboard', ['two', 'sel']);
+assert.equal(roleAllowed(dash, 'two', []), null);
+assert.match(roleAllowed(dash, 'yes', []), /不是儀表板抽中/);
 assert.throws(() => makeGroupCfg(8, 'A', 'dashboard', ['sel', 'two']));
 
 // QR

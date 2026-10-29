@@ -64,7 +64,7 @@ function mapPage(set, q, today, ov) {
     h('div', { class: 'row', style: { alignItems: 'flex-start', gap: '16px', flexWrap: 'nowrap' } },
       h('div', { class: 'flex1 small', style: { lineHeight: 1.6 } },
         h('b', {}, '人工判定提醒　'),
-        '隊伍有破壞型臥底 → 失敗，原因「人」；否則依序比對存款、體力、特休、交通。成功時只扣存款與特休，3 人平均分攤，不足由持有最多者補。未用到的信封每梯次結束後放回本套。'),
+        '隊上有陽奉陰違或表面工夫 → 失敗，原因「人」，不扣除（優先）；圖謀私利在隊上且任務要存款 → 存款照常分攤但全歸他，失敗原因「金額」；圖謀私利出不要存款的任務 → 原因「人」；否則依序比對存款、體力、特休、交通。成功時只扣存款與特休，3 人平均分攤，不足由持有最多者補。未用到的信封每梯次結束後放回本套。'),
       h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' } },
         qrImg(QR.map(q.version, set, map), 110, `${set} 套離線載入 QR 碼`), h('span', { class: 'tiny' }, '離線載入 QR 碼'))),
     h('div', { class: 'grid g2 small', style: { marginTop: 'auto' } },

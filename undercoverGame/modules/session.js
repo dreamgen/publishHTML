@@ -8,7 +8,7 @@
 //   live/<g>: { phone, seats: { 1: code }, ledger: { code: {money, leave} },
 //               rounds: { <r>: { mid, seats, ok, reason, deltas, timeout, at } }, loaded: { round, mid } }
 import { connect } from './fb.js';
-import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed, roleWith, missionWith } from './rules.js';
+import { ROLE, MISSION, ROUND_LIMIT_MS, judge, initialLedger, roleAllowed, roleWith, missionWith, VETO_LIMIT } from './rules.js';
 
 const LS_OFFLINE = 'ug.offline.v1';
 
@@ -117,7 +117,7 @@ export class EventSession {
   }
 
   // ── 手機：綁定、結算、撤銷 ─────────────────────────────
-  /** 已綁定座位的角色（實體抽時，臥底以掃到的為準） */
+  /** 已綁定座位的角色（實體抽時，虛偽大人以掃到的為準） */
   boundRoles(g) { const map = this.mapping(g); return Object.values(this.seats(g)).map((c) => map[c]); }
   checkEnvelope(g, code) {
     const map = this.mapping(g), cfg = this.groupCfg(g);
@@ -177,7 +177,7 @@ export class EventSession {
     if (this.rounds(g)[round]) throw new Error('這回合已經結算過；要重來請先撤銷');
     const res = this.preview(g, mid, seatList);
     const ledger = this.live(g).ledger;
-    const p = { [`live/${g}/rounds/${round}`]: { mid, seats: seatList.map(Number), ok: res.ok, reason: res.reason, deltas: res.deltas, at: this.now() } };
+    const p = { [`live/${g}/rounds/${round}`]: { mid, seats: seatList.map(Number), ok: res.ok, reason: res.reason, deltas: res.deltas, at: this.now(), ...(res.thief ? { stolen: res.stolen, thief: res.thief } : {}) } };
     for (const [code, d] of Object.entries(res.deltas)) {
       p[`live/${g}/ledger/${code}/money`] = ledger[code].money + d.money;
       p[`live/${g}/ledger/${code}/leave`] = ledger[code].leave + d.leave;
@@ -189,7 +189,7 @@ export class EventSession {
     const r = this.rounds(g)[round];
     if (!r) return;
     const ledger = this.live(g).ledger;
-    const p = { [`live/${g}/rounds/${round}`]: null };
+    const p = { [`live/${g}/rounds/${round}`]: null, ...(r.vetoed ? { [`live/${g}/vfails/${round}`]: null } : {}) };
     for (const [code, d] of Object.entries(r.deltas || {})) {
       p[`live/${g}/ledger/${code}/money`] = ledger[code].money - d.money;
       p[`live/${g}/ledger/${code}/leave`] = ledger[code].leave - d.leave;
@@ -234,6 +234,7 @@ export class EventSession {
     const required = [...new Set([...(v.voters || []), ...voted])].sort((a, b) => a - b);
     const o = voted.filter((s) => votes[s] === 'O').length, x = voted.filter((s) => votes[s] === 'X').length;
     const pending = required.filter((s) => !votes[s]);
+    if (v.paper) return { ...v, o: v.po != null ? v.po : null, x: v.px != null ? v.px : null, pending: [], required: [], passed: v.result === 'pass' };
     return { ...v, o, x, pending, required, passed: o > x };
   }
   async castVote(g, voteId, seat, choice) {
@@ -247,7 +248,33 @@ export class EventSession {
   async closeVote(g) {
     const t = this.tally(g);
     if (!t || t.status !== 'open') return;
-    await this.patch({ [`live/${g}/vote/status`]: 'closed', [`live/${g}/vote/result`]: t.passed ? 'pass' : 'fail', [`live/${g}/vote/closedAt`]: this.now() });
+    await this.afterVote(g, t.passed, { [`live/${g}/vote/status`]: 'closed', [`live/${g}/vote/result`]: t.passed ? 'pass' : 'fail', [`live/${g}/vote/closedAt`]: this.now() });
+  }
+  /** 紙本不記名表決：控場主持人收完 O／X 小紙片後，直接登記通過或否決（o、x 票數可省略） */
+  async recordVote(g, passed, o = null, x = null) {
+    const at = this.now();
+    const v = { id: `v${at}`, round: this.control.round, team: [], voters: [], status: 'closed', votes: {}, paper: true, result: passed ? 'pass' : 'fail', at, closedAt: at };
+    if (o != null) v.po = o;
+    if (x != null) v.px = x;
+    await this.afterVote(g, passed, { [`live/${g}/vote`]: v });
+  }
+
+  // ── 輪值隊長：每次表決結束（通過或否決）都換下一位；同一回合否決 3 次 → 無法派人，任務失敗 ──
+  captain(g) { return this.live(g).captain || 1; }
+  voteFails(g, round = this.control.round) { return ((this.live(g).vfails || {})[round]) || 0; }
+  async setCaptain(g, seat) { await this.patch({ [`live/${g}/captain`]: Number(seat) }); }
+  async afterVote(g, passed, extra = {}) {
+    const c = this.control, cfg = this.groupCfg(g);
+    const size = (cfg && cfg.size) || 1;
+    const p = { ...extra, [`live/${g}/captain`]: (this.captain(g) % size) + 1 };
+    if (!passed) {
+      const n = this.voteFails(g, c.round) + 1;
+      p[`live/${g}/vfails/${c.round}`] = n;
+      if (n >= VETO_LIMIT && !this.rounds(g)[c.round] && c.missionId) {
+        p[`live/${g}/rounds/${c.round}`] = { mid: c.missionId, ok: false, reason: '無法派人', timeout: true, vetoed: true, deltas: {}, seats: [], at: this.now() };
+      }
+    }
+    await this.patch(p);
   }
   async clearVote(g) { await this.patch({ [`live/${g}/vote`]: null }); }
 

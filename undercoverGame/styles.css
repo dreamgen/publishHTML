@@ -69,6 +69,7 @@ th,td{padding:9px 8px;border-top:1px solid #EEE9DE;text-align:left}
 thead th{border-top:0;font-size:12px;font-weight:500;color:var(--muted)}
 td.num,th.num{text-align:right;font-family:var(--mono)}
 .zero{color:var(--bad);font-weight:700}
+.bad-t{color:var(--bad);font-weight:700}
 .scroll-x{overflow-x:auto}
 .mission{min-height:84px;border-radius:14px;padding:10px 12px;border:1px solid var(--line2);background:#fff;display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;cursor:pointer}
 .mission.used{background:#EEE9DE}
@@ -191,6 +192,8 @@ body.player-theme{background:#171614;color:#F1ECE2}
 .vote-chip.o{background:#1F5F5B;color:#fff;border-color:#1F5F5B}
 .vote-chip.x{background:#A3401A;color:#fff;border-color:#A3401A}
 .vote-chip.wait{border-style:dashed;color:var(--muted)}
+.vote-chip.done{background:var(--ok-bg,#E6F0EE);border-color:var(--ok);color:var(--ok)}
+.cap-row{padding:6px 10px;border-radius:8px;background:rgba(0,0,0,.04)}
 .p-vote-btns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .p-vbtn{min-height:84px;border-radius:18px;border:2px solid #D8C7A3;background:#23211E;color:#F1ECE2;font-size:44px;font-weight:900;cursor:pointer}
 .p-vbtn[disabled]{opacity:.25;cursor:not-allowed}
