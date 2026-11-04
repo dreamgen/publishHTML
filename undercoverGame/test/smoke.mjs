@@ -63,7 +63,25 @@ const ev = await dash.evaluate(() => localStorage.getItem('ug.dash.ev'));
 step('活動 ' + ev);
 await shot(dash, '1-prep');
 // 列印頁
-await dash.goto(BASE + '#/print/labels'); await dash.getByText('A 套　13 張').waitFor(); await shot(dash, '2-labels');
+await dash.goto(BASE + '#/print/labels'); await dash.locator('.label-sheet').first().waitFor(); await shot(dash, '2-labels');
+{
+  // 每格 2 個 QR、每套 13 個；所有 QR 與文字都離切線（四邊與中線）至少 3.5 mm
+  const chk = await dash.evaluate(() => {
+    const mm = 96 / 25.4, out = { qr: document.querySelectorAll('.label-sheet')[0].querySelectorAll('img.qr').length, bad: [] };
+    for (const cell of document.querySelectorAll('.label-sheet .lbl-cell')) {
+      const c = cell.getBoundingClientRect(), mid = c.left + c.width / 2;
+      for (const el of cell.querySelectorAll('.lbl-half > *')) {
+        const r = el.getBoundingClientRect();
+        const left = r.left < mid ? r.left - c.left : r.left - mid, right = r.right <= mid ? mid - r.right : c.right - r.right;
+        const d = Math.min(left, right, r.top - c.top, c.bottom - r.bottom) / mm;
+        if (d < 3.5) out.bad.push(el.className + ' ' + d.toFixed(1));
+      }
+    }
+    return out;
+  });
+  if (chk.qr !== 13 || chk.bad.length) throw new Error('貼紙版面不對 ' + JSON.stringify(chk));
+  await dash.emulateMedia({ media: 'print' }); await dash.pdf({ path: (process.env.SHOTS || '/tmp') + '/ug-labels.pdf', format: 'A4', printBackground: true }); await dash.emulateMedia({ media: 'screen' });
+}
 await dash.goto(BASE + '#/print/map'); await dash.getByText('13 個角色全對照').first().waitFor(); await shot(dash, '3-map');
 await dash.goto(BASE + '#/dash'); await dash.getByRole('button', { name: '梯次與組別' }).waitFor();
 // 2. 梯次：12 人 → 6+6

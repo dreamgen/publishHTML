@@ -1,4 +1,4 @@
-// 列印頁：信封 QR 貼紙（每套 13 張）與工作人員對照表（每套 13 列）。A、B 兩套各一頁。
+// 列印頁：信封 QR 貼紙（10 格標籤紙，每格 2 個 QR；每套 13 個）與工作人員對照表（每套 13 列）。A、B 兩套各一頁。
 import { h, qrImg, iconEl } from './ui.js';
 import { connect } from './fb.js';
 import { ROLE, KIND_LABEL, WHEN_LABEL, fmtNum, QR, roleWith } from './rules.js';
@@ -15,31 +15,61 @@ export async function mountPrint(app, parts) {
   const ov = (await fb.get(fb.evRef(ev, 'overrides/roles'))).val() || {};
   if (!q) throw new Error('這個活動還沒有 QR 碼');
   const today = new Date().toLocaleDateString('zh-TW');
-  const pages = ['A', 'B'].map((set) => (kind === 'labels' ? labelsPage(set, q, today) : mapPage(set, q, today, ov)));
-  app.replaceChildren(
-    h('div', { class: 'print-bar' },
-      h('a', { class: 'btn', href: '#/dash' }, iconEl('back'), '回儀表板'),
-      h('a', { class: 'btn', href: kind === 'labels' ? '#/print/map' : '#/print/labels' }, kind === 'labels' ? '改看對照表' : '改看貼紙'),
-      h('button', { class: 'btn dark', onclick: () => window.print() }, iconEl('print'), '列印（A4）')),
-    ...pages);
+  const draw = () => {
+    const pages = ['A', 'B'].map((set) => (kind === 'labels' ? labelsPage(set, q, today) : mapPage(set, q, today, ov)));
+    app.replaceChildren(
+      h('div', { class: 'print-bar' },
+        h('div', { class: 'row', style: { justifyContent: 'center' } },
+          h('a', { class: 'btn', href: '#/dash' }, iconEl('back'), '回儀表板'),
+          h('a', { class: 'btn', href: kind === 'labels' ? '#/print/map' : '#/print/labels' }, kind === 'labels' ? '改看對照表' : '改看貼紙'),
+          h('button', { class: 'btn dark', onclick: () => window.print() }, iconEl('print'), kind === 'labels' ? '列印（10 格標籤紙，A、B 各一張）' : '列印（A4）')),
+        kind === 'labels' ? labelTools(draw) : null),
+      ...pages);
+  };
+  draw();
 }
 
 const sortedCodes = (map) => Object.keys(map).sort();
 
+// 標籤紙規格（彩之舞 10 格標籤 10C，A4 直式 2 欄 × 5 列）：每格 92 × 55 mm，上邊界 11 mm、左邊界 13 mm。
+// 每格印 2 個信封 QR（左右各一，可沿中線剪開分貼兩個信封）；內容離每條切線（四邊與中線）都至少 4 mm。
+export const LABEL = { cols: 2, rows: 5, w: 92, h: 55, top: 11, left: 13, safe: 4 };
+const LS_CAL = 'ug.print.cal';
+const loadCal = () => { try { return { x: 0, y: 0, frame: false, ...JSON.parse(localStorage.getItem(LS_CAL) || '{}') }; } catch (e) { return { x: 0, y: 0, frame: false }; } };
+const saveCal = (c) => { try { localStorage.setItem(LS_CAL, JSON.stringify(c)); } catch (e) { /* */ } };
+
 function labelsPage(set, q, today) {
   const map = q.sets[set];
-  const cells = sortedCodes(map).map((code) => h('div', {},
-    qrImg(QR.envelope(set, code, q.version), 104, `信封 QR 碼 ${code}`),
+  const codes = sortedCodes(map);
+  const cal = loadCal();
+  const one = (code) => (code ? h('div', { class: 'lbl-half' },
+    qrImg(QR.envelope(set, code, q.version), 120, `信封 QR 碼 ${code}`),
     h('span', { class: 'code' }, code),
-    h('span', { class: 'tiny muted' }, `${set} 套・v${q.version}`)));
-  cells.push(h('div', {}), h('div', {}));
-  return h('section', { class: 'print-page' },
-    h('div', { class: 'print-head' },
-      h('div', {}, h('div', { class: 'eyebrow' }, '勿虛心假意・信封 QR 貼紙・全場固定'), h('h1', {}, `${set} 套　13 張`)),
-      h('p', { class: 'tiny muted', style: { textAlign: 'right' } }, `QR 碼版本 v${q.version}・沿虛線剪下貼在信封正面`, h('br'), '貼紙不含任何角色資訊')),
-    h('div', { class: 'labels' }, cells),
-    h('div', { class: 'row between tiny muted', style: { marginTop: 'auto' } },
-      h('span', {}, `依代號排序，與角色無關。裝填請對照同版本的「${set} 套對照表」。`), h('span', {}, `列印日期 ${today}`)));
+    h('span', { class: 'meta' }, `${set} 套・v${q.version}`)) : h('div', { class: 'lbl-half' }));
+  const cells = [];
+  for (let i = 0; i < LABEL.cols * LABEL.rows; i++) {
+    const r = Math.floor(i / LABEL.cols), c = i % LABEL.cols;
+    cells.push(h('div', {
+      class: 'lbl-cell',
+      style: { left: `${LABEL.left + c * LABEL.w}mm`, top: `${LABEL.top + r * LABEL.h}mm`, width: `${LABEL.w}mm`, height: `${LABEL.h}mm` },
+    }, one(codes[i * 2]), one(codes[i * 2 + 1])));
+  }
+  const used = Math.ceil(codes.length / 2);
+  return h('section', { class: 'label-sheet' + (cal.frame ? ' show-frame' : ''), 'aria-label': `${set} 套信封貼紙` },
+    h('div', { class: 'lbl-shift', style: { transform: `translate(${cal.x}mm, ${cal.y}mm)` } }, cells),
+    h('p', { class: 'lbl-note no-print' }, `${set} 套 ${codes.length} 個 QR，用掉前 ${used} 格（每格 2 個），其餘 ${LABEL.cols * LABEL.rows - used} 格空白可留著下次用。列印日期 ${today}`));
+}
+
+/** 貼紙列印的校正工具列：位移、試印外框 */
+export function labelTools(rerender) {
+  const cal = loadCal();
+  const num = (key, label) => h('label', { class: 'field', style: { width: '110px' } }, label,
+    h('input', { type: 'number', step: '0.5', value: cal[key], onchange: (e) => { cal[key] = +e.target.value || 0; saveCal(cal); rerender(); } }));
+  return h('div', { class: 'row', style: { alignItems: 'flex-end', flexWrap: 'wrap', gap: '10px' } },
+    num('x', '右移 mm（負＝左）'), num('y', '下移 mm（負＝上）'),
+    h('label', { class: 'row small', style: { gap: '6px' } },
+      h('input', { type: 'checkbox', checked: cal.frame, onchange: (e) => { cal.frame = e.target.checked; saveCal(cal); rerender(); } }), '印出標籤外框（先用白紙試印）'),
+    h('span', { class: 'muted tiny', style: { maxWidth: '360px' } }, '列印設定請選「實際大小／100%」、邊界「無」。先用白紙勾選外框試印，疊在標籤紙上對光檢查，偏了再調位移。'));
 }
 
 function mapPage(set, q, today, ov) {
