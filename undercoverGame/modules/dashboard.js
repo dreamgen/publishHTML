@@ -4,7 +4,7 @@ import { EventSession } from './session.js';
 import { connect } from './fb.js';
 import {
   ROLE, MISSIONS, MISSION, ROUND_LIMIT_MS, KIND_LABEL,
-  splitGroups, composition, makeGroupCfg, generateMapping, needText, fmtNum, QR,
+  splitGroups, composition, makeGroupCfg, goodCount, generateMapping, needText, fmtNum, QR,
 } from './rules.js';
 import { spyPicker } from './spypick.js';
 import { editTab } from './editor.js';
@@ -118,7 +118,7 @@ function dashboard(app, S) {
     return h('div', { class: 'cols' },
       h('section', { class: 'card' },
         h('h2', {}, '信封 QR 碼（全場固定）'),
-        h('p', { class: 'muted small' }, 'A、B 兩套各 13 個 QR 碼，固定對應 6 種虛偽大人與 7 位真誠大人（特殊大人 4、一般大人 A、B、C），所有梯次共用。每梯次依人數從套內取出要用的信封。'),
+        h('p', { class: 'muted small' }, 'A、B 兩套各 13 個 QR 碼，固定對應 6 種虛偽大人與 7 位真誠大人（特殊大人 4、一般大人 A、B、C），所有梯次共用。每梯次依人數從 7 個真誠大人信封隨機取出需要的數量，特殊大人不一定要出現。'),
         h('div', { class: 'row' }, h('span', { class: 'chip' }, `目前版本 v${q.version}`), h('span', { class: 'muted tiny' }, '建立於 ' + new Date(q.updatedAt).toLocaleString('zh-TW'))),
         h('div', { class: 'row' },
           h('a', { class: 'btn dark', href: '#/print/labels' }, iconEl('print'), '列印貼紙（A、B 套）'),
@@ -147,8 +147,7 @@ function dashboard(app, S) {
     const groupCards = form.sizes.map((size, i) => {
       const g = i + 1, c = composition(size), set = g === 1 ? 'A' : 'B';
       return h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}・${form.picks[g].draw === 'auto' ? '不用信封' : `信封 ${set} 套`}`)),
-        h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '真誠大人　'), c.good.map((id) => ROLE[id].name).join('、')),
+        h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${size} 人`), h('span', { class: 'muted small' }, `真誠大人 ${c.goods}・虛偽大人 ${c.spies}・${form.picks[g].draw === 'auto' ? '不用信封' : `信封 ${set} 套`}`)),
         spyPicker(size, form.picks[g], render));
     });
     return h('div', { class: 'stack' },
@@ -170,7 +169,7 @@ function dashboard(app, S) {
               form.sizes.forEach((size, i) => {
                 const g = i + 1;
                 const pk = form.picks[g];
-                try { groups[g] = makeGroupCfg(size, g === 1 ? 'A' : 'B', pk.draw, pk.draw !== 'physical' ? pk.spies : null); }
+                try { groups[g] = makeGroupCfg(size, g === 1 ? 'A' : 'B', pk.draw, pk.draw !== 'physical' ? pk.spies : null, Math.random, pk.draw === 'auto' ? pk.goods : null); }
                 catch (err) { throw new Error(`第 ${g} 組：${err.message}`); }
               });
               // 自動抽角色的組別：座位、帳本與座位 QR 隨機碼在建立時就準備好，不需要掃碼綁定
@@ -318,7 +317,7 @@ function dashboard(app, S) {
         h('span', { class: 'chip ' + (live.phone ? 'ok' : '') }, live.phone ? (auto ? '手機已加入・免綁定' : `手機已加入・綁定 ${bound}/${cfg.size}`) : '等待手機掃描'),
         h('p', { class: 'muted tiny' }, '助理主持人用手機相機或本程式掃描加入。QR 碼不含角色資訊。'),
         h('details', {}, h('summary', { class: 'small' }, '本組角色（請勿外流）'),
-          h('p', { class: 'small' }, '真誠大人：', cfg.good.map((id) => ROLE[id].name).join('、')),
+          h('p', { class: 'small' }, '真誠大人：', cfg.good ? cfg.good.map((id) => ROLE[id].name).join('、') : `從 7 張隨機抽 ${goodCount(cfg)} 張，綁定時以掃到的為準`),
           h('p', { class: 'small' }, '虛偽大人：', cfg.spies ? cfg.spies.map((id) => ROLE[id].name).join('、') : `實體抽 ${cfg.spyCount} 張，綁定時以掃到的為準`)));
     }).concat([h('section', { class: 'card' },
       h('h2', {}, handPending.length ? '等待發角色卡與綁定完成' : '等待全部組別綁定完成'),

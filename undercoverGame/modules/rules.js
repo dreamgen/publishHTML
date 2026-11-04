@@ -25,7 +25,7 @@ export const SPIES = ROLES.filter((r) => r.camp === 'spy').map((r) => r.id);
 /** 統稱（2026-10-28 會議）：好人＝真誠大人、臥底＝虛偽大人 */
 export const CAMP_NAME = { good: '真誠大人', spy: '虛偽大人' };
 export const KIND_LABEL = { special: '真誠大人・特殊', normal: '真誠大人・一般', sabotage: '虛偽大人・破壞型', disrupt: '虛偽大人・干擾型' };
-export const WHEN_LABEL = { sen: '每組必用', car: '每組必用', pow: '每組必用', rich: '每組必用', nA: '7 人以上', nB: '9 人以上', nC: '11 人' };
+export const WHEN_LABEL = Object.fromEntries(['sen', 'car', 'pow', 'rich', 'nA', 'nB', 'nC'].map((id) => [id, '依人數抽選']));
 
 // 任務條件：money 元、leave 天、power 點、cars 汽車台數（轎車＋遊覽車）、bus 遊覽車台數。
 // alt：替代交通條件（任一成立即可）。
@@ -64,26 +64,27 @@ export function splitGroups(total) {
   return Array.from({ length: g }, (_, i) => base + (i >= g - extra ? 1 : 0));
 }
 
-// 每組人數 → 好人角色與臥底人數。臥底不分破壞型／干擾型，從 6 種臥底中隨機抽，不控制比例。
-const COMPOSE = {
-  6: { normals: [], spies: 2 },
-  7: { normals: ['nA'], spies: 2 },
-  8: { normals: ['nA'], spies: 3 },
-  9: { normals: ['nA', 'nB'], spies: 3 },
-  10: { normals: ['nA', 'nB'], spies: 4 },
-  11: { normals: ['nA', 'nB', 'nC'], spies: 4 },
-};
+// 每組人數 → 真誠大人與虛偽大人人數。
+// 真誠大人：從 7 張（特殊大人 4、一般大人 A、B、C）中隨機抽出足夠的張數，不限定特殊大人一定要出現。
+// 虛偽大人：從 6 種中隨機抽，不控制比例，但至少 1 位破壞型。
+export const GOODS = ROLES.filter((r) => r.camp === 'good').map((r) => r.id);
+const COMPOSE = { 6: [4, 2], 7: [5, 2], 8: [5, 3], 9: [6, 3], 10: [6, 4], 11: [7, 4] };
 export function composition(size) {
   const c = COMPOSE[size];
   if (!c) throw new Error('每組人數須為 6～11 人');
-  return { good: [...SPECIALS, ...c.normals], spies: c.spies };
+  return { goods: c[0], spies: c[1] };
 }
+/** 本組真誠大人張數（舊資料只有 good 清單時用清單長度） */
+export function goodCount(cfg) { return cfg.goodCount != null ? cfg.goodCount : (cfg.good || []).length; }
 
 export function shuffle(arr, rnd = Math.random) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 }
+
+/** 抽真誠大人：從 7 張中隨機抽出本組需要的張數 */
+export function drawGoods(size, rnd = Math.random) { return shuffle(GOODS, rnd).slice(0, composition(size).goods); }
 
 /** 抽虛偽大人：不控制破壞型／干擾型比例，但每組至少要有 1 位破壞型 */
 export function drawSpies(size, rnd = Math.random) {
@@ -97,9 +98,16 @@ export function drawSpies(size, rnd = Math.random) {
  * draw = 'physical'（預設，實體抽臥底卡：綁定座位時掃到哪張臥底就是哪張）
  *      | 'dashboard'（離線手機抽：事先抽定，spies 為虛偽大人角色陣列）
  */
-export function makeGroupCfg(size, set, draw = 'physical', spies = null, rnd = Math.random) {
+export function makeGroupCfg(size, set, draw = 'physical', spies = null, rnd = Math.random, goods = null) {
   const c = composition(size);
-  const cfg = { size, set, draw, good: c.good, spyCount: c.spies };
+  const cfg = { size, set, draw, goodCount: c.goods, spyCount: c.spies };
+  if (draw === 'auto') {
+    // 自動抽角色：真誠大人也由系統抽（可傳入儀表板上手動調整後的清單）
+    const gl = goods || drawGoods(size, rnd);
+    if (gl.length !== c.goods) throw new Error(`${size} 人組需要 ${c.goods} 位真誠大人`);
+    if (new Set(gl).size !== gl.length || gl.some((id) => !GOODS.includes(id))) throw new Error('真誠大人不可重複');
+    cfg.good = gl;
+  }
   if (draw === 'dashboard' || draw === 'auto') {
     const list = spies || drawSpies(size);
     if (list.length !== c.spies) throw new Error(`${size} 人組需要 ${c.spies} 位虛偽大人`);
@@ -107,7 +115,7 @@ export function makeGroupCfg(size, set, draw = 'physical', spies = null, rnd = M
     if (!list.some((id) => SABOTAGE.includes(id))) throw new Error('每組至少要有 1 位破壞型虛偽大人');
     cfg.spies = list;
     // 自動抽角色（無實體卡片）：全部角色隨機排到 1～N 號座位，seatRoles[i] 為 i+1 號的角色
-    if (draw === 'auto') cfg.seatRoles = shuffle([...c.good, ...list], rnd);
+    if (draw === 'auto') cfg.seatRoles = shuffle([...cfg.good, ...list], rnd);
   }
   return cfg;
 }
@@ -125,7 +133,11 @@ export function makeNonce(rnd = Math.random) { return Math.floor(rnd() * 36 ** 6
 export function roleAllowed(cfg, role, boundRoles) {
   if (!ROLE[role]) return '不明的角色';
   if (boundRoles.includes(role)) return '這個角色已經綁定過了';
-  if (ROLE[role].camp === 'good') return cfg.good.includes(role) ? null : `這個真誠大人角色 ${cfg.size} 人組不使用，請換一個信封`;
+  if (ROLE[role].camp === 'good') {
+    if (cfg.draw === 'auto') return cfg.good.includes(role) ? null : '這個真誠大人不是本組抽中的';
+    const goodsBound = boundRoles.filter((r) => ROLE[r].camp === 'good').length;
+    return goodsBound < goodCount(cfg) ? null : `本組真誠大人已滿 ${goodCount(cfg)} 位，請換虛偽大人的信封`;
+  }
   if (cfg.draw === 'dashboard') return cfg.spies.includes(role) ? null : '這張虛偽大人卡不是儀表板抽中的，請換一個信封';
   const spiesBound = boundRoles.filter((r) => ROLE[r].camp === 'spy');
   if (spiesBound.length >= cfg.spyCount) return `本組虛偽大人已滿 ${cfg.spyCount} 位，請換真誠大人的信封`;
@@ -137,7 +149,7 @@ export function roleAllowed(cfg, role, boundRoles) {
 
 /** 綁定完成前，好人與臥底各還差幾位 */
 export function remainingSlots(cfg, boundRoles) {
-  const goodLeft = cfg.good.filter((r) => !boundRoles.includes(r)).length;
+  const goodLeft = goodCount(cfg) - boundRoles.filter((r) => ROLE[r].camp === 'good').length;
   const spyLeft = cfg.spyCount - boundRoles.filter((r) => ROLE[r].camp === 'spy').length;
   return { goodLeft, spyLeft };
 }

@@ -96,7 +96,8 @@ const batch = db.artifacts.undercoverGame.public.data.events[ev].batch;
 const sets = db.artifacts.undercoverGame.public.data.events[ev].qr.sets;
 const ver = db.artifacts.undercoverGame.public.data.events[ev].qr.version;
 const SPY_ORDER = ['sel', 'two', 'yang', 'yes', 'face', 'lie'];
-const rolesOf = (cfg) => [...cfg.good, ...(cfg.spies || SPY_ORDER.slice(0, cfg.spyCount))];
+const GOOD_ORDER = ['sen', 'car', 'pow', 'rich', 'nA', 'nB', 'nC'];
+const rolesOf = (cfg) => [...(cfg.good || GOOD_ORDER.slice(0, cfg.goodCount)), ...(cfg.spies || SPY_ORDER.slice(0, cfg.spyCount))];
 step('第 1 組 ' + JSON.stringify(rolesOf(batch.groups[1])) + '・抽法 ' + batch.groups[1].draw);
 
 // 3. 兩支手機加入、綁定（用手動輸入代替相機）

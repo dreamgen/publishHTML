@@ -1,6 +1,6 @@
 // node test/rules.test.mjs —— 以修正方案第一節「任務」表的 6 人組試算驗證判定與扣除
 import assert from 'node:assert/strict';
-import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR, autoSeats } from '../modules/rules.js';
+import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR, autoSeats, drawGoods, remainingSlots } from '../modules/rules.js';
 
 const res = {};
 const mk = (...ids) => ids.map((id) => ({ code: id, role: id, money: res[id].money, leave: res[id].leave }));
@@ -82,7 +82,17 @@ assert.match(roleAllowed(phys, 'face', ['sel', 'yang']), /虛偽大人已滿/);
 assert.match(roleAllowed(phys, 'yes', ['two']), /破壞型/); // 最後一個名額還沒有破壞型 → 不能再放干擾型
 assert.equal(roleAllowed(phys, 'sel', ['two']), null);
 assert.equal(roleAllowed(phys, 'two', ['yang']), null);
-assert.match(roleAllowed(phys, 'nA', []), /不使用/);
+// 真誠大人：7 張中任選，不限定特殊大人；只檢查張數
+assert.equal(roleAllowed(phys, 'nA', []), null);
+assert.equal(roleAllowed(phys, 'nC', ['nA', 'nB']), null);
+assert.match(roleAllowed(phys, 'sen', ['nA', 'nB', 'nC', 'car']), /真誠大人已滿 4 位/);
+assert.deepEqual(remainingSlots(phys, ['nA', 'sel']), { goodLeft: 3, spyLeft: 1 });
+const seen = new Set();
+for (let i = 0; i < 400; i++) { const gl = drawGoods(6); assert.equal(gl.length, 4); assert.equal(new Set(gl).size, 4); gl.forEach((x) => seen.add(x)); if (!gl.includes('sen')) seen.add('no-sen'); }
+assert.ok(seen.has('nC') && seen.has('no-sen'), '應能抽到一般大人、也能不抽特殊大人');
+assert.equal(makeGroupCfg(11, 'A', 'auto').good.length, 7);
+assert.throws(() => makeGroupCfg(6, 'A', 'auto', ['sel', 'two'], Math.random, ['sen', 'sen', 'nA', 'nB']), /不可重複/);
+assert.deepEqual(makeGroupCfg(6, 'A', 'auto', ['sel', 'two'], Math.random, ['nA', 'nB', 'nC', 'pow']).good, ['nA', 'nB', 'nC', 'pow']);
 const dash = makeGroupCfg(6, 'A', 'dashboard', ['two', 'sel']);
 assert.equal(roleAllowed(dash, 'two', []), null);
 assert.match(roleAllowed(dash, 'yes', []), /不是儀表板抽中/);

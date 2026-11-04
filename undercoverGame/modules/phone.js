@@ -90,8 +90,7 @@ function offlineEntry(app) {
       h('div', { class: 'field' }, h('span', {}, '本組人數'),
         h('div', { class: 'grid g6' }, [6, 7, 8, 9, 10, 11].map((n) => h('button', { class: 'btn', 'aria-pressed': String(st.size === n), onclick: () => { st.size = n; roll(); render(); } }, n)))),
       h('section', { class: 'card' },
-        h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `真誠大人 ${c.good.length}・虛偽大人 ${c.spies}`)),
-        h('p', { class: 'small' }, h('b', { style: { color: 'var(--ok)' } }, '真誠大人　'), c.good.map((id) => ROLE[id].name).join('、')),
+        h('div', { class: 'row between' }, h('h2', {}, `${st.size} 人組角色組成`), h('span', { class: 'muted small' }, `真誠大人 ${c.goods}・虛偽大人 ${c.spies}`)),
         spyPicker(st.size, st.pick, render, 'dashboard'),
         h('label', { class: 'field' }, '信封套別', h('select', { onchange: (e) => { st.set = e.target.value; render(); } }, ['A', 'B'].map((s) => h('option', { value: s, selected: st.set === s }, `${s} 套`)))),
         have ? h('div', { class: 'note ok' }, `${st.set} 套 v${mapsNow.version} 對照已在手機上`)
