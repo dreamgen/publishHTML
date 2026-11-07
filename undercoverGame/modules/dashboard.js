@@ -12,6 +12,7 @@ import { noticeBanner } from './notice.js';
 import { voteBox } from './vote.js';
 import { handPanel } from './hand.js';
 import { checkTab } from './qrcheck.js';
+import { roleTone } from './rules.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
@@ -70,7 +71,8 @@ function entry(app) {
 
 function dashboard(app, S) {
   let tab = S.batch ? 'control' : 'prep';
-  let reveal = false;
+  // 顯示角色（揭牌後）：存在資料庫 staff/showRoles，助理主持人手機也同步顯示全組角色
+  const reveal = () => !!(S.data && S.data.staff && S.data.staff.showRoles);
   let form = null; // 梯次設定表單暫存
   const editSt = { draft: null }; // 編輯模式草稿
   const handSt = {}; // 自動抽角色：各組發卡面板狀態
@@ -184,6 +186,7 @@ function dashboard(app, S) {
                 live: Object.keys(live).length ? live : null,
                 control: { round: 1, missionId: null, status: 'idle', accum: 0, startAt: null },
                 player: { open: false, revealed: false },
+                staff: { showRoles: false },
               });
               tab = 'control'; render();
               toast(Object.keys(live).length ? `已建立第 ${form.no} 梯次，請發角色卡給玩家` : `已建立第 ${form.no} 梯次，請助理主持人掃組別 QR 碼`);
@@ -252,7 +255,9 @@ function dashboard(app, S) {
               await S.patch({ control: { round: r + 1, missionId: null, status: 'idle', accum: 0, startAt: null } });
             },
           }, '下一回合'))),
-      h('div', { class: 'row end' }, h('button', { class: 'btn', 'aria-pressed': String(reveal), onclick: () => { reveal = !reveal; render(); } }, reveal ? '隱藏角色' : '顯示角色（揭牌後）')),
+      h('div', { class: 'row end' },
+        h('button', { class: 'btn', onclick: () => showJoinQr(gs) }, '助理主持人換手機／重新加入'),
+        h('button', { class: 'btn' + (reveal() ? ' dark' : ''), 'aria-pressed': String(reveal()), onclick: () => S.patch({ 'staff/showRoles': !reveal() }) }, reveal() ? '隱藏角色（各組手機同步隱藏）' : '顯示角色（揭牌後，各組手機同步）')),
       h('div', { class: 'cols' }, gs.map((g) => groupCard(g, c))),
       playerPanel(gs));
   }
@@ -309,6 +314,25 @@ function dashboard(app, S) {
         gs.some((g) => !S.isAuto(g)) ? (pc.open ? '實體抽的組別已開放：玩家按住畫面即可查看角色。關閉後玩家畫面立即蓋住。' : '實體抽的組別尚未開放：玩家可先掃信封，但看不到角色。') : null));
   }
 
+  // 遊戲進行中也能顯示各組的加入 QR 碼：助理主持人換手機或需要重新加入時使用
+  function showJoinQr(gs) {
+    const close = () => wrap.remove();
+    const wrap = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': '助理主持人加入 QR 碼', onclick: (e) => { if (e.target === wrap) close(); } },
+      h('div', { class: 'modal-card', style: { width: 'min(100%, 760px)' } },
+        h('div', { class: 'row between' }, h('h2', {}, '助理主持人加入 QR 碼'), h('button', { class: 'btn', onclick: close }, '關閉')),
+        h('p', { class: 'muted small' }, '新手機用相機掃自己那一組的 QR 碼，確認組別後就會接續目前的回合，座位綁定、資源與結算紀錄都保留，不用重新綁定。舊手機可以直接關掉。'),
+        h('div', { class: 'cols' }, gs.map((g) => {
+          const cfg = S.groupCfg(g), live = S.live(g);
+          const url = `${location.origin}${location.pathname}?join=${ev}.${S.batch.no}.${g}`;
+          return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center', flex: '1 1 260px' } },
+            h('b', {}, `第 ${g} 組・${cfg.draw === 'auto' ? '自動抽角色' : cfg.set + ' 套'}`),
+            qrImg(url, 220, `第 ${g} 組加入用 QR 碼`),
+            h('span', { class: 'muted tiny' }, live.phone ? `目前手機加入於 ${new Date(live.phone.at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}` : '尚未有手機加入'));
+        })),
+        h('p', { class: 'muted tiny' }, 'QR 碼不含角色資訊，但請只給助理主持人掃描。')));
+    document.body.append(wrap);
+  }
+
   function joinPanel(gs, handPending = []) {
     return h('div', { class: 'cols' }, gs.map((g) => {
       const cfg = S.groupCfg(g), live = S.live(g), auto = cfg.draw === 'auto';
@@ -355,12 +379,12 @@ function dashboard(app, S) {
       h('div', { class: 'row between' }, h('h2', {}, `第 ${g} 組・${cfg.size} 人`), h('span', { class: 'muted small' }, `成功 ${ok}・失敗 ${bad}`)),
       status, !x && c.missionId ? voteBox(S, g) : null, strip,
       h('div', { class: 'scroll-x' }, h('table', {},
-        h('thead', {}, h('tr', {}, h('th', {}, '座位'), reveal ? h('th', {}, '角色') : null, h('th', { class: 'num' }, '存款'), h('th', { class: 'num' }, '特休'), h('th', { class: 'num' }, '體力'), h('th', {}, '交通'))),
+        h('thead', {}, h('tr', {}, h('th', {}, '座位'), reveal() ? h('th', {}, '角色') : null, h('th', { class: 'num' }, '存款'), h('th', { class: 'num' }, '特休'), h('th', { class: 'num' }, '體力'), h('th', {}, '交通'))),
         h('tbody', {}, seatNos.map((s) => {
           const code = seats[s], role = ROLE[map[code]], st = S.stats(g, code), l = ledger[code] || { money: st.money, leave: st.leave };
           return h('tr', {},
             h('th', { scope: 'row', style: { fontSize: '18px', fontWeight: 900 } }, s),
-            reveal ? h('td', {}, role.name, h('span', { class: 'muted tiny' }, '　' + KIND_LABEL[role.kind])) : null,
+            reveal() ? h('td', {}, h('span', { class: 'role-tag ' + roleTone(role) }, role.name), h('span', { class: 'muted tiny' }, '　' + KIND_LABEL[role.kind])) : null,
             h('td', { class: 'num' + (l.money === 0 ? ' zero' : '') }, fmtNum(l.money)),
             h('td', { class: 'num' + (l.leave === 0 ? ' zero' : '') }, l.leave),
             h('td', { class: 'num' }, st.power),

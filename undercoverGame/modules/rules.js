@@ -191,6 +191,9 @@ export const ROLE_TEXT = {
 };
 /** 角色的表決限制：口是心非只能投 X、鄉愿討好只能投 O */
 export const VOTE_LOCK = { two: 'X', yes: 'O' };
+/** 顯示用色調：真誠大人＝good、破壞型＝sabotage、干擾型＝disrupt（見 styles.css 的 .role-tag） */
+export function roleTone(r) { return r.camp === 'good' ? 'good' : r.kind; }
+export const TONE_LABEL = { good: '真誠大人', sabotage: '虛偽大人・破壞型', disrupt: '虛偽大人・干擾型' };
 export function roleTitle(id) { const r = ROLE[id]; return `${CAMP_NAME[r.camp]}・${r.name}`; }
 
 // ── QR 碼對照 ─────────────────────────────────────────────────────────────────

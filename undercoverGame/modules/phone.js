@@ -3,7 +3,7 @@ import { h, toast, confirmBox, openScanner, iconEl, fmtClock } from './ui.js';
 import { EventSession, deviceId, loadOffline, saveOffline, clearOffline } from './session.js';
 import {
   ROLE, MISSIONS, MISSION, ROUND_LIMIT_MS, KIND_LABEL, REASON_ORDER,
-  composition, makeGroupCfg, remainingSlots, pickEnvelopes, needText, fmtNum, announce, QR,
+  composition, makeGroupCfg, remainingSlots, pickEnvelopes, roleTone, TONE_LABEL, needText, fmtNum, announce, QR,
 } from './rules.js';
 import { spyPicker } from './spypick.js';
 import { noticeBanner } from './notice.js';
@@ -170,6 +170,8 @@ function groupApp(app, S, g, info) {
   // 確認組別（連線）
   function confirmScreen() {
     const cfg = S.groupCfg(g);
+    // 換手機／重新加入：本組已有綁定或已開放查看，就是接續進度
+    const resume = Object.keys(S.seats(g)).length > 0 && (cfg.draw !== 'auto' || S.handLocked(g) || S.claimedSeats(g).length > 0);
     return shell('加入組別', null,
       h('section', { class: 'card', style: { border: '2px solid var(--ok)' } },
         h('span', { class: 'eyebrow', style: { color: 'var(--ok)' } }, '已辨識組別'),
@@ -177,14 +179,15 @@ function groupApp(app, S, g, info) {
         h('p', { class: 'muted' }, `${cfg.size} 人・本梯次共 ${Object.keys(S.batch.groups).length} 組`),
         h('p', { class: 'small' }, cfg.draw === 'auto' ? `座位 1～${cfg.size} 號（順時針）・自動抽角色（無實體卡片，不用綁定）・回合由控場講師儀表板同步`
           : `座位 1～${cfg.size} 號（順時針）・信封 ${cfg.set} 套（v${S.qr.version}）・回合由控場講師儀表板同步`),
-        h('div', { class: 'note' }, '角色組成只在儀表板設定，手機不顯示誰是虛偽大人。')),
+        h('div', { class: 'note' }, '角色組成只在儀表板設定，手機不顯示誰是虛偽大人。'),
+        resume ? h('div', { class: 'note ok' }, `本組已在進行中（${S.control.round ? `第 ${S.control.round} 回合` : '已綁定座位'}）。確認後接續原本的進度，座位、資源與結算紀錄都保留。`) : null),
       h('footer', {},
         h('button', {
           class: 'btn primary big', onclick: async () => {
             await S.patch({ [`live/${g}/phone`]: { id: deviceId(), at: Date.now() } });
             ui.confirmed = true; jset(LS_PHONE, { ...info, confirmed: true }); render();
           },
-        }, cfg.draw === 'auto' ? '確認，開始發角色卡' : '確認，開始綁定座位'),
+        }, resume ? '確認，接續本組進度' : cfg.draw === 'auto' ? '確認，開始發角色卡' : '確認，開始綁定座位'),
         h('button', { class: 'btn', onclick: () => { jset(LS_PHONE, null); S.stop(); scanJoin(app); } }, '不是這組，重新掃描'),
         S.qr ? h('button', { class: 'btn', onclick: () => { ui.check = { cur: null, set: S.groupCfg(g).set }; render(); } }, '先核對信封內容') : null));
   }
@@ -262,6 +265,20 @@ function groupApp(app, S, g, info) {
         h('button', { class: 'btn primary big', onclick: () => { closer = scan(); } }, iconEl('scan'), `掃 ${next} 號座位的信封`),
         h('button', { class: 'btn', disabled: !bound.length, onclick: () => S.unbindSeat(g, bound[bound.length - 1]).catch((e) => toast(e.message, 'bad')) }, `重掃上一位（${bound[bound.length - 1] || '-'} 號）`),
         h('button', { class: 'btn', onclick: () => { ui.check = { cur: null, set: cfg.set }; render(); } }, '核對信封內容')));
+  }
+
+  // 揭牌後：控場講師按「顯示角色」時，同步顯示全組角色（依陣營／類型上色）
+  function rolesBlock() {
+    if (offline || !(S.data && S.data.staff && S.data.staff.showRoles)) return null;
+    const cfg = S.groupCfg(g), seats = S.seats(g), map = S.mapping(g);
+    return h('section', { class: 'card roles-all' },
+      h('div', { class: 'row between' }, h('h2', {}, '全組角色（揭牌）'), h('span', { class: 'muted tiny' }, '控場講師開啟')),
+      h('div', { class: 'roles-grid' }, Array.from({ length: cfg.size }, (_, i) => i + 1).map((s) => {
+        const r = ROLE[map[seats[s]]];
+        if (!r) return h('div', { class: 'role-cell' }, h('b', { class: 'mono' }, s), h('span', { class: 'muted' }, '未綁定'));
+        return h('div', { class: 'role-cell ' + roleTone(r) }, h('b', { class: 'mono' }, s), h('span', { class: 'role-name' }, r.name), h('span', { class: 'tiny' }, TONE_LABEL[roleTone(r)]));
+      })),
+      h('div', { class: 'row', style: { gap: '10px' } }, ['good', 'sabotage', 'disrupt'].map((t) => h('span', { class: 'role-tag ' + t }, TONE_LABEL[t]))));
   }
 
   // 回合畫面
@@ -349,8 +366,9 @@ function groupApp(app, S, g, info) {
       })(),
       h('p', { class: 'muted tiny' }, '宣告前請確認這 3 個號碼正確。結算時全場禁言，只宣告成敗與原因類別，不說是誰。')) : null;
 
-    const voteBlock = ready ? voteBox(S, g, { team: ui.picks, offline, onProxy: (s) => { ui.handover = { code: S.seats(g)[s], mode: 'vote' }; render(); } }) : null;
-    return wrapper(h('main', {}, timeAlert, pausedNote, missionBlock, teamBlock, voteBlock),
+    const voteBlock0 = ready ? voteBox(S, g, { team: ui.picks, offline, onProxy: (s) => { ui.handover = { code: S.seats(g)[s], mode: 'vote' }; render(); } }) : null;
+    const voteBlock = voteBlock0;
+    return wrapper(h('main', {}, rolesBlock(), timeAlert, pausedNote, missionBlock, teamBlock, voteBlock),
       h('footer', {},
         ready ? h('button', {
           class: 'btn primary big', disabled: ui.picks.length !== 3, onclick: async () => {
@@ -400,7 +418,7 @@ function groupApp(app, S, g, info) {
         h('p', { class: 'small' }, x.vetoed ? '同一回合表決否決 3 次，無法派人，不扣除資源。' : x.timeout ? '未成行，不扣除資源。' : `出任務 ${x.seats.join('・')} 號・失敗不扣除資源`)));
     }
     const c = S.control;
-    return [h('main', {}, hero, ...body),
+    return [h('main', {}, rolesBlock(), hero, ...body),
       h('footer', {},
         h('button', {
           class: 'btn', onclick: async () => { if (await confirmBox('撤銷這次結算？', '資源會還原，可重新掃描出任務的 3 人。', '撤銷', true)) S.undo(g, r); },

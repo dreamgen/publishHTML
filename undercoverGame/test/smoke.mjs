@@ -278,6 +278,19 @@ await dash.getByRole('button', { name: '下一回合' }).click();
 await p1.ph.getByText('第 2 回合').first().waitFor();
 await shot(dash, '10-dash-r2');
 step('進入第 2 回合');
+// 遊戲中助理主持人換手機：儀表板顯示加入 QR，新手機接續進度
+await dash.getByRole('button', { name: '助理主持人換手機／重新加入' }).click();
+await dash.locator('.modal').getByText('第 2 組・B 套').waitFor();
+await shot(dash, '44-rejoin-qr');
+await dash.locator('.modal').getByRole('button', { name: '關閉' }).click();
+{
+  const pctxN = await mkCtx({ width: 390, height: 844 });
+  const phN = await open(`?join=${ev}.1.2`, null, pctxN);
+  await phN.getByRole('button', { name: '確認，接續本組進度' }).click();
+  await phN.getByText('第 2 回合').first().waitFor();
+  await phN.close();
+}
+step('遊戲中助理主持人換手機：加入 QR 可再顯示，新手機接續進度');
 
 // O／X 表決：玩家 D 持鄉愿討好（只能投 O）；助理主持人掃滿 3 人自動開始表決
 const pctxD = await mkCtx({ width: 390, height: 844 });
@@ -324,6 +337,14 @@ step('O／X 表決：自動開始、角色限制、統計、全部投完顯示�
 await dash.getByRole('button', { name: '揭牌：公開所有身分' }).click();
 await dash.locator('.modal').getByRole('button', { name: '揭牌' }).click();
 await pA.getByText('遊戲結束・已揭牌').waitFor();
+// 儀表板「顯示角色」→ 助理主持人手機同步顯示全組角色（顏色區分）
+await dash.getByRole('button', { name: '顯示角色（揭牌後，各組手機同步）' }).click();
+await p1.ph.getByText('全組角色（揭牌）').waitFor();
+const tones = await p1.ph.locator('.roles-all .role-cell').evaluateAll((els) => els.map((e) => e.className.replace('role-cell ', '')));
+if (tones.length !== 6 || tones.filter((t) => t === 'good').length !== 4 || !tones.includes('sabotage')) throw new Error('全組角色顏色不對 ' + tones);
+await shot(p1.ph, '45-phone-roles', false);
+await dash.getByRole('button', { name: '隱藏角色（各組手機同步隱藏）' }).click();
+await p1.ph.getByText('全組角色（揭牌）').waitFor({ state: 'detached' });
 await shot(pA, '15-player-end', false);
 step('玩家：揭牌後顯示身分與回顧');
 
