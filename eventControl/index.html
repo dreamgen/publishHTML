@@ -161,6 +161,17 @@
               <input id="startInput" type="time" class="field !w-auto !py-2 font-mono font-bold" aria-label="開始時間">
               <button id="pb2" class="btn btn-ghost !py-2 !text-[13px]" data-act="confirm-start">設定</button>
             </div>
+            <!-- 日期：預設今天，不必設定；要辦在別天才點開 -->
+            <div class="w-full flex flex-wrap items-center gap-2 pl-10 text-[13px]">
+              <!-- 透明的日期輸入框疊在按鈕上：點按鈕＝直接開手機原生日曆 -->
+              <span class="relative inline-flex">
+                <span id="dateBtn" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                  <i class="ph-bold ph-calendar-blank"></i><span id="dateLbl">今天</span><i class="ph-bold ph-caret-down text-[10px] opacity-60"></i>
+                </span>
+                <input id="startDate" type="date" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" aria-label="開始日期（預設今天）" title="改成其他日期">
+              </span>
+              <button id="dateReset" type="button" class="hidden text-xs underline text-slate-500 dark:text-slate-400" data-act="date-today">改回今天</button>
+            </div>
           </div>
 
           <div class="prep-card !block space-y-3">
@@ -472,9 +483,10 @@
             <span id="impSum" class="text-xs text-slate-500 dark:text-slate-400 tnum"></span>
           </div>
           <div id="impWarn" class="text-xs text-amber-600 dark:text-amber-400"></div>
+          <label class="block text-xs">活動名稱<input id="impTitle" class="field mt-1"></label>
           <div class="grid grid-cols-2 gap-2">
-            <label class="text-xs">活動名稱<input id="impTitle" class="field mt-1"></label>
             <label class="text-xs">預定開始<input id="impStart" type="time" class="field mt-1 font-mono"></label>
+            <label class="text-xs">日期（空白＝今天）<input id="impDate" type="date" class="field mt-1 font-mono"></label>
           </div>
           <div id="impRows" class="space-y-1.5"></div>
         </div>

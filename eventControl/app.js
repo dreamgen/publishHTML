@@ -3,7 +3,7 @@
  *
  * 同步模型：
  *  Firebase RTDB  artifacts/eventControl/public/data/events/{CODE}
- *    title, plannedStart('HH:MM'), createdAt, updatedAt
+ *    title, plannedStart('HH:MM'), plannedDate('YYYY-MM-DD'，空白＝當天), createdAt, updatedAt
  *    clock: { start: ms|null, pausedAt: ms|null }      ← 所有時間都由 start + 各單元分鐘數推算
  *    items: [{ id, title, subtitle, owner, duration, rounds }]
  *    broadcast: { id, text, by, at }
@@ -162,6 +162,12 @@ const fmtHM = (ms, sec = false) => { const d = new Date(ms); return `${pad(d.get
 const fmtCd = (ms) => {
   const neg = ms < 0;
   let t = Math.ceil(Math.abs(ms) / 1000);
+  if (t >= 86400) {
+    // 一天以上：「1天 03:20:05」
+    const days = Math.floor(t / 86400); t %= 86400;
+    const s1 = `${days}天 ${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+    return neg ? '-' + s1 : s1;
+  }
   const h = Math.floor(t / 3600); t %= 3600;
   const s = `${h ? h + ':' + pad(Math.floor(t / 60)) : pad(Math.floor(t / 60))}:${pad(t % 60)}`;
   return neg ? '-' + s : s;
@@ -172,12 +178,35 @@ function todayAt(hhmm) {
   d.setHours(h, m, 0, 0);
   return d.getTime();
 }
+const ymd = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const todayYmd = () => ymd(now());
+/** 指定日期（YYYY-MM-DD，空白＝今天）的 HH:MM */
+function dateAt(dateStr, hhmm) {
+  if (!dateStr) return todayAt(hhmm);
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, m] = hhmm.split(':').map(Number);
+  return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
+}
+/** 原定開始時刻（plannedStart + plannedDate） */
+const plannedAt = () => (S.ev?.plannedStart ? dateAt(S.ev.plannedDate || '', S.ev.plannedStart) : null);
+/** 不是今天時回傳「明天」「11/9（週一）」等；今天回傳空字串 */
+function dayLabel(ms) {
+  if (ms == null) return '';
+  const a = new Date(ms); a.setHours(0, 0, 0, 0);
+  const b = new Date(now()); b.setHours(0, 0, 0, 0);
+  const diff = Math.round((a - b) / 86400000);
+  if (diff === 0) return '';
+  const md = `${a.getMonth() + 1}/${a.getDate()}（週${'日一二三四五六'[a.getDay()]}）`;
+  return diff === 1 ? `明天 ${md}` : diff === 2 ? `後天 ${md}` : diff === -1 ? `昨天 ${md}` : md;
+}
+/** 「明天 11/9（週一） 09:00」或今天只顯示「09:00」 */
+const fmtWhen = (ms) => { const l = dayLabel(ms); return l ? `${l} ${fmtHM(ms)}` : fmtHM(ms); };
 
 /** 回傳 { units, start, end, effNow, activeIdx, state } */
 function compute() {
   const list = items();
   const c = clock();
-  let base = c.start ?? (S.ev?.plannedStart ? todayAt(S.ev.plannedStart) : null);
+  let base = c.start ?? plannedAt();
   const started = c.start != null;
   let cur = base;
   const units = list.map((it, i) => {
@@ -216,12 +245,17 @@ async function startNow() {
   await txClock(() => ({ start: now(), pausedAt: null }));
   log('▶ 活動開始');
 }
-async function setStartTime(hhmm) {
+/** dateStr：YYYY-MM-DD，空白＝今天 */
+async function setStartTime(hhmm, dateStr = '') {
   if (!hhmm) return;
-  const t = todayAt(hhmm);
+  if (dateStr === todayYmd()) dateStr = '';
+  const t = dateAt(dateStr, hhmm);
   await txClock((c) => ({ start: t, pausedAt: c.pausedAt ? now() : null }));
-  log(`設定開始時間 ${hhmm}`);
+  // 原定日期跟著更新，「比原定晚／早幾分」才會以同一天比較
+  if ((S.ev?.plannedDate || '') !== dateStr) await S.be.set(S.code, 'plannedDate', dateStr || null);
+  log(`設定開始時間 ${fmtWhen(t)}`);
 }
+const startDateVal = () => $('startDate').value || '';
 async function shift(min) {
   if (clock().start == null) return toast('請先開始活動或設定開始時間');
   await txClock((c) => (c.start == null ? c : { ...c, start: c.start + min * 60000 }));
@@ -505,13 +539,13 @@ function renderFocus(r) {
 
   if (!r.units.length) { title = '尚無流程'; sub = '請先匯入或新增單元'; }
   else if (r.state === 'idle') {
-    title = '尚未開始'; sub = r.start ? `預定 ${fmtHM(r.start)} 開始，共 ${Math.round(r.total / 60000)} 分鐘` : '按「現在開始」或設定開始時間';
+    title = '尚未開始'; sub = r.start ? `預定 ${fmtWhen(r.start)} 開始，共 ${Math.round(r.total / 60000)} 分鐘` : '按「現在開始」或設定開始時間';
     cdLabel = r.start ? '距預定開始' : ''; cd = r.start ? fmtCd(r.start - now()) : '--:--';
   } else if (r.state === 'countdown') {
     status = '倒數開始'; statusCls = 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300';
-    title = '即將開始'; sub = `${fmtHM(r.start)} 開始`; cdLabel = '距離開始'; cd = fmtCd(r.start - r.effNow);
+    title = '即將開始'; sub = `${fmtWhen(r.start)} 開始`; cdLabel = '距離開始'; cd = fmtCd(r.start - r.effNow);
   } else if (r.state === 'done') {
-    status = '已結束'; title = '活動結束 🎉'; sub = `${fmtHM(r.start)}–${fmtHM(r.end)}，共 ${Math.round(r.total / 60000)} 分鐘`; bar = 100;
+    status = '已結束'; title = '活動結束 🎉'; sub = `${fmtWhen(r.start)}–${fmtHM(r.end)}，共 ${Math.round(r.total / 60000)} 分鐘`; bar = 100;
   } else if (u) {
     const remain = u.endMs - r.effNow;
     warn = remain <= 60000;
@@ -529,12 +563,12 @@ function renderFocus(r) {
   $('fRange').textContent = range; $('fTitle').textContent = title; $('fSub').textContent = sub;
   if ($('fOwner').dataset.v !== owner) { $('fOwner').innerHTML = owner; $('fOwner').dataset.v = owner; }
   $('fCdLabel').textContent = cdLabel; $('fCountdown').textContent = cd;
-  $('fCountdown').className = 'mt-4 font-mono font-extrabold text-[84px] sm:text-[104px] tnum leading-none tracking-tight ' + (u && warn ? 'text-rose-600 dark:text-rose-400' : c.pausedAt ? 'text-slate-400' : '');
+  $('fCountdown').className = 'mt-4 font-mono font-extrabold tnum leading-none tracking-tight ' + (cd.length > 9 ? 'text-[44px] sm:text-[72px] ' : 'text-[84px] sm:text-[104px] ') + (u && warn ? 'text-rose-600 dark:text-rose-400' : c.pausedAt ? 'text-slate-400' : '');
   $('fCountdown').classList.toggle('hidden', cd === '--:--');
   // 與原定時間的差距（開始時間被延後／提前、暫停後繼續都會反映在 clock.start）
   let drift = '';
   if (r.started && S.ev?.plannedStart && r.state !== 'done') {
-    const d = Math.round((r.start - todayAt(S.ev.plannedStart)) / 60000);
+    const d = Math.round((r.start - plannedAt()) / 60000);
     if (Math.abs(d) < 720) drift = d > 0 ? `・全場比原定晚 ${d} 分` : d < 0 ? `・全場比原定早 ${-d} 分` : '・與原定時間一致';
   }
   $('fDrift').textContent = drift;
@@ -555,7 +589,7 @@ function renderFocus(r) {
     $('nTime').textContent = next.startMs != null ? fmtHM(next.startMs) : '';
   } else $('nextCard').classList.add('hidden');
   $('fTotal').textContent = r.started && r.state !== 'countdown' ? `全場 ${Math.min(100, Math.max(0, Math.round(((r.effNow - r.start) / r.total) * 100)))}%・預計 ${fmtHM(r.end)} 結束` : '';
-  $('totalInfo').textContent = r.units.length ? `${r.units.length} 個單元・${Math.round(r.total / 60000)} 分鐘${r.start ? `・${fmtHM(r.start)}–${fmtHM(r.end)}` : ''}` : '';
+  $('totalInfo').textContent = r.units.length ? `${r.units.length} 個單元・${Math.round(r.total / 60000)} 分鐘${r.start ? `・${fmtWhen(r.start)}–${fmtHM(r.end)}` : ''}` : '';
 
   // 底部按鈕
   $('pauseBtn').innerHTML = c.pausedAt ? '<i class="ph-fill ph-play text-xl"></i>繼續' : '<i class="ph-fill ph-pause text-xl"></i>暫停';
@@ -566,7 +600,7 @@ function renderFocus(r) {
   // 控場面板
   if ($('controlModal').classList.contains('open')) {
     $('cNow').innerHTML = u ? `目前：${esc(u.title)}・剩 <span class="font-mono font-semibold text-slate-900 dark:text-white tnum">${cd}</span>${c.pausedAt ? '（暫停中）' : ''}`
-      : r.state === 'countdown' ? `${fmtHM(r.start)} 開始・還有 <span class="font-mono font-semibold tnum">${cd}</span>`
+      : r.state === 'countdown' ? `${fmtWhen(r.start)} 開始・還有 <span class="font-mono font-semibold tnum">${cd}</span>`
         : r.state === 'done' ? '活動已結束' : r.units.length ? '尚未開始' : '還沒有流程';
     $('cRunBox').classList.toggle('hidden', !r.started);
     $('cDurBox').classList.toggle('hidden', !u);
@@ -654,7 +688,7 @@ function renderPrep(r) {
   if (n) { $('pb1').dataset.act = 'tab'; $('pb1').dataset.tab = 'flow'; } else $('pb1').dataset.act = 'import';
   // 2 開始時間
   ok += setChk('pk2', counting, 2);
-  $('pt2').textContent = counting ? `到點自動開始・還有 ${fmtCd(r.start - r.effNow)}` : '選好時間按「設定」，到點自動開始';
+  $('pt2').textContent = counting ? `${fmtWhen(r.start)} 自動開始・還有 ${fmtCd(r.start - r.effNow)}` : '選好時間按「設定」，到點自動開始（預設今天，可改日期）';
   $('pb2').textContent = counting ? '更新' : '設定';
   // 3 邀請
   ok += setChk('pk3', others.length > 0, 3);
@@ -681,10 +715,10 @@ function renderDone(r) {
   const sig = JSON.stringify([S.listSig, r.start]);
   if (sig === S.doneSig) return;
   S.doneSig = sig;
-  $('dRange').textContent = r.start != null ? `${fmtHM(r.start)} – ${fmtHM(r.end)}・共 ${Math.round(r.total / 60000)} 分` : '';
+  $('dRange').textContent = r.start != null ? `${fmtWhen(r.start)} – ${fmtHM(r.end)}・共 ${Math.round(r.total / 60000)} 分` : '';
   let drift = '';
   if (S.ev?.plannedStart && r.start != null) {
-    const d = Math.round((r.start - todayAt(S.ev.plannedStart)) / 60000);
+    const d = Math.round((r.start - plannedAt()) / 60000);
     if (Math.abs(d) < 720) drift = d > 0 ? `比原定時間晚 ${d} 分` : d < 0 ? `比原定時間早 ${-d} 分` : '與原定時間一致';
   }
   $('dDrift').textContent = drift;
@@ -746,14 +780,26 @@ function renderSettings() {
   $('notifyBtn').classList.toggle('hidden', np === 'granted' || np === 'unsupported');
 }
 
+/** 日期按鈕：今天＝「今天」；別天＝「明天 11/9（週一）」並顯示「改回今天」 */
+function renderDateCtl() {
+  const v = startDateVal();
+  const other = v && v !== todayYmd();
+  $('dateLbl').textContent = other ? dayLabel(dateAt(v, '12:00')) : '今天';
+  $('dateBtn').className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full border ' + (other ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/50 font-semibold' : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300');
+  $('dateReset').classList.toggle('hidden', !other);
+  $('startDate').min = todayYmd();
+}
+
 function renderAll() {
   if (!S.ev) return;
   $('evTitle').textContent = S.ev.title || '活動';
   document.title = `${S.ev.title || '活動'}・活動控場`;
   $('evCode').textContent = S.code;
   const c = clock();
-  const st = c.start ?? (S.ev.plannedStart ? todayAt(S.ev.plannedStart) : null);
+  const st = c.start ?? plannedAt();
   if (document.activeElement !== $('startInput')) $('startInput').value = st ? fmtHM(st) : '';
+  if (document.activeElement !== $('startDate')) $('startDate').value = st && ymd(st) !== todayYmd() ? ymd(st) : '';
+  renderDateCtl();
   renderPeople();
   renderSettings();
   tick();
@@ -906,6 +952,7 @@ function showImport(res) {
   S.imp = res;
   $('impTitle').value = res.title || (S.impMode === 'create' ? $('newTitleInput').value.trim() : S.ev?.title || '');
   $('impStart').value = res.startTime || '';
+  $('impDate').value = res.startDate && res.startDate !== todayYmd() ? res.startDate : (S.impMode === 'create' ? '' : S.ev?.plannedDate || '');
   $('impWarn').innerHTML = res.warnings.map((w) => `⚠ ${esc(w)}`).join('<br>');
   renderImpRows();
   $('impPreview').classList.remove('hidden');
@@ -930,11 +977,12 @@ async function applyImport(mode) {
   if (!res?.items.length) return;
   const title = $('impTitle').value.trim() || '未命名活動';
   const plannedStart = $('impStart').value || '';
+  const plannedDate = $('impDate').value && $('impDate').value !== todayYmd() ? $('impDate').value : '';
   if (S.impMode === 'create') {
     try {
       const code = await genCode();
       await S.be.create(code, {
-        title, plannedStart, createdAt: S.be.ts(), updatedAt: S.be.ts(),
+        title, plannedStart, plannedDate, createdAt: S.be.ts(), updatedAt: S.be.ts(),
         clock: { start: null, pausedAt: null },
         items: res.items,
       });
@@ -955,6 +1003,7 @@ async function applyImport(mode) {
   const upd = {};
   if (title && title !== S.ev.title && mode === 'replace') upd.title = title;
   if (plannedStart && plannedStart !== S.ev.plannedStart) upd.plannedStart = plannedStart;
+  if (plannedStart && plannedDate !== (S.ev.plannedDate || '')) upd.plannedDate = plannedDate || null;
   if (Object.keys(upd).length) await S.be.update(S.code, upd);
   closeModals();
   toast('流程已更新');
@@ -1065,7 +1114,17 @@ document.addEventListener('click', async (e) => {
       case 'tab': return setTab(b.dataset.tab);
       case 'confirm-start':
         if (!$('startInput').value) return toast('請先選擇開始時間');
-        return setStartTime($('startInput').value);
+        if (startDateVal() && dateAt(startDateVal(), $('startInput').value) < now() - 60000 && !confirm('這個時間已經過了，確定要設定嗎？')) return;
+        return setStartTime($('startInput').value, startDateVal());
+      case 'date-today':
+        $('startDate').value = '';
+        renderDateCtl();
+        if ($('startInput').value && (clock().start != null || S.ev?.plannedDate)) {
+          // 改回今天後若時間已過，不自動套用（避免活動直接被判定開始或結束）
+          if (todayAt($('startInput').value) < now()) return toast('已改回今天；這個時間已過，請重新選時間後按「設定」');
+          return setStartTime($('startInput').value, '');
+        }
+        return;
       case 'who': return openWho();
       case 'start-now':
         if (compute().state === 'countdown') return startNow();
@@ -1161,9 +1220,14 @@ document.addEventListener('input', (e) => {
   }
 });
 
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'startDate') { try { e.target.showPicker?.(); } catch (err) {} }
+});
+
 document.addEventListener('change', (e) => {
   const id = e.target.id;
-  if (id === 'startInput') setStartTime(e.target.value);
+  if (id === 'startInput') setStartTime(e.target.value, startDateVal());
+  else if (id === 'startDate') { renderDateCtl(); if ($('startInput').value) setStartTime($('startInput').value, startDateVal()); }
   else if (id === 'fileInput' && e.target.files[0]) readFile(e.target.files[0]);
   else if (id === 'setName') { prefs.name = e.target.value.trim(); savePrefs(); updatePresence(); }
   else if (id === 'setTitle') { const v = e.target.value.trim(); if (v && v !== S.ev?.title) { S.be.set(S.code, 'title', v); log(`活動名稱改為「${v}」`); } }

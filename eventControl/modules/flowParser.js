@@ -6,7 +6,7 @@
  *  - 表格列（Excel / CSV / 從試算表複製貼上的 Tab 分隔文字）
  *  - 自由文字（每行一個單元，自動抓起迄時間、分鐘數、負責人、回合數）
  *
- * 統一輸出：{ title, startTime: 'HH:MM' | '', items: [{id,title,subtitle,owner,duration,rounds}], warnings: [] }
+ * 統一輸出：{ title, startTime: 'HH:MM' | '', startDate: 'YYYY-MM-DD' | ''（空白＝當天）, items: [{id,title,subtitle,owner,duration,rounds}], warnings: [] }
  */
 
 const DUR_RE = /(\d+(?:\.\d+)?)\s*(?:分鐘|分|mins?\b|minutes?\b|m\b|['’′])/i;
@@ -57,7 +57,16 @@ function makeItem({ title = '', subtitle = '', owner = '', duration = null, roun
 }
 
 /** 補齊缺漏分鐘數、整理輸出 */
-function finalize(items, { title = '', startTime = '' } = {}, warnings = []) {
+export function normDate(v) {
+  if (v == null || v === '') return '';
+  const m = String(v).match(/(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
+  if (!m) return '';
+  const y = +m[1], mo = +m[2], d = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function finalize(items, { title = '', startTime = '', startDate = '' } = {}, warnings = []) {
   items = items.filter((it) => it.title || it.duration);
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
@@ -80,6 +89,7 @@ function finalize(items, { title = '', startTime = '' } = {}, warnings = []) {
   return {
     title: String(title || '').trim(),
     startTime: normTime(startTime),
+    startDate: normDate(startDate),
     items: items.map(({ _start, ...rest }) => rest),
     warnings,
   };
@@ -127,6 +137,7 @@ export function normalizeFlowJSON(obj) {
     {
       title: Array.isArray(obj) ? '' : pick(obj, ['title', 'name', 'event', '活動名稱', '活動']),
       startTime: Array.isArray(obj) ? '' : pick(obj, ['startTime', 'start', '開始時間']),
+      startDate: Array.isArray(obj) ? '' : pick(obj, ['startDate', 'date', '日期', '活動日期']),
     },
     warnings
   );
@@ -365,6 +376,7 @@ export function toExportJSON(ev) {
   return {
     title: ev.title || '',
     startTime: ev.plannedStart || '',
+    startDate: ev.plannedDate || '',
     items: (ev.items || []).map(({ title, subtitle, owner, duration, rounds }) => ({
       title, subtitle: subtitle || '', owner: owner || '', duration, rounds: rounds || 1,
     })),
@@ -376,6 +388,7 @@ export const AI_PROMPT = `請把我下面提供的活動流程，整理成以下
 {
   "title": "活動名稱",
   "startTime": "HH:MM（活動開始時間，不知道就留空字串）",
+  "startDate": "YYYY-MM-DD（活動日期；就是今天或不知道就留空字串）",
   "items": [
     {
       "title": "單元名稱",
