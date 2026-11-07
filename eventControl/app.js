@@ -485,6 +485,7 @@ function renderFocus(r) {
     status = c.pausedAt ? '⏸ 暫停中' : warn ? '最後 1 分鐘' : '進行中';
     statusCls = c.pausedAt ? 'bg-slate-500 text-white' : warn ? 'bg-rose-500 text-white animate-pulse' : 'bg-emerald-500 text-white';
     idx = `第 ${u.idx + 1} / ${r.units.length} 單元`;
+    status += `・${u.idx + 1} / ${r.units.length}`;
     title = u.title; sub = u.subtitle || ''; owner = ownerChips(u.owner, true);
     range = `${fmtHM(u.startMs)}–${fmtHM(u.endMs)}`;
     cdLabel = '剩餘時間'; cd = fmtCd(remain);
@@ -492,10 +493,18 @@ function renderFocus(r) {
   }
   card.className = 'rounded-3xl border-2 p-4 sm:p-6 transition-all ' + (u && warn ? 'border-rose-400 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/60 warn-glow' : u ? 'border-emerald-400 bg-white dark:bg-slate-900 dark:border-emerald-500/50 active-glow' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900');
   $('fStatus').textContent = status; $('fStatus').className = 'px-2.5 py-1 rounded-full text-xs font-bold ' + statusCls;
-  $('fRange').textContent = range; $('fIndex').textContent = idx; $('fTitle').textContent = title; $('fSub').textContent = sub;
+  $('fRange').textContent = range; $('fTitle').textContent = title; $('fSub').textContent = sub;
   if ($('fOwner').dataset.v !== owner) { $('fOwner').innerHTML = owner; $('fOwner').dataset.v = owner; }
   $('fCdLabel').textContent = cdLabel; $('fCountdown').textContent = cd;
-  $('fCountdown').className = 'font-mono font-black text-6xl sm:text-7xl tnum leading-none ' + (u && warn ? 'text-rose-600 dark:text-rose-400' : '');
+  $('fCountdown').className = 'mt-4 font-mono font-extrabold text-[84px] sm:text-[104px] tnum leading-none tracking-tight ' + (u && warn ? 'text-rose-600 dark:text-rose-400' : c.pausedAt ? 'text-slate-400' : '');
+  $('fCountdown').classList.toggle('hidden', cd === '--:--');
+  // 與原定時間的差距（開始時間被延後／提前、暫停後繼續都會反映在 clock.start）
+  let drift = '';
+  if (r.started && S.ev?.plannedStart && r.state !== 'done') {
+    const d = Math.round((r.start - todayAt(S.ev.plannedStart)) / 60000);
+    if (Math.abs(d) < 720) drift = d > 0 ? `・全場比原定晚 ${d} 分` : d < 0 ? `・全場比原定早 ${-d} 分` : '・與原定時間一致';
+  }
+  $('fDrift').textContent = drift;
   $('fBar').style.width = Math.max(0, Math.min(100, bar)) + '%';
   $('fBar').className = 'h-full transition-[width] duration-500 ' + (warn ? 'bg-rose-500' : 'bg-emerald-500');
   // 回合
@@ -505,23 +514,44 @@ function renderFocus(r) {
     rh = `<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-500 text-white">第 ${k + 1} / ${u.rounds} 回合・剩 ${fmtCd(u.startMs + rd * (k + 1) - r.effNow)}</span>`;
   }
   $('fRounds').innerHTML = rh;
-  $('fNext').innerHTML = next ? `下一個：<b>${esc(next.title)}</b>${next.owner ? '・' + esc(next.owner) : ''}${next.startMs != null && r.started ? `（${fmtHM(next.startMs)}）` : ''}` : r.state === 'running' || r.state === 'paused' ? '這是最後一個單元' : '';
+  // 接下來
+  if (next && r.state !== 'idle' && r.state !== 'countdown') {
+    $('nextCard').classList.remove('hidden');
+    $('nTitle').textContent = next.title;
+    $('nMeta').textContent = [next.owner, `${next.duration} 分`].filter(Boolean).join('・');
+    $('nTime').textContent = next.startMs != null ? fmtHM(next.startMs) : '';
+  } else $('nextCard').classList.add('hidden');
   $('fTotal').textContent = r.started && r.state !== 'countdown' ? `全場 ${Math.min(100, Math.max(0, Math.round(((r.effNow - r.start) / r.total) * 100)))}%・預計 ${fmtHM(r.end)} 結束` : '';
   $('totalInfo').textContent = r.units.length ? `${r.units.length} 個單元・${Math.round(r.total / 60000)} 分鐘${r.start ? `・${fmtHM(r.start)}–${fmtHM(r.end)}` : ''}` : '';
 
   // 底部按鈕
-  $('pauseBtn').innerHTML = c.pausedAt ? '<i class="ph-bold ph-play text-lg"></i><span class="text-[10px] font-medium opacity-70">繼續</span>' : '<i class="ph-bold ph-pause text-lg"></i><span class="text-[10px] font-medium opacity-70">暫停</span>';
-  $('nextBtn').innerHTML = !r.started || r.state === 'countdown' ? '<i class="ph-bold ph-play text-lg"></i><span class="text-[10px] font-medium">開始</span>'
-    : r.activeIdx === r.units.length - 1 ? '<i class="ph-bold ph-flag-checkered text-lg"></i><span class="text-[10px] font-medium">結束</span>'
-      : '<i class="ph-bold ph-skip-forward text-lg"></i><span class="text-[10px] font-medium">下一單元</span>';
+  $('pauseBtn').innerHTML = c.pausedAt ? '<i class="ph-fill ph-play text-xl"></i>繼續' : '<i class="ph-fill ph-pause text-xl"></i>暫停';
+  $('nextBtn').innerHTML = !r.started || r.state === 'countdown' ? '<i class="ph-fill ph-play text-xl"></i>立刻開始第 1 個'
+    : r.activeIdx === r.units.length - 1 ? '<i class="ph-bold ph-flag-checkered text-xl"></i>結束活動'
+      : '<i class="ph-bold ph-skip-forward text-xl"></i>下一單元';
+
+  // 控場面板
+  if ($('controlModal').classList.contains('open')) {
+    $('cNow').innerHTML = u ? `目前：${esc(u.title)}・剩 <span class="font-mono font-semibold text-slate-900 dark:text-white tnum">${cd}</span>${c.pausedAt ? '（暫停中）' : ''}`
+      : r.state === 'countdown' ? `${fmtHM(r.start)} 開始・還有 <span class="font-mono font-semibold tnum">${cd}</span>`
+        : r.state === 'done' ? '活動已結束' : r.units.length ? '尚未開始' : '還沒有流程';
+    $('cStartBox').classList.toggle('hidden', r.started && r.state !== 'countdown');
+    $('cStartText').textContent = '現在開始';
+    $('cRunBox').classList.toggle('hidden', !r.started);
+    $('cDurBox').classList.toggle('hidden', !u);
+    if (u) $('cDur').textContent = `${u.duration} 分`;
+  }
 
   // 我的提醒摘要
   const me = meFor(S.code);
   const nextMine = r.units.find((x) => isMine(x) && (x.startMs == null || x.endMs > r.effNow));
   if (me.length && nextMine) {
     $('mineCard').classList.remove('hidden');
-    const when = nextMine.startMs == null ? '' : r.effNow >= nextMine.startMs ? '進行中' : `${fmtHM(nextMine.startMs)}（${fmtCd(nextMine.startMs - r.effNow)} 後）`;
-    $('mineText').innerHTML = `<b>${esc(me.join('、'))}</b> 的下一個單元：<b>${esc(nextMine.title)}</b> ${when}`;
+    const live = nextMine.startMs != null && r.effNow >= nextMine.startMs;
+    $('mineTitle').textContent = live ? `你負責的單元進行中：${nextMine.title}` : `輪到你：${nextMine.title}`;
+    $('mineMeta').textContent = nextMine.startMs == null ? `${nextMine.duration} 分・開始後會提前 ${prefs.lead} 分提醒`
+      : live ? `到 ${fmtHM(nextMine.endMs)}・結束前 1 分提醒`
+        : `約 ${Math.max(1, Math.ceil((nextMine.startMs - r.effNow) / 60000))} 分鐘後（${fmtHM(nextMine.startMs)}）・提前 ${prefs.lead} 分提醒`;
   } else $('mineCard').classList.add('hidden');
 
   // 大字卡
@@ -534,6 +564,33 @@ function renderFocus(r) {
     $('sCountdown').style.color = u && warn ? '#fb7185' : c.pausedAt ? '#94a3b8' : '';
     $('sNext').textContent = next ? `下一個：${next.title}${next.owner ? '・' + next.owner : ''}` : '';
   }
+}
+
+/** 看時間畫面的「今日流程」：已完成收成一行，之後只列 4 個 */
+function renderPreview(r) {
+  const sig = JSON.stringify([S.listSig, r.activeIdx, r.state, r.started && r.units.map((u) => u.startMs)]);
+  if (sig === S.previewSig) return;
+  S.previewSig = sig;
+  $('previewAll').textContent = `全部 ${r.units.length} 個 ›`;
+  if (!r.units.length) {
+    $('previewList').innerHTML = `<button data-act="import" class="w-full py-5 text-sm text-emerald-700 dark:text-emerald-400 font-medium">還沒有流程，點這裡匯入</button>`;
+    return;
+  }
+  const doneCount = r.started ? r.units.filter((u) => r.effNow >= u.endMs).length : 0;
+  const from = r.state === 'done' ? Math.max(0, r.units.length - 4) : doneCount;
+  const rows = [];
+  if (doneCount && r.state !== 'done') {
+    const d = r.units.slice(0, doneCount);
+    rows.push(`<div class="flex items-center gap-3 py-2 text-sm text-slate-500 dark:text-slate-400"><span class="font-mono text-xs w-10 tnum">${fmtHM(d[0].startMs)}</span><span class="flex-1 truncate line-through">${esc(d.map((x) => x.title).join('・'))}</span><span class="text-xs shrink-0">已完成 ${doneCount}</span></div>`);
+  }
+  r.units.slice(from, from + 4).forEach((u) => {
+    const active = u.idx === r.activeIdx;
+    const done = r.started && r.effNow >= u.endMs;
+    const mine = isMine(u);
+    const t = u.startMs != null ? fmtHM(u.startMs) : `${u.duration}分`;
+    rows.push(`<div class="flex items-center gap-3 py-2 text-sm ${active ? 'font-bold text-emerald-700 dark:text-emerald-400' : done ? 'text-slate-400 line-through' : ''}"><span class="font-mono text-xs w-10 tnum ${active ? '' : 'text-slate-500 dark:text-slate-400'}">${t}</span><span class="flex-1 truncate">${esc(u.title)}</span>${mine ? '<span class="text-[11px] font-bold text-amber-800 bg-amber-100 dark:bg-amber-500/20 dark:text-amber-200 px-2 py-0.5 rounded-full shrink-0">你</span>' : ''}${active ? '<span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>' : ''}</div>`);
+  });
+  $('previewList').innerHTML = rows.join('');
 }
 
 function renderPeople() {
@@ -583,6 +640,7 @@ function tick() {
   renderFlow(r);
   paintRows(r);
   renderFocus(r);
+  renderPreview(r);
   checkReminders(r);
 }
 
@@ -633,9 +691,11 @@ async function enterEvent(code, { fresh = false } = {}) {
       else if (S.justCreated) { S.justCreated = false; openShare(); }
     }
   });
-  history.replaceState(null, '', `${location.pathname}?e=${code}${S.be.kind === 'mock' ? '&mock=1' : ''}`);
+  // 活動代碼放在 #e=XXXX（不用 ?e=），網址的路徑與查詢字串維持乾淨，Android Chrome 才能正常「安裝」
+  history.replaceState(null, '', `${location.pathname}${S.be.kind === 'mock' ? '?mock=1' : ''}#e=${code}`);
   $('homeView').classList.add('hidden');
   $('eventView').classList.remove('hidden');
+  setTab('watch');
   updatePresence();
   if (prefs.wake) setWake(true);
 }
@@ -817,7 +877,7 @@ function exportFlow(fmt) {
   else download(base + '.csv', csv, 'text/csv');
 }
 
-function shareUrl() { return `${location.origin}${location.pathname}?e=${S.code}`; }
+function shareUrl() { return `${location.origin}${location.pathname}#e=${S.code}`; }
 function openShare() {
   if (!S.code) return;
   $('shareCode').textContent = S.code;
@@ -832,9 +892,11 @@ async function copyText(t, ok = '已複製') {
 }
 
 function setTab(t) {
-  S.tab = t;
-  ['flow', 'people', 'settings'].forEach((k) => $('tab-' + k).classList.toggle('hidden', k !== t));
-  document.querySelectorAll('nav .tab-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+  const prev = S.tab;
+  S.tab = t || 'watch';
+  ['watch', 'flow', 'people', 'settings'].forEach((k) => $('tab-' + k).classList.toggle('hidden', k !== S.tab));
+  $('bottomBar').classList.toggle('hidden', S.tab !== 'watch');
+  if (prev !== S.tab) window.scrollTo(0, 0);
 }
 
 function toggleTheme() {
@@ -859,7 +921,11 @@ document.addEventListener('click', async (e) => {
       case 'create': return openImport('create');
       case 'open-recent': return enterEvent(b.dataset.code);
       case 'forget-recent': lsSet('ec_recent', recent().filter((x) => x.code !== b.dataset.code)); return renderRecent();
+      case 'back': return S.tab && S.tab !== 'watch' ? setTab('watch') : leaveEvent();
       case 'home': case 'leave': return leaveEvent();
+      case 'control': openModal('controlModal'); return tick();
+      case 'goto-flow': closeModals(); return setTab('flow');
+      case 'dur-cur': { const r = compute(); if (r.activeIdx < 0) return; return adjustDur(r.activeIdx, +b.dataset.d); }
       case 'share': return openShare();
       case 'copy-link': return copyText(shareUrl(), '連結已複製');
       case 'native-share':
@@ -904,7 +970,7 @@ document.addEventListener('click', async (e) => {
         await saveItems(list, `刪除「${rm.title}」`);
         return closeModals();
       }
-      case 'import': return openImport('edit');
+      case 'import': closeModals(); return openImport('edit');
       case 'export': return exportFlow(b.dataset.fmt);
       case 'close-modal': return closeModals();
       case 'imp-tab': return impTab(b.dataset.tab);
@@ -977,13 +1043,22 @@ document.addEventListener('change', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.id === 'joinCodeInput') enterEvent(e.target.value);
   if (e.key === 'Enter' && e.target.id === 'bcInput') { broadcast(e.target.value); e.target.value = ''; }
-  if (e.key === 'Escape') { if (S.stage) { S.stage = false; $('stageModal').classList.remove('open'); } else closeModals(); }
+  if (e.key === 'Escape') { if (S.stage) { S.stage = false; $('stageModal').classList.remove('open'); } else if (document.querySelector('.modal.open')) closeModals(); else if (S.tab && S.tab !== 'watch' && S.code) setTab('watch'); }
 });
 
 // ═════════════════════════ 啟動 ═════════════════════════
 $('quickMsgs').innerHTML = QUICK_MSGS.map((m) => `<button class="btn btn-ghost !py-1.5 !px-3 text-sm" data-act="bc-quick" data-msg="${esc(m)}">${esc(m)}</button>`).join('');
 renderRecent();
 setInterval(tick, 250);
+
+function codeFromHash() {
+  const m = location.hash.match(/^#(?:e=)?([A-Za-z0-9]{4})$/);
+  return m ? m[1].toUpperCase() : '';
+}
+window.addEventListener('hashchange', () => {
+  const c = codeFromHash();
+  if (c && c !== S.code && S.be) enterEvent(c);
+});
 
 (async function boot() {
   const params = new URLSearchParams(location.search);
@@ -995,7 +1070,9 @@ setInterval(tick, 250);
       $('connDot').className = 'w-2 h-2 rounded-full ' + (ok ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse');
       $('connText').textContent = ok ? '即時同步中' : '離線（恢復後自動同步）';
     });
-    const code = params.get('e');
+    // 相容舊連結 ?e=XXXX：轉成 #e=XXXX 並清掉查詢字串
+    const code = codeFromHash() || params.get('e');
+    if (params.has('e')) history.replaceState(null, '', `${location.pathname}${S.be.kind === 'mock' ? '?mock=1' : ''}${code ? '#e=' + code : ''}`);
     if (code) enterEvent(code);
   } catch (e) {
     console.error(e);
