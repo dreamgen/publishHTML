@@ -255,7 +255,7 @@ async function togglePause() {
   }
 }
 async function resetClock() {
-  if (!confirm('要把計時重設為「未開始」嗎？')) return;
+  if (!confirm('要回到「準備」階段嗎？（計時會重設為未開始）')) return;
   await S.be.set(S.code, 'clock', { start: null, pausedAt: null });
   log('↺ 計時重設');
 }
@@ -535,8 +535,6 @@ function renderFocus(r) {
     $('cNow').innerHTML = u ? `目前：${esc(u.title)}・剩 <span class="font-mono font-semibold text-slate-900 dark:text-white tnum">${cd}</span>${c.pausedAt ? '（暫停中）' : ''}`
       : r.state === 'countdown' ? `${fmtHM(r.start)} 開始・還有 <span class="font-mono font-semibold tnum">${cd}</span>`
         : r.state === 'done' ? '活動已結束' : r.units.length ? '尚未開始' : '還沒有流程';
-    $('cStartBox').classList.toggle('hidden', r.started && r.state !== 'countdown');
-    $('cStartText').textContent = '現在開始';
     $('cRunBox').classList.toggle('hidden', !r.started);
     $('cDurBox').classList.toggle('hidden', !u);
     if (u) $('cDur').textContent = `${u.duration} 分`;
@@ -564,6 +562,101 @@ function renderFocus(r) {
     $('sCountdown').style.color = u && warn ? '#fb7185' : c.pausedAt ? '#94a3b8' : '';
     $('sNext').textContent = next ? `下一個：${next.title}${next.owner ? '・' + next.owner : ''}` : '';
   }
+}
+
+// ═════════════════════════ 三階段：準備 → 進行 → 結束 ═════════════════════════
+const phaseOf = (r) => (r.state === 'running' || r.state === 'paused' ? 'live' : r.state === 'done' ? 'done' : 'prep');
+const PHASES = ['prep', 'live', 'done'];
+
+function syncBars() {
+  const w = S.tab === 'watch';
+  $('bottomBar').classList.toggle('hidden', !(w && S.phase === 'live'));
+  $('prepBar').classList.toggle('hidden', !(w && S.phase === 'prep'));
+}
+
+function renderPhase(r) {
+  const ph = phaseOf(r);
+  if (ph !== S.phase) {
+    S.phase = ph;
+    $('phPrep').classList.toggle('hidden', ph !== 'prep');
+    $('phLive').classList.toggle('hidden', ph !== 'live');
+    $('phDone').classList.toggle('hidden', ph !== 'done');
+    const at = PHASES.indexOf(ph);
+    document.querySelectorAll('#phaseBar li').forEach((li) => {
+      const k = PHASES.indexOf(li.dataset.phase);
+      li.querySelector('.ph-seg').className = 'ph-seg h-[5px] rounded-full ' + (k === at ? 'bg-emerald-500' : k < at ? 'bg-slate-400 dark:bg-slate-600' : 'bg-slate-200 dark:bg-slate-800');
+      li.querySelector('.ph-lbl').className = 'ph-lbl text-xs ' + (k === at ? 'font-bold text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400');
+      if (k === at) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+    });
+    if (ph !== 'live' && $('controlModal').classList.contains('open')) closeModals();
+    S.doneSig = '';
+    syncBars();
+  }
+  if (ph === 'prep') renderPrep(r);
+  else if (ph === 'done') renderDone(r);
+}
+
+function setChk(id, ok, n) {
+  const el = $(id);
+  const v = ok ? 'ok' : String(n);
+  if (el.dataset.v === v) return ok;
+  el.dataset.v = v;
+  el.classList.toggle('ok', ok);
+  el.innerHTML = ok ? '<i class="ph-bold ph-check"></i>' : String(n);
+  return ok;
+}
+
+function renderPrep(r) {
+  const n = r.units.length;
+  const counting = r.state === 'countdown';
+  const me = meFor(S.code);
+  const owners = allOwners();
+  const ppl = Object.entries(S.ev?.presence || {});
+  const others = ppl.filter(([uid]) => uid !== S.be.uid).map(([, p]) => p.name || '匿名');
+  let ok = 0;
+  // 1 流程
+  ok += setChk('pk1', n > 0, 1);
+  $('pt1').textContent = n ? `${n} 個單元・共 ${Math.round(r.total / 60000)} 分・負責人 ${owners.length} 位` : '還沒有流程';
+  $('pb1').textContent = n ? '編輯' : '匯入';
+  if (n) { $('pb1').dataset.act = 'tab'; $('pb1').dataset.tab = 'flow'; } else $('pb1').dataset.act = 'import';
+  // 2 開始時間
+  ok += setChk('pk2', counting, 2);
+  $('pt2').textContent = counting ? `到點自動開始・還有 ${fmtCd(r.start - r.effNow)}` : '選好時間按「設定」，到點自動開始';
+  $('pb2').textContent = counting ? '更新' : '設定';
+  // 3 邀請
+  ok += setChk('pk3', others.length > 0, 3);
+  $('pt3').textContent = others.length ? `已加入 ${others.length} 人：${others.join('、')}` : '把代碼或 QR Code 傳給一起控場的夥伴';
+  if ($('prepCode').textContent !== S.code) {
+    $('prepCode').textContent = S.code;
+    try { window.QRious && new window.QRious({ element: $('prepQR'), value: shareUrl(), size: 128, level: 'M' }); } catch (e) {}
+  }
+  // 4 我是誰
+  ok += setChk('pk4', !!prefs.name && (me.length > 0 || !owners.length), 4);
+  $('pt4a').textContent = prefs.name ? `我是 ${prefs.name}` : '我是誰';
+  const mine = r.units.filter(isMine).map((u) => u.title);
+  $('pt4').textContent = me.length ? (mine.length ? `負責「${mine.join('」「')}」・提前 ${prefs.lead} 分提醒` : `負責人：${me.join('、')}`)
+    : owners.length ? '還沒選你負責的人名，選了才會提醒你' : '流程表裡沒有負責人，可略過';
+  // 5 測試提醒
+  ok += setChk('pk5', !!lsGet('ec_tested_' + S.code, false), 5);
+
+  $('prepHint').textContent = n ? `準備清單完成 ${ok} / 5・不必全部完成也能開始` : '先匯入流程表，其他步驟可以之後再補';
+  $('prepStartText').textContent = counting ? '提前，現在開始' : '現在開始';
+  $('prepBarHint').textContent = !n ? '' : counting ? `或等 ${fmtCd(r.start - r.effNow)} 後自動進入「進行」` : '設定開始時間就會到點自動開始，也可以直接開始';
+}
+
+function renderDone(r) {
+  const sig = JSON.stringify([S.listSig, r.start]);
+  if (sig === S.doneSig) return;
+  S.doneSig = sig;
+  $('dRange').textContent = r.start != null ? `${fmtHM(r.start)} – ${fmtHM(r.end)}・共 ${Math.round(r.total / 60000)} 分` : '';
+  let drift = '';
+  if (S.ev?.plannedStart && r.start != null) {
+    const d = Math.round((r.start - todayAt(S.ev.plannedStart)) / 60000);
+    if (Math.abs(d) < 720) drift = d > 0 ? `比原定時間晚 ${d} 分` : d < 0 ? `比原定時間早 ${-d} 分` : '與原定時間一致';
+  }
+  $('dDrift').textContent = drift;
+  $('dCount').textContent = `${r.units.length} 個單元`;
+  $('dList').innerHTML = r.units.map((u) => `<div class="flex items-center gap-3 py-2 text-sm"><span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum shrink-0">${fmtHM(u.startMs)}–${fmtHM(u.endMs)}</span><span class="flex-1 truncate">${esc(u.title)}</span><span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">${esc(u.owner || '')}</span></div>`).join('');
 }
 
 /** 看時間畫面的「今日流程」：已完成收成一行，之後只列 4 個 */
@@ -641,6 +734,7 @@ function tick() {
   paintRows(r);
   renderFocus(r);
   renderPreview(r);
+  renderPhase(r);
   checkReminders(r);
 }
 
@@ -674,6 +768,7 @@ async function enterEvent(code, { fresh = false } = {}) {
   S.code = code;
   S.ev = null;
   S.listSig = '';
+  S.phase = null;
   S.lastBcId = lsGet('ec_bc_' + code, null);
   let first = true;
   S.unwatch = S.be.watch(code, (val) => {
@@ -895,7 +990,7 @@ function setTab(t) {
   const prev = S.tab;
   S.tab = t || 'watch';
   ['watch', 'flow', 'people', 'settings'].forEach((k) => $('tab-' + k).classList.toggle('hidden', k !== S.tab));
-  $('bottomBar').classList.toggle('hidden', S.tab !== 'watch');
+  syncBars();
   if (prev !== S.tab) window.scrollTo(0, 0);
 }
 
@@ -934,7 +1029,12 @@ document.addEventListener('click', async (e) => {
       case 'stage': S.stage = true; openModal('stageModal'); document.documentElement.requestFullscreen?.().catch(() => {}); return tick();
       case 'close-stage': S.stage = false; $('stageModal').classList.remove('open'); document.fullscreenElement && document.exitFullscreen?.().catch(() => {}); return;
       case 'tab': return setTab(b.dataset.tab);
+      case 'confirm-start':
+        if (!$('startInput').value) return toast('請先選擇開始時間');
+        return setStartTime($('startInput').value);
+      case 'who': return openWho();
       case 'start-now':
+        if (compute().state === 'countdown') return startNow();
         if (clock().start != null && !confirm('活動已在計時中，要從「現在」重新開始第 1 單元嗎？')) return;
         return startNow();
       case 'reset-clock': return resetClock();
@@ -1002,7 +1102,7 @@ document.addEventListener('click', async (e) => {
         return;
       case 'bc-send': { const t = $('bcInput').value; $('bcInput').value = ''; return broadcast(t); }
       case 'bc-quick': return broadcast(b.dataset.msg);
-      case 'test-alert': return alertUser('這是測試提醒 🔔', { kind: 'remind' });
+      case 'test-alert': if (S.code) lsSet('ec_tested_' + S.code, true); return alertUser('這是測試提醒 🔔', { kind: 'remind' });
       case 'notify-perm':
         if ('Notification' in window) await Notification.requestPermission();
         return renderSettings();

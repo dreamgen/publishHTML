@@ -64,6 +64,11 @@
     .dark .ctl-btn { background: rgb(30 41 59); border-color: rgb(51 65 85); color: rgb(241 245 249); }
     .ctl-btn.ctl-warn { background: rgb(255 251 235); border-color: rgb(252 211 77); color: rgb(120 53 15); }
     .dark .ctl-btn.ctl-warn { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); color: rgb(253 230 138); }
+    .prep-card { display: flex; align-items: center; gap: .75rem; background: #fff; border-radius: 18px; padding: .875rem; }
+    .dark .prep-card { background: rgb(15 23 42); }
+    .prep-chk { width: 32px; height: 32px; flex-shrink: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: .875rem; border: 2px solid rgb(203 213 225); color: rgb(71 85 105); }
+    .dark .prep-chk { border-color: rgb(71 85 105); color: rgb(203 213 225); }
+    .prep-chk.ok { background: rgb(22 163 74); border-color: rgb(22 163 74); color: #fff; }
     .safe-bottom { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
   </style>
 </head>
@@ -130,6 +135,62 @@
     <main class="flex-1 max-w-2xl w-full mx-auto px-4 pt-1 pb-32">
       <!-- ── 看時間（預設畫面） ── -->
       <section id="tab-watch" class="space-y-3">
+        <!-- 三階段 -->
+        <ol id="phaseBar" aria-label="活動階段" class="grid grid-cols-3 gap-1.5 pt-1 pb-1">
+          <li data-phase="prep" class="flex flex-col gap-1.5"><span class="ph-seg h-[5px] rounded-full"></span><span class="ph-lbl text-xs">1 準備</span></li>
+          <li data-phase="live" class="flex flex-col gap-1.5"><span class="ph-seg h-[5px] rounded-full"></span><span class="ph-lbl text-xs">2 進行</span></li>
+          <li data-phase="done" class="flex flex-col gap-1.5"><span class="ph-seg h-[5px] rounded-full"></span><span class="ph-lbl text-xs">3 結束</span></li>
+        </ol>
+
+        <!-- ══ 1 準備 ══ -->
+        <div id="phPrep" class="hidden space-y-2.5">
+          <div id="prepHint" class="text-sm text-slate-500 dark:text-slate-400 px-1"></div>
+
+          <div class="prep-card">
+            <span class="prep-chk" id="pk1">1</span>
+            <div class="flex-1 min-w-0"><div class="font-bold">流程表</div><div id="pt1" class="text-xs text-slate-500 dark:text-slate-400"></div></div>
+            <button id="pb1" class="btn btn-ghost !py-2 !text-[13px]" data-act="tab" data-tab="flow">編輯</button>
+          </div>
+
+          <div class="prep-card flex-wrap">
+            <span class="prep-chk" id="pk2">2</span>
+            <div class="flex-1 min-w-0"><div class="font-bold">開始時間</div><div id="pt2" class="text-xs text-slate-500 dark:text-slate-400"></div></div>
+            <div class="flex items-center gap-1.5">
+              <input id="startInput" type="time" class="field !w-auto !py-2 font-mono font-bold" aria-label="開始時間">
+              <button id="pb2" class="btn btn-ghost !py-2 !text-[13px]" data-act="confirm-start">設定</button>
+            </div>
+          </div>
+
+          <div class="prep-card !block space-y-3">
+            <div class="flex items-center gap-3">
+              <span class="prep-chk" id="pk3">3</span>
+              <div class="flex-1 min-w-0"><div class="font-bold">邀請夥伴</div><div id="pt3" class="text-xs text-slate-500 dark:text-slate-400 truncate"></div></div>
+            </div>
+            <div class="flex items-center gap-3 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 p-2.5">
+              <canvas id="prepQR" width="64" height="64" class="w-16 h-16 rounded-lg bg-white shrink-0"></canvas>
+              <div class="flex-1 min-w-0">
+                <div class="text-[11px] text-emerald-800 dark:text-emerald-300">活動代碼</div>
+                <div id="prepCode" class="font-mono font-extrabold text-[28px] tracking-[.25em] text-emerald-900 dark:text-emerald-100 leading-tight">----</div>
+              </div>
+              <button class="btn btn-primary !py-3" data-act="share"><i class="ph-bold ph-share-network"></i>分享</button>
+            </div>
+          </div>
+
+          <div class="prep-card">
+            <span class="prep-chk" id="pk4">4</span>
+            <div class="flex-1 min-w-0"><div id="pt4a" class="font-bold truncate">我是誰</div><div id="pt4" class="text-xs text-slate-500 dark:text-slate-400"></div></div>
+            <button class="btn btn-ghost !py-2 !text-[13px]" data-act="who">更改</button>
+          </div>
+
+          <div class="prep-card">
+            <span class="prep-chk" id="pk5">5</span>
+            <div class="flex-1 min-w-0"><div class="font-bold">測試提醒聲音</div><div class="text-xs text-slate-500 dark:text-slate-400">iPhone 要先點一下畫面才會出聲；可在設定開「螢幕恆亮」</div></div>
+            <button class="btn btn-ghost !py-2 !text-[13px]" data-act="test-alert">測試</button>
+          </div>
+        </div>
+
+        <!-- ══ 2 進行（方案 A） ══ -->
+        <div id="phLive" class="space-y-3">
         <!-- 焦點卡 -->
         <div id="focusCard" class="rounded-[28px] border-2 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 transition-all">
           <div class="flex items-center justify-between gap-2">
@@ -174,6 +235,30 @@
             <button data-act="tab" data-tab="flow" id="previewAll" class="text-sm font-medium text-emerald-700 dark:text-emerald-400">全部 ›</button>
           </div>
           <div id="previewList" class="pb-1.5"></div>
+        </div>
+        </div>
+
+        <!-- ══ 3 結束 ══ -->
+        <div id="phDone" class="hidden space-y-3">
+          <div class="rounded-[28px] bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-5 text-center">
+            <div class="w-14 h-14 mx-auto rounded-2xl bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 flex items-center justify-center"><i class="ph-bold ph-flag-checkered text-3xl"></i></div>
+            <h2 class="mt-3 text-2xl font-black">活動結束</h2>
+            <div id="dRange" class="mt-1 font-mono text-slate-600 dark:text-slate-300 tnum"></div>
+            <div id="dDrift" class="mt-1 text-sm text-slate-500 dark:text-slate-400"></div>
+          </div>
+          <div class="bg-white dark:bg-slate-900 rounded-[18px] px-4 py-1.5">
+            <div class="flex items-center justify-between py-2">
+              <span class="text-sm font-bold text-slate-600 dark:text-slate-300">實際流程</span>
+              <span id="dCount" class="text-xs text-slate-500 dark:text-slate-400"></span>
+            </div>
+            <div id="dList" class="pb-1.5"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="btn btn-ghost !py-3" data-act="tab" data-tab="people"><i class="ph-bold ph-clock-counter-clockwise"></i>調整紀錄</button>
+            <button class="btn btn-ghost !py-3" data-act="export" data-fmt="csv"><i class="ph-bold ph-file-csv"></i>匯出 CSV</button>
+            <button class="btn btn-ghost !py-3" data-act="reset-clock"><i class="ph-bold ph-arrow-counter-clockwise"></i>回到準備</button>
+            <button class="btn btn-ghost !py-3" data-act="leave"><i class="ph-bold ph-sign-out"></i>離開活動</button>
+          </div>
         </div>
       </section>
 
@@ -276,7 +361,15 @@
         <button class="flex-1 h-[60px] rounded-[18px] bg-emerald-600 hover:bg-emerald-700 active:scale-[.98] text-white text-[17px] font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition" data-act="control"><i class="ph-bold ph-sliders-horizontal text-xl"></i>控場</button>
       </div>
     </div>
+    <!-- 準備階段底部 -->
+    <div id="prepBar" class="hidden fixed bottom-0 inset-x-0 z-30 safe-bottom pt-6 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent dark:from-slate-950 dark:via-slate-950/95">
+      <div class="max-w-2xl mx-auto px-4 space-y-1.5">
+        <button class="w-full h-[60px] rounded-[18px] bg-slate-900 dark:bg-emerald-600 text-white text-[17px] font-bold flex items-center justify-center gap-2 active:scale-[.98] transition" data-act="start-now"><i class="ph-fill ph-play text-xl"></i><span id="prepStartText">現在開始</span></button>
+        <div id="prepBarHint" class="text-xs text-center text-slate-500 dark:text-slate-400 tnum"></div>
+      </div>
+    </div>
   </div>
+
 
   <!-- ═════════════ 控場面板 ═════════════ -->
   <div id="controlModal" class="modal fixed inset-0 z-50 bg-black/55 items-end sm:items-center justify-center p-0 sm:p-4">
@@ -288,18 +381,6 @@
           <div id="cNow" class="text-sm text-slate-500 dark:text-slate-400 truncate"></div>
         </div>
         <button class="icon-btn bg-slate-100 dark:bg-slate-800" data-act="close-modal" aria-label="關閉"><i class="ph-bold ph-x text-lg"></i></button>
-      </div>
-
-      <!-- 未開始時：開始 -->
-      <div id="cStartBox" class="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 p-3 space-y-2">
-        <div class="flex items-center gap-2">
-          <label for="startInput" class="text-sm font-bold flex-1">開始時間</label>
-          <input id="startInput" type="time" class="field !w-auto font-mono">
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-primary flex-1 !py-3" data-act="start-now"><i class="ph-bold ph-play"></i><span id="cStartText">現在開始</span></button>
-          <button class="btn btn-ghost !py-3" data-act="reset-clock" title="回到未開始" aria-label="重設為未開始"><i class="ph-bold ph-arrow-counter-clockwise"></i></button>
-        </div>
       </div>
 
       <div id="cRunBox" class="space-y-4">
@@ -333,7 +414,7 @@
       <div class="grid grid-cols-3 gap-2">
         <button class="btn btn-ghost !py-3 !text-[13px] !font-medium" data-act="goto-flow">編輯流程</button>
         <button class="btn btn-ghost !py-3 !text-[13px] !font-medium" data-act="goto-flow">跳到某單元</button>
-        <button class="btn btn-ghost !py-3 !text-[13px] !font-medium" data-act="import">匯入流程</button>
+        <button class="btn btn-ghost !py-3 !text-[13px] !font-medium" data-act="reset-clock">回到準備</button>
       </div>
       <p class="text-xs text-center text-slate-500 dark:text-slate-400">知道代碼的人都能操作・每個動作都會留下紀錄</p>
     </div>
