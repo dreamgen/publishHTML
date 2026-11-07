@@ -136,7 +136,15 @@ for (const g of [1, 2]) {
   const order = rolesOf(cfg);
   await ph.getByRole('button', { name: /號座位的信封/ }).first().click();
   for (const [k, role] of order.entries()) {
-    if (g === 1 && k === 3) { await ph.locator('.scan').getByRole('button', { name: '關閉' }).click(); await ph.waitForTimeout(300); await shot(ph, '4c-bind', false); await ph.getByRole('button', { name: /號座位的信封/ }).first().click(); }
+    if (g === 1 && k === 3) { await ph.locator('.scan').getByRole('button', { name: '關閉' }).click(); await ph.waitForTimeout(300); await shot(ph, '4c-bind', false);
+      // 助理主持人手機：綁定中途核對信封（已綁定的信封顯示所在座位）
+      await ph.getByRole('button', { name: '核對信封內容' }).click();
+      await ph.getByRole('button', { name: '掃信封', exact: true }).click();
+      await ph.fill('.scan input', codeOf(cfg.set, order[0]).slice(2)); await ph.press('.scan input', 'Enter');
+      await ph.getByText('本梯次：第 1 組 1 號').waitFor();
+      await shot(ph, '42-phone-check', false);
+      await ph.getByRole('button', { name: '返回' }).click();
+      await ph.getByRole('button', { name: /號座位的信封/ }).first().click(); }
     await ph.fill('.scan input', `UG:E:${cfg.set}:${codeOf(cfg.set, role)}:v${ver}`);
     await ph.press('.scan input', 'Enter');
     await ph.waitForTimeout(150);

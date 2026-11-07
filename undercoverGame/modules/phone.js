@@ -10,6 +10,7 @@ import { noticeBanner } from './notice.js';
 import { voteBox } from './vote.js';
 import { handPanel } from './hand.js';
 import { handoverCard, handoverVote } from './handover.js';
+import { checkTab } from './qrcheck.js';
 import { setUnmount } from './nav.js';
 
 const LS_PHONE = 'ug.phone';
@@ -134,7 +135,7 @@ function offlineEntry(app) {
 // ── 組別主程式（連線／離線共用）────────────────────────────
 function groupApp(app, S, g, info) {
   const offline = S.mode === 'offline';
-  const ui = { picks: [], lookup: null, confirmed: offline || !!(info && info.confirmed), checked: false, hand: {}, lookupPick: false };
+  const ui = { picks: [], lookup: null, confirmed: offline || !!(info && info.confirmed), checked: false, hand: {}, lookupPick: false, check: null };
   const auto = () => !offline && S.isAuto(g);
   let lastUp = false;
 
@@ -153,6 +154,10 @@ function groupApp(app, S, g, info) {
       const { code, mode } = ui.handover;
       const exit = () => { ui.handover = null; render(); };
       return app.replaceChildren(mode === 'vote' ? handoverVote(S, g, code, exit) : handoverCard(S, g, code, exit));
+    }
+    if (ui.check) {
+      return app.replaceChildren(shell('核對信封', sub(), checkTab(S, ui.check, render),
+        h('footer', {}, h('button', { class: 'btn', onclick: () => { ui.check = null; render(); } }, iconEl('back'), '返回'))));
     }
     if (ui.lookup) return app.replaceChildren(lookupScreen());
     if (ui.lookupPick) return app.replaceChildren(lookupPickScreen());
@@ -180,7 +185,8 @@ function groupApp(app, S, g, info) {
             ui.confirmed = true; jset(LS_PHONE, { ...info, confirmed: true }); render();
           },
         }, cfg.draw === 'auto' ? '確認，開始發角色卡' : '確認，開始綁定座位'),
-        h('button', { class: 'btn', onclick: () => { jset(LS_PHONE, null); S.stop(); scanJoin(app); } }, '不是這組，重新掃描')));
+        h('button', { class: 'btn', onclick: () => { jset(LS_PHONE, null); S.stop(); scanJoin(app); } }, '不是這組，重新掃描'),
+        S.qr ? h('button', { class: 'btn', onclick: () => { ui.check = { cur: null, set: S.groupCfg(g).set }; render(); } }, '先核對信封內容') : null));
   }
 
   // 自動抽角色：發角色卡（逐一顯示座位 QR）
@@ -239,7 +245,8 @@ function groupApp(app, S, g, info) {
       })),
       h('footer', {},
         h('button', { class: 'btn primary big', onclick: () => { closer = scan(); } }, iconEl('scan'), `掃 ${next} 號座位的信封`),
-        h('button', { class: 'btn', disabled: !bound.length, onclick: () => S.unbindSeat(g, bound[bound.length - 1]).catch((e) => toast(e.message, 'bad')) }, `重掃上一位（${bound[bound.length - 1] || '-'} 號）`)));
+        h('button', { class: 'btn', disabled: !bound.length, onclick: () => S.unbindSeat(g, bound[bound.length - 1]).catch((e) => toast(e.message, 'bad')) }, `重掃上一位（${bound[bound.length - 1] || '-'} 號）`),
+        h('button', { class: 'btn', onclick: () => { ui.check = { cur: null, set: cfg.set }; render(); } }, '核對信封內容')));
   }
 
   // 回合畫面
@@ -252,6 +259,7 @@ function groupApp(app, S, g, info) {
       h('div', { class: 'row', style: { gap: '6px' } },
         h('span', { class: 'timer' + (remaining() <= 0 && c.status !== 'idle' ? ' late' : ''), 'data-timer': '1' }, c.status === 'idle' ? '05:00' : fmtClock(Math.max(0, remaining()))),
         h('button', { class: 'btn icon', 'aria-label': auto() ? '查詢角色' : '掃信封查詢角色', onclick: () => (auto() ? (ui.lookupPick = true, render()) : scanLookup()) }, iconEl('search')),
+        auto() ? null : h('button', { class: 'btn icon', 'aria-label': '核對信封內容', title: '核對信封內容', onclick: () => { ui.check = { cur: null, set: S.groupCfg(g).set }; render(); } }, '核'),
         offline && c.status !== 'idle' ? h('button', { class: 'btn icon', 'aria-label': c.status === 'paused' ? '繼續計時' : '暫停計時', onclick: () => (c.status === 'paused' ? S.resume() : S.pause()) }, iconEl(c.status === 'paused' ? 'play' : 'pause')) : null));
     const banner = offline ? null : noticeBanner(S, 'phone', (n) => {
       const out = [];

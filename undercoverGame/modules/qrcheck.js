@@ -94,14 +94,15 @@ export function checkTab(S, st, rerender) {
 
   function wrapPage(resultNode) {
   // ── 核對清單 ──
-  const setNow = st.set || 'A';
+  const setsHave = ['A', 'B'].filter((x) => q.sets[x]);
+  const setNow = setsHave.includes(st.set) ? st.set : setsHave[0];
   const map = q.sets[setNow];
   const codes = sortedCodes(map);
   const count = (s) => { const ms = marks[s] || {}; const all = sortedCodes(q.sets[s]); return { ok: all.filter((c) => ms[c] && ms[c].ok).length, bad: all.filter((c) => ms[c] && !ms[c].ok).length, n: all.length }; };
   const list = h('section', { class: 'card' },
     h('div', { class: 'row between' },
       h('h2', {}, '核對清單'),
-      h('div', { class: 'row' }, ['A', 'B'].map((s) => { const c = count(s); return h('button', { class: 'btn', 'aria-pressed': String(setNow === s), onclick: () => { st.set = s; rerender(); } }, `${s} 套 ${c.ok}/${c.n}${c.bad ? `・放錯 ${c.bad}` : ''}`); }))),
+      h('div', { class: 'row' }, setsHave.map((s) => { const c = count(s); return h('button', { class: 'btn', 'aria-pressed': String(setNow === s), onclick: () => { st.set = s; rerender(); } }, `${s} 套 ${c.ok}/${c.n}${c.bad ? `・放錯 ${c.bad}` : ''}`); }))),
     h('div', { class: 'check-grid' }, codes.map((code) => {
       const m = markOf(setNow, code), r = ROLE[map[code]];
       return h('button', {
