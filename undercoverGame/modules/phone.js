@@ -3,7 +3,7 @@ import { h, toast, confirmBox, openScanner, iconEl, fmtClock } from './ui.js';
 import { EventSession, deviceId, loadOffline, saveOffline, clearOffline } from './session.js';
 import {
   ROLE, MISSIONS, MISSION, ROUND_LIMIT_MS, KIND_LABEL, REASON_ORDER,
-  composition, makeGroupCfg, remainingSlots, needText, fmtNum, announce, QR,
+  composition, makeGroupCfg, remainingSlots, pickEnvelopes, needText, fmtNum, announce, QR,
 } from './rules.js';
 import { spyPicker } from './spypick.js';
 import { noticeBanner } from './notice.js';
@@ -232,7 +232,22 @@ function groupApp(app, S, g, info) {
       onClose: () => render(),
     });
     let closer = () => {};
+    // 自動選信封：依規則隨機列出本梯次要用的信封代號，方便快速找出信封；可重洗
+    const pick = S.envPick(g);
+    const doPick = () => S.setEnvPick(g, pickEnvelopes(cfg, S.mapping(g))).catch((e) => toast(e.message, 'bad'));
+    const pickBox = cfg.draw === 'auto' ? null : pick ? h('section', { class: 'card env-pick' },
+      h('div', { class: 'row between' }, h('h2', {}, '本梯次要用的信封'), h('span', { class: 'muted tiny' }, `${cfg.set} 套・${pick.codes.length} 個・第 ${pick.n || 1} 次洗牌`)),
+      h('div', { class: 'env-codes' }, pick.codes.map((c) => h('span', { class: 'env-code mono' + (S.seatOf(g, c) ? ' done' : '') }, c, S.seatOf(g, c) ? h('small', {}, `${S.seatOf(g, c)} 號`) : null))),
+      h('p', { class: 'muted tiny' }, '依代號排序，方便從信封盒找出。只看代號，看不出角色；取出後打散讓學員抽。'),
+      bound.length ? h('p', { class: 'muted tiny' }, '已開始綁定：只接受清單裡的信封。') : h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: async () => { if (await confirmBox('重新洗牌？', '會換一組信封代號；已經取出的信封請放回。', '重洗')) doPick(); } }, '重洗一次'),
+        h('button', { class: 'btn', onclick: () => S.setEnvPick(g, null).catch((e) => toast(e.message, 'bad')) }, '清除清單（自己挑信封）')))
+      : bound.length ? null : h('section', { class: 'card env-pick' },
+        h('div', { class: 'row between' }, h('h2', {}, '還沒取信封？'), h('span', { class: 'muted tiny' }, `真誠大人 ${cfg.goodCount ?? (cfg.good || []).length}・虛偽大人 ${cfg.spyCount}`)),
+        h('p', { class: 'small' }, `按「自動選信封」，依規則從 ${cfg.set} 套隨機列出這一梯次要用的 ${cfg.size} 個信封代號（至少 1 位破壞型），照清單取出信封即可。`),
+        h('button', { class: 'btn dark', onclick: doPick }, '自動選信封'));
     return shell('掃碼綁定座位', sub(),
+      pickBox,
       h('div', { class: 'row between' }, h('span', { class: 'muted small' }, '座位順序（順時針）・角色不顯示'), h('b', { class: 'mono' }, `${bound.length} / ${cfg.size}`)),
       (() => { const r = remainingSlots(cfg, S.boundRoles(g)); return h('p', { class: 'muted tiny' },
         `還需真誠大人 ${r.goodLeft} 位・虛偽大人 ${r.spyLeft} 位${cfg.draw === 'dashboard' ? '（只收儀表板抽中的虛偽大人卡）' : '（實體抽，以掃到的為準）'}`); })(),

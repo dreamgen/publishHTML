@@ -120,6 +120,17 @@ export function makeGroupCfg(size, set, draw = 'physical', spies = null, rnd = M
   return cfg;
 }
 
+/**
+ * 自動選信封（實體抽用）：依規則隨機選出本梯次要放進抽籤的信封代號（已排序，方便找信封）。
+ * 真誠大人從 7 張隨機抽；虛偽大人隨機抽（至少 1 位破壞型），離線「手機抽」則用已抽定的虛偽大人。
+ */
+export function pickEnvelopes(cfg, mapping, rnd = Math.random) {
+  const goods = shuffle(GOODS, rnd).slice(0, goodCount(cfg));
+  const spies = cfg.draw === 'dashboard' && cfg.spies ? cfg.spies : drawSpies(cfg.size, rnd);
+  const codeOf = Object.fromEntries(Object.entries(mapping).map(([code, role]) => [role, code]));
+  return [...goods, ...spies].map((r) => codeOf[r]).sort();
+}
+
 /** 自動抽角色：依 seatRoles 與 QR 對照表算出座位 → 代號（同一套對照表，代號只在系統內部使用） */
 export function autoSeats(cfg, mapping) {
   const codeOf = Object.fromEntries(Object.entries(mapping).map(([code, role]) => [role, code]));

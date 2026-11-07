@@ -259,3 +259,9 @@ body.player-theme{background:#171614;color:#F1ECE2}
 .check-item.bad{background:var(--bad-bg);border:1px solid var(--bad-line);color:var(--bad-d)}
 .check-item .tiny{color:inherit}
 .check-info .chip{align-self:flex-start}
+/* 自動選信封 */
+.env-pick{gap:10px}
+.env-codes{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.env-code{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:52px;border-radius:10px;border:1px solid var(--line2);background:#fff;font-size:19px;font-weight:700}
+.env-code.done{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok-d)}
+.env-code small{font-size:11px;font-weight:500;font-family:'Noto Sans TC',sans-serif}

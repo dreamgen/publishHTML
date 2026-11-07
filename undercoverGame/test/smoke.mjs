@@ -133,7 +133,27 @@ for (const g of [1, 2]) {
   await ph.getByRole('button', { name: '確認，開始綁定座位' }).click({ timeout: 8000 }).catch(async (e) => { console.log(await ph.evaluate(() => location.href + ' | ' + document.body.innerText)); throw e; });
   const cfg = batch.groups[g];
   // 座位順序：依角色陣列打散
-  const order = rolesOf(cfg);
+  let order = rolesOf(cfg);
+  if (g === 2) {
+    // 自動選信封：依規則列出本梯次要用的信封代號，可重洗；之後只接受清單裡的信封
+    const evd2 = () => db.artifacts.undercoverGame.public.data.events[ev].live[2];
+    await ph.getByRole('button', { name: '自動選信封' }).click();
+    await ph.getByText('本梯次要用的信封').waitFor();
+    const first = evd2().envPick.codes;
+    if (first.length !== 6 || [...first].sort().join() !== first.join()) throw new Error('自動選信封數量或排序不對 ' + first);
+    await ph.getByRole('button', { name: '重洗一次' }).click();
+    await ph.locator('.modal').getByRole('button', { name: '重洗' }).click();
+    await ph.getByText('第 2 次洗牌').waitFor();
+    await shot(ph, '43-env-pick', false);
+    const picked = evd2().envPick.codes.map((c) => sets.B[c]);
+    if (picked.filter((r) => ['sel', 'yang', 'face'].includes(r)).length < 1 || picked.filter((r) => ['sen', 'car', 'pow', 'rich', 'nA', 'nB', 'nC'].includes(r)).length !== 4) throw new Error('自動選信封不符規則 ' + picked);
+    order = picked; // 照清單綁定
+    const notIn = Object.keys(sets.B).find((c) => !evd2().envPick.codes.includes(c));
+    await ph.getByRole('button', { name: /號座位的信封/ }).first().click();
+    await ph.fill('.scan input', notIn.slice(2)); await ph.press('.scan input', 'Enter');
+    await ph.getByText('不在自動選出的信封清單裡').waitFor();
+    await ph.locator('.scan').getByRole('button', { name: '關閉' }).click();
+  }
   await ph.getByRole('button', { name: /號座位的信封/ }).first().click();
   for (const [k, role] of order.entries()) {
     if (g === 1 && k === 3) { await ph.locator('.scan').getByRole('button', { name: '關閉' }).click(); await ph.waitForTimeout(300); await shot(ph, '4c-bind', false);

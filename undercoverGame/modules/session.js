@@ -123,6 +123,8 @@ export class EventSession {
     const map = this.mapping(g), cfg = this.groupCfg(g);
     const role = map[code];
     if (!role) return { error: '這個 QR 碼不在本組的信封套別裡（可能是另一套或舊版本）' };
+    const pick = this.envPick(g);
+    if (pick && !pick.codes.includes(code)) return { error: `${code} 不在自動選出的信封清單裡；要改用其他信封，請先清除清單`, role };
     const exist = this.seatOf(g, code);
     if (exist) return { error: `這個信封已綁定在 ${exist} 號`, role };
     const err = roleAllowed(cfg, role, this.boundRoles(g));
@@ -136,6 +138,12 @@ export class EventSession {
     const seats = { ...this.seats(g), [seat]: code };
     if (Object.keys(seats).length >= cfg.size) p[`live/${g}/ledger`] = initialLedger(seats, this.mapping(g), this.overrides.roles);
     await this.patch(p);
+  }
+  /** 自動選信封：本梯次要用的信封代號（存起來，換手機或重新整理都還在） */
+  envPick(g) { return this.live(g).envPick || null; }
+  async setEnvPick(g, codes) {
+    if (Object.keys(this.seats(g)).length) throw new Error('已經開始綁定座位，不能重選信封');
+    await this.patch({ [`live/${g}/envPick`]: codes ? { codes, at: this.now(), n: ((this.envPick(g) || {}).n || 0) + 1 } : null });
   }
   async unbindSeat(g, seat) {
     if (Object.keys(this.rounds(g)).length) throw new Error('已經開始結算，不能再改座位');

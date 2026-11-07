@@ -1,6 +1,6 @@
 // node test/rules.test.mjs —— 以修正方案第一節「任務」表的 6 人組試算驗證判定與扣除
 import assert from 'node:assert/strict';
-import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR, autoSeats, drawGoods, remainingSlots } from '../modules/rules.js';
+import { ROLE, MISSION, judge, splitGroups, makeGroupCfg, roleAllowed, drawSpies, generateMapping, QR, autoSeats, drawGoods, remainingSlots, pickEnvelopes } from '../modules/rules.js';
 
 const res = {};
 const mk = (...ids) => ids.map((id) => ({ code: id, role: id, money: res[id].money, leave: res[id].leave }));
@@ -120,4 +120,19 @@ for (let k = 1; k <= 7; k++) assert.equal(amap[aseats[k]], acfg.seatRoles[k - 1]
 const sq = QR.parse(QR.seat('https://x.io/undercoverGame/', 'AB12', 3, 2, 5, 'k3j9a0'));
 assert.deepEqual(sq, { type: 'seat', ev: 'AB12', batch: 3, g: 2, seat: 5, nonce: 'k3j9a0' });
 assert.equal(QR.parse('https://x.io/?player=AB12').type, 'player');
+// 自動選信封：張數符合人數、至少 1 位破壞型、代號排序；手機抽沿用已抽定的虛偽大人
+{
+  const mp = generateMapping().A;
+  for (let i = 0; i < 200; i++) {
+    const codes = pickEnvelopes(makeGroupCfg(8, 'A'), mp);
+    const roles = codes.map((c) => mp[c]);
+    assert.equal(codes.length, 8); assert.equal(new Set(codes).size, 8);
+    assert.deepEqual(codes, [...codes].sort());
+    assert.equal(roles.filter((r) => ROLE[r].camp === 'good').length, 5);
+    assert.ok(roles.some((r) => ROLE[r].kind === 'sabotage'));
+  }
+  const dc = makeGroupCfg(6, 'A', 'dashboard', ['sel', 'two']);
+  const rs = pickEnvelopes(dc, mp).map((c) => mp[c]);
+  assert.ok(rs.includes('sel') && rs.includes('two'));
+}
 console.log('rules tests passed');
