@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-09T13:43:23.572Z",
-  "count": 16,
+  "generatedAt": "2026-11-07T08:46:29.512Z",
+  "count": 18,
   "apps": [
     {
       "id": "bridgeGame",
@@ -12,6 +12,19 @@
       "themeColor": "#15803d",
       "categories": [
         "games"
+      ]
+    },
+    {
+      "id": "eventControl",
+      "name": "活動控場",
+      "shortName": "活動控場",
+      "description": "匯入或輸入活動流程表，與同場夥伴即時同步控場：自動計算起迄、倒數、延後調整、負責人輪到前提醒、一鍵廣播訊息",
+      "path": "../eventControl/",
+      "icon": "../eventControl/icons/eventControl-192.png",
+      "themeColor": "#059669",
+      "categories": [
+        "productivity",
+        "utilities"
       ]
     },
     {
@@ -187,6 +200,19 @@
       "categories": [
         "productivity",
         "utilities"
+      ]
+    },
+    {
+      "id": "undercoverGame",
+      "name": "勿虛心假意 — 體驗遊戲結算",
+      "shortName": "體驗遊戲結算",
+      "description": "法會「勿虛心假意」體驗遊戲：控場儀表板設定梯次、列印信封 QR、控制回合；助理主持人手機掃碼綁定座位與結算，支援離線單機模式",
+      "path": "../undercoverGame/",
+      "icon": "../undercoverGame/icons/undercoverGame-192.svg",
+      "themeColor": "#1F5F5B",
+      "categories": [
+        "education",
+        "games"
       ]
     },
     {

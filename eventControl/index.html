@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>活動控場</title>
+  <meta name="description" content="匯入或輸入活動流程表，與同場夥伴即時同步控場：自動計算起迄、倒數、延後調整、負責人輪到前提醒、一鍵廣播訊息">
+  <meta name="theme-color" content="#059669">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="活動控場">
+  <link rel="apple-touch-icon" href="icons/eventControl-192.png">
+  <link rel="icon" href="icons/eventControl-192.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+  <script src="vendor/qrious.min.js" defer></script>
+  <script>
+    try { if (localStorage.getItem('ec_theme') === 'light') document.documentElement.classList.remove('dark'); } catch (e) {}
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Inter', 'Noto Sans TC', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] } } }
+    };
+  </script>
+  <style>
+    body { transition: background-color .25s, color .25s; -webkit-tap-highlight-color: transparent; }
+    .tnum { font-variant-numeric: tabular-nums; }
+    .active-glow { box-shadow: 0 0 25px -5px rgba(16,185,129,.35), 0 8px 16px -6px rgba(16,185,129,.2); }
+    .warn-glow { box-shadow: 0 0 30px -5px rgba(245,158,11,.45), 0 8px 16px -6px rgba(239,68,68,.3); }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    .hidden { display: none !important; }
+    .modal { display: none; }
+    .modal.open { display: flex; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: .375rem; border-radius: .75rem; font-weight: 600; font-size: .875rem; padding: .55rem .9rem; transition: background-color .15s, transform .05s; user-select: none; }
+    .btn:active { transform: scale(.97); }
+    .btn-ghost { background: rgb(241 245 249); color: rgb(51 65 85); border: 1px solid rgb(226 232 240); }
+    .dark .btn-ghost { background: rgb(30 41 59); color: rgb(226 232 240); border-color: rgb(51 65 85); }
+    .btn-ghost:hover { background: rgb(226 232 240); }
+    .dark .btn-ghost:hover { background: rgb(51 65 85); }
+    .btn-primary { background: rgb(5 150 105); color: #fff; }
+    .btn-primary:hover { background: rgb(4 120 87); }
+    .field { width: 100%; border-radius: .75rem; padding: .55rem .75rem; background: #fff; border: 1px solid rgb(203 213 225); font-size: .95rem; }
+    .dark .field { background: rgb(15 23 42); border-color: rgb(51 65 85); color: rgb(241 245 249); }
+    .field:focus { outline: 2px solid rgb(16 185 129); outline-offset: -1px; }
+    .tab-btn[aria-selected="true"] { background: rgb(5 150 105); color: #fff; border-color: transparent; }
+    @keyframes slideDown { from { transform: translateY(-120%); } to { transform: translateY(0); } }
+    .slide-down { animation: slideDown .3s ease-out; }
+    .safe-bottom { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100 min-h-screen">
+
+  <!-- ═════════════ 首頁 ═════════════ -->
+  <main id="homeView" class="max-w-xl mx-auto px-4 py-6 space-y-5">
+    <header class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+        <i class="ph-bold ph-timer text-3xl"></i>
+      </div>
+      <div class="flex-1">
+        <h1 class="text-xl font-bold">活動控場</h1>
+        <p class="text-xs text-slate-500 dark:text-slate-400">匯入流程表，和同場夥伴一起看時間、調時間、收提醒</p>
+      </div>
+      <button class="btn btn-ghost !p-2.5" data-act="theme" title="深淺色"><i class="ph-bold ph-moon text-lg"></i></button>
+    </header>
+
+    <section class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+      <h2 class="font-bold flex items-center gap-2"><i class="ph-bold ph-sign-in text-emerald-500"></i>加入活動</h2>
+      <div class="flex gap-2">
+        <input id="joinCodeInput" class="field font-mono uppercase tracking-[.3em] text-center text-lg" maxlength="4" placeholder="代碼" autocomplete="off" autocapitalize="characters">
+        <button class="btn btn-primary shrink-0" data-act="join-code">加入</button>
+      </div>
+      <p class="text-xs text-slate-500 dark:text-slate-400">輸入夥伴分享的 4 碼代碼，或直接點對方傳來的連結／掃 QR Code。</p>
+    </section>
+
+    <section class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+      <h2 class="font-bold flex items-center gap-2"><i class="ph-bold ph-plus-circle text-emerald-500"></i>建立新活動</h2>
+      <input id="newTitleInput" class="field" placeholder="活動名稱（例如：青年營第二天晚會）">
+      <button class="btn btn-primary w-full" data-act="create"><i class="ph-bold ph-list-plus"></i>建立並匯入／輸入流程</button>
+    </section>
+
+    <section id="recentSection" class="space-y-2 hidden">
+      <h2 class="text-sm font-bold text-slate-500 dark:text-slate-400 px-1">最近的活動</h2>
+      <div id="recentList" class="space-y-2"></div>
+    </section>
+
+    <p id="authStatus" class="text-center text-xs text-slate-400">連線中…</p>
+  </main>
+
+  <!-- ═════════════ 活動頁 ═════════════ -->
+  <div id="eventView" class="hidden min-h-screen flex flex-col">
+    <header class="sticky top-0 z-30 backdrop-blur-md bg-white/85 dark:bg-slate-900/85 border-b border-slate-200 dark:border-slate-800">
+      <div class="max-w-5xl mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-2">
+        <button class="btn btn-ghost !p-2" data-act="home" title="回首頁"><i class="ph-bold ph-caret-left text-lg"></i></button>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <h1 id="evTitle" class="font-bold truncate text-base sm:text-lg">活動</h1>
+            <button data-act="share" class="font-mono text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300 tracking-widest shrink-0" id="evCode">----</button>
+          </div>
+          <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+            <span id="connDot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+            <span id="connText">連線中</span>
+            <span>・</span>
+            <button data-act="tab" data-tab="people" id="onlineCount" class="underline-offset-2 hover:underline">0 人在線</button>
+          </div>
+        </div>
+        <div class="text-right mr-1">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 leading-none">現在</div>
+          <div id="nowClock" class="font-mono font-bold tnum">--:--:--</div>
+        </div>
+        <button class="btn btn-ghost !p-2" data-act="stage" title="大字卡"><i class="ph-bold ph-presentation-chart text-lg"></i></button>
+        <button class="btn btn-ghost !p-2" data-act="share" title="分享"><i class="ph-bold ph-share-network text-lg"></i></button>
+      </div>
+    </header>
+
+    <main class="flex-1 max-w-5xl w-full mx-auto px-3 sm:px-5 py-4 space-y-4 pb-36">
+      <!-- 焦點卡 -->
+      <section id="focusCard" class="rounded-3xl border-2 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 transition-all">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <span id="fStatus" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800">未開始</span>
+          <span id="fRange" class="font-mono text-sm text-slate-500 dark:text-slate-400 tnum"></span>
+        </div>
+        <div class="grid sm:grid-cols-[1fr_auto] gap-3 items-end">
+          <div class="min-w-0">
+            <div id="fIndex" class="text-xs font-bold text-emerald-600 dark:text-emerald-400"></div>
+            <h2 id="fTitle" class="text-2xl sm:text-3xl font-black leading-tight break-words">尚未開始</h2>
+            <p id="fSub" class="text-sm text-slate-500 dark:text-slate-400 mt-1"></p>
+            <div id="fOwner" class="mt-2 flex flex-wrap gap-1.5"></div>
+            <div id="fRounds" class="mt-2 flex flex-wrap gap-1.5"></div>
+          </div>
+          <div class="text-left sm:text-right">
+            <div id="fCdLabel" class="text-xs font-semibold text-slate-500 dark:text-slate-400">剩餘時間</div>
+            <div id="fCountdown" class="font-mono font-black text-6xl sm:text-7xl tnum leading-none">--:--</div>
+          </div>
+        </div>
+        <div class="mt-4 h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+          <div id="fBar" class="h-full bg-emerald-500 transition-[width] duration-500" style="width:0%"></div>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <span id="fNext" class="truncate"></span>
+          <span id="fTotal" class="shrink-0 tnum"></span>
+        </div>
+      </section>
+
+      <!-- 我的提醒摘要 -->
+      <section id="mineCard" class="hidden rounded-2xl border border-amber-300/60 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm flex items-center gap-3">
+        <i class="ph-fill ph-bell-ringing text-amber-500 text-xl"></i>
+        <div id="mineText" class="flex-1"></div>
+        <button class="text-xs underline text-amber-700 dark:text-amber-300" data-act="tab" data-tab="settings">設定</button>
+      </section>
+
+      <!-- 分頁 -->
+      <nav class="flex gap-2">
+        <button class="tab-btn btn btn-ghost flex-1" data-act="tab" data-tab="flow" aria-selected="true"><i class="ph-bold ph-list-numbers"></i>流程</button>
+        <button class="tab-btn btn btn-ghost flex-1" data-act="tab" data-tab="people"><i class="ph-bold ph-users-three"></i>夥伴</button>
+        <button class="tab-btn btn btn-ghost flex-1" data-act="tab" data-tab="settings"><i class="ph-bold ph-gear-six"></i>設定</button>
+      </nav>
+
+      <section id="tab-flow" class="space-y-3">
+        <div class="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
+          <label class="text-sm font-semibold flex items-center gap-2"><i class="ph-bold ph-flag-banner text-emerald-500"></i>開始時間</label>
+          <input id="startInput" type="time" class="field !w-auto font-mono">
+          <button class="btn btn-ghost" data-act="start-now"><i class="ph-bold ph-play"></i>現在開始</button>
+          <button class="btn btn-ghost" data-act="reset-clock" title="回到未開始"><i class="ph-bold ph-arrow-counter-clockwise"></i></button>
+          <span class="flex-1"></span>
+          <span id="totalInfo" class="text-xs text-slate-500 dark:text-slate-400 tnum"></span>
+        </div>
+        <div id="flowList" class="space-y-2.5"></div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button class="btn btn-ghost" data-act="add-item"><i class="ph-bold ph-plus"></i>新增單元</button>
+          <button class="btn btn-ghost" data-act="import"><i class="ph-bold ph-upload-simple"></i>匯入流程</button>
+          <button class="btn btn-ghost" data-act="export" data-fmt="json"><i class="ph-bold ph-download-simple"></i>匯出 JSON</button>
+          <button class="btn btn-ghost" data-act="export" data-fmt="csv"><i class="ph-bold ph-file-csv"></i>匯出 CSV</button>
+        </div>
+      </section>
+
+      <section id="tab-people" class="hidden space-y-3">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+          <h3 class="font-bold mb-2 flex items-center gap-2"><i class="ph-bold ph-megaphone text-emerald-500"></i>廣播給所有人</h3>
+          <div id="quickMsgs" class="flex flex-wrap gap-2 mb-2"></div>
+          <div class="flex gap-2">
+            <input id="bcInput" class="field" placeholder="自訂訊息…" maxlength="60">
+            <button class="btn btn-primary shrink-0" data-act="bc-send"><i class="ph-bold ph-paper-plane-tilt"></i>送出</button>
+          </div>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+          <h3 class="font-bold mb-2 flex items-center gap-2"><i class="ph-bold ph-users-three text-emerald-500"></i>在線夥伴</h3>
+          <div id="peopleList" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+          <h3 class="font-bold mb-2 flex items-center gap-2"><i class="ph-bold ph-clock-counter-clockwise text-emerald-500"></i>調整與訊息紀錄</h3>
+          <ul id="logList" class="space-y-1.5 text-sm"></ul>
+        </div>
+      </section>
+
+      <section id="tab-settings" class="hidden space-y-3">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+          <h3 class="font-bold flex items-center gap-2"><i class="ph-bold ph-user-circle text-emerald-500"></i>我是誰</h3>
+          <label class="block text-sm">我的暱稱（顯示在紀錄與在線名單）
+            <input id="setName" class="field mt-1" maxlength="16">
+          </label>
+          <div class="text-sm">我負責的人名（點選流程表中的負責人，可複選）</div>
+          <div id="setMe" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+          <h3 class="font-bold flex items-center gap-2"><i class="ph-bold ph-bell text-emerald-500"></i>提醒</h3>
+          <label class="flex items-center justify-between gap-3 text-sm">輪到我之前幾分鐘提醒
+            <select id="setLead" class="field !w-24"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>10</option></select>
+          </label>
+          <label class="flex items-center justify-between gap-3 text-sm">每個單元結束前 1 分鐘都提醒我（控場人員）
+            <input id="setAll" type="checkbox" class="w-5 h-5 accent-emerald-600">
+          </label>
+          <label class="flex items-center justify-between gap-3 text-sm">提示音
+            <input id="setSound" type="checkbox" class="w-5 h-5 accent-emerald-600">
+          </label>
+          <label class="flex items-center justify-between gap-3 text-sm">震動（Android）
+            <input id="setVibrate" type="checkbox" class="w-5 h-5 accent-emerald-600">
+          </label>
+          <label class="flex items-center justify-between gap-3 text-sm">螢幕保持恆亮
+            <input id="setWake" type="checkbox" class="w-5 h-5 accent-emerald-600">
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-ghost" data-act="test-alert"><i class="ph-bold ph-speaker-high"></i>測試提醒</button>
+            <button class="btn btn-ghost" data-act="notify-perm" id="notifyBtn"><i class="ph-bold ph-bell-simple-ringing"></i>允許系統通知</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400">提醒在本頁開著時運作（可切到其他 App，但不要關閉）。iPhone 不支援震動，請開啟提示音；建議開「螢幕保持恆亮」。</p>
+        </div>
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+          <h3 class="font-bold flex items-center gap-2"><i class="ph-bold ph-sliders text-emerald-500"></i>活動</h3>
+          <label class="block text-sm">活動名稱
+            <input id="setTitle" class="field mt-1" maxlength="40">
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-ghost" data-act="theme"><i class="ph-bold ph-moon"></i>深淺色</button>
+            <button class="btn btn-ghost" data-act="leave"><i class="ph-bold ph-sign-out"></i>離開活動</button>
+            <button class="btn btn-ghost !text-rose-600" data-act="delete-event"><i class="ph-bold ph-trash"></i>刪除整場活動</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 底部控場列 -->
+    <div class="fixed bottom-0 inset-x-0 z-30 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 safe-bottom pt-2.5">
+      <div class="max-w-5xl mx-auto px-3 grid grid-cols-5 gap-2">
+        <button class="btn btn-ghost !px-1 flex-col !gap-0.5" data-act="shift" data-min="-1"><span class="font-mono text-base">-1</span><span class="text-[10px] font-medium opacity-70">提前</span></button>
+        <button class="btn btn-ghost !px-1 flex-col !gap-0.5" data-act="shift" data-min="1"><span class="font-mono text-base">+1</span><span class="text-[10px] font-medium opacity-70">延後</span></button>
+        <button class="btn btn-ghost !px-1 flex-col !gap-0.5" data-act="shift" data-min="5"><span class="font-mono text-base">+5</span><span class="text-[10px] font-medium opacity-70">延後</span></button>
+        <button class="btn btn-ghost !px-1 flex-col !gap-0.5" data-act="pause" id="pauseBtn"><i class="ph-bold ph-pause text-lg"></i><span class="text-[10px] font-medium opacity-70">暫停</span></button>
+        <button class="btn btn-primary !px-1 flex-col !gap-0.5" data-act="next" id="nextBtn"><i class="ph-bold ph-skip-forward text-lg"></i><span class="text-[10px] font-medium">下一單元</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ 匯入 Modal ═════════════ -->
+  <div id="importModal" class="modal fixed inset-0 z-50 bg-black/60 items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white dark:bg-slate-900 w-full sm:max-w-2xl max-h-[92vh] rounded-t-3xl sm:rounded-3xl flex flex-col">
+      <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
+        <h3 class="font-bold text-lg">匯入／輸入流程表</h3>
+        <button class="btn btn-ghost !p-2" data-act="close-modal"><i class="ph-bold ph-x"></i></button>
+      </div>
+      <div class="p-4 overflow-y-auto space-y-4">
+        <div class="flex gap-2 text-sm">
+          <button class="imp-tab tab-btn btn btn-ghost flex-1 !px-2" data-act="imp-tab" data-tab="paste" aria-selected="true"><i class="ph-bold ph-clipboard-text"></i>貼上</button>
+          <button class="imp-tab tab-btn btn btn-ghost flex-1 !px-2" data-act="imp-tab" data-tab="file"><i class="ph-bold ph-file-xls"></i>檔案</button>
+          <button class="imp-tab tab-btn btn btn-ghost flex-1 !px-2" data-act="imp-tab" data-tab="ai"><i class="ph-bold ph-sparkle"></i>請 AI 整理</button>
+        </div>
+
+        <div id="imp-paste" class="space-y-2">
+          <textarea id="pasteInput" rows="8" class="field font-mono text-sm" placeholder="每行一個單元，例如：&#10;09:00-09:05 開場 修德、曉慈&#10;遊戲規則說明 7分鐘 負責：修德&#10;正課 15 分 | 嘉伸、毓倫&#10;&#10;也可以：從 Excel／Google 試算表直接複製表格貼上，或貼上 JSON。"></textarea>
+          <button class="btn btn-primary w-full" data-act="parse-paste"><i class="ph-bold ph-magic-wand"></i>解析</button>
+        </div>
+
+        <div id="imp-file" class="hidden space-y-2">
+          <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 cursor-pointer hover:border-emerald-500">
+            <i class="ph-bold ph-file-arrow-up text-4xl text-emerald-500"></i>
+            <span class="text-sm font-semibold">選擇 Excel（.xlsx）、CSV 或 JSON 檔</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400 text-center">欄位名稱可用：單元／內容、說明、負責人、分鐘（或「時間」09:00-09:10、開始、結束）、回合</span>
+            <input id="fileInput" type="file" accept=".xlsx,.csv,.json,.txt,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+          </label>
+          <button class="btn btn-ghost w-full" data-act="download-template"><i class="ph-bold ph-download-simple"></i>下載 CSV 範本</button>
+        </div>
+
+        <div id="imp-ai" class="hidden space-y-2">
+          <ol class="text-sm list-decimal pl-5 space-y-1 text-slate-600 dark:text-slate-300">
+            <li>按「複製提示詞」，到 Claude／ChatGPT／Gemini 貼上。</li>
+            <li>在提示詞最後貼上你的流程（文字、會議記錄、截圖都可以）。</li>
+            <li>把 AI 回覆的 JSON 整段複製，貼到「貼上」分頁按解析。</li>
+          </ol>
+          <pre id="aiPrompt" class="text-xs bg-slate-100 dark:bg-slate-800 rounded-xl p-3 whitespace-pre-wrap max-h-56 overflow-y-auto"></pre>
+          <div class="flex gap-2">
+            <button class="btn btn-primary flex-1" data-act="copy-prompt"><i class="ph-bold ph-copy"></i>複製提示詞</button>
+            <button class="btn btn-ghost flex-1" data-act="imp-tab" data-tab="paste"><i class="ph-bold ph-clipboard-text"></i>去貼上 JSON</button>
+          </div>
+        </div>
+
+        <!-- 預覽 -->
+        <div id="impPreview" class="hidden space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-bold">預覽（可直接修改）</h4>
+            <span id="impSum" class="text-xs text-slate-500 dark:text-slate-400 tnum"></span>
+          </div>
+          <div id="impWarn" class="text-xs text-amber-600 dark:text-amber-400"></div>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="text-xs">活動名稱<input id="impTitle" class="field mt-1"></label>
+            <label class="text-xs">預定開始<input id="impStart" type="time" class="field mt-1 font-mono"></label>
+          </div>
+          <div id="impRows" class="space-y-1.5"></div>
+        </div>
+      </div>
+      <div id="impFooter" class="hidden p-4 border-t border-slate-200 dark:border-slate-800 flex gap-2 safe-bottom">
+        <button class="btn btn-ghost flex-1" data-act="imp-apply" data-mode="append" id="impAppendBtn">接在後面</button>
+        <button class="btn btn-primary flex-[2]" data-act="imp-apply" data-mode="replace"><i class="ph-bold ph-check"></i><span id="impApplyText">套用流程</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ 加入身分 Modal ═════════════ -->
+  <div id="whoModal" class="modal fixed inset-0 z-50 bg-black/60 items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-5 space-y-4">
+      <h3 class="font-bold text-lg">歡迎加入：<span id="whoTitle"></span></h3>
+      <label class="block text-sm">你的暱稱<input id="whoName" class="field mt-1" maxlength="16" placeholder="例如：嘉伸"></label>
+      <div class="space-y-2">
+        <div class="text-sm">你負責哪些單元？選你的名字，輪到前會提醒你（可複選、可略過）</div>
+        <div id="whoMe" class="flex flex-wrap gap-2"></div>
+      </div>
+      <button class="btn btn-primary w-full" data-act="who-ok">進入控場</button>
+    </div>
+  </div>
+
+  <!-- ═════════════ 編輯單元 Modal ═════════════ -->
+  <div id="itemModal" class="modal fixed inset-0 z-50 bg-black/60 items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white dark:bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 space-y-3 safe-bottom">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-lg" id="itemModalTitle">編輯單元</h3>
+        <button class="btn btn-ghost !p-2" data-act="close-modal"><i class="ph-bold ph-x"></i></button>
+      </div>
+      <label class="block text-sm">單元名稱<input id="itTitle" class="field mt-1"></label>
+      <label class="block text-sm">補充說明<input id="itSub" class="field mt-1"></label>
+      <label class="block text-sm">負責人（多人用「、」分隔）<input id="itOwner" class="field mt-1"></label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block text-sm">分鐘<input id="itDur" type="number" min="1" class="field mt-1 font-mono"></label>
+        <label class="block text-sm">回合數<input id="itRounds" type="number" min="1" max="20" class="field mt-1 font-mono"></label>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost" data-act="item-move" data-dir="-1" title="上移"><i class="ph-bold ph-arrow-up"></i></button>
+        <button class="btn btn-ghost" data-act="item-move" data-dir="1" title="下移"><i class="ph-bold ph-arrow-down"></i></button>
+        <button class="btn btn-ghost !text-rose-600" data-act="item-delete"><i class="ph-bold ph-trash"></i>刪除</button>
+        <span class="flex-1"></span>
+        <button class="btn btn-primary" data-act="item-save"><i class="ph-bold ph-check"></i>儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ 分享 Modal ═════════════ -->
+  <div id="shareModal" class="modal fixed inset-0 z-50 bg-black/60 items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-5 space-y-4 text-center">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-lg">邀請夥伴一起控場</h3>
+        <button class="btn btn-ghost !p-2" data-act="close-modal"><i class="ph-bold ph-x"></i></button>
+      </div>
+      <div class="font-mono text-5xl font-black tracking-[.25em] text-emerald-600 dark:text-emerald-400" id="shareCode"></div>
+      <canvas id="shareQR" class="mx-auto rounded-xl bg-white p-2"></canvas>
+      <div id="shareUrl" class="text-xs break-all text-slate-500 dark:text-slate-400"></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost flex-1" data-act="copy-link"><i class="ph-bold ph-copy"></i>複製連結</button>
+        <button class="btn btn-primary flex-1" data-act="native-share"><i class="ph-bold ph-share-network"></i>分享</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════ 大字卡 ═════════════ -->
+  <div id="stageModal" class="modal fixed inset-0 z-[60] bg-slate-950 text-white flex-col items-center justify-center p-6 text-center">
+    <button class="absolute top-4 right-4 btn !bg-white/10 !text-white" data-act="close-stage"><i class="ph-bold ph-x"></i>關閉</button>
+    <div id="sClock" class="absolute top-5 left-5 font-mono text-xl text-white/60 tnum"></div>
+    <div id="sIndex" class="text-emerald-400 font-bold text-xl sm:text-2xl"></div>
+    <div id="sTitle" class="text-4xl sm:text-6xl font-black mt-2 max-w-5xl leading-tight"></div>
+    <div id="sOwner" class="text-xl sm:text-2xl text-white/70 mt-3"></div>
+    <div id="sCountdown" class="font-mono font-black tnum leading-none mt-6" style="font-size:min(30vw,38vh)">--:--</div>
+    <div id="sNext" class="text-lg sm:text-2xl text-white/60 mt-4"></div>
+  </div>
+
+  <!-- 廣播 / 提醒橫幅 -->
+  <div id="banner" class="hidden fixed top-0 inset-x-0 z-[70] p-3">
+    <div id="bannerBox" class="slide-down max-w-xl mx-auto rounded-2xl shadow-2xl p-4 flex items-start gap-3 cursor-pointer">
+      <i id="bannerIcon" class="ph-fill ph-megaphone text-3xl"></i>
+      <div class="flex-1 min-w-0">
+        <div id="bannerText" class="text-xl font-black leading-snug break-words"></div>
+        <div id="bannerMeta" class="text-xs opacity-80 mt-1"></div>
+      </div>
+      <i class="ph-bold ph-x opacity-70"></i>
+    </div>
+  </div>
+
+  <div id="toast" class="fixed bottom-28 inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-4"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

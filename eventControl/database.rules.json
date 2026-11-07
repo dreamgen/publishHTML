@@ -1,0 +1,19 @@
+{
+  "rules": {
+    "artifacts": {
+      "eventControl": {
+        "public": {
+          "data": {
+            "events": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "$code.matches(/^[A-Z0-9]{4}$/)"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

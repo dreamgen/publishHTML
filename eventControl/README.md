@@ -1,0 +1,69 @@
+# 活動控場 (eventControl)
+
+匯入或輸入活動流程表後，產生一組 4 碼活動代碼，同場夥伴掃 QR Code／點連結加入，就能**一起看同一份即時倒數、一起調整時間**，並在輪到自己負責的單元前收到提醒。
+
+源自單機版「時間配置・即時控場系統」，改為多人即時同步的 PWA。
+
+## 功能
+
+- **流程匯入**
+  - 貼上文字：每行一個單元，自動抓 `09:00-09:10` 起迄時間、`7分鐘`／`15'`／`10min`、`負責：xxx` 或結尾「甲、乙」名單、`（括號說明）`、`4 回合`
+  - 從 Excel／Google 試算表複製表格直接貼上（Tab 分隔，自動辨識欄名或依內容推斷）
+  - 檔案：`.xlsx`（ExcelJS，需要時才載入）、`.csv`、`.json`；可下載 CSV 範本
+  - 請 AI 整理：一鍵複製提示詞，到 Claude／ChatGPT 貼上流程，把回覆的 JSON 貼回來
+  - 匯入前可預覽並直接修改名稱、負責人、分鐘；可「取代」或「接在後面」
+- **即時控場（所有知道代碼的人都能操作）**
+  - 開始時間（現在開始／指定時刻）、全體提前 1／延後 1／延後 5 分鐘、暫停／繼續、下一單元、從任一單元開始
+  - 每個單元 ±1 分鐘、編輯／新增／排序／刪除
+  - 進行中單元自動高亮、最後 1 分鐘轉紅、多回合單元自動細分回合時間
+  - 調整與廣播都會留下「誰在幾點做了什麼」紀錄
+  - 時間以 Firebase 伺服器時間校正，各手機時鐘不準也一致
+- **提醒**
+  - 加入時選「我是誰」（從流程表的負責人挑），自己負責的單元在開始前 N 分鐘（1/2/3/5/10）、開始時、結束前 1 分鐘、時間到時跳出橫幅＋提示音＋震動
+  - 控場人員可開「每個單元結束前 1 分鐘都提醒」
+  - 一鍵廣播：「請加快」「再 2 分鐘」等快捷訊息或自訂文字，所有人手機立刻跳出
+  - 可開系統通知（頁面在背景時）、螢幕保持恆亮（Wake Lock）
+- **大字卡**：全螢幕舞台倒數，適合投影或放在講台給講者看
+- 匯出 JSON（可再匯入或丟給 AI 修改）／CSV（含計算後起迄時間）
+
+## 資料與同步
+
+Firebase 專案 `pwa-boardgame`，Realtime Database 路徑：
+
+```
+artifacts/eventControl/public/data/events/{CODE}
+  title, plannedStart, createdAt, updatedAt
+  clock: { start, pausedAt }        // 所有起迄時間皆由 start + 各單元分鐘數推算
+  items: [{ id, title, subtitle, owner, duration, rounds }]
+  broadcast: { id, text, by, at }
+  log/{pushId}: { at, by, text }
+  presence/{uid}: { name, me, at }  // onDisconnect 自動移除
+```
+
+延後、暫停、跳單元都用 transaction 寫 `clock`，多人同時按也不會互相覆蓋（兩人各按 +1 會延後 2 分鐘）。
+
+個人設定（暱稱、我是誰、提醒偏好）只存在本機 localStorage。
+
+### 首次部署：Firebase 規則
+
+在 Firebase 主控台 → `pwa-boardgame` → Realtime Database → 規則，把 [`database.rules.json`](database.rules.json) 裡 `artifacts/eventControl` 這一段**合併**進現有規則（不要整份覆蓋，否則其他 PWA 的規則會被蓋掉）。
+
+## 檔案
+
+| 檔案 | 說明 |
+|---|---|
+| `index.html` | 介面（Tailwind CDN + Phosphor Icons） |
+| `app.js` | 主程式：後端介接（Firebase／本機測試）、計時計算、提醒、渲染、事件 |
+| `modules/flowParser.js` | 流程表解析（純函式，可用 node 測試） |
+| `vendor/qrious.min.js` | QR Code（同 undercoverGame） |
+| `vendor/exceljs.min.js` | 讀 xlsx（同 staffSurvey，按需載入） |
+| `sw.js` | 離線快取 |
+
+## 本機測試
+
+網址加 `?mock=1` 改用本機記憶體後端（不連 Firebase），同一瀏覽器開兩個分頁會透過 BroadcastChannel 互相同步，可模擬多人控場。
+
+## 注意
+
+- 提醒在頁面開著時運作（可切到別的 App，不要關掉分頁）；iPhone 不支援震動，請開提示音。瀏覽器需要先點一下畫面才能出聲，進入活動後隨便點一下即可。
+- 任何知道代碼的人都能改流程，活動結束後可在「設定 → 刪除整場活動」清除。
