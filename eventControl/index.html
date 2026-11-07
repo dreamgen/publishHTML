@@ -64,6 +64,7 @@
         <h1 class="text-xl font-bold">活動控場</h1>
         <p class="text-xs text-slate-500 dark:text-slate-400">匯入流程表，和同場夥伴一起看時間、調時間、收提醒</p>
       </div>
+      <button id="installBtn" class="btn btn-primary !py-2 !px-3 hidden" title="安裝成 App"><i class="ph-bold ph-download-simple"></i><span class="text-xs">安裝</span></button>
       <button class="btn btn-ghost !p-2.5" data-act="theme" title="深淺色"><i class="ph-bold ph-moon text-lg"></i></button>
     </header>
 
@@ -88,6 +89,7 @@
     </section>
 
     <p id="authStatus" class="text-center text-xs text-slate-400">連線中…</p>
+    <p id="installHint" class="text-center text-xs text-slate-400 hidden"></p>
   </main>
 
   <!-- ═════════════ 活動頁 ═════════════ -->
@@ -396,6 +398,39 @@
 
   <div id="toast" class="fixed bottom-28 inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-4"></div>
 
+  <script>
+    // PWA 安裝：先註冊 SW（不依賴 app.js 是否載入成功），再處理安裝按鈕
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(function (e) { console.warn('SW 註冊失敗', e); });
+    }
+    (function () {
+      var deferred = null;
+      var btn = document.getElementById('installBtn');
+      var hint = document.getElementById('installHint');
+      var standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+      var ua = navigator.userAgent;
+      var isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var isAndroid = /Android/.test(ua);
+      var inApp = /Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua);
+      if (standalone) return;
+      function showHint(t) { hint.textContent = t; hint.classList.remove('hidden'); }
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault(); deferred = e; btn.classList.remove('hidden'); hint.classList.add('hidden');
+      });
+      window.addEventListener('appinstalled', function () { deferred = null; btn.classList.add('hidden'); showHint('已安裝，可從主畫面開啟「活動控場」'); });
+      btn.addEventListener('click', function () {
+        if (!deferred) return;
+        deferred.prompt();
+        deferred.userChoice.finally(function () { deferred = null; btn.classList.add('hidden'); });
+      });
+      setTimeout(function () {
+        if (deferred) return;
+        if (inApp) showHint('目前在 LINE／FB 內建瀏覽器，無法安裝。請按右上角選單 →「以預設瀏覽器開啟」改用 Chrome／Safari。');
+        else if (isIOS) showHint('iPhone 安裝：用 Safari 開啟 → 分享按鈕 →「加入主畫面」');
+        else if (isAndroid) showHint('Android 安裝：Chrome 右上角 ⋮ →「加到主畫面」→ 選「安裝」');
+      }, 4000);
+    })();
+  </script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

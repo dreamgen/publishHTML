@@ -1,12 +1,12 @@
 /**
  * Service Worker for 活動控場 (eventControl) PWA
  *
- * - 安裝時預先快取 App 外殼（含 QRious、ExcelJS）
+ * - 安裝時預先快取 App 外殼（含 QRious；ExcelJS 用到時才快取）
  * - 本站檔案：Stale-While-Revalidate
  * - CDN（Tailwind、Phosphor Icons、Firebase SDK、Google Fonts）：執行時快取，離線時仍可開啟介面
  * - Firebase 即時資料走 WebSocket，不經過 SW
  */
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_NAME = `eventControl-${SW_VERSION}`;
 const CDN_CACHE = 'eventControl-cdn-v1';
 const ASSETS = [
@@ -15,7 +15,6 @@ const ASSETS = [
   './app.js',
   './modules/flowParser.js',
   './vendor/qrious.min.js',
-  './vendor/exceljs.min.js',
   './manifest.webmanifest',
   './icons/eventControl-192.png',
   './icons/eventControl-512.png',
@@ -24,7 +23,13 @@ const ASSETS = [
 const CDN_HOSTS = ['cdn.tailwindcss.com', 'unpkg.com', 'www.gstatic.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // 逐檔快取、單檔失敗不讓整個安裝失敗（手機網路不穩時 addAll 一失敗就裝不起來，Chrome 也就不提供「安裝」）
+  // ExcelJS（約 1MB）不預載，第一次匯入 xlsx 時再由 fetch handler 快取
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((c) => Promise.allSettled(ASSETS.map((u) => c.add(new Request(u, { cache: 'reload' })))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {

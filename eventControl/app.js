@@ -1003,6 +1003,4 @@ setInterval(tick, 250);
   }
 })();
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
-}
+// Service Worker 註冊移到 index.html 內嵌腳本，app.js 載入失敗也不影響安裝
