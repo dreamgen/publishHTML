@@ -4,7 +4,7 @@ import { QR } from './modules/rules.js';
 import { runUnmount } from './modules/nav.js';
 
 const app = document.getElementById('app');
-export const APP_VERSION = 'v21';
+export const APP_VERSION = 'v22';
 window.__UG_VERSION = APP_VERSION;
 
 function home() {

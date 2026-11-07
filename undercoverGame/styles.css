@@ -277,3 +277,6 @@ body.player-theme{background:#171614;color:#F1ECE2}
 .role-cell.good{background:#E3EEEC;border-color:#BFD9D5;color:#164744}
 .role-cell.sabotage{background:#A3401A;border-color:#A3401A;color:#fff}
 .role-cell.disrupt{background:#F6E2B8;border-color:#E9C985;color:#6B4400}
+/* 可收合區塊標題 */
+.collapse-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;min-height:44px;padding:0;border:0;background:transparent;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.collapse-caret{font-size:16px;width:16px;color:var(--muted)}

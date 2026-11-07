@@ -16,6 +16,7 @@ import { roleTone } from './rules.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
+const LS_PP = 'ug.dash.playerPanel';
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* */ } };
 
@@ -77,6 +78,7 @@ function dashboard(app, S) {
   const editSt = { draft: null }; // 編輯模式草稿
   const handSt = {}; // 自動抽角色：各組發卡面板狀態
   const checkSt = { cur: null, set: 'A' }; // 核對信封
+  let playerPanelOpen = lsGet(LS_PP) === '1'; // 玩家版區塊：預設收合，記住這台電腦上次的選擇
   let lastTimeUp = false;
   let lock = null;
   wakeLock().then((l) => { lock = l; });
@@ -293,8 +295,24 @@ function dashboard(app, S) {
         })),
         h('span', { class: 'muted tiny' }, '綠底＝已在手機開啟；點座位可重設手機綁定。只顯示是否開啟，不顯示角色。'));
     };
+    // 預設收合：只顯示標題與狀態摘要，有需要再展開
+    const openedAll = gs.reduce((n, g) => { const seats = S.seats(g), pl = S.live(g).players || {}; return n + Object.keys(seats).filter((x) => pl[seats[x]]).length; }, 0);
+    const sizeAll = gs.reduce((n, g) => n + S.groupCfg(g).size, 0);
+    const head = h('button', {
+      class: 'collapse-head', type: 'button', 'aria-expanded': String(playerPanelOpen),
+      onclick: () => { playerPanelOpen = !playerPanelOpen; lsSet(LS_PP, playerPanelOpen ? '1' : null); render(); },
+    },
+    h('span', { class: 'collapse-caret', 'aria-hidden': 'true' }, playerPanelOpen ? '▾' : '▸'),
+    h('h2', {}, '玩家版：在手機上查看自己的角色'),
+    h('span', { class: 'row', style: { gap: '6px', marginLeft: 'auto' } },
+      gs.some((g) => !S.isAuto(g)) ? h('span', { class: 'chip ' + (pc.open ? 'ok' : '') }, pc.open ? '已開放查看' : '未開放查看') : null,
+      h('span', { class: 'chip' }, `手機已開啟 ${openedAll}/${sizeAll}`),
+      pc.revealed ? h('span', { class: 'chip bad' }, '已揭牌') : null,
+      h('span', { class: 'muted tiny' }, playerPanelOpen ? '點此收合' : '點此展開')));
+    if (!playerPanelOpen) return h('section', { class: 'card' }, head);
     return h('section', { class: 'card' },
-      h('div', { class: 'row between' }, h('h2', {}, '玩家版：在手機上查看自己的角色'),
+      head,
+      h('div', { class: 'row end' },
         h('div', { class: 'row' },
           gs.some((g) => !S.isAuto(g)) ? h('button', { class: 'btn ' + (pc.open ? 'primary' : ''), onclick: () => S.patch({ 'player/open': !pc.open }) }, pc.open ? '已開放・按此關閉' : '開放玩家查看') : null,
           h('button', {

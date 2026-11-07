@@ -197,6 +197,9 @@ if (L('sen').leave !== 23 || L('car').leave !== 2 || L('rich').leave !== 0) thro
 step('第 1 組成功、扣除正確');
 
 // 玩家版：開放 → 玩家 A 掃有錢人信封 → 按住看角色；玩家 B 用另一支手機掃同一信封被擋
+// 玩家版區塊預設收合，點標題展開
+if (await dash.getByRole('button', { name: '開放玩家查看' }).count()) throw new Error('玩家版區塊應預設收合');
+await dash.getByRole('button', { name: /玩家版：在手機上查看自己的角色/ }).click();
 await dash.getByRole('button', { name: '開放玩家查看' }).click();
 const pctxA = await mkCtx({ width: 390, height: 844 });
 const pA = await open(`?player=${ev}`, null, pctxA);
