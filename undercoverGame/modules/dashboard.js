@@ -11,6 +11,7 @@ import { editTab } from './editor.js';
 import { noticeBanner } from './notice.js';
 import { voteBox } from './vote.js';
 import { handPanel } from './hand.js';
+import { checkTab } from './qrcheck.js';
 import { setUnmount } from './nav.js';
 
 const LS_EV = 'ug.dash.ev';
@@ -73,6 +74,7 @@ function dashboard(app, S) {
   let form = null; // 梯次設定表單暫存
   const editSt = { draft: null }; // 編輯模式草稿
   const handSt = {}; // 自動抽角色：各組發卡面板狀態
+  const checkSt = { cur: null, set: 'A' }; // 核對信封
   let lastTimeUp = false;
   let lock = null;
   wakeLock().then((l) => { lock = l; });
@@ -105,10 +107,10 @@ function dashboard(app, S) {
           h('a', { class: 'btn', href: './guide.html', target: '_blank', rel: 'noopener' }, '操作說明'),
           h('button', { class: 'btn', onclick: async () => { if (await confirmBox('切換活動', '回到活動選擇畫面（資料仍保留在雲端）。')) { lsSet(LS_EV, null); location.hash = '#/'; } } }, '切換活動'))),
       h('nav', { class: 'row', 'aria-label': '儀表板分頁' },
-        ...[['prep', '活動前準備'], ['batch', '梯次與組別'], ['control', '回合控制'], ['edit', '編輯模式']].map(([k, label]) =>
+        ...[['prep', '活動前準備'], ['batch', '梯次與組別'], ['control', '回合控制'], ['check', '核對信封'], ['edit', '編輯模式']].map(([k, label]) =>
           h('button', { class: 'btn' + (k === 'edit' && tab !== 'edit' ? ' soft-bad' : ''), 'aria-pressed': String(tab === k), onclick: () => { if (tab === 'edit' && k !== 'edit') editSt.draft = null; tab = k; if (k === 'batch') initForm(); render(); } }, label))),
       noticeBanner(S, 'dash', (n) => n.staff || [], { onSeen: () => render() }),
-      tab === 'prep' ? prepTab() : tab === 'batch' ? batchTab() : tab === 'edit' ? editTab(S, editSt, () => { if (!editSt.draft && tab === 'edit') tab = 'control'; render(); }) : controlTab(c));
+      tab === 'prep' ? prepTab() : tab === 'batch' ? batchTab() : tab === 'check' ? checkTab(S, checkSt, render) : tab === 'edit' ? editTab(S, editSt, () => { if (!editSt.draft && tab === 'edit') tab = 'control'; render(); }) : controlTab(c));
     app.replaceChildren(root);
   };
 
@@ -123,6 +125,7 @@ function dashboard(app, S) {
         h('div', { class: 'row' },
           h('a', { class: 'btn dark', href: '#/print/labels' }, iconEl('print'), '列印貼紙（A、B 套）'),
           h('a', { class: 'btn', href: '#/print/map' }, iconEl('print'), '列印對照表（A、B 套）')),
+        h('button', { class: 'btn', onclick: () => { tab = 'check'; render(); } }, '裝填後：掃信封核對內容'),
         h('div', { class: 'note bad' }, '更新 QR 碼會重新配對所有代號，已印的貼紙與對照表全部作廢。只在活動前使用。'),
         h('button', {
           class: 'btn soft-bad', onclick: async () => {

@@ -102,6 +102,30 @@ step('第 1 組 ' + JSON.stringify(rolesOf(batch.groups[1])) + '・抽法 ' + ba
 
 // 3. 兩支手機加入、綁定（用手動輸入代替相機）
 const codeOf = (set, role) => Object.keys(sets[set]).find((c) => sets[set][c] === role);
+
+// 核對信封：任何時候都能掃信封確認應裝的角色（梯次剛建立、尚未綁定時）
+await dash.getByRole('button', { name: '核對信封' }).click();
+await dash.getByRole('button', { name: '掃信封', exact: true }).click();
+await dash.fill('.scan input', `UG:E:A:${codeOf('A', 'sel')}:v${ver}`); await dash.press('.scan input', 'Enter');
+await dash.locator('.check-role').getByText('虛偽大人・圖謀私利').waitFor();
+await dash.getByText('本梯次未使用').waitFor();
+await shot(dash, '40-check');
+await dash.getByRole('button', { name: '放錯了' }).click();
+await dash.getByText('上次核對：放錯了').waitFor();
+await dash.getByRole('button', { name: '掃另一個' }).click();
+await dash.fill('.scan input', codeOf('B', 'nC').slice(2)); await dash.press('.scan input', 'Enter'); // 只輸入 4 位數字，自動找到 B 套
+await dash.locator('.check-role').getByText('真誠大人・一般大人 C').waitFor();
+await dash.getByRole('button', { name: '正確，掃下一個' }).click();
+await dash.locator('.scan').waitFor();
+await dash.fill('.scan input', `UG:E:A:${codeOf('A', 'rich')}:v${ver + 5}`); await dash.press('.scan input', 'Enter');
+await dash.getByText(/舊版貼紙，已作廢/).waitFor();
+if (await dash.getByRole('button', { name: '正確，掃下一個' }).count()) throw new Error('舊版貼紙不應顯示角色與正確按鈕');
+const qc = db.artifacts.undercoverGame.public.data.events[ev].qrcheck[`v${ver}`];
+if (qc.A[codeOf('A', 'sel')].ok !== false || qc.B[codeOf('B', 'nC')].ok !== true) throw new Error('核對紀錄不對 ' + JSON.stringify(qc));
+await dash.getByRole('button', { name: /^B 套 1\/13/ }).click();
+await shot(dash, '41-check-list');
+step('核對信封：掃 QR／輸入代號顯示應裝角色、紀錄正確與放錯、舊版貼紙警告、核對清單');
+await dash.getByRole('button', { name: '回合控制' }).click();
 const phones = [];
 for (const g of [1, 2]) {
   const ph = await open(`?join=${ev}.1.${g}`, { width: 390, height: 844 });
