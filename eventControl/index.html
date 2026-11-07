@@ -69,6 +69,8 @@
     .prep-chk { width: 32px; height: 32px; flex-shrink: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: .875rem; border: 2px solid rgb(203 213 225); color: rgb(71 85 105); }
     .dark .prep-chk { border-color: rgb(71 85 105); color: rgb(203 213 225); }
     .prep-chk.ok { background: rgb(22 163 74); border-color: rgb(22 163 74); color: #fff; }
+    .dock-btn.dock-on { background: rgb(254 243 199); border-color: rgb(251 191 36); color: rgb(146 64 14); }
+    .dark .dock-btn.dock-on { background: rgba(245,158,11,.18); border-color: rgba(245,158,11,.55); color: rgb(253 230 138); }
     .safe-bottom { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
   </style>
 </head>
@@ -358,6 +360,7 @@
       <div class="max-w-2xl mx-auto px-4 flex gap-2.5">
         <button class="dock-btn" data-act="tab" data-tab="people" title="廣播" aria-label="廣播與夥伴"><i class="ph-bold ph-megaphone text-2xl"></i></button>
         <button class="dock-btn" data-act="stage" title="大字卡" aria-label="大字卡"><i class="ph-bold ph-presentation-chart text-2xl"></i></button>
+        <button id="wakeBtn" class="dock-btn flex-col gap-1" data-act="wake-toggle" aria-pressed="false" aria-label="螢幕保持恆亮" title="點一下讓螢幕保持恆亮"><i class="ph-bold ph-sun-dim text-2xl"></i><span class="text-[10px] font-medium leading-none">恆亮</span></button>
         <button class="flex-1 h-[60px] rounded-[18px] bg-emerald-600 hover:bg-emerald-700 active:scale-[.98] text-white text-[17px] font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition" data-act="control"><i class="ph-bold ph-sliders-horizontal text-xl"></i>控場</button>
       </div>
     </div>

@@ -355,12 +355,45 @@ function checkReminders(r) {
 
 async function setWake(on) {
   try {
-    if (on && 'wakeLock' in navigator) {
-      S.wakeLock = await navigator.wakeLock.request('screen');
-    } else if (!on && S.wakeLock) {
-      await S.wakeLock.release(); S.wakeLock = null;
+    if (on) {
+      if (!('wakeLock' in navigator)) { toast('這個瀏覽器不支援保持恆亮，請到手機設定調長「自動鎖定」時間'); return false; }
+      if (!S.wakeLock || S.wakeLock.released) {
+        S.wakeLock = await navigator.wakeLock.request('screen');
+        S.wakeLock.addEventListener('release', () => {
+          updateWakeUI();
+          // 被系統釋放（例如省電模式）但頁面還在前景時，再要一次
+          if (prefs.wake && S.code && !document.hidden) setTimeout(() => prefs.wake && !document.hidden && setWake(true), 1000);
+        });
+      }
+    } else if (S.wakeLock) {
+      const l = S.wakeLock; S.wakeLock = null;
+      await l.release().catch(() => {});
     }
-  } catch (e) { if (on) toast('此裝置無法保持恆亮'); }
+    return true;
+  } catch (e) {
+    if (on) toast('此裝置目前無法保持恆亮（可能是省電模式）');
+    return false;
+  } finally { updateWakeUI(); }
+}
+const wakeOn = () => !!(S.wakeLock && !S.wakeLock.released);
+function updateWakeUI() {
+  const b = document.getElementById('wakeBtn');
+  if (!b) return;
+  const on = wakeOn();
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? '螢幕保持恆亮中（點一下關閉）' : '點一下讓螢幕保持恆亮';
+  b.classList.toggle('dock-on', on);
+  b.innerHTML = on ? '<i class="ph-fill ph-sun text-2xl"></i><span class="text-[10px] font-bold leading-none">恆亮中</span>'
+    : '<i class="ph-bold ph-sun-dim text-2xl"></i><span class="text-[10px] font-medium leading-none">恆亮</span>';
+  const cb = document.getElementById('setWake');
+  if (cb) cb.checked = prefs.wake;
+}
+async function toggleWake() {
+  const turnOn = !wakeOn();
+  prefs.wake = turnOn; savePrefs();
+  const ok = await setWake(turnOn);
+  if (turnOn && !ok) { prefs.wake = false; savePrefs(); updateWakeUI(); return; }
+  toast(turnOn ? '螢幕會保持恆亮，不會自動變暗' : '已關閉恆亮，螢幕會依手機設定變暗');
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && prefs.wake && S.code) setWake(true); });
 
@@ -1019,6 +1052,7 @@ document.addEventListener('click', async (e) => {
       case 'back': return S.tab && S.tab !== 'watch' ? setTab('watch') : leaveEvent();
       case 'home': case 'leave': return leaveEvent();
       case 'control': openModal('controlModal'); return tick();
+      case 'wake-toggle': return toggleWake();
       case 'goto-flow': closeModals(); return setTab('flow');
       case 'dur-cur': { const r = compute(); if (r.activeIdx < 0) return; return adjustDur(r.activeIdx, +b.dataset.d); }
       case 'share': return openShare();
