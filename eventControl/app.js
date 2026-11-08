@@ -187,6 +187,15 @@ function dateAt(dateStr, hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
   return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
 }
+/** 比原定開始晚幾分（正）／早幾分（負）；沒有原定時間或差太多（>12 小時）回傳 null */
+function driftMin(r) {
+  const p = plannedAt();
+  if (p == null || r.start == null || !r.started) return null;
+  // 原定時間只到「分」，實際開始取到同一位數再比，按一次 −1／+1 就剛好差 1 分
+  const ms = Math.floor(r.start / 60000) * 60000 - p;
+  if (Math.abs(ms) >= 12 * 3600000) return null;
+  return Math.round(ms / 60000);
+}
 /** 原定開始時刻（plannedStart + plannedDate） */
 const plannedAt = () => (S.ev?.plannedStart ? dateAt(S.ev.plannedDate || '', S.ev.plannedStart) : null);
 /** 不是今天時回傳「明天」「11/9（週一）」等；今天回傳空字串 */
@@ -242,7 +251,10 @@ function log(text) {
 const txClock = (fn) => S.be.tx(S.code, 'clock', (c) => fn(c || { start: null, pausedAt: null }));
 
 async function startNow() {
-  await txClock(() => ({ start: now(), pausedAt: null }));
+  const t = now();
+  await txClock(() => ({ start: t, pausedAt: null }));
+  // 沒有原定時間時，以第一次開始的時刻當作「原定」，之後的延後／提前才有比較基準
+  if (!S.ev?.plannedStart) await S.be.set(S.code, 'plannedStart', fmtHM(t)).catch(() => {});
   log('▶ 活動開始');
 }
 /** dateStr：YYYY-MM-DD，空白＝今天 */
@@ -253,6 +265,7 @@ async function setStartTime(hhmm, dateStr = '') {
   await txClock((c) => ({ start: t, pausedAt: c.pausedAt ? now() : null }));
   // 原定日期跟著更新，「比原定晚／早幾分」才會以同一天比較
   if ((S.ev?.plannedDate || '') !== dateStr) await S.be.set(S.code, 'plannedDate', dateStr || null);
+  if (!S.ev?.plannedStart) await S.be.set(S.code, 'plannedStart', hhmm).catch(() => {});
   log(`設定開始時間 ${fmtWhen(t)}`);
 }
 const startDateVal = () => $('startDate').value || '';
@@ -565,13 +578,18 @@ function renderFocus(r) {
   $('fCdLabel').textContent = cdLabel; $('fCountdown').textContent = cd;
   $('fCountdown').className = 'mt-4 font-mono font-extrabold tnum leading-none tracking-tight ' + (cd.length > 9 ? 'text-[44px] sm:text-[72px] ' : 'text-[84px] sm:text-[104px] ') + (u && warn ? 'text-rose-600 dark:text-rose-400' : c.pausedAt ? 'text-slate-400' : '');
   $('fCountdown').classList.toggle('hidden', cd === '--:--');
-  // 與原定時間的差距（開始時間被延後／提前、暫停後繼續都會反映在 clock.start）
-  let drift = '';
-  if (r.started && S.ev?.plannedStart && r.state !== 'done') {
-    const d = Math.round((r.start - plannedAt()) / 60000);
-    if (Math.abs(d) < 720) drift = d > 0 ? `・全場比原定晚 ${d} 分` : d < 0 ? `・全場比原定早 ${-d} 分` : '・與原定時間一致';
+  // 與原定時間的差距（方案 C）：延後／提前、暫停後繼續都會反映在 clock.start
+  const dm = r.state === 'running' || r.state === 'paused' ? driftMin(r) : null;
+  const dEl = $('fDrift');
+  if (dm == null) dEl.classList.add('hidden');
+  else {
+    const [txt, cls] = dm > 0 ? [`比原定晚 ${dm} 分`, 'bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200']
+      : dm < 0 ? [`比原定早 ${-dm} 分`, 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200']
+        : ['準時', 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'];
+    dEl.textContent = txt;
+    dEl.title = `原定 ${fmtHM(plannedAt())} 開始，實際（含延後、暫停）${fmtHM(r.start)}`;
+    dEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold tnum ' + cls;
   }
-  $('fDrift').textContent = drift;
   $('fBar').style.width = Math.max(0, Math.min(100, bar)) + '%';
   $('fBar').className = 'h-full transition-[width] duration-500 ' + (warn ? 'bg-rose-500' : 'bg-emerald-500');
   // 回合
@@ -599,7 +617,7 @@ function renderFocus(r) {
 
   // 控場面板
   if ($('controlModal').classList.contains('open')) {
-    $('cNow').innerHTML = u ? `目前：${esc(u.title)}・剩 <span class="font-mono font-semibold text-slate-900 dark:text-white tnum">${cd}</span>${c.pausedAt ? '（暫停中）' : ''}`
+    $('cNow').innerHTML = u ? `目前：${esc(u.title)}・剩 <span class="font-mono font-semibold text-slate-900 dark:text-white tnum">${cd}</span>${c.pausedAt ? '（暫停中）' : ''}${dm ? `・${dm > 0 ? '晚' : '早'} ${Math.abs(dm)} 分` : ''}`
       : r.state === 'countdown' ? `${fmtWhen(r.start)} 開始・還有 <span class="font-mono font-semibold tnum">${cd}</span>`
         : r.state === 'done' ? '活動已結束' : r.units.length ? '尚未開始' : '還沒有流程';
     $('cRunBox').classList.toggle('hidden', !r.started);
@@ -717,10 +735,8 @@ function renderDone(r) {
   S.doneSig = sig;
   $('dRange').textContent = r.start != null ? `${fmtWhen(r.start)} – ${fmtHM(r.end)}・共 ${Math.round(r.total / 60000)} 分` : '';
   let drift = '';
-  if (S.ev?.plannedStart && r.start != null) {
-    const d = Math.round((r.start - plannedAt()) / 60000);
-    if (Math.abs(d) < 720) drift = d > 0 ? `比原定時間晚 ${d} 分` : d < 0 ? `比原定時間早 ${-d} 分` : '與原定時間一致';
-  }
+  const d = driftMin(r);
+  if (d != null) drift = d > 0 ? `比原定時間晚 ${d} 分` : d < 0 ? `比原定時間早 ${-d} 分` : '與原定時間一致';
   $('dDrift').textContent = drift;
   $('dCount').textContent = `${r.units.length} 個單元`;
   $('dList').innerHTML = r.units.map((u) => `<div class="flex items-center gap-3 py-2 text-sm"><span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum shrink-0">${fmtHM(u.startMs)}–${fmtHM(u.endMs)}</span><span class="flex-1 truncate">${esc(u.title)}</span><span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">${esc(u.owner || '')}</span></div>`).join('');
