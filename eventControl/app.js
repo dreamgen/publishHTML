@@ -6,6 +6,7 @@
  *    title, plannedStart('HH:MM'), plannedDate('YYYY-MM-DD'，空白＝當天), createdAt, updatedAt
  *    clock: { start: ms|null, pausedAt: ms|null }      ← 所有時間都由 start + 各單元分鐘數推算
  *    items: [{ id, title, subtitle, owner, duration, rounds }]
+ *    plan: [{ id, d }]   ← 開始進行時的流程快照（各單元原定分鐘），用來算每個單元比原定晚／早幾分
  *    broadcast: { id, text, by, at }
  *    log/{pushId}: { at, by, text }
  *    presence/{uid}: { name, me, at }
@@ -196,6 +197,34 @@ function driftMin(r) {
   if (Math.abs(ms) >= 12 * 3600000) return null;
   return Math.round(ms / 60000);
 }
+const planKey = (it, i) => it.id || `#${i}`;
+/** 各單元的原定開始時刻：原定開始＋快照中排在它前面的單元分鐘數 */
+function planStarts() {
+  const p = plannedAt();
+  const plan = Array.isArray(S.ev?.plan) ? S.ev.plan.filter(Boolean) : Object.values(S.ev?.plan || {});
+  if (p == null || !plan.length) return null;
+  const m = new Map();
+  let acc = p;
+  plan.forEach((x) => { m.set(x.id, acc); acc += Math.max(1, Number(x.d) || 1) * 60000; });
+  return m;
+}
+/** 單元比原定晚（正）／早（負）幾分；不在快照裡（開始後才新增）回傳 'new'；無法比較回傳 null */
+function unitDrift(u, ps) {
+  if (!ps || u.startMs == null) return null;
+  const at = ps.get(planKey(u, u.idx));
+  if (at == null) return 'new';
+  return Math.round((Math.floor(u.startMs / 60000) * 60000 - at) / 60000);
+}
+function driftChip(d, ps, u) {
+  if (d == null) return '';
+  const base = 'text-[11px] font-bold px-2 py-0.5 rounded-full tnum ';
+  if (d === 'new') return `<span class="${base}bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" title="開始後才加入的單元">新增</span>`;
+  const at = ps.get(planKey(u, u.idx));
+  const [txt, cls] = d > 0 ? [`晚 ${d} 分`, 'bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200']
+    : d < 0 ? [`早 ${-d} 分`, 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200']
+      : ['準時', 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'];
+  return `<span class="${base}${cls}" title="原定 ${fmtHM(at)} 開始">${txt}</span>`;
+}
 /** 原定開始時刻（plannedStart + plannedDate） */
 const plannedAt = () => (S.ev?.plannedStart ? dateAt(S.ev.plannedDate || '', S.ev.plannedStart) : null);
 /** 不是今天時回傳「明天」「11/9（週一）」等；今天回傳空字串 */
@@ -304,6 +333,8 @@ async function togglePause() {
 async function resetClock() {
   if (!confirm('要回到「準備」階段嗎？（計時會重設為未開始）')) return;
   await S.be.set(S.code, 'clock', { start: null, pausedAt: null });
+  await S.be.set(S.code, 'plan', null).catch(() => {});
+  S.planFor = null;
   log('↺ 計時重設');
 }
 async function adjustDur(i, delta) {
@@ -459,7 +490,8 @@ function ownerChips(owner, big) {
 }
 
 function renderFlow(r) {
-  const sig = JSON.stringify([items(), clock(), S.ev?.plannedStart, meFor(S.code)]);
+  const showDrift = r.state === 'running' || r.state === 'paused' || r.state === 'done';
+  const sig = JSON.stringify([items(), clock(), S.ev?.plannedStart, S.ev?.plannedDate, S.ev?.plan, showDrift, meFor(S.code)]);
   if (sig === S.listSig && r.activeIdx === S.activeIdx) return;
   S.listSig = sig;
   S.activeIdx = r.activeIdx;
@@ -468,7 +500,9 @@ function renderFlow(r) {
     list.innerHTML = `<div class="text-center text-sm text-slate-500 dark:text-slate-400 py-10 bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">還沒有流程。按下方「匯入流程」或「新增單元」。</div>`;
     return;
   }
+  const ps = showDrift ? planStarts() : null;
   list.innerHTML = r.units.map((u) => {
+    const dchip = driftChip(unitDrift(u, ps), ps, u);
     const time = u.startMs != null ? `${fmtHM(u.startMs)}–${fmtHM(u.endMs)}` : `${u.duration} 分`;
     const rounds = u.rounds > 1 ? `<div class="mt-2 flex flex-wrap gap-1" data-rounds="${u.idx}">${Array.from({ length: u.rounds }, (_, k) => `<span data-round="${k}" class="text-[11px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 font-mono">R${k + 1}${u.startMs != null ? ' ' + fmtHM(u.startMs + (u.durMs / u.rounds) * k) : ''}</span>`).join('')}</div>` : '';
     return `<article id="row-${u.idx}" class="row rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-3 sm:p-4 transition">
@@ -479,6 +513,7 @@ function renderFlow(r) {
         <div class="flex-1 min-w-0">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum">${time}</span>
+            ${dchip}
             <span class="row-badge text-[11px] font-bold px-2 py-0.5 rounded-full"></span>
           </div>
           <h3 class="row-title font-bold text-base leading-snug mt-0.5 break-words">${esc(u.title)}</h3>
@@ -520,7 +555,7 @@ function paintRows(r) {
     const [txt, cls] = {
       active: [clock().pausedAt ? '暫停中' : '進行中', 'bg-emerald-500 text-white'],
       done: ['已結束', 'bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400'],
-      up: [u.startMs - r.effNow < 3600000 ? `${Math.ceil((u.startMs - r.effNow) / 60000)} 分後` : '稍後', 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'],
+      up: [u.startMs - r.effNow < 3600000 ? `${Math.ceil((u.startMs - r.effNow) / 60000)} 分後` : '稍後', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
       plan: [mine ? '我負責' : '', mine ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' : ''],
     }[st];
     badge.textContent = mine && st === 'up' ? `我負責・${txt}` : txt;
@@ -664,6 +699,11 @@ function syncBars() {
  * 以最後一次「▶ 活動開始／⏭ 提前開始」紀錄的時刻當原定；找不到就以目前的開始時間當原定（之後的延後／提前才開始累計）
  */
 function ensureBaseline(r) {
+  // 進入「進行」時拍下流程快照（各單元原定分鐘）；舊活動則以目前流程補上
+  if ((r.state === 'running' || r.state === 'paused') && !S.ev?.plan && S.planFor !== S.code) {
+    S.planFor = S.code;
+    S.be.set(S.code, 'plan', items().map((it, i) => ({ id: planKey(it, i), d: Math.max(1, Number(it.duration) || 1) }))).catch(() => {});
+  }
   if (!r.started || S.ev?.plannedStart || S.baselineFor === S.code) return;
   S.baselineFor = S.code;
   const starts = Object.values(S.ev?.log || {}).filter((l) => l && typeof l.at === 'number' && /^(▶ 活動開始|⏭ 提前開始)/.test(l.text || '')).sort((a, b) => b.at - a.at);
@@ -746,7 +786,7 @@ function renderPrep(r) {
 }
 
 function renderDone(r) {
-  const sig = JSON.stringify([S.listSig, r.start]);
+  const sig = JSON.stringify([S.listSig, r.start, S.ev?.plan]);
   if (sig === S.doneSig) return;
   S.doneSig = sig;
   $('dRange').textContent = r.start != null ? `${fmtWhen(r.start)} – ${fmtHM(r.end)}・共 ${Math.round(r.total / 60000)} 分` : '';
@@ -755,7 +795,8 @@ function renderDone(r) {
   if (d != null) drift = d > 0 ? `比原定時間晚 ${d} 分` : d < 0 ? `比原定時間早 ${-d} 分` : '與原定時間一致';
   $('dDrift').textContent = drift;
   $('dCount').textContent = `${r.units.length} 個單元`;
-  $('dList').innerHTML = r.units.map((u) => `<div class="flex items-center gap-3 py-2 text-sm"><span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum shrink-0">${fmtHM(u.startMs)}–${fmtHM(u.endMs)}</span><span class="flex-1 truncate">${esc(u.title)}</span><span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">${esc(u.owner || '')}</span></div>`).join('');
+  const ps = planStarts();
+  $('dList').innerHTML = r.units.map((u) => `<div class="flex items-center gap-3 py-2 text-sm"><span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum shrink-0">${fmtHM(u.startMs)}–${fmtHM(u.endMs)}</span><span class="flex-1 truncate">${esc(u.title)}</span>${driftChip(unitDrift(u, ps), ps, u)}<span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">${esc(u.owner || '')}</span></div>`).join('');
 }
 
 /** 看時間畫面的「今日流程」：已完成收成一行，之後只列 4 個 */
