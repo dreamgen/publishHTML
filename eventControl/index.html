@@ -207,18 +207,15 @@
         <!-- 焦點卡 -->
         <div id="focusCard" class="rounded-[28px] border-2 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 transition-all">
           <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-1.5 flex-wrap min-w-0">
-              <span id="fStatus" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800">未開始</span>
-              <span id="fDrift" class="hidden px-2.5 py-1 rounded-full text-xs font-bold"></span>
-            </div>
-            <span id="fRange" class="font-mono text-sm text-slate-500 dark:text-slate-400 tnum"></span>
+            <span id="fStatus" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800">未開始</span>
+            <span id="fDrift" class="hidden px-3 py-1 rounded-full text-sm font-bold"></span>
           </div>
           <h2 id="fTitle" class="mt-3 text-[28px] sm:text-3xl font-black leading-tight break-words">尚未開始</h2>
           <p id="fSub" class="text-sm text-slate-500 dark:text-slate-400 mt-1 empty:hidden"></p>
           <div id="fOwner" class="mt-2 flex flex-wrap gap-1.5 empty:hidden"></div>
           <div id="fRounds" class="mt-2 flex flex-wrap gap-1.5 empty:hidden"></div>
           <div id="fCountdown" class="mt-4 font-mono font-extrabold text-[84px] sm:text-[104px] tnum leading-none tracking-tight">--:--</div>
-          <div class="mt-1 mb-3 text-sm text-slate-500 dark:text-slate-400"><span id="fCdLabel">剩餘時間</span></div>
+          <div class="mt-1 mb-3 text-sm text-slate-500 dark:text-slate-400"><span id="fCdLabel">剩餘時間</span><span id="fRange" class="font-mono tnum"></span></div>
           <div class="h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
             <div id="fBar" class="h-full bg-emerald-500 transition-[width] duration-500" style="width:0%"></div>
           </div>
@@ -584,6 +581,15 @@
     // PWA 安裝：先註冊 SW（不依賴 app.js 是否載入成功），再處理安裝按鈕
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(function (e) { console.warn('SW 註冊失敗', e); });
+      // 有新版本接手時自動重新整理一次（第一次安裝不算；正在填寫視窗時不打斷，下次開啟再更新）
+      var hadCtrl = !!navigator.serviceWorker.controller, swReloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!hadCtrl || swReloading) return;
+        var busy = Array.prototype.some.call(document.querySelectorAll('.modal.open'), function (m) { return m.id !== 'stageModal' && m.id !== 'controlModal'; });
+        if (busy) return;
+        swReloading = true;
+        location.reload();
+      });
     }
     (function () {
       var deferred = null;

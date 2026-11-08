@@ -573,7 +573,7 @@ function renderFocus(r) {
   }
   card.className = 'rounded-3xl border-2 p-4 sm:p-6 transition-all ' + (u && warn ? 'border-rose-400 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/60 warn-glow' : u ? 'border-emerald-400 bg-white dark:bg-slate-900 dark:border-emerald-500/50 active-glow' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900');
   $('fStatus').textContent = status; $('fStatus').className = 'px-2.5 py-1 rounded-full text-xs font-bold ' + statusCls;
-  $('fRange').textContent = range; $('fTitle').textContent = title; $('fSub').textContent = sub;
+  $('fRange').textContent = range ? `・${range}` : ''; $('fTitle').textContent = title; $('fSub').textContent = sub;
   if ($('fOwner').dataset.v !== owner) { $('fOwner').innerHTML = owner; $('fOwner').dataset.v = owner; }
   $('fCdLabel').textContent = cdLabel; $('fCountdown').textContent = cd;
   $('fCountdown').className = 'mt-4 font-mono font-extrabold tnum leading-none tracking-tight ' + (cd.length > 9 ? 'text-[44px] sm:text-[72px] ' : 'text-[84px] sm:text-[104px] ') + (u && warn ? 'text-rose-600 dark:text-rose-400' : c.pausedAt ? 'text-slate-400' : '');
@@ -588,7 +588,7 @@ function renderFocus(r) {
         : ['準時', 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'];
     dEl.textContent = txt;
     dEl.title = `原定 ${fmtHM(plannedAt())} 開始，實際（含延後、暫停）${fmtHM(r.start)}`;
-    dEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold tnum ' + cls;
+    dEl.className = 'px-3 py-1 rounded-full text-sm font-bold tnum shrink-0 ' + cls;
   }
   $('fBar').style.width = Math.max(0, Math.min(100, bar)) + '%';
   $('fBar').className = 'h-full transition-[width] duration-500 ' + (warn ? 'bg-rose-500' : 'bg-emerald-500');
@@ -659,7 +659,23 @@ function syncBars() {
   $('prepBar').classList.toggle('hidden', !(w && S.phase === 'prep'));
 }
 
+/**
+ * 舊活動（v8 以前建立、沒有原定時間）補上比較基準：
+ * 以最後一次「▶ 活動開始／⏭ 提前開始」紀錄的時刻當原定；找不到就以目前的開始時間當原定（之後的延後／提前才開始累計）
+ */
+function ensureBaseline(r) {
+  if (!r.started || S.ev?.plannedStart || S.baselineFor === S.code) return;
+  S.baselineFor = S.code;
+  const starts = Object.values(S.ev?.log || {}).filter((l) => l && typeof l.at === 'number' && /^(▶ 活動開始|⏭ 提前開始)/.test(l.text || '')).sort((a, b) => b.at - a.at);
+  const t = starts.length ? starts[0].at : r.start;
+  if (t == null) return;
+  const day = ymd(t) === todayYmd() ? null : ymd(t);
+  S.be.set(S.code, 'plannedStart', fmtHM(t)).catch(() => {});
+  if ((S.ev?.plannedDate || null) !== day) S.be.set(S.code, 'plannedDate', day).catch(() => {});
+}
+
 function renderPhase(r) {
+  ensureBaseline(r);
   const ph = phaseOf(r);
   if (ph !== S.phase) {
     S.phase = ph;
