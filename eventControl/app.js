@@ -7,6 +7,7 @@
  *    clock: { start: ms|null, pausedAt: ms|null }      ← 所有時間都由 start + 各單元分鐘數推算
  *    items: [{ id, title, subtitle, owner, duration, rounds }]
  *    plan: [{ id, d }]   ← 開始進行時的流程快照（各單元原定分鐘），用來算每個單元比原定晚／早幾分
+ *    actual/{id}: ms     ← 各單元「實際」開始的時刻（輪到它時記下，之後的延後／提前不會改寫）
  *    broadcast: { id, text, by, at }
  *    log/{pushId}: { at, by, text }
  *    presence/{uid}: { name, me, at }
@@ -189,6 +190,14 @@ function dateAt(dateStr, hhmm) {
   return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
 }
 /** 比原定開始晚幾分（正）／早幾分（負）；沒有原定時間或差太多（>12 小時）回傳 null */
+/** 全場目前落後／超前幾分：本單元照目前進度的結束時刻 vs 原定結束時刻（含單元加減分鐘）；沒有快照時退回比較開始時間 */
+function scheduleDrift(r) {
+  const ps = planStarts();
+  const u = r.activeIdx >= 0 ? r.units[r.activeIdx] : null;
+  const key = u && planKey(u, u.idx);
+  if (ps && u && ps.has(key)) return Math.round((minFloor(u.endMs) - (ps.get(key) + ps.dur.get(key) * 60000)) / 60000);
+  return driftMin(r);
+}
 function driftMin(r) {
   const p = plannedAt();
   if (p == null || r.start == null || !r.started) return null;
@@ -197,28 +206,63 @@ function driftMin(r) {
   if (Math.abs(ms) >= 12 * 3600000) return null;
   return Math.round(ms / 60000);
 }
-const planKey = (it, i) => it.id || `#${i}`;
+const planKey = (it, i) => it.id || `i${i}`;
 /** 各單元的原定開始時刻：原定開始＋快照中排在它前面的單元分鐘數 */
 function planStarts() {
   const p = plannedAt();
   const plan = Array.isArray(S.ev?.plan) ? S.ev.plan.filter(Boolean) : Object.values(S.ev?.plan || {});
   if (p == null || !plan.length) return null;
   const m = new Map();
+  m.dur = new Map();
   let acc = p;
-  plan.forEach((x) => { m.set(x.id, acc); acc += Math.max(1, Number(x.d) || 1) * 60000; });
+  plan.forEach((x) => { const d = Math.max(1, Number(x.d) || 1); m.set(x.id, acc); m.dur.set(x.id, d); acc += d * 60000; });
+  m.end = acc;
   return m;
 }
+const actualMap = () => S.ev?.actual || {};
+const minFloor = (ms) => Math.floor(ms / 60000) * 60000;
+/** 單元已經輪過（進行中或已結束） */
+const isPastUnit = (u, r) => r.state === 'done' || (r.activeIdx >= 0 && u.idx <= r.activeIdx) || (r.activeIdx < 0 && r.started && r.effNow >= u.endMs);
+/**
+ * 各單元要顯示的起迄：輪過的單元用「實際」記錄（下一個單元的實際開始＝這個單元的實際結束），
+ * 還沒輪到的用目前進度推算
+ */
+function unitTimes(r) {
+  const act = actualMap();
+  const firstRec = r.units.findIndex((u) => act[planKey(u, u.idx)] != null && isPastUnit(u, r));
+  return r.units.map((u, i) => {
+    if (u.startMs == null) return { s: null, e: null, actual: false };
+    const past = isPastUnit(u, r);
+    const rec = past ? act[planKey(u, u.idx)] : null;
+    let e = u.endMs;
+    const nx = r.units[i + 1];
+    if (past && nx && u.idx !== r.activeIdx) { const nr = act[planKey(nx, nx.idx)]; if (nr != null && isPastUnit(nx, r)) e = nr; }
+    return { s: rec ?? u.startMs, e, actual: rec != null, past, skip: past && rec == null && firstRec >= 0 && i > firstRec };
+  });
+}
+/** 輪到某單元時記下它的實際開始時刻（只記第一次，多支手機同時記也只會留一筆） */
+function recordActual(r) {
+  if (r.activeIdx < 0 || (r.state !== 'running' && r.state !== 'paused')) return;
+  const u = r.units[r.activeIdx];
+  const key = planKey(u, u.idx);
+  if (actualMap()[key] != null || S.recKey === S.code + key) return;
+  S.recKey = S.code + key;
+  S.be.tx(S.code, `actual/${key}`, (v) => (v == null ? u.startMs : undefined)).catch(() => {});
+}
+const clearActual = () => { S.recKey = null; return S.be.set(S.code, 'actual', null).catch(() => {}); };
 /** 單元比原定晚（正）／早（負）幾分；不在快照裡（開始後才新增）回傳 'new'；無法比較回傳 null */
-function unitDrift(u, ps) {
-  if (!ps || u.startMs == null) return null;
+function unitDrift(u, ps, t) {
+  if (!ps || !t || t.s == null) return null;
   const at = ps.get(planKey(u, u.idx));
   if (at == null) return 'new';
-  return Math.round((Math.floor(u.startMs / 60000) * 60000 - at) / 60000);
+  if (t.past && !t.actual) return t.skip ? 'skip' : null; // 前後都有記錄、自己沒有＝被跳過；舊活動沒記錄就不顯示
+  return Math.round((minFloor(t.s) - at) / 60000);
 }
 function driftChip(d, ps, u) {
   if (d == null) return '';
   const base = 'text-[11px] font-bold px-2 py-0.5 rounded-full tnum ';
   if (d === 'new') return `<span class="${base}bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" title="開始後才加入的單元">新增</span>`;
+  if (d === 'skip') return `<span class="${base}bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" title="這個單元被跳過">略過</span>`;
   const at = ps.get(planKey(u, u.idx));
   const [txt, cls] = d > 0 ? [`晚 ${d} 分`, 'bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200']
     : d < 0 ? [`早 ${-d} 分`, 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200']
@@ -294,6 +338,7 @@ async function startNow() {
   // 其他情況（準備階段直接按開始、或從頭重來）：以按下的這一刻當原定，不沿用舊的原定時間
   const keepPlanned = compute().state === 'countdown' && S.ev?.plannedStart;
   await txClock(() => ({ start: t, pausedAt: null }));
+  await clearActual();
   if (keepPlanned) { S.planFor = S.code; await snapshotPlan().catch(() => {}); }
   else await setBaseline(t).catch(() => {});
   log('▶ 活動開始');
@@ -303,6 +348,11 @@ async function rebase() {
   if (!r.started) return toast('活動還沒開始');
   if (!confirm('把目前的進度當作「原定」，所有時間差歸零？')) return;
   await setBaseline(Math.floor(r.start / 60000) * 60000);
+  // 已輪過的單元一律記成新原定的時間（全部歸零為「準時」）
+  const past = {};
+  r.units.forEach((u) => { if (u.idx <= r.activeIdx) past[planKey(u, u.idx)] = u.startMs; });
+  S.recKey = null;
+  await S.be.set(S.code, 'actual', Object.keys(past).length ? past : null);
   log('⟲ 時間差歸零（以目前進度為原定）');
   toast('時間差已歸零');
 }
@@ -311,6 +361,7 @@ async function setStartTime(hhmm, dateStr = '') {
   if (!hhmm) return;
   if (dateStr === todayYmd()) dateStr = '';
   const t = dateAt(dateStr, hhmm);
+  if (compute().state !== 'running' && compute().state !== 'paused') await clearActual();
   await txClock((c) => ({ start: t, pausedAt: c.pausedAt ? now() : null }));
   // 原定日期跟著更新，「比原定晚／早幾分」才會以同一天比較
   if ((S.ev?.plannedDate || '') !== dateStr) await S.be.set(S.code, 'plannedDate', dateStr || null);
@@ -355,6 +406,7 @@ async function resetClock() {
   if (!confirm('要回到「準備」階段嗎？（計時會重設為未開始）')) return;
   await S.be.set(S.code, 'clock', { start: null, pausedAt: null });
   await S.be.set(S.code, 'plan', null).catch(() => {});
+  await clearActual();
   S.planFor = null;
   log('↺ 計時重設');
 }
@@ -512,7 +564,7 @@ function ownerChips(owner, big) {
 
 function renderFlow(r) {
   const showDrift = r.state === 'running' || r.state === 'paused' || r.state === 'done';
-  const sig = JSON.stringify([items(), clock(), S.ev?.plannedStart, S.ev?.plannedDate, S.ev?.plan, showDrift, meFor(S.code)]);
+  const sig = JSON.stringify([items(), clock(), S.ev?.plannedStart, S.ev?.plannedDate, S.ev?.plan, S.ev?.actual, r.state, showDrift, meFor(S.code)]);
   if (sig === S.listSig && r.activeIdx === S.activeIdx) return;
   S.listSig = sig;
   S.activeIdx = r.activeIdx;
@@ -522,9 +574,11 @@ function renderFlow(r) {
     return;
   }
   const ps = showDrift ? planStarts() : null;
+  const tm = showDrift ? unitTimes(r) : null;
   list.innerHTML = r.units.map((u) => {
-    const dchip = driftChip(unitDrift(u, ps), ps, u);
-    const time = u.startMs != null ? `${fmtHM(u.startMs)}–${fmtHM(u.endMs)}` : `${u.duration} 分`;
+    const t = tm ? tm[u.idx] : null;
+    const dchip = driftChip(unitDrift(u, ps, t), ps, u);
+    const time = u.startMs == null ? `${u.duration} 分` : t ? `${fmtHM(t.s)}–${fmtHM(t.e)}` : `${fmtHM(u.startMs)}–${fmtHM(u.endMs)}`;
     const rounds = u.rounds > 1 ? `<div class="mt-2 flex flex-wrap gap-1" data-rounds="${u.idx}">${Array.from({ length: u.rounds }, (_, k) => `<span data-round="${k}" class="text-[11px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 font-mono">R${k + 1}${u.startMs != null ? ' ' + fmtHM(u.startMs + (u.durMs / u.rounds) * k) : ''}</span>`).join('')}</div>` : '';
     return `<article id="row-${u.idx}" class="row rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-3 sm:p-4 transition">
       <div class="flex gap-3">
@@ -635,7 +689,7 @@ function renderFocus(r) {
   $('fCountdown').className = 'mt-4 font-mono font-extrabold tnum leading-none tracking-tight ' + (cd.length > 9 ? 'text-[44px] sm:text-[72px] ' : 'text-[84px] sm:text-[104px] ') + (u && warn ? 'text-rose-600 dark:text-rose-400' : c.pausedAt ? 'text-slate-400' : '');
   $('fCountdown').classList.toggle('hidden', cd === '--:--');
   // 與原定時間的差距（方案 C）：延後／提前、暫停後繼續都會反映在 clock.start
-  const dm = r.state === 'running' || r.state === 'paused' ? driftMin(r) : null;
+  const dm = r.state === 'running' || r.state === 'paused' ? scheduleDrift(r) : null;
   const dEl = $('fDrift');
   if (dm == null) dEl.classList.add('hidden');
   else {
@@ -737,6 +791,7 @@ function ensureBaseline(r) {
 
 function renderPhase(r) {
   ensureBaseline(r);
+  recordActual(r);
   const ph = phaseOf(r);
   if (ph !== S.phase) {
     S.phase = ph;
@@ -807,17 +862,19 @@ function renderPrep(r) {
 }
 
 function renderDone(r) {
-  const sig = JSON.stringify([S.listSig, r.start, S.ev?.plan]);
+  const sig = JSON.stringify([S.listSig, r.start, S.ev?.plan, S.ev?.actual]);
   if (sig === S.doneSig) return;
   S.doneSig = sig;
-  $('dRange').textContent = r.start != null ? `${fmtWhen(r.start)} – ${fmtHM(r.end)}・共 ${Math.round(r.total / 60000)} 分` : '';
+  const ps = planStarts();
+  const tm = unitTimes(r);
+  const s0 = tm[0]?.s ?? r.start;
+  $('dRange').textContent = s0 != null ? `${fmtWhen(s0)} – ${fmtHM(r.end)}・共 ${Math.round((r.end - s0) / 60000)} 分` : '';
   let drift = '';
-  const d = driftMin(r);
-  if (d != null) drift = d > 0 ? `比原定時間晚 ${d} 分` : d < 0 ? `比原定時間早 ${-d} 分` : '與原定時間一致';
+  const d = ps ? Math.round((minFloor(r.end) - ps.end) / 60000) : driftMin(r);
+  if (d != null) drift = d > 0 ? `比原定晚 ${d} 分結束` : d < 0 ? `比原定早 ${-d} 分結束` : '與原定時間同時結束';
   $('dDrift').textContent = drift;
   $('dCount').textContent = `${r.units.length} 個單元`;
-  const ps = planStarts();
-  $('dList').innerHTML = r.units.map((u) => `<div class="flex items-center gap-3 py-2 text-sm"><span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum shrink-0">${fmtHM(u.startMs)}–${fmtHM(u.endMs)}</span><span class="flex-1 truncate">${esc(u.title)}</span>${driftChip(unitDrift(u, ps), ps, u)}<span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">${esc(u.owner || '')}</span></div>`).join('');
+  $('dList').innerHTML = r.units.map((u) => `<div class="flex items-center gap-3 py-2 text-sm"><span class="font-mono text-xs text-slate-500 dark:text-slate-400 tnum shrink-0">${fmtHM(tm[u.idx].s)}–${fmtHM(tm[u.idx].e)}</span><span class="flex-1 truncate">${esc(u.title)}</span>${driftChip(unitDrift(u, ps, tm[u.idx]), ps, u)}<span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">${esc(u.owner || '')}</span></div>`).join('');
 }
 
 /** 看時間畫面的「今日流程」：已完成收成一行，之後只列 4 個 */
