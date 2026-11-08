@@ -6,7 +6,7 @@
  * - CDN（Tailwind、Phosphor Icons、Firebase SDK、Google Fonts）：執行時快取，離線時仍可開啟介面
  * - Firebase 即時資料走 WebSocket，不經過 SW
  */
-const SW_VERSION = 'v10';
+const SW_VERSION = 'v11';
 const CACHE_NAME = `eventControl-${SW_VERSION}`;
 const CDN_CACHE = 'eventControl-cdn-v1';
 const ASSETS = [

@@ -279,12 +279,32 @@ function log(text) {
 }
 const txClock = (fn) => S.be.tx(S.code, 'clock', (c) => fn(c || { start: null, pausedAt: null }));
 
+const snapshotPlan = () => S.be.set(S.code, 'plan', items().map((it, i) => ({ id: planKey(it, i), d: Math.max(1, Number(it.duration) || 1) })));
+const dayOrNull = (t) => (ymd(t) === todayYmd() ? null : ymd(t));
+/** 以 t 為「原定開始」：寫入 plannedStart／plannedDate，並重拍流程快照 */
+async function setBaseline(t) {
+  await S.be.set(S.code, 'plannedStart', fmtHM(t));
+  if ((S.ev?.plannedDate || null) !== dayOrNull(t)) await S.be.set(S.code, 'plannedDate', dayOrNull(t));
+  S.planFor = S.code;
+  await snapshotPlan();
+}
 async function startNow() {
   const t = now();
+  // 倒數中按「提前開始」：保留排定的時間當原定（會顯示早 N 分）
+  // 其他情況（準備階段直接按開始、或從頭重來）：以按下的這一刻當原定，不沿用舊的原定時間
+  const keepPlanned = compute().state === 'countdown' && S.ev?.plannedStart;
   await txClock(() => ({ start: t, pausedAt: null }));
-  // 沒有原定時間時，以第一次開始的時刻當作「原定」，之後的延後／提前才有比較基準
-  if (!S.ev?.plannedStart) await S.be.set(S.code, 'plannedStart', fmtHM(t)).catch(() => {});
+  if (keepPlanned) { S.planFor = S.code; await snapshotPlan().catch(() => {}); }
+  else await setBaseline(t).catch(() => {});
   log('▶ 活動開始');
+}
+async function rebase() {
+  const r = compute();
+  if (!r.started) return toast('活動還沒開始');
+  if (!confirm('把目前的進度當作「原定」，所有時間差歸零？')) return;
+  await setBaseline(Math.floor(r.start / 60000) * 60000);
+  log('⟲ 時間差歸零（以目前進度為原定）');
+  toast('時間差已歸零');
 }
 /** dateStr：YYYY-MM-DD，空白＝今天 */
 async function setStartTime(hhmm, dateStr = '') {
@@ -294,7 +314,8 @@ async function setStartTime(hhmm, dateStr = '') {
   await txClock((c) => ({ start: t, pausedAt: c.pausedAt ? now() : null }));
   // 原定日期跟著更新，「比原定晚／早幾分」才會以同一天比較
   if ((S.ev?.plannedDate || '') !== dateStr) await S.be.set(S.code, 'plannedDate', dateStr || null);
-  if (!S.ev?.plannedStart) await S.be.set(S.code, 'plannedStart', hhmm).catch(() => {});
+  // 在準備階段設定的開始時間就是新的原定時間
+  if (S.ev?.plannedStart !== hhmm) await S.be.set(S.code, 'plannedStart', hhmm).catch(() => {});
   log(`設定開始時間 ${fmtWhen(t)}`);
 }
 const startDateVal = () => $('startDate').value || '';
@@ -702,7 +723,7 @@ function ensureBaseline(r) {
   // 進入「進行」時拍下流程快照（各單元原定分鐘）；舊活動則以目前流程補上
   if ((r.state === 'running' || r.state === 'paused') && !S.ev?.plan && S.planFor !== S.code) {
     S.planFor = S.code;
-    S.be.set(S.code, 'plan', items().map((it, i) => ({ id: planKey(it, i), d: Math.max(1, Number(it.duration) || 1) }))).catch(() => {});
+    snapshotPlan().catch(() => {});
   }
   if (!r.started || S.ev?.plannedStart || S.baselineFor === S.code) return;
   S.baselineFor = S.code;
@@ -1174,6 +1195,7 @@ document.addEventListener('click', async (e) => {
       case 'back': return S.tab && S.tab !== 'watch' ? setTab('watch') : leaveEvent();
       case 'home': case 'leave': return leaveEvent();
       case 'control': openModal('controlModal'); return tick();
+      case 'rebase': return rebase();
       case 'wake-toggle': return toggleWake();
       case 'goto-flow': closeModals(); return setTab('flow');
       case 'dur-cur': { const r = compute(); if (r.activeIdx < 0) return; return adjustDur(r.activeIdx, +b.dataset.d); }
