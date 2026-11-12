@@ -1,0 +1,15 @@
+{
+  "_note": "僅供本機測試：這是測試用私鑰，只用來在 test/e2e.mjs 簽發假的 Google ID token；對應公鑰在 .dev.vars 的 DEV_TEST_JWKS。請勿用於任何正式環境。",
+  "kid": "test-key-1",
+  "alg": "RS256",
+  "use": "sig",
+  "kty": "RSA",
+  "n": "qaw0f_ceuF2YtNP6OeGA-JVI-DaVdo0B_cYjRD9XKPyWu_oJg6OwfAYDlkZj0WV34rpsy5P_UImZImC4fb_ysQ10uHl3XI1dAamMaYWuLchLYP6BPKmoTIU81aPsvx_Qf29VfBmSQ1x6eGWLmMCCcv9l209Mf_xppoJ1SJplQ3gT2VM42O9zsPN1FM4w1LbRkagFORgmP5-cTXUpG4DuUl9Qdi_9NZ0PwavMknZPlyZdlyHaqcD1sAMpZ8xUgR0_6jzZvXFKDBdfud57gqBncKbMDloKrVfY8TStQ-K3sWnd33wB4ovL5WePlqWx7VBgQrTl4DpIa9UnwFjYb2wlYw",
+  "e": "AQAB",
+  "d": "A_-ncxaXVj_6b9SJEqEiYXlfMV5T8mnLULhBL4QQoUomoUJ4w-3xJFMd9YYuJwqtox3Cn5-axkKf5cQCxQ_nf82x4QEX04oPVZEx2nDIlJKiWCRXVl8nNLp1HxHQbAarar1sddLCdCzzQ_ActJpg2KX1OBBr3J5NvRtY-T-OQGNDtZCNnoLMLVVOGAtZMpt_08SYapDnbsh0gk6dsbBId3lUSDxpxCfkOPdhSv9aTKHTqb49StTS5wU9SiRQEkTPrIWTgm5VTg1zpy8JtJ-6knQYnM3VBYyY5k2e84nKjbPNeFdXXc7lkD_aZodxNCqp5amZqOqPArLuY8qVCfgZVQ",
+  "p": "4dlnyIWCtHWAmUPS5EXbAeuw1n_CVbE_91AhDSYhsZtPT-FiC7oKWtD2OIsWfZDtTOwVyWCUD9YaaVwf7mEMwXCyjbNmQLcNWsD5R6PnuGoRGUo6FHkYoziXB5I0jyxy7r_BnEc1LszurrZ-s0zkSIbnbmgv7B3BZPVcxgurvC8",
+  "q": "wFLqqZTo3LbE6q0GCFwGFot1XsO5bichW2-syPNNzsfWR22nvNiISOUsNjwkLy2RRxrxtR4Pr-zyZSbW4NlkSjVgMQVYZv_iXwjbxfOIqq-fDV1ej5_23mNAXvm9uTg_FuFFl44zVI5Vd1APK8Z71A3EIZuj8IZxECk3xQ8dGQ0",
+  "dp": "uRlFRcKmbOAglXxQy2W1KM3SEPqEe1bZ5gd2DyDBXJ69UeqWQKYo9mVsZssXk7HDytdyw6izsIb4_oDSarx_h8qljB0MIN3lxAuEQoLC1xGXEfMTxtO4rY0jusDI8s6rI6FlPH_fxouO0wIetTS_o_Fsm8AoBowchHHTpzzJc2E",
+  "dq": "bm8uUDIxhItuh1LTI_mzhT6PJts8nwPZI6f8j2cmRpZ5dIqCxu2PVExEFuBx5qVDxpCyOk4Is_xbM7oZqQMrk3ESyxNGr94_HlL337L3xwsRSZtTsSUpnIlhbSf6yWCC2aCBVYVR9DvG17wg-gH_GMTO2n2EpZiNU7pXS9Bh5Q",
+  "qi": "uuHSZ_VpW8LLzosAlcIiEtG0chBApLFTqaKOtHkgMROSJV6CpayVeBJDOKYO_7vat3JH9YeE2liKYxoOZgPq396k5dFUy32sGltZ42835G7bLEJREd1zvQHO5KuvN5kOB0WvJ5xORbVc9RxpExXKpKOFsGc8Xwn-o1vigECxe7w"
+}

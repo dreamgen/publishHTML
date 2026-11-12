@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>主辦者管理頁</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/base.css">
+<link rel="stylesheet" href="/assets/admin.css">
+<link rel="stylesheet" href="/assets/auth.css">
+</head>
+<body class="app-bg">
+<div id="loading" class="wrap center-msg" role="status">讀取活動資料中…</div>
+
+<div id="error-screen" class="wrap center-msg" hidden>
+  <div class="card err-card" role="alert">
+    <h1 class="h1" id="err-title">無法開啟</h1>
+    <p id="err-body" class="lead"></p>
+    <div id="err-auth" class="ac-err-auth" hidden></div>
+    <div class="row">
+      <a class="btn btn-primary" href="/">回我的活動</a>
+      <button class="btn" id="err-retry" type="button" hidden>重試</button>
+    </div>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="wrap topbar-in topbar-wrap">
+      <a class="icon-link" href="/" aria-label="回到我的活動">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+      </a>
+      <div class="head-title">
+        <div class="muted small">活動照片募集 · 管理</div>
+        <h1 id="ev-title" class="h1"></h1>
+      </div>
+      <div class="head-right">
+        <span id="role-tag" class="tag tag-role" hidden></span>
+        <span id="stage-tag" class="tag"></span>
+        <span id="head-note" class="muted small"></span>
+        <button id="open-toggle" class="pill-toggle" type="button"><span class="dot" aria-hidden="true"></span><span id="open-label"></span></button>
+        <div id="acct" class="acct" hidden></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div id="ro-bar" class="ac-ro ac-bar" hidden></div>
+    <div id="claim-bar" class="note ac-bar" hidden>
+      <span>這個活動還沒有綁定 Google 帳號。</span>
+      <button id="claim-btn" class="btn btn-sm btn-primary" type="button">把這個活動加入我的 Google 帳號</button>
+      <span id="claim-msg" class="form-err" role="alert" hidden></span>
+    </div>
+    <div class="tabs" role="tablist" aria-label="管理分頁" id="tablist">
+      <button type="button" role="tab" id="tab-setup" aria-controls="panel-setup" data-tab="setup">準備中心</button>
+      <button type="button" role="tab" id="tab-progress" aria-controls="panel-progress" data-tab="progress">即時進度</button>
+      <button type="button" role="tab" id="tab-album" aria-controls="panel-album" data-tab="album">相簿與票選</button>
+      <button type="button" role="tab" id="tab-handoff" aria-controls="panel-handoff" data-tab="handoff">交給 MV 製作者</button>
+      <button type="button" role="tab" id="tab-security" aria-controls="panel-security" data-tab="security">安全與保存</button>
+      <button type="button" role="tab" id="tab-members" aria-controls="panel-members" data-tab="members" hidden>共同管理</button>
+    </div>
+  </div>
+
+  <main class="wrap panels">
+    <section id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" tabindex="0" hidden></section>
+    <section id="panel-progress" role="tabpanel" aria-labelledby="tab-progress" tabindex="0" hidden></section>
+    <section id="panel-album" role="tabpanel" aria-labelledby="tab-album" tabindex="0" hidden></section>
+    <section id="panel-handoff" role="tabpanel" aria-labelledby="tab-handoff" tabindex="0" hidden></section>
+    <section id="panel-security" role="tabpanel" aria-labelledby="tab-security" tabindex="0" hidden></section>
+    <section id="panel-members" role="tabpanel" aria-labelledby="tab-members" tabindex="0" hidden></section>
+  </main>
+</div>
+
+<!-- 列印用海報（只在列印時顯示） -->
+<div id="poster" aria-hidden="true"></div>
+
+<dialog id="dlg" class="dlg" aria-labelledby="dlg-title">
+  <form method="dialog" id="dlg-form" class="stack">
+    <h2 id="dlg-title" class="h2"></h2>
+    <p id="dlg-body" class="lead"></p>
+    <label id="dlg-req-wrap" class="field" for="dlg-req" hidden><span id="dlg-req-label"></span>
+      <input id="dlg-req" class="input" type="text" autocomplete="off">
+    </label>
+    <div class="row row-end">
+      <button type="button" class="btn" id="dlg-cancel">取消</button>
+      <button type="submit" class="btn btn-primary" id="dlg-ok" value="ok">確定</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/vendor/qrcode.js"></script>
+<script type="module" src="/assets/admin.js"></script>
+</body>
+</html>

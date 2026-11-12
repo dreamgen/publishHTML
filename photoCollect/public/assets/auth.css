@@ -1,0 +1,71 @@
+/* Google 登入相關樣式（帳號區、分區清單、共同管理、上傳頁登入區）；token 來自 base.css */
+
+/* 頁首帳號區 */
+.acct { margin-left: auto; display: flex; align-items: center; min-height: 44px; }
+.ac-gwrap { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ac-gslot { min-height: 32px; display: flex; align-items: center; }
+.ac-gfail { font-size: 13px; color: var(--c-muted); background: var(--c-bg); border-radius: 999px; padding: 6px 12px; }
+.ac-gerr { font-size: 13px; color: var(--c-danger); max-width: 280px; }
+.ac-user { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ac-name { font-size: 14px; font-weight: 500; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-av { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--c-accent-soft); }
+.ac-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ac-av-init { background: var(--c-accent); color: #fff; font-weight: 700; font-size: 15px; }
+.ac-link { min-height: 44px; padding: 0 6px; border: none; background: none; color: var(--c-accent); font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
+.ac-link:hover { color: var(--c-accent-ink); }
+.ac-link:disabled { color: var(--c-muted); cursor: default; }
+.ac-link:focus-visible { outline: 3px solid #7FC4BD; outline-offset: 2px; }
+
+/* 起點頁：登入提示與三個分區 */
+.ac-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; background: var(--c-accent-faint); border: 1px solid #B9D6D2; border-radius: var(--radius); padding: 12px 14px; font-size: 14px; color: var(--c-accent-ink); }
+.ac-sec { display: flex; flex-direction: column; gap: 10px; }
+.ac-sec-h { display: flex; align-items: baseline; gap: 8px; }
+.ac-sec-h .count { font-size: 13px; color: var(--c-muted); font-weight: 400; }
+.ac-empty { background: var(--c-surface); border: 1px dashed var(--c-line-strong); border-radius: 12px; padding: 14px 18px; font-size: 14px; color: var(--c-muted); }
+.ac-sub { flex: 1 1 220px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.ev-title-off { font-size: 16px; font-weight: 700; color: var(--c-muted); overflow-wrap: anywhere; display: inline-block; }
+.tag-role { background: var(--c-accent-soft); color: var(--c-accent-ink); }
+.tag-viewer { background: var(--c-bg); color: var(--c-ink-2); border: 1px solid var(--c-line); }
+.tag-off { background: var(--c-warn-bg); color: #7A4600; }
+.ac-row-msg { flex-basis: 100%; font-size: 13px; color: var(--c-danger); }
+.ac-row-msg.ok { color: var(--c-accent-ink); }
+.ac-secret-note { font-size: 13px; color: var(--c-accent-ink); background: var(--c-accent-faint); border-radius: var(--radius-sm); padding: 8px 10px; font-weight: 400; }
+
+/* 管理頁：認領列、唯讀提示、共同管理 */
+.ac-bar { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.ac-ro { background: var(--c-bg); border: 1px solid var(--c-line-strong); border-radius: var(--radius); padding: 10px 14px; font-size: 14px; color: var(--c-ink-2); }
+.ac-lock { font-size: 13px; color: var(--c-muted); background: var(--c-bg); border-radius: var(--radius-sm); padding: 8px 12px; }
+.ac-err-auth { display: flex; justify-content: flex-start; }
+.ac-table-wrap { overflow-x: auto; }
+.ac-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+.ac-table th, .ac-table td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--c-track); vertical-align: middle; }
+.ac-table th { font-size: 13px; font-weight: 700; color: var(--c-muted); }
+.ac-table td.c { text-align: center; }
+.ac-table th.c { text-align: center; }
+.ac-table .em { overflow-wrap: anywhere; }
+.ac-table select { min-height: 44px; }
+.ac-add { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; gap: 10px; align-items: end; }
+.ac-perm td:first-child { font-weight: 500; }
+.ac-yes { color: var(--c-accent-ink); font-weight: 700; }
+.ac-no { color: var(--c-muted); }
+.ac-copy-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ac-copy-row .input { flex: 1 1 260px; min-width: 0; }
+
+/* 上傳頁：不顯眼的登入區 */
+.ac-up { border-top: 1px solid var(--c-track); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--c-muted); }
+.ac-up[hidden] { display: none; }
+.ac-up .ac-user { flex-wrap: wrap; }
+.ac-up .ac-name { max-width: none; }
+.ac-up-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+
+#acct-sections { gap: 26px; }
+.brand { white-space: nowrap; }
+@media (max-width: 720px) {
+  .topbar-in { flex-wrap: wrap; }
+  .head-right .acct { margin-left: 0; width: 100%; }
+  .ac-add { grid-template-columns: minmax(0, 1fr); }
+  .ac-name { max-width: 8em; }
+}
+@media (min-width: 721px) {
+  .topbar-in .acct { padding-left: 12px; }
+}

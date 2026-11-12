@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-07T08:46:29.512Z",
-  "count": 18,
+  "generatedAt": "2026-11-12T03:09:12.522Z",
+  "count": 19,
   "apps": [
     {
       "id": "bridgeGame",
@@ -99,6 +99,19 @@
       "categories": [
         "productivity",
         "utilities"
+      ]
+    },
+    {
+      "id": "photoCollect",
+      "name": "活動照片募集",
+      "shortName": "照片募集",
+      "description": "活動照片從手機直接上傳或貼上 Google 相簿／雲端硬碟連結匯入，支援多日活動、輪站課程、小隊統計與 MV Studio 同步下載",
+      "path": "../photoCollect/",
+      "icon": "../photoCollect/public/assets/icon-192.png",
+      "themeColor": "#0E6F6A",
+      "categories": [
+        "utilities",
+        "productivity"
       ]
     },
     {

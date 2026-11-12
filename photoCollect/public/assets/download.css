@@ -1,0 +1,18 @@
+body { background: var(--c-bg); }
+.dl-wrap { max-width: 720px; margin: 0 auto; padding: 0 20px; }
+.dl-head { background: var(--c-accent); color: #fff; padding: 32px 0 28px; }
+.dl-kicker { color: #CDE7E4; }
+.dl-head h1 { font-size: 26px; margin-top: 4px; }
+.dl-lead { margin: 10px 0 0; color: #E6F3F1; line-height: 1.6; }
+.dl-main { display: flex; flex-direction: column; gap: 16px; padding-top: 24px; padding-bottom: 48px; }
+.card h2 { font-size: 18px; margin-bottom: 8px; }
+.card p { margin: 0 0 14px; line-height: 1.6; }
+.dl-preview { margin-top: 12px; }
+.dl-preview summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--c-accent); }
+.dl-pre { white-space: pre-wrap; background: var(--c-bg); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 13px; line-height: 1.7; margin: 0; font-family: var(--font); }
+.dl-meta { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 10px 12px; margin: 0 0 12px; align-items: center; }
+.dl-meta dt { color: var(--c-muted); font-size: 13px; }
+.dl-meta dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.dl-sha { word-break: break-all; font-size: 12px; }
+.dl-steps { margin: 0; padding-left: 20px; line-height: 1.8; }
+@media (max-width: 480px) { .dl-meta { grid-template-columns: 1fr; } }

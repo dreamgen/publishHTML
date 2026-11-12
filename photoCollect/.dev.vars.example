@@ -1,0 +1,9 @@
+CREATE_SECRET=local-dev-secret
+# Google 登入（本機測試用；這裡的值會覆蓋 wrangler.toml [vars]）
+GOOGLE_CLIENT_ID=test-client.apps.googleusercontent.com
+SESSION_SECRET=local-dev-session-secret-0123456789abcdef
+# 免建立密碼即可建立活動的名單（逗號分隔；@網域 只比對該網域本身）：test/e2e.mjs 會用到
+CREATOR_EMAILS=creator@example.com,@corp.example.com
+# 本機測試用 JWK Set（公鑰）；只有 host 為 localhost / 127.0.0.1 的請求才會採用。對應私鑰在 test/fixtures/test-jwk-private.json
+DEV_TEST_JWKS='{"keys":[{"kty":"RSA","kid":"test-key-1","use":"sig","alg":"RS256","n":"qaw0f_ceuF2YtNP6OeGA-JVI-DaVdo0B_cYjRD9XKPyWu_oJg6OwfAYDlkZj0WV34rpsy5P_UImZImC4fb_ysQ10uHl3XI1dAamMaYWuLchLYP6BPKmoTIU81aPsvx_Qf29VfBmSQ1x6eGWLmMCCcv9l209Mf_xppoJ1SJplQ3gT2VM42O9zsPN1FM4w1LbRkagFORgmP5-cTXUpG4DuUl9Qdi_9NZ0PwavMknZPlyZdlyHaqcD1sAMpZ8xUgR0_6jzZvXFKDBdfud57gqBncKbMDloKrVfY8TStQ-K3sWnd33wB4ovL5WePlqWx7VBgQrTl4DpIa9UnwFjYb2wlYw","e":"AQAB"}]}'
+DEV_MODE=1

@@ -297,6 +297,25 @@
 
 ---
 
+### 📸 活動照片募集 (`photoCollect/`)
+
+> 活動現場手機掃碼上傳照片、或貼上 Google 相簿／雲端硬碟共用連結批次匯入，自動依流程表與輪站課程歸類並供 MV Studio 同步下載
+
+**功能：**
+- 免安裝／免登入即可掃碼上傳（支援加到手機主畫面 PWA、離線佇列續傳、自動讀取 EXIF 拍攝時間與 GPS、前端長邊縮圖壓縮省流量）
+- 支援貼上 Google 相簿公開分享連結或 Google 雲端硬碟公開資料夾連結，預覽縮圖並批次匯入至 R2（自動去重與每日額度控管）
+- 支援單日與多日營隊流程表、輪站／分站課程（關卡熱度表與時段自動對應）、小隊與環節照片募集進度統計
+- 內建活動相簿瀏覽（`/album.html`）、「我傳的照片」（`/mine.html`）與主辦者準備中心（`/admin`），支援 Google 帳號登入管理與自訂 LINE/FB 分享預覽卡
+- 後端採用 Cloudflare Worker + R2（`https://mv-photo-collect.ikt-checkin.workers.dev`），每日排程自動清除過期活動照片
+
+**安裝：** 開啟 `/photoCollect/`（自動導向 `https://mv-photo-collect.ikt-checkin.workers.dev/`）或掃描活動專屬 QR Code 後，點選「加入主畫面」即可安裝為獨立 App。
+
+**部署與本機測試：**
+- 部署至 Cloudflare Worker：`cd photoCollect && bash scripts/deploy.sh`
+- 本機開發與端對端測試：先啟動 `npx wrangler dev --local --port 8788`，再執行 `BASE_URL=http://localhost:8788 node test/e2e.mjs`
+
+---
+
 ### 🧭 PWA 總覽 App Hub (`appHub/`)
 
 > 快速搜尋並開啟本專案所有已安裝／可安裝的 PWA 工具，新增工具時清單會自動更新
@@ -374,6 +393,14 @@ publishHTML/
 │   └── icons/
 │       ├── pdfEditor-192.svg
 │       └── pdfEditor-512.svg
+├── photoCollect/                # 活動照片募集（Cloudflare Worker + R2 + PWA）
+│   ├── index.html               # App Hub 入口與自動導頁
+│   ├── manifest.webmanifest     # PWA 設定（指向 Worker 服務）
+│   ├── src/                     # Cloudflare Worker 後端（上傳、相簿匯入、排程清理）
+│   ├── public/                  # 前端靜態頁面（上傳、相簿、準備中心、Service Worker）
+│   ├── scripts/                 # 部署與打包腳本（deploy.sh、build-download.sh）
+│   ├── test/                    # E2E 自動化測試（e2e.mjs）
+│   └── wrangler.toml            # Cloudflare Worker 與 R2 設定
 └── README.md
 ```
 

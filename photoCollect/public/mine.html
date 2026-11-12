@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0E6F6A">
+<title>我上傳的照片</title>
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&amp;display=swap">
+<link rel="stylesheet" href="/assets/base.css">
+<link rel="stylesheet" href="/assets/upload.css">
+<link rel="stylesheet" href="/assets/auth.css">
+<link rel="stylesheet" href="/assets/album.css">
+</head>
+<body>
+<div class="app" id="app">
+  <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
+
+  <!-- 載入中／訊息 -->
+  <section id="view-msg" class="view view-center">
+    <div class="msg-body">
+      <h1 id="msg-title" class="msg-title" tabindex="-1">載入中…</h1>
+      <p id="msg-text" class="msg-text"></p>
+      <a id="msg-back" class="btn" href="/u/" hidden>回到上傳頁</a>
+    </div>
+  </section>
+
+  <!-- 清單 -->
+  <section id="view-list" class="view" hidden>
+    <header class="hero">
+      <div class="hero-top">
+        <a id="back-upload" class="hero-back" href="/u/" aria-label="回到上傳頁">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+        </a>
+        <button type="button" id="sel-toggle" class="hero-pill" aria-pressed="false">選取多張</button>
+      </div>
+      <h1 id="list-h" class="hero-title" tabindex="-1">我上傳的照片</h1>
+      <div id="list-sub" class="hero-sub"></div>
+    </header>
+    <nav id="filters" class="filters" aria-label="依環節篩選"></nav>
+    <main class="list-main">
+      <div id="flag" class="warn flag" role="note" hidden></div>
+      <div id="closed-note" class="note" hidden></div>
+      <div id="grid" class="grid3"></div>
+      <div id="empty" class="empty" hidden></div>
+      <div class="legend">標示說明：<b class="w">待標環節</b> 尚未選環節；<b class="o">相簿 N 票</b> 參與者選它當最佳照片；<b class="x">主辦者已排除</b> 不會進 MV，也不能再修改（仍可刪除）。</div>
+      <section id="acct-sec" class="ac-up" aria-label="Google 帳號（選用）" hidden></section>
+    </main>
+    <footer class="foot">
+      <div id="foot-sel" class="foot-sel" hidden>
+        <div id="sel-count" style="font-size:14px;font-weight:700">已選 0 張</div>
+        <div class="btn-row3">
+          <button type="button" id="batch-groups" class="btn btn-primary">改小隊</button>
+          <button type="button" id="batch-seg" class="btn btn-primary">改環節</button>
+          <button type="button" id="batch-del" class="btn btn-danger">刪除</button>
+        </div>
+        <div id="batch-confirm" class="confirm" role="alertdialog" aria-labelledby="batch-confirm-h" hidden>
+          <div id="batch-confirm-h" class="confirm-h"></div>
+          <div class="small" style="color:var(--c-ink-2)">會從雲端與活動相簿移除，無法復原。</div>
+          <div class="btn-row2">
+            <button type="button" id="batch-del-no" class="btn">取消</button>
+            <button type="button" id="batch-del-yes" class="btn btn-danger-fill">刪除</button>
+          </div>
+        </div>
+      </div>
+      <div id="foot-main" class="foot-row">
+        <a id="album-link" class="btn btn-block btn-flex" href="#" hidden>看活動相簿</a>
+        <a id="more-link" class="btn btn-primary btn-block btn-flex" href="/u/">繼續上傳</a>
+      </div>
+    </footer>
+  </section>
+
+  <!-- 修改（單張或批次） -->
+  <section id="view-edit" class="view" hidden>
+    <header class="topbar">
+      <button type="button" id="edit-back" class="icon-btn" aria-label="返回我上傳的照片">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+      </button>
+      <div class="topbar-title"><h1 id="edit-h" class="topbar-h" tabindex="-1">修改照片</h1></div>
+      <span id="edit-pos" class="small muted"></span>
+    </header>
+    <main class="edit-main">
+      <section id="photo-sec" aria-label="照片" class="sec" style="gap:10px">
+        <div class="preview">
+          <img id="pv-img" alt="">
+          <span id="pv-new" class="badge b-new" hidden>新照片 · 儲存後取代</span>
+          <span id="pv-votes" class="badge" hidden></span>
+        </div>
+        <div id="pv-line" class="file-line"></div>
+        <div class="btn-row2">
+          <button type="button" id="replace-btn" class="btn" style="border:1.5px solid var(--c-accent);color:var(--c-accent);font-weight:700">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"></path></svg><span id="replace-label">更換照片</span></button>
+          <button type="button" id="del-btn" class="btn" style="color:var(--c-danger);font-weight:700">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"></path></svg>刪除</button>
+        </div>
+        <input type="file" id="replace-input" accept="image/*,.heic,.heif" hidden>
+        <div id="replace-note" class="info-soft" role="note" hidden></div>
+        <div id="del-confirm" class="confirm" role="alertdialog" aria-labelledby="del-h" hidden>
+          <div id="del-h" class="confirm-h">確定刪除這張照片？</div>
+          <div class="small" style="color:var(--c-ink-2);line-height:1.6">會從雲端與活動相簿移除，無法復原。若 MV Studio 已下載，下次同步時也會移出。</div>
+          <div class="btn-row2">
+            <button type="button" id="del-no" class="btn">取消</button>
+            <button type="button" id="del-yes" class="btn btn-danger-fill">刪除</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="grp-sec" class="sec" aria-labelledby="e-grp-h">
+        <div class="sec-row"><h2 id="e-grp-h" class="sec-h">照片裡有哪些小隊？</h2><span class="sec-hint">可複選</span></div>
+        <div id="e-groups" class="chips"></div>
+      </section>
+
+      <section id="seg-sec" class="sec" aria-labelledby="e-seg-h">
+        <h2 id="e-seg-h" class="sec-h">活動環節</h2>
+        <div id="e-segs" class="seg-list" role="radiogroup" aria-labelledby="e-seg-h"></div>
+      </section>
+
+      <section id="note-sec" class="sec">
+        <label for="e-note" class="sec-h">備註 <span class="sec-hint" style="font-weight:400">選填，給剪輯的人看</span></label>
+        <textarea id="e-note" class="textarea" rows="3" maxlength="200" placeholder="例如：隊長抱起獎盃那一刻、背景是終點拱門"></textarea>
+      </section>
+    </main>
+    <footer class="foot">
+      <div id="dirty-note" class="foot-note">沒有變更</div>
+      <button type="button" id="save-btn" class="btn btn-primary btn-block" disabled>儲存修改</button>
+    </footer>
+  </section>
+</div>
+<script type="module" src="/assets/mine.js"></script>
+</body>
+</html>

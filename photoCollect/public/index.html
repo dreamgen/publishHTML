@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>我的活動</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/base.css">
+<link rel="stylesheet" href="/assets/admin.css">
+<link rel="stylesheet" href="/assets/auth.css">
+</head>
+<body class="app-bg">
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <div class="logo" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"></rect><circle cx="12" cy="13" r="3.5"></circle><path d="M8 6l1.5-2h5L16 6"></path></svg>
+    </div>
+    <div class="brand">活動照片募集</div>
+    <div id="acct" class="acct" hidden></div>
+  </div>
+</header>
+
+<main class="wrap st-main">
+  <section class="card card-accent st-new" aria-labelledby="new-h">
+    <div>
+      <h1 id="new-h" class="h1">建立新活動</h1>
+      <p class="lead">只要一個名稱就能開始。流程表、小隊、拍攝清單都可以等規劃慢慢成形再補。</p>
+    </div>
+    <form id="create-form" class="stack" novalidate>
+      <label class="field" for="ev-name">活動名稱
+        <input id="ev-name" class="input" type="text" maxlength="60" required placeholder="例如：2027 親子成長營" autocomplete="off">
+      </label>
+      <div class="grid2">
+        <label class="field" for="ev-date">開始日期 <span class="muted small">（還不確定可以先空著）</span>
+          <input id="ev-date" class="input" type="date">
+        </label>
+        <label class="field" for="ev-end">結束日期 <span class="muted small">（單日活動留空）</span>
+          <input id="ev-end" class="input" type="date">
+        </label>
+      </div>
+      <label id="secret-field" class="field" for="ev-secret"><span>建立密碼 <span id="secret-hint" class="muted small">（只存在這個瀏覽器，之後可修改）</span></span>
+        <input id="ev-secret" class="input" type="password" autocomplete="off" required>
+        <span id="secret-note" class="ac-secret-note" hidden>輸入一次後，這個 Google 帳號以後就不用再輸入。</span>
+      </label>
+      <div id="create-free" class="ac-secret-note" hidden>已登入，這個帳號可以直接建立活動，不需要建立密碼。</div>
+      <div id="create-err" class="form-err" role="alert" hidden></div>
+      <button id="create-btn" class="btn btn-primary btn-block" type="submit">建立，進入活動準備</button>
+    </form>
+    <p class="muted small">建立後就有固定的上傳連結與 QR Code，可以先印進活動手冊；在你設定開放時間之前，掃碼只會看到「尚未開放」。</p>
+  </section>
+
+  <section class="st-list" aria-labelledby="list-h">
+    <div id="auth-hint" class="ac-hint" hidden>登入 Google，換電腦也能找到你的活動</div>
+    <div id="acct-sections" class="stack" hidden></div>
+    <h2 id="list-h" class="h2">我的活動</h2>
+    <div id="local-note" class="note">管理連結只存在這個瀏覽器裡，換電腦或清除瀏覽資料就找不回來。請按每筆活動的「複製管理連結」，另外保存到筆記或雲端硬碟。</div>
+    <div id="ev-list" class="stack" aria-live="polite"></div>
+    <form id="open-form" class="card stack" novalidate>
+      <label class="field" for="open-link">用管理連結開啟 <span class="muted small">（貼上完整管理連結，加入上面的清單）</span>
+        <span class="row">
+          <input id="open-link" class="input" type="text" placeholder="https://…/admin#e=ev_…&k=…" autocomplete="off">
+          <button class="btn" type="submit">加入清單</button>
+        </span>
+      </label>
+      <div id="open-err" class="form-err" role="alert" hidden></div>
+    </form>
+  </section>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="/assets/start.js"></script>
+</body>
+</html>

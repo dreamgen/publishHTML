@@ -1,0 +1,16 @@
+{
+  "name": "活動照片募集",
+  "short_name": "照片募集",
+  "description": "活動照片從手機直接上傳或貼上 Google 相簿／雲端硬碟連結匯入，支援多日活動、輪站課程、小隊統計與 MV Studio 同步下載",
+  "lang": "zh-Hant",
+  "start_url": "https://mv-photo-collect.ikt-checkin.workers.dev/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#0E6F6A",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    { "src": "public/assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "public/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "public/assets/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

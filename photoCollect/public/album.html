@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0E6F6A">
+<title>活動相簿</title>
+<!-- 分享預覽用 meta：/a/{code} 由伺服器（HTMLRewriter）依活動設定只改 content -->
+<meta name="description" content="一起來挑選活動中最棒的照片！">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="活動照片募集">
+<meta property="og:title" content="活動相簿">
+<meta property="og:description" content="一起來挑選活動中最棒的照片！">
+<meta property="og:url" content="">
+<meta property="og:image" content="/assets/og-default.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="活動相簿">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&amp;display=swap">
+<link rel="stylesheet" href="/assets/base.css">
+<link rel="stylesheet" href="/assets/upload.css">
+<link rel="stylesheet" href="/assets/auth.css">
+<link rel="stylesheet" href="/assets/album.css">
+</head>
+<body>
+<div class="app" id="app">
+  <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
+
+  <header class="hero">
+    <div class="hero-eyebrow">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+      活動相簿 · 一起挑最佳照片
+    </div>
+    <h1 id="ev-name" class="hero-title" tabindex="-1">活動相簿</h1>
+    <div class="hero-top hero-sub">
+      <span id="ev-sub"></span>
+      <button type="button" id="who-btn" class="hero-chip" hidden></button>
+    </div>
+  </header>
+
+  <!-- 進不去時：載入中、需要登入、需要密碼、相簿已關閉 -->
+  <section id="gate" class="gate">
+    <h2 id="gate-h" class="msg-title" tabindex="-1">載入中…</h2>
+    <p id="gate-text" class="msg-text"></p>
+    <form id="pw-form" class="sec" hidden>
+      <label for="pw" class="sec-h">相簿密碼</label>
+      <input id="pw" class="input input-lg" type="password" autocomplete="off" required>
+      <button type="submit" class="btn btn-primary btn-block">進入相簿</button>
+    </form>
+    <div id="gate-login" hidden></div>
+  </section>
+
+  <section id="nick" class="nick" aria-labelledby="nick-h" hidden>
+    <h2 id="nick-h" class="sec-h" tabindex="-1">先告訴大家你是誰</h2>
+    <label for="nick-in" class="sec-hint">暱稱會和這支手機綁在一起，用來記住你的選擇；主辦者看得到暱稱，其他參與者看不到</label>
+    <form id="nick-form" class="nick-row">
+      <input id="nick-in" class="input input-lg" maxlength="24" placeholder="例如：小林、二小隊媽媽" required>
+      <button type="submit" class="btn btn-primary">開始挑選</button>
+    </form>
+    <div id="nick-login"></div>
+  </section>
+
+  <section id="picks" class="picks" aria-label="我的選擇" hidden>
+    <div class="picks-top"><span>我的最佳照片 <b id="pk-n">0 / 10</b></span><span id="pk-note" class="small muted"></span></div>
+    <div class="bar" role="progressbar" aria-label="已選張數" aria-valuemin="0" id="pk-bar"><span id="pk-fill" style="width:0"></span></div>
+    <span id="pk-own" class="small muted" hidden></span>
+  </section>
+
+  <nav id="tabs" class="filters" aria-label="依環節篩選" hidden></nav>
+
+  <main id="main" class="list-main" hidden>
+    <div class="sortbar">
+      <span id="count-line"></span>
+      <button type="button" id="sort-btn" class="link-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"></path></svg><span id="sort-label">依拍攝時間</span></button>
+    </div>
+    <div id="closed-note" class="note" hidden></div>
+    <div id="grid" class="grid2"></div>
+    <div id="empty" class="empty" hidden>目前相簿裡還沒有照片。</div>
+    <div class="note small">只放主辦者開放的照片，被排除的照片不會出現。照片裡有你、但你不想出現在相簿或 MV？打開大圖按「照片裡有我，我不想入鏡」，主辦者會收到通知。</div>
+  </main>
+
+  <!-- 大圖 -->
+  <div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-labelledby="v-seg" hidden>
+    <div class="viewer-top">
+      <button type="button" id="v-close" class="viewer-x" aria-label="關閉大圖，回到相簿">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      </button>
+      <span id="v-pos"></span>
+      <span id="v-picks" style="padding-right:10px"></span>
+    </div>
+    <div class="viewer-stage">
+      <img id="v-img" alt="">
+      <button type="button" id="v-prev" class="viewer-nav prev" aria-label="上一張"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+      <button type="button" id="v-next" class="viewer-nav next" aria-label="下一張"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+    </div>
+    <div class="viewer-foot">
+      <div class="viewer-meta">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span id="v-seg" class="t"></span><span id="v-by" class="s"></span></div>
+        <span id="v-votes" class="s"></span>
+      </div>
+      <button type="button" id="v-pick" class="pick-big" aria-pressed="false">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"></path></svg><span id="v-pick-label">選為最佳照片</span></button>
+      <a id="v-dl" class="opt-link" href="#" hidden>下載原檔</a>
+      <div id="opt-box" class="opt-box" role="alertdialog" aria-labelledby="opt-h" hidden>
+        <div id="opt-h" style="font-size:14px;font-weight:700">通知主辦者：我不想入鏡</div>
+        <div style="font-size:13px;line-height:1.6;color:#C9D2CF">主辦者確認前，這張會先從相簿隱藏。不會告訴攝影者是誰提出的。</div>
+        <div class="btn-row2">
+          <button type="button" id="opt-no" class="btn">取消</button>
+          <button type="button" id="opt-yes" class="btn btn-primary">送出</button>
+        </div>
+      </div>
+      <button type="button" id="opt-link" class="opt-link">照片裡有我，我不想入鏡</button>
+    </div>
+  </div>
+</div>
+<script type="module" src="/assets/album.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>活動照片募集</title>
+  <meta name="description" content="活動照片從手機直接上傳或貼上 Google 相簿／雲端硬碟連結匯入，支援多日活動、輪站課程、小隊統計與 MV Studio 同步下載">
+  <meta name="theme-color" content="#0E6F6A">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="public/assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="public/assets/icon-192.png">
+  <script>
+    (function () {
+      var target = "https://mv-photo-collect.ikt-checkin.workers.dev/" + (location.search || "") + (location.hash || "");
+      location.replace(target);
+    })();
+  </script>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", sans-serif;
+      background: #f6faf9;
+      color: #133836;
+      padding: 24px;
+      text-align: center;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 32px 28px;
+      max-width: 420px;
+      box-shadow: 0 8px 24px rgba(14, 111, 106, 0.08);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 1.35rem;
+      color: #0E6F6A;
+    }
+    p {
+      margin: 0 0 20px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      color: #4a6664;
+    }
+    a.btn {
+      display: inline-block;
+      background: #0E6F6A;
+      color: #ffffff;
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>活動照片募集</h1>
+    <p>正在前往活動照片募集服務，若未自動跳轉請點擊下方按鈕：</p>
+    <a id="fallback-link" class="btn" href="https://mv-photo-collect.ikt-checkin.workers.dev/">開啟活動照片募集</a>
+  </div>
+  <script>
+    var a = document.getElementById("fallback-link");
+    if (a) {
+      a.href = "https://mv-photo-collect.ikt-checkin.workers.dev/" + (location.search || "") + (location.hash || "");
+    }
+  </script>
+</body>
+</html>

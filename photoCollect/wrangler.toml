@@ -1,0 +1,32 @@
+name = "mv-photo-collect"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# 靜態頁（PWA、管理頁、下載頁）由同一個 Worker 提供；Worker 先處理請求，再轉給 ASSETS
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "mv-photo-collect"
+
+[triggers]
+crons = ["17 3 * * *"]
+
+[vars]
+APP_VERSION = "1.5.0"
+
+# ---- Google 帳號登入（選填）----
+# GOOGLE_CLIENT_ID 留空字串 = 功能關閉，一切維持原本只用管理碼／建立密碼的行為。
+# 取得方式：Google Cloud Console（console.cloud.google.com）→ API 和服務 → 憑證 → 建立憑證 → OAuth 用戶端 ID
+#   → 應用程式類型選「網頁應用程式」→「已授權的 JavaScript 來源」填 Worker 網址
+#   （例如 https://mv-photo-collect.<你的帳號>.workers.dev，自訂網域也要加）→ 建立後複製「用戶端 ID」
+#   （長得像 1234567890-abc.apps.googleusercontent.com）貼在下面。這個值是公開的，不是機密。
+# 設定後還要有 SESSION_SECRET（簽發登入 cookie 用的機密，≥32 字元隨機字串）：
+#   npx wrangler secret put SESSION_SECRET      （scripts/deploy.sh 偵測到會提示並協助設定）
+GOOGLE_CLIENT_ID = "57605620293-dk5a015dsc3aqgada7l90vkuji3d4e0t.apps.googleusercontent.com"
+# 免建立密碼就能建立活動的 Email 或網域，逗號分隔，例如 "a@example.com,@mycompany.com"；留空 = 沒有這份名單
+CREATOR_EMAILS = ""
+# CREATE_SECRET 用 `npx wrangler secret put CREATE_SECRET` 設定；本機測試放在 .dev.vars

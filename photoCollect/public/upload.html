@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0E6F6A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="活動照片上傳">
+<title>活動照片募集</title>
+<!-- 分享預覽用 meta：這裡是預設值，/u/{code} 由伺服器（HTMLRewriter）依活動設定只改 content -->
+<meta name="description" content="請使用主辦者提供的連結，上傳你在活動中拍到的照片。">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="活動照片募集">
+<meta property="og:title" content="活動照片募集">
+<meta property="og:description" content="請使用主辦者提供的連結，上傳你在活動中拍到的照片。">
+<meta property="og:url" content="">
+<meta property="og:image" content="/assets/og-default.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="活動照片募集">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&amp;display=swap">
+<link rel="stylesheet" href="/assets/base.css">
+<link rel="stylesheet" href="/assets/upload.css">
+<link rel="stylesheet" href="/assets/auth.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- 螢幕閱讀器狀態播報 -->
+  <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
+
+  <!-- 初始畫面：只有一段簡短說明（爬蟲抓摘要時只會看到這段）；其餘畫面放在下方 template，由 upload.js 啟動時載入 -->
+  <section id="view-loading" class="view view-center" aria-busy="true">
+    <h1 class="load-title">活動照片上傳頁</h1>
+    <p class="muted load-text">請用手機開啟主辦者提供的連結，選擇活動中拍到的照片上傳。</p>
+  </section>
+
+  <template id="tpl-views">
+  <!-- 訊息頁：尚未開放／已結束／連結無效／連線失敗 -->
+  <section id="view-msg" class="view" hidden>
+    <header class="hero">
+      <div class="hero-eyebrow">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><circle cx="12" cy="13" r="3.5"></circle><path d="M8 6l1.5-2h5L16 6"></path></svg>
+        活動照片募集
+      </div>
+      <h1 id="msg-event" class="hero-title">活動照片上傳</h1>
+    </header>
+    <main class="msg-body">
+      <h2 id="msg-title" class="msg-title" tabindex="-1"></h2>
+      <p id="msg-text" class="msg-text"></p>
+      <button type="button" id="msg-retry" class="btn btn-primary" hidden>重新載入</button>
+    </main>
+  </section>
+
+  <!-- 狀態一：選擇小隊與照片 -->
+  <section id="view-pick" class="view" hidden>
+    <header class="hero">
+      <div class="hero-eyebrow">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><circle cx="12" cy="13" r="3.5"></circle><path d="M8 6l1.5-2h5L16 6"></path></svg>
+        活動照片募集
+      </div>
+      <h1 id="pick-event" class="hero-title" tabindex="-1"></h1>
+      <div id="pick-sub" class="hero-sub"></div>
+      <a id="pick-mine" class="hero-mine" href="#" hidden></a>
+    </header>
+
+    <main class="view-main">
+      <!-- 斷線續傳提示 -->
+      <section id="resume-box" class="resume" aria-labelledby="resume-text" hidden>
+        <div id="resume-text" class="resume-text"></div>
+        <div class="resume-actions">
+          <button type="button" id="resume-go" class="btn btn-primary">繼續上傳</button>
+          <button type="button" id="resume-drop" class="btn">捨棄</button>
+        </div>
+      </section>
+
+      <!-- 快速上傳（預設）：一顆大按鈕，選完立刻上傳，標籤傳完再補 -->
+      <section id="quick" class="quick" aria-label="快速上傳">
+        <button type="button" id="quick-btn" class="quick-drop">
+          <span class="quick-ic"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg></span>
+          <span class="quick-label">選照片，馬上上傳</span>
+          <span class="quick-sub">可一次選很多張，會自動壓縮、保留拍攝時間</span>
+        </button>
+        <div class="quick-who">
+          <span class="muted">上傳者</span>
+          <span id="who-view" class="who-box"><span id="who-text"></span><button type="button" id="who-edit" class="link-mini">更改</button></span>
+        </div>
+        <button type="button" id="imp-open" class="imp-open" hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"></path></svg>
+          <span>照片已在 Google 相簿或雲端硬碟？貼連結匯入</span>
+        </button>
+        <div class="quick-links">
+          <button type="button" id="to-batch" class="link-mini">想先選小隊、環節再傳？改用分批分類上傳</button>
+        </div>
+      </section>
+
+      <!-- 分批分類上傳：先設定小隊／環節，再選照片 -->
+      <div id="batch" class="batch" hidden>
+        <div class="batch-head">
+          <h2 class="sec-h">分批分類上傳</h2>
+          <button type="button" id="to-quick" class="link-mini">回到快速上傳</button>
+        </div>
+
+        <section aria-labelledby="pick-h" class="sec">
+          <h2 id="pick-h" class="visually-hidden">選擇照片</h2>
+          <button type="button" id="pick-btn" class="drop">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0E6F6A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+            <span id="pick-label" class="drop-label">從相簿選擇（可多選）</span>
+            <span id="pick-sub2" class="drop-sub">會自動壓縮到 2560 像素，保留拍攝時間</span>
+          </button>
+          <label class="check">
+            <input type="checkbox" id="original">
+            <span>傳原圖（攝影師用，檔案較大）</span>
+          </label>
+          <button type="button" id="imp-open2" class="link-mini" hidden>或貼 Google 相簿／雲端硬碟連結匯入（套用下方小隊、環節）</button>
+        </section>
+
+        <details id="more" class="more" open>
+          <summary><span>這一批的補充資訊</span><span id="more-sum" class="sec-hint">選填</span></summary>
+          <div class="more-body">
+            <section id="sec-groups" aria-labelledby="grp-h" class="sec" hidden>
+              <div class="sec-row">
+                <h3 id="grp-h" class="sec-h">照片裡有哪些小隊？</h3>
+                <span class="sec-hint">可複選</span>
+              </div>
+              <div id="group-list" class="chips"></div>
+            </section>
+
+            <section id="sec-segments" aria-labelledby="seg-h" class="sec" hidden>
+              <h3 id="seg-h" class="sec-h">活動環節</h3>
+              <div id="segment-list" class="seg-list" role="radiogroup" aria-labelledby="seg-h"></div>
+            </section>
+
+            <section id="rot-panel" class="rot-panel" aria-labelledby="rot-h" hidden></section>
+          </div>
+        </details>
+      </div>
+
+      <!-- 上傳者稱呼（快速模式按「更改」、分批模式都會用到） -->
+      <section id="who-sec" aria-labelledby="who-h" class="sec" hidden>
+        <h2 id="who-h" class="sec-h">你的稱呼 <span class="sec-hint" style="font-weight:400">選填，會記在這支手機</span></h2>
+        <input id="uploader" class="input input-lg" type="text" maxlength="24" autocomplete="nickname" placeholder="例如：小林、二小隊媽媽">
+      </section>
+
+      <input id="file-input" class="visually-hidden" type="file" accept="image/*" multiple tabindex="-1" aria-label="選擇照片">
+
+      <section aria-label="使用說明" class="consent">
+        <span>選照片即表示同意：</span><span id="notice-short"></span>
+        <button type="button" id="notice-more" class="link-mini" aria-expanded="false">完整說明</button>
+        <div id="notice-text" class="notice-text" hidden></div>
+      </section>
+
+      <!-- Google 登入（選用）：登入功能未啟用時整塊隱藏，不影響上傳流程 -->
+      <section id="acct-sec" class="ac-up" aria-label="Google 帳號（選用）" hidden></section>
+    </main>
+
+    <footer id="batch-foot" class="foot" hidden>
+      <div id="apply-line" class="apply-line"></div>
+      <button type="button" id="start-btn" class="btn btn-primary btn-block" disabled aria-disabled="true">請先選擇照片</button>
+    </footer>
+  </section>
+
+  <!-- 貼共用連結匯入：Google 相簿公開分享相簿／雲端硬碟「知道連結的任何人」資料夾 -->
+  <section id="view-import" class="view" hidden>
+    <header class="topbar">
+      <button type="button" id="imp-back" class="icon-btn" aria-label="返回選擇畫面">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+      </button>
+      <div class="topbar-title">
+        <h1 id="imp-title" class="topbar-h" tabindex="-1">貼連結匯入</h1>
+        <div id="imp-event" class="topbar-sub"></div>
+      </div>
+    </header>
+    <main class="view-main">
+      <section class="sec imp-form" aria-labelledby="imp-h">
+        <h2 id="imp-h" class="sec-h"><label for="imp-url">貼上分享連結</label> <span class="sec-hint" style="font-weight:400">可一次貼多個，一行一個</span></h2>
+        <textarea id="imp-url" class="input imp-url" rows="3" autocomplete="off" spellcheck="false" placeholder="https://photos.app.goo.gl/…&#10;https://drive.google.com/drive/folders/…"></textarea>
+        <div class="imp-row">
+          <button type="button" id="imp-read" class="btn btn-primary btn-flex">讀取照片</button>
+          <button type="button" id="imp-paste" class="btn" hidden>從剪貼簿貼上</button>
+        </div>
+        <p id="imp-err" class="imp-err" role="alert" hidden></p>
+        <details class="imp-help">
+          <summary>怎麼取得分享連結？</summary>
+          <div class="imp-help-body">
+            <p><b>Google 相簿</b>：打開相簿 → 右上角「分享」→「建立連結」或「複製連結」。只有共用相簿可以，單張照片的網址不行。</p>
+            <p id="imp-help-drive"><b>Google 雲端硬碟</b>：在資料夾按右鍵 →「共用」→ 一般存取權改成「知道連結的任何人」→「複製連結」。會讀取資料夾內的照片，以及往下一層子資料夾。</p>
+            <p class="muted">照片由伺服器直接向 Google 取得，不會用到你手機的流量；匯入後就算關掉分享也沒關係。</p>
+          </div>
+        </details>
+      </section>
+      <div id="imp-albums" class="imp-albums"></div>
+    </main>
+    <footer id="imp-foot" class="foot" hidden>
+      <div id="imp-line" class="apply-line"></div>
+      <button type="button" id="imp-start" class="btn btn-primary btn-block" disabled aria-disabled="true">請先勾選照片</button>
+    </footer>
+  </section>
+
+  <!-- 狀態二：上傳中 -->
+  <section id="view-upload" class="view" hidden>
+    <header class="topbar">
+      <button type="button" id="back-btn" class="icon-btn" aria-label="返回選擇畫面">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+      </button>
+      <div class="topbar-title">
+        <h1 id="up-title" class="topbar-h" tabindex="-1">上傳中</h1>
+        <div id="up-event" class="topbar-sub"></div>
+      </div>
+      <span id="net-tag" class="net net-ok" role="status"><span class="net-dot"></span><span id="net-text">網路正常</span></span>
+    </header>
+
+    <section aria-label="整體進度" class="progress">
+      <div class="progress-row">
+        <div class="progress-num"><span id="up-done">0</span><span class="progress-total"> / <span id="up-total">0</span> 張</span></div>
+        <div id="up-eta" class="progress-eta"></div>
+      </div>
+      <div id="up-bar" class="bar" role="progressbar" aria-label="上傳進度" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span id="up-bar-fill" style="width:0%"></span></div>
+      <div id="up-summary" class="progress-sum"></div>
+    </section>
+
+    <!-- 快速上傳：依拍攝時間自動分組，順手補小隊（選填） -->
+    <section id="tag-panel" class="tag-panel" aria-labelledby="tag-h" hidden>
+      <div class="tag-head"><h2 id="tag-h" class="sec-h">順手補個小隊？</h2><span class="sec-hint">選填，套用到該組照片</span></div>
+      <div id="tag-groups" class="tag-groups"></div>
+      <div class="sec-hint">環節已依拍攝時間自動分好；分錯或要加備註，之後在「我上傳的照片」修改。</div>
+    </section>
+
+    <div id="stay-warn" class="warn stay">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9A5B00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>
+      <div>上傳時請停留在這個畫面，不要鎖屏或切到其他 App。中斷了也沒關係，重新打開這個頁面會從剩下的照片接著傳。</div>
+    </div>
+
+    <ul id="up-list" class="rows" aria-label="照片清單"></ul>
+
+    <footer class="foot foot-row">
+      <button type="button" id="pause-btn" class="btn btn-block btn-flex">暫停</button>
+      <button type="button" id="retry-btn" class="btn btn-block btn-flex" hidden>重試失敗的照片</button>
+      <button type="button" id="finish-btn" class="btn btn-primary btn-block btn-flex" hidden>完成，查看結果</button>
+    </footer>
+  </section>
+
+  <!-- 狀態三：完成 -->
+  <section id="view-done" class="view" hidden>
+    <main class="view-main done-main">
+      <section aria-labelledby="ok-h" class="ok">
+        <div class="ok-badge">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0E6F6A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>
+        </div>
+        <h1 id="ok-h" class="ok-title" tabindex="-1"></h1>
+        <div id="ok-sub" class="ok-sub"></div>
+        <a id="mine-link" class="btn mine-link" href="#">查看、修改我上傳的照片</a>
+      </section>
+
+      <section id="need-sec" aria-labelledby="need-h" class="need" hidden>
+        <div class="need-head">
+          <h2 id="need-h" class="need-h">大家的拍攝清單</h2>
+          <div class="sec-hint">MV 每個段落需要的照片張數；只顯示數量，看不到別人的照片</div>
+        </div>
+        <div id="need-list" class="need-list"></div>
+        <div id="need-warn" class="need-warn" hidden></div>
+      </section>
+
+      <section aria-label="加到主畫面" class="a2hs">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0E6F6A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"></rect><path d="M12 8v6M9 11h6"></path></svg>
+        <div>活動期間還會再傳嗎？用瀏覽器的「分享 → 加入主畫面」，下次點圖示就能直接上傳。</div>
+      </section>
+    </main>
+    <footer class="foot">
+      <button type="button" id="again-btn" class="btn btn-primary btn-block">繼續上傳其他照片</button>
+    </footer>
+  </section>
+  </template>
+
+</div>
+<script type="module" src="/assets/upload.js"></script>
+</body>
+</html>
