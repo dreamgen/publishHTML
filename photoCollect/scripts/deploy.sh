@@ -57,10 +57,20 @@ else
   echo "==> 尚未設定 GOOGLE_API_KEY：只能匯入 Google 相簿連結。要開放雲端硬碟匯入，請執行 npx wrangler secret put GOOGLE_API_KEY"
 fi
 
+# 3d. 同步到 Google 相簿（選填）：需要 Google 登入（GOOGLE_CLIENT_ID＋SESSION_SECRET）再加上 OAuth 用戶端密碼
+if [ -n "$CLIENT_ID" ]; then
+  if npx wrangler secret list 2>/dev/null | grep -q '"GOOGLE_CLIENT_SECRET"'; then
+    echo "==> GOOGLE_CLIENT_SECRET 已設定（Google 相簿同步可用）"
+  else
+    echo "==> 尚未設定 GOOGLE_CLIENT_SECRET：管理頁的「Google 相簿」只能用下載備援。"
+    echo "    要啟用同步，請依 README「啟用 Google 相簿同步」設定後執行 npx wrangler secret put GOOGLE_CLIENT_SECRET"
+  fi
+fi
+
 # 4. 部署
 echo "==> 部署 Worker"
 npx wrangler deploy
 
 echo
-echo "部署完成。每天 03:17 UTC 會自動清除過期活動的照片。"
+echo "部署完成。每天 03:17 UTC 會自動清除過期活動的照片；每小時 :47 會替開啟自動同步的活動補傳 Google 相簿。"
 echo "打開上面顯示的網址，用建立密碼建立第一個活動。"

@@ -40,6 +40,25 @@ bash scripts/deploy.sh      # 建立 R2 bucket、設定建立密碼、部署
 
 舊活動要加入帳號：登入後在起點頁「這台瀏覽器記住的活動」按「加入我的帳號」，或用管理連結開啟後按頁首的「把這個活動加入我的 Google 帳號」。
 
+## 啟用 Google 相簿同步（選用）
+
+主辦者在管理頁「Google 相簿」分頁按「連結 Google 相簿」→ 系統在他的 Google 相簿建立一本相簿 → 照片分批同步進去；主辦者再到 Google 相簿 App 把相簿設成共用。Google 自 2025/3/31 起不允許程式寫入使用者自己建立的相簿，所以一定是「系統建立的相簿」。沒有設定時，該分頁只提供「下載全部照片」備援。
+
+前提：已完成上面的「啟用 Google 帳號登入」（同一個 Google Cloud 專案、同一個 OAuth 用戶端）。
+
+1. Google Cloud Console →「API 和服務」→「程式庫」→ 啟用 **Photos Library API**。
+2. 「OAuth 同意畫面」→「資料存取」→ 新增範圍 `.../auth/photoslibrary.appendonly` 與 `.../auth/photoslibrary.readonly.appcreateddata`。
+   - 這兩個屬於敏感範圍。發布狀態維持「正式版」即可使用（未送審時授權畫面會出現「Google 尚未驗證這個應用程式」，按「進階 → 繼續」；最多 100 位使用者）。
+   - **不要停在「測試中」**：測試狀態下 refresh token 7 天就失效，自動同步會中斷。
+3. 「憑證」→ 原本的 OAuth 用戶端 →「已授權的重新導向 URI」加上 `https://<你的 Worker 網址>/oauth/gphotos/callback`（自訂網域也要加）。
+4. 複製「用戶端密碼」，執行 `npx wrangler secret put GOOGLE_CLIENT_SECRET`，再 `bash scripts/deploy.sh`。
+
+注意事項：
+- 照片佔用主辦者 Google 帳號的空間；每個 Google Cloud 專案每天約 10,000 次 API 請求（一張照片約 1.1 次）。
+- refresh token 以 `SESSION_SECRET` 衍生的金鑰加密存在 R2；更換 `SESSION_SECRET` 後每場活動都要重新連結。
+- 已同步的照片之後在本系統排除或刪除，不會從 Google 相簿移除；活動照片到期自動刪除時也會保留在 Google 相簿（只撤銷授權）。
+- 設計與 API 細節見 `docs/PLAN-google-photos-export.md`。
+
 ## 更新安裝包
 
 本地 MV Studio 可攜版更新後：

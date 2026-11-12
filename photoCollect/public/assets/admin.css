@@ -252,3 +252,14 @@ details.pv pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: va
 .rot-link { font-size: 12px; color: var(--c-accent-ink); }
 .rot-day { width: auto; min-height: 36px; padding: 0 6px; font-size: 13px; }
 .rot-thday { display: inline-block; font-size: 11px; font-weight: 700; color: var(--c-accent-ink); background: var(--c-accent-soft); border-radius: 999px; padding: 1px 8px; }
+
+/* Google 相簿分頁 */
+.gp-steps { margin: 0; padding-left: 32px; }
+.gp-steps li { margin: 2px 0; }
+.gp-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 14px; }
+.gp-info dt { color: var(--c-muted); }
+.gp-info dd { margin: 0; overflow-wrap: anywhere; }
+.gp-nums { gap: 14px; font-variant-numeric: tabular-nums; }
+.gp-fail { color: var(--c-warn-ink); font-weight: 700; }
+.gp-faillist { margin: 4px 0 12px; padding-left: 20px; font-size: 13px; }
+#panel-gphotos .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }

@@ -10,6 +10,7 @@ import * as account from './account.js';
 import * as mine from './mine.js';
 import * as importer from './importer.js';
 import * as album from './album.js';
+import * as gphotos from './gphotos.js';
 import { assertSameOrigin, getSession } from './session.js';
 
 const methodNotAllowed = () => new HttpError(405, 'method_not_allowed', '不支援的請求方法。');
@@ -131,6 +132,17 @@ export async function handleApi(req, env, url) {
 
   // /api/admin/{id}[/action[/arg]]
   if (a === 'admin' && b) {
+    // /api/admin/{id}/gphotos[/connect|sync|disconnect]：匯出到 Google 相簿
+    if (c === 'gphotos') {
+      if (parts.length === 4) {
+        if (m === 'GET') return gphotos.status(env, req, b);
+        if (m === 'PATCH') return gphotos.patch(env, req, b);
+        throw methodNotAllowed();
+      }
+      const post = { connect: gphotos.connect, sync: gphotos.sync, disconnect: gphotos.disconnect };
+      if (parts.length === 5 && post[d]) { if (m !== 'POST') throw methodNotAllowed(); return post[d](env, req, b); }
+      throw notFound();
+    }
     if (parts.length === 3) {
       if (m === 'GET') return admin.get(env, req, b);
       if (m === 'PATCH') return admin.patch(env, req, b);
@@ -164,6 +176,10 @@ export async function handleApi(req, env, url) {
     if (parts.length === 5 && c === 'thumb') {
       if (m !== 'GET') throw methodNotAllowed();
       return admin.thumb(env, req, b, d);
+    }
+    if (parts.length === 5 && c === 'original') {
+      if (m !== 'GET') throw methodNotAllowed();
+      return admin.original(env, req, b, d);
     }
     throw notFound();
   }

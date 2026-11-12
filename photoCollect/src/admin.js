@@ -105,6 +105,25 @@ export async function thumb(env, req, id, hash) {
   });
 }
 
+// 原圖下載（方案 B：管理頁「下載全部照片」後手動拖進 Google 相簿）
+export async function original(env, req, id, hash) {
+  const { cfg } = await requireRole(env, req, id, 'manager');
+  if (!HASH_RE.test(hash)) throw new HttpError(400, 'invalid', '照片編號格式不正確。');
+  const key = await findPhotoKey(env, cfg.id, hash);
+  const obj = key ? await env.PHOTOS.get(key) : null;
+  if (!obj) throw new HttpError(404, 'not_found', '找不到這張照片。');
+  const ext = key.split('.').pop();
+  return new Response(obj.body, {
+    headers: {
+      'content-type': EXT_MIME[ext] || 'application/octet-stream',
+      'content-length': String(obj.size),
+      'content-disposition': `attachment; filename="${hash.slice(0, 10)}.${ext}"`,
+      'cache-control': 'private, no-store',
+      'content-security-policy': "default-src 'none'; sandbox",
+    },
+  });
+}
+
 export async function photos(env, req, id, url) {
   const { cfg } = await requireRole(env, req, id, 'viewer');
   const cursor = url.searchParams.get('cursor') || undefined;
@@ -112,7 +131,7 @@ export async function photos(env, req, id, url) {
     prefix: `events/${cfg.id}/p/`, include: ['customMetadata'], limit: 200, cursor,
   });
   const ex = new Set(cfg.excluded || []);
-  const list = page.objects.map(parsePhoto).filter(Boolean).map((p) => photoView(p, cfg, ex));
+  const list = page.objects.map(parsePhoto).filter(Boolean).map((p) => ({ ...photoView(p, cfg, ex), ext: p.ext, size: p.size }));
   return json({ photos: list, cursor: page.truncated ? page.cursor : null });
 }
 

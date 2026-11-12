@@ -1,8 +1,9 @@
 // 管理頁主程式：解析網址片段、載入資料、頁首、分頁、確認對話框、自動更新
 // 驗證方式：網址有 k 就用管理碼（舊流程）；只有 e 則靠 Google 登入 cookie，依角色（owner／manager／viewer）調整畫面。
 import {
-  adminApi, ApiError, upsertEvent, stageOf, fmtDateTime, toast,
+  adminApi, ApiError, upsertEvent, loadEvents, stageOf, fmtDateTime, toast,
 } from './admin-common.js';
+import { renderGphotos } from './admin-gphotos.js';
 import { renderSetup } from './admin-setup.js';
 import { renderProgress } from './admin-progress.js';
 import { renderHandoff } from './admin-handoff.js';
@@ -61,6 +62,25 @@ function showError(title, body, retry, { login = false } = {}) {
   btn.onclick = retry || null;
 }
 
+// ---------- 從 Google 相簿授權頁回來（#e=…&gp=ok|denied|err）：還原原本的網址片段（含管理碼） ----------
+const gpReturn = (() => {
+  const q = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const gp = q.get('gp');
+  if (!gp) return null;
+  let back = '';
+  try { back = sessionStorage.getItem('mv.gp.return') || ''; sessionStorage.removeItem('mv.gp.return'); } catch { /* 私密模式 */ }
+  const e = q.get('e') || '';
+  const bq = new URLSearchParams(back.replace(/^#/, ''));
+  let frag;
+  if (back && (!e || bq.get('e') === e)) frag = back.replace(/^#/, '');
+  else {
+    const rec = loadEvents().find((x) => x.event_id === e);
+    frag = `e=${encodeURIComponent(e)}${rec ? `&k=${encodeURIComponent(rec.admin_code)}` : ''}`;
+  }
+  history.replaceState(null, '', `${location.pathname}${location.search}#${frag}`);
+  return { gp, why: q.get('why') || '', reused: q.get('reused') === '1' };
+})();
+
 // ---------- 啟動 ----------
 const params = new URLSearchParams(location.hash.replace(/^#/, ''));
 const id = params.get('e') || '';
@@ -69,7 +89,7 @@ let authOn = false;      // 登入功能是否啟用（/api/auth/config）
 let bootSub = null;      // 載入當下的登入身分（sub）；之後登入／登出／換帳號就重新載入
 
 const ctx = {
-  id, k,
+  id, k, gpReturn,
   api: adminApi(id, k),
   data: null,                 // 最近一次 GET/PATCH 回傳
   listeners: new Set(),
@@ -213,7 +233,7 @@ $('open-toggle').addEventListener('click', async () => {
 });
 
 // ---------- 分頁（WAI-ARIA tabs，左右鍵／Home／End 切換） ----------
-let TABS = ['setup', 'progress', 'album', 'handoff', 'security'];   // 登入功能啟用時多一個 members
+let TABS = ['setup', 'progress', 'album', 'gphotos', 'handoff', 'security'];   // 登入功能啟用時多一個 members
 const tabHooks = {};                                            // 切到某分頁時要做的事（共同管理＝重新讀名單）
 let curTab = 'setup';
 function selectTab(name, focus = false) {
@@ -275,12 +295,14 @@ async function boot() {
   if (authOn) {
     mountAccount($('acct'));
     $('tab-members').hidden = false;
-    TABS = ['setup', 'progress', 'album', 'handoff', 'security', 'members'];
+    TABS = ['setup', 'progress', 'album', 'gphotos', 'handoff', 'security', 'members'];
   }
   const members = authOn ? renderMembers(ctx, $('panel-members')) : null;
   if (members) tabHooks.members = () => members.load();
   const albumPanel = renderAlbum(ctx, $('panel-album'));
   tabHooks.album = () => albumPanel.load();
+  const gpPanel = renderGphotos(ctx, $('panel-gphotos'));
+  tabHooks.gphotos = () => gpPanel.load();
   const panels = [
     renderSetup(ctx, $('panel-setup')),
     renderProgress(ctx, $('panel-progress')),
@@ -289,7 +311,7 @@ async function boot() {
   ];
   void panels;
   ctx.apply(d, 'init');
-  selectTab('setup');
+  selectTab(gpReturn ? 'gphotos' : 'setup');
 
   // 每 30 秒自動更新（瀏覽器分頁可見時；輸入中的準備中心不被覆蓋，因為它只更新狀態列）
   setInterval(() => {

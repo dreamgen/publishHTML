@@ -345,3 +345,23 @@ shares/{sha256(lower(email))}.json   {"events":[{"event_id","role","added_at","a
 - 錯誤碼：`bad_source` 400、`album_not_public`／`drive_not_public`／`album_empty`／`short_link_unresolved` 422、`album_not_found` 404、`album_parse_failed`／`source_fetch_failed` 502、`source_timeout` 504、`drive_disabled` 503、`import_disabled` 403、`import_daily_limit` 429、`list_expired` 410、`source_gone` 410。
 - 設定：`upload.import_enabled`（預設 true）、`upload.import_daily`（預設 1500，0–5000）。
 - 環境：secret `GOOGLE_API_KEY`（雲端硬碟用，建議在 Google Cloud 限制只能呼叫 Drive API）；`IMPORT_TZ_OFFSET_MIN`（預設 480）；本機測試 `DEV_MODE=1`＋`IMPORT_TEST_ORIGIN` 把 Google 網域導向假伺服器。
+
+## 12. 匯出到 Google 相簿（v7）
+
+需要 `GOOGLE_CLIENT_ID`、`SESSION_SECRET`（≥32）與 `GOOGLE_CLIENT_SECRET`；缺任何一個時 `enabled=false`，connect／sync 回 404 `gphotos_disabled`。
+
+| 方法與路徑 | 權限 | 說明 |
+|---|---|---|
+| `GET /api/admin/{id}/gphotos` | viewer | 狀態：`enabled, connected, need_reconnect, account_email, album_title, album_url, share_url, auto, connected_at, connected_by, last_sync_at, last_error, syncing, eligible, synced, remaining, failed, failed_list[{hash,msg}]` |
+| `POST /api/admin/{id}/gphotos/connect` | manager | 回 `{auth_url, redirect_uri}`，並設 `gpn` nonce cookie（HttpOnly、Path=/oauth/gphotos/callback、10 分鐘） |
+| `GET /oauth/gphotos/callback?code&state` | — | 驗 state（HMAC、10 分鐘）＋ nonce cookie → 換 token → 檢查 appendonly 範圍與 refresh token → 沿用（albums.get 可讀）或建立相簿 → 302 `/admin#e={id}&gp=ok[&reused=1]`；失敗 `gp=denied` 或 `gp=err&why=state|nonce|code|event|token|scope|refresh|album|disabled` |
+| `PATCH /api/admin/{id}/gphotos` | manager | `{share_url?, auto?}`；share_url 限 `https://photos.app.goo.gl/…`、`https://photos.google.com/share/…` 或空字串 |
+| `POST /api/admin/{id}/gphotos/sync` | manager | `{limit?=8 (1–15), retry_failed?}` 同步一批，回 `{added, failed_now, ...狀態}`；前端重複呼叫直到 `remaining=0` |
+| `POST /api/admin/{id}/gphotos/disconnect` | manager | 撤銷 refresh token；相簿與同步紀錄保留 |
+| `GET /api/admin/{id}/original/{hash}` | manager | 原圖（attachment），給「下載全部照片」備援 |
+
+錯誤碼：`gphotos_not_connected`(409)、`gphotos_reconnect`(409，refresh token 失效)、`gphotos_busy`(409，另一個同步進行中；鎖 90 秒)、`gphotos_album_unavailable`(409，相簿被刪)、`gphotos_rate_limited`(429)、`gphotos_token_failed`/`gphotos_batch_failed`/`gphotos_fetch_failed`(502)、`gphotos_timeout`(504)。
+
+同步規則：排除（excluded）與上傳者刪除（removed）的照片不同步；依上傳時間由舊到新；同一張失敗 3 次後不再自動重試（`retry_failed` 清除）。
+排程：`47 * * * *` 對 `gphotos/auto/{id}` 列出的活動同步，每次合計最多 30 張、每活動 10 張。排程刪除活動時撤銷授權並刪除 `events/{id}/gphotos.json`。
+`GET /api/admin/{id}/photos` 的每張照片多了 `ext`、`size`。

@@ -3,9 +3,12 @@ import { CSP, LOGIN_CSP, HttpError, errorResponse } from './util.js';
 import { googleClientId } from './session.js';
 import { handleApi } from './router.js';
 import { runPurge } from './schedule.js';
+import { callback as gphotosCallback, runAutoSync, CALLBACK_PATH } from './gphotos.js';
 import {
   eventForPage, pageMeta, rewriteUploadHead, serveOg, albumForPage, albumMeta, serveAlbumOg,
 } from './og.js';
+
+const GPHOTOS_CRON = '47 * * * *';
 
 // 所有回應都加的標頭
 // login=true 時改用含 Google 網域的 CSP（§8.8）；有設定 GOOGLE_CLIENT_ID 才會是 true
@@ -93,6 +96,10 @@ export default {
 
       if (p === '/api' || p.startsWith('/api/')) return finalize(await handleApi(req, env, url));
 
+      if (p === CALLBACK_PATH) {
+        if (req.method !== 'GET') return finalize(errorResponse(405, 'method_not_allowed', '不支援的請求方法。'));
+        return finalize(await gphotosCallback(env, req));
+      }
       if (/^\/u\/([^/]+\/?)?$/.test(p)) return serveUploadPage(env, req, url);
       if (/^\/u\/[^/]+\/mine\/?$/.test(p)) return servePage(env, req, '/mine.html', !!googleClientId(env));
       if (/^\/a\/([^/]+\/?)?$/.test(p)) return serveAlbumPage(env, req, url);
@@ -125,7 +132,9 @@ export default {
     }
   },
 
-  async scheduled(_event, env, _ctx) {
-    await runPurge(env);
+  // 每天 03:17 UTC：清除過期活動；每小時 :47：Google 相簿自動同步
+  async scheduled(event, env, _ctx) {
+    if (event && event.cron === GPHOTOS_CRON) await runAutoSync(env);
+    else await runPurge(env);
   },
 };

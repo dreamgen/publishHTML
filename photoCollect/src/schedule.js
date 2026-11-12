@@ -1,6 +1,7 @@
 // 排程（Cron 每天 03:17 UTC）：清除過期活動的照片
 import { deleteAt, getConfig, saveConfig } from './config.js';
 import { purgePhotos } from './stats.js';
+import { onEventPurged } from './gphotos.js';
 
 export async function runPurge(env, now = Date.now()) {
   const summary = { checked: 0, purged: [] };
@@ -26,6 +27,7 @@ export async function runPurge(env, now = Date.now()) {
         await saveConfig(env, cfg);
         await env.PHOTOS.delete(`codes/u/${cfg.upload_code}`); // 上傳連結失效
         await purgePhotos(env, id);
+        await onEventPurged(env, id); // 撤銷 Google 相簿授權（相簿裡的照片保留在主辦者帳號）
         summary.purged.push(id);
       } catch (e) {
         console.error('purge failed', id, e && e.message);

@@ -1380,6 +1380,7 @@ async function main() {
   await multiDayTests();
   await rotationTests();
   await importTests();
+  await gphotosTests();
 
   console.log(`\n結果：通過 ${pass} 項，失敗 ${fail} 項`);
   process.exit(fail ? 1 : 0);
@@ -2019,6 +2020,210 @@ async function importTests() {
     await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { mode: 'closed' } } });
     r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: daid, uid: 'gd:FILE000001' } });
     ok(r.status === 403, '關閉上傳後不能匯入');
+  } finally {
+    srv.close();
+  }
+}
+
+// ================= 匯出到 Google 相簿（方案 A）＋原圖下載（方案 B）=================
+// 同樣靠 IMPORT_TEST_ORIGIN 把 oauth2.googleapis.com／photoslibrary.googleapis.com 導向本機假伺服器
+async function gphotosTests() {
+  const http = await import('node:http');
+  console.log('[Google 相簿匯出]');
+  const SC = ['openid', 'email', 'https://www.googleapis.com/auth/photoslibrary.appendonly', 'https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata'];
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const fake = {
+    albums: new Map(), nAlbum: 0, uploads: 0, batches: [], revoked: [], tokenCalls: [],
+    badRefresh: false, upload401: false, batch404: false,
+  };
+  const readBody = (req) => new Promise((r) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => r(Buffer.concat(c))); });
+  const srv = http.createServer(async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const p = u.pathname;
+    const body = await readBody(req);
+    const send = (code, obj, type = 'application/json') => { res.writeHead(code, { 'content-type': type }); res.end(typeof obj === 'string' ? obj : JSON.stringify(obj)); };
+    if (p === '/oauth2.googleapis.com/token') {
+      const f = new URLSearchParams(body.toString());
+      fake.tokenCalls.push(Object.fromEntries(f));
+      if (f.get('client_secret') !== 'test-client-secret') return send(401, { error: 'invalid_client' });
+      if (f.get('grant_type') === 'authorization_code') {
+        const code = f.get('code');
+        if (code === 'BADCODE') return send(400, { error: 'invalid_grant' });
+        const scope = code === 'NOSCOPE' ? 'openid email' : SC.join(' ');
+        return send(200, { access_token: 'AT1', expires_in: 3599, refresh_token: code === 'NORT' ? undefined : 'RT1', scope, id_token: `x.${b64u({ email: 'owner@gmail.com' })}.y` });
+      }
+      if (f.get('grant_type') === 'refresh_token') {
+        if (fake.badRefresh || f.get('refresh_token') !== 'RT1') return send(400, { error: 'invalid_grant' });
+        return send(200, { access_token: 'AT2', expires_in: 3599 });
+      }
+      return send(400, { error: 'unsupported_grant_type' });
+    }
+    if (p === '/oauth2.googleapis.com/revoke') { fake.revoked.push(new URLSearchParams(body.toString()).get('token')); return send(200, {}); }
+    const auth = req.headers.authorization || '';
+    if (!/^Bearer AT[12]$/.test(auth)) return send(401, { error: { code: 401, message: 'bad token' } });
+    if (p === '/photoslibrary.googleapis.com/v1/albums' && req.method === 'POST') {
+      const j = JSON.parse(body.toString());
+      const id = `ALBUM${++fake.nAlbum}`;
+      fake.albums.set(id, { title: j.album.title, items: [] });
+      return send(200, { id, title: j.album.title, productUrl: `https://photos.google.com/lr/album/${id}` });
+    }
+    const ma = /^\/photoslibrary\.googleapis\.com\/v1\/albums\/([^/]+)$/.exec(p);
+    if (ma) {
+      const a = fake.albums.get(ma[1]);
+      return a ? send(200, { id: ma[1], title: a.title, productUrl: `https://photos.google.com/lr/album/${ma[1]}` }) : send(404, { error: { code: 404, message: 'not found' } });
+    }
+    if (p === '/photoslibrary.googleapis.com/v1/uploads') {
+      if (fake.upload401) return send(401, { error: { code: 401 } });
+      if (req.headers['x-goog-upload-protocol'] !== 'raw' || !req.headers['x-goog-upload-content-type']) return send(400, 'bad', 'text/plain');
+      fake.uploads++;
+      if (body.includes(Buffer.from('fail-upload'))) return send(500, 'boom', 'text/plain');
+      return send(200, `UT-${createHash('sha256').update(body).digest('hex').slice(0, 12)}`, 'text/plain');
+    }
+    if (p === '/photoslibrary.googleapis.com/v1/mediaItems:batchCreate') {
+      const j = JSON.parse(body.toString());
+      const a = fake.albums.get(j.albumId);
+      if (fake.batch404 || !a) return send(400, { error: { code: 400, message: 'Invalid album ID' } });
+      fake.batches.push(j);
+      const results = j.newMediaItems.map((m, i) => {
+        const id = `MI-${a.items.length + i + 1}-${j.albumId}`;
+        return { uploadToken: m.simpleMediaItem.uploadToken, status: { message: 'Success' }, mediaItem: { id } };
+      });
+      a.items.push(...results.map((r) => r.mediaItem.id));
+      return send(200, { newMediaItemResults: results });
+    }
+    send(404, { error: { code: 404 } });
+  });
+  await new Promise((r) => srv.listen(8799, '127.0.0.1', r));
+  const cb = async (qs, cookie) => {
+    const res = await fetch(`${BASE}/oauth/gphotos/callback?${qs}`, { redirect: 'manual', headers: cookie ? { cookie } : {} });
+    const loc = res.headers.get('location') || '';
+    return { status: res.status, loc, frag: new URLSearchParams(loc.split('#')[1] || ''), setCookie: res.headers.get('set-cookie') || '' };
+  };
+  try {
+    const ev = await createEvent('相簿匯出營', '2026-11-20');
+    const tok = ev.admin_code; const up = ev.upload_code; const id = ev.event_id;
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { mode: 'open' } } });
+    const p1 = await uploadPhoto(up, { bytes: makeJpeg('gp-1'), meta: { uploader: '小明', device: 'dev-gp-1', groups: [] } });
+    const p2 = await uploadPhoto(up, { bytes: makeJpeg('gp-2'), meta: { uploader: '小華', device: 'dev-gp-1' } });
+    const p3 = await uploadPhoto(up, { bytes: makeJpeg('gp-3'), meta: { device: 'dev-gp-1' } });
+    ok(p1.status === 201 && p2.status === 201 && p3.status === 201, '準備 3 張照片', [p1.data, p2.data, p3.data]);
+
+    let r = await api('GET', `/api/admin/${id}/gphotos`);
+    ok(r.status === 401, '未帶管理碼 → 401');
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(r.status === 200 && r.data.enabled === true && r.data.connected === false && r.data.eligible === 3, '狀態：已啟用、未連結、可同步 3 張', r.data);
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(r.status === 409 && r.data.error === 'gphotos_not_connected', '未連結就同步 → 409');
+    r = await api('PATCH', `/api/admin/${id}/gphotos`, { token: tok, body: { auto: true } });
+    ok(r.status === 409, '未連結就改設定 → 409');
+
+    // ---- 連結 ----
+    r = await api('POST', `/api/admin/${id}/gphotos/connect`, { token: tok });
+    const au = new URL(r.data.auth_url);
+    const state = au.searchParams.get('state');
+    const nonceCookie = (r.headers.get('set-cookie') || '').split(';')[0];
+    ok(r.status === 200 && au.hostname === 'accounts.google.com' && au.searchParams.get('access_type') === 'offline' && au.searchParams.get('prompt') === 'consent'
+      && au.searchParams.get('scope') === SC.join(' ') && au.searchParams.get('redirect_uri') === `${BASE}/oauth/gphotos/callback`, '產生 Google 授權網址（offline、consent、appendonly 範圍）', r.data);
+    ok(/^gpn=[A-Za-z0-9_-]+$/.test(nonceCookie) && /Path=\/oauth\/gphotos\/callback/.test(r.headers.get('set-cookie')) && /HttpOnly/.test(r.headers.get('set-cookie')), '設定一次性 nonce cookie（HttpOnly、限 callback 路徑）');
+
+    let c = await cb(`code=GOODCODE&state=${encodeURIComponent(state)}`);
+    ok(c.status === 302 && c.frag.get('gp') === 'err' && c.frag.get('why') === 'nonce' && c.frag.get('e') === id, '缺 nonce cookie → why=nonce');
+    c = await cb(`code=GOODCODE&state=${encodeURIComponent(state.slice(0, -2) + 'xx')}`, nonceCookie);
+    ok(c.frag.get('why') === 'state', '竄改 state → why=state');
+    c = await cb(`error=access_denied&state=${encodeURIComponent(state)}`, nonceCookie);
+    ok(c.frag.get('gp') === 'denied', '使用者取消授權 → gp=denied');
+    c = await cb(`code=NOSCOPE&state=${encodeURIComponent(state)}`, nonceCookie);
+    ok(c.frag.get('why') === 'scope', '沒勾 appendonly 權限 → why=scope');
+    c = await cb(`code=NORT&state=${encodeURIComponent(state)}`, nonceCookie);
+    ok(c.frag.get('why') === 'refresh', '沒有 refresh token → why=refresh');
+    c = await cb(`code=GOODCODE&state=${encodeURIComponent(state)}`, nonceCookie);
+    ok(c.status === 302 && c.frag.get('gp') === 'ok' && !c.frag.get('reused') && c.loc.startsWith(`${BASE}/admin#`) && /gpn=;/.test(c.setCookie), '授權成功 → 回管理頁 gp=ok、清除 nonce', c);
+    ok(fake.albums.size === 1 && [...fake.albums.values()][0].title.includes('相簿匯出營'), '建立以活動命名的相簿');
+    const codeCall = fake.tokenCalls.find((x) => x.code === 'GOODCODE');
+    ok(codeCall && codeCall.redirect_uri === `${BASE}/oauth/gphotos/callback` && codeCall.client_id === 'test-client.apps.googleusercontent.com', '換 token 時帶相同 redirect_uri 與 client_id');
+    const raw = await fetch(`${BASE}/api/admin/${id}`, { headers: { authorization: `Bearer ${tok}` } }).then((x) => x.text());
+    ok(!raw.includes('RT1') && !raw.includes('enc_rt'), '活動設定 API 不含 refresh token');
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(r.data.connected === true && r.data.account_email === 'owner@gmail.com' && r.data.album_url === 'https://photos.google.com/lr/album/ALBUM1' && r.data.synced === 0, '狀態：已連結、帳號、相簿連結', r.data);
+    ok(!JSON.stringify(r.data).includes('RT1') && !('enc_rt' in r.data), '狀態 API 不外洩 token');
+
+    // ---- 同步 ----
+    await api('POST', `/api/admin/${id}/exclude`, { token: tok, body: { hash: p3.hash, excluded: true } });
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: { limit: 1 } });
+    ok(r.status === 200 && r.data.added === 1 && r.data.eligible === 2 && r.data.synced === 1 && r.data.remaining === 1, '第一批同步 1 張（已排除的不算）', r.data);
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok });
+    ok(r.status === 200 && r.data.added === 1 && r.data.remaining === 0, '不帶內容也可同步，剩 0 張', r.data);
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(r.data.added === 0 && fake.uploads === 2, '已同步的不重傳');
+    const items = fake.batches.flatMap((b) => b.newMediaItems);
+    ok(fake.batches.every((b) => b.albumId === 'ALBUM1') && items.some((m) => (m.description || '').includes('小明')) && items.every((m) => /^[0-9a-f]{10}\.jpg$/.test(m.simpleMediaItem.fileName)), 'batchCreate：加入相簿、描述帶上傳者、檔名');
+    ok(!fake.batches.some((b) => b.newMediaItems.some((m) => m.simpleMediaItem.fileName.startsWith(p3.hash.slice(0, 10)))), '排除的照片沒有上傳');
+
+    // ---- 失敗與重試 ----
+    const pf = await uploadPhoto(up, { bytes: makeJpeg('gp-fail-upload'), meta: { device: 'dev-gp-1' } });
+    for (let i = 0; i < 3; i++) await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(r.data.failed === 1 && r.data.remaining === 0 && r.data.failed_list[0].hash === pf.hash && /500/.test(r.data.failed_list[0].msg), '連續失敗 3 次 → 列為失敗、不再自動重試', r.data);
+    const before = fake.uploads;
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(fake.uploads === before, '失敗清單內的照片不再上傳');
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: { retry_failed: true } });
+    ok(fake.uploads === before + 1 && r.data.failed === 0 && r.data.remaining === 1, '重試失敗的照片：清除計數後重新上傳', r.data);
+
+    // ---- 設定 ----
+    r = await api('PATCH', `/api/admin/${id}/gphotos`, { token: tok, body: { share_url: 'https://evil.example.com/x' } });
+    ok(r.status === 400, '共用連結非 Google 相簿 → 400');
+    r = await api('PATCH', `/api/admin/${id}/gphotos`, { token: tok, body: { share_url: 'https://photos.app.goo.gl/AbC123', auto: true } });
+    ok(r.status === 200 && r.data.share_url === 'https://photos.app.goo.gl/AbC123' && r.data.auto === true, '儲存共用連結、開啟自動同步', r.data);
+
+    // ---- 排程自動同步 ----
+    const p5 = await uploadPhoto(up, { bytes: makeJpeg('gp-5'), meta: { device: 'dev-gp-1' } });
+    const sres = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('47 * * * *')}`);
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(sres.status === 200 && r.data.synced === 3, '每小時排程自動補傳新照片', r.data);
+    void p5;
+
+    // ---- 原圖下載（方案 B）----
+    r = await api('GET', `/api/admin/${id}/photos`, { token: tok });
+    ok(r.data.photos.every((x) => x.ext === 'jpg' && x.size > 0), '照片清單帶副檔名與大小');
+    r = await api('GET', `/api/admin/${id}/original/${p1.hash}`, { token: tok });
+    ok(r.status === 200 && sha(r.buf) === p1.hash && /attachment/.test(r.headers.get('content-disposition') || ''), '下載原圖（位元組一致、attachment）');
+    r = await api('GET', `/api/admin/${id}/original/${p1.hash}`);
+    ok(r.status === 401, '原圖下載需要權限');
+
+    // ---- 重新連結（同一帳號）→ 沿用相簿 ----
+    r = await api('POST', `/api/admin/${id}/gphotos/connect`, { token: tok });
+    const st2 = new URL(r.data.auth_url).searchParams.get('state');
+    const nc2 = (r.headers.get('set-cookie') || '').split(';')[0];
+    c = await cb(`code=GOODCODE&state=${encodeURIComponent(st2)}`, nc2);
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(c.frag.get('reused') === '1' && fake.albums.size === 1 && r.data.synced === 3 && r.data.share_url === 'https://photos.app.goo.gl/AbC123', '重新連結：沿用相簿與同步紀錄', r.data);
+
+    // ---- 相簿被刪除 ----
+    fake.batch404 = true;
+    await uploadPhoto(up, { bytes: makeJpeg('gp-6'), meta: { device: 'dev-gp-1' } });
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(r.status === 409 && r.data.error === 'gphotos_album_unavailable', '相簿不能再加入 → 409 album_unavailable', r.data);
+    fake.batch404 = false;
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(r.data.syncing === false && /無法加入相簿/.test(r.data.last_error), '失敗後解鎖並記錄錯誤', r.data);
+
+    // ---- 授權失效 ----
+    fake.upload401 = true; fake.badRefresh = true;
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(r.status === 502 && r.data.error === 'gphotos_token_failed', 'access token 被拒 → 502，清除快取', r.data);
+    fake.upload401 = false;
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(r.status === 409 && r.data.error === 'gphotos_reconnect', 'refresh token 失效 → 409 需要重新連結', r.data);
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    ok(r.data.need_reconnect === true && r.data.connected === false, '狀態顯示需要重新連結', r.data);
+    fake.badRefresh = false;
+
+    // ---- 中斷連結 ----
+    r = await api('POST', `/api/admin/${id}/gphotos/disconnect`, { token: tok });
+    ok(r.status === 200 && r.data.connected === false && fake.revoked.includes('RT1') && r.data.album_title, '中斷連結：撤銷 token、保留相簿資訊', r.data);
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
+    ok(r.status === 409, '中斷後不能同步');
   } finally {
     srv.close();
   }
