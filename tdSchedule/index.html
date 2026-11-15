@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- 只允許載入本站檔案、禁止對外連線：人員名冊與排班資料只留在本機瀏覽器，不上傳 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>天達堂 116 年排班台</title>
+  <meta name="description" content="天達堂 116 年排班工作台：依區設定廚務組、服務組、禮節隊與交通隊人員，並依日期與區域安排忠恕輪值、洗碗、大典前晚等無組別勤務，內建規則檢查與離線儲存">
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/tdSchedule-192.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/tdSchedule-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="天達排班">
+  <meta name="theme-color" content="#2c6a5d">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <div class="bar1">
+        <div class="brand">
+          <img src="./icons/tdSchedule-192.svg" alt="" class="brand-icon" width="28" height="28">
+          <div>
+            <h1>天達堂 116 年排班台</h1>
+            <span class="sub">116/1/1–117/2/6（v9.2 最新行事曆｜可離線使用）</span>
+          </div>
+        </div>
+        <div class="hdr-right">
+          <span class="sync" id="sync"><span class="dot on"></span>本機離線就緒</span>
+          <span class="counts" id="hdrCounts"></span>
+          <button class="btn sm" id="btnUndo" data-act="undo" hidden>復原上一步</button>
+          <button class="btn sm" id="btnInstall" hidden>安裝 App</button>
+          <button class="btn sm" id="btnLarge" data-act="toggleLarge" title="切換年長者大字簡化版">大字版</button>
+          <button class="btn sm ghost" id="btnTheme" data-act="toggleTheme" title="切換深色／淺色">◐</button>
+          <button class="btn sm pri" data-act="openAuto">自動排人</button>
+        </div>
+      </div>
+      <nav class="tabs" id="tabs" aria-label="主功能分頁">
+        <a href="#area" data-v="area">依區排人</a>
+        <a href="#ungrouped" data-v="ungrouped">忠恕＆無組別</a>
+        <a href="#schedule" data-v="schedule">全年排班表</a>
+        <a href="#overview" data-v="overview">總覽與負擔</a>
+        <a href="#issues" data-v="issues">衝突與議題<span id="tabIss"></span></a>
+        <a href="#settings" data-v="settings">規則與匯出</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap" id="main"></main>
+  <div id="layer"></div>
+
+  <nav class="bottom-nav" id="bottomNav" aria-label="手機快捷導覽">
+    <a href="#area" data-v="area"><span>依區排人</span></a>
+    <a href="#ungrouped" data-v="ungrouped"><span>忠恕無組</span></a>
+    <a href="#schedule" data-v="schedule"><span>排班表</span></a>
+    <a href="#overview" data-v="overview"><span>總覽</span></a>
+    <a href="#issues" data-v="issues"><span>衝突</span></a>
+    <a href="#settings" data-v="settings"><span>匯出</span></a>
+  </nav>
+
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

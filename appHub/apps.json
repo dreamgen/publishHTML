@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-12T03:09:12.522Z",
-  "count": 19,
+  "generatedAt": "2026-11-15T03:48:18.159Z",
+  "count": 20,
   "apps": [
     {
       "id": "bridgeGame",
@@ -210,6 +210,19 @@
       "path": "../talentPool/",
       "icon": "../talentPool/icons/talentPool-192.png",
       "themeColor": "#0f5e5a",
+      "categories": [
+        "productivity",
+        "utilities"
+      ]
+    },
+    {
+      "id": "tdSchedule",
+      "name": "天達堂 116 年排班台",
+      "shortName": "天達排班",
+      "description": "天達堂 116 年排班工作台：依區設定廚務組、服務組、禮節隊與交通隊人員，並依日期與區域安排忠恕輪值、洗碗、大典前晚等無組別勤務，內建規則檢查與離線儲存",
+      "path": "../tdSchedule/",
+      "icon": "../tdSchedule/icons/tdSchedule-192.png",
+      "themeColor": "#2c6a5d",
       "categories": [
         "productivity",
         "utilities"

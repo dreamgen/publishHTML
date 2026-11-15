@@ -1,0 +1,21 @@
+{
+  "id": "tdSchedule",
+  "name": "天達堂 116 年排班台",
+  "short_name": "天達排班",
+  "description": "天達堂 116 年排班工作台：依區設定廚務組、服務組、禮節隊與交通隊人員，並依日期與區域安排忠恕輪值、洗碗、大典前晚等無組別勤務，內建規則檢查與離線儲存",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f4",
+  "theme_color": "#2c6a5d",
+  "lang": "zh-TW",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "./icons/tdSchedule-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/tdSchedule-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/tdSchedule-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/tdSchedule-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/tdSchedule-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
