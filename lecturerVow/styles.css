@@ -657,40 +657,6 @@ table.classic td {
   gap: 14px;
 }
 
-@media (min-width: 768px) {
-  .pwa-shell {
-    padding-bottom: 32px;
-  }
-  .pwa-desktop-nav {
-    display: flex;
-  }
-  .bottom-nav {
-    display: none !important;
-  }
-  .pwa-body {
-    padding: 22px 20px;
-  }
-  .pwa-overview-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 980px) {
-  .pwa-monthly-layout {
-    grid-template-columns: 320px 1fr;
-  }
-  .pwa-month-sidebar {
-    position: sticky;
-    top: 76px;
-  }
-  .pwa-month-sidebar .month-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  .pwa-kr-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
 .goal-tabs-bar {
   display: flex;
   gap: 8px;
@@ -724,14 +690,8 @@ table.classic td {
   box-shadow: 0 2px 6px rgba(78, 42, 30, 0.2);
 }
 
-.goal-tab .tab-star {
-  color: #f59e0b;
-  font-size: 12px;
-}
-
-.goal-tab.active .tab-star {
-  color: #fcd34d;
-}
+.goal-tab .tab-star { color: #f59e0b; font-size: 12px; }
+.goal-tab.active .tab-star { color: #fcd34d; }
 
 .bottom-nav {
   position: fixed;
@@ -764,11 +724,7 @@ table.classic td {
   cursor: pointer;
 }
 
-.bottom-nav-btn.active {
-  color: var(--brand);
-  font-weight: 800;
-}
-
+.bottom-nav-btn.active { color: var(--brand); font-weight: 800; }
 .bottom-nav-icon { font-size: 18px; line-height: 1.2; }
 
 .onboarding-box {
@@ -780,4 +736,19 @@ table.classic td {
   width: 100%;
   margin: 16px auto;
   box-shadow: 0 6px 20px rgba(78, 42, 30, 0.08);
+}
+
+@media (min-width: 768px) {
+  .pwa-shell { padding-bottom: 32px; }
+  .pwa-desktop-nav { display: flex; }
+  .bottom-nav { display: none; }
+  .pwa-body { padding: 22px 20px; }
+  .pwa-overview-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 980px) {
+  .pwa-monthly-layout { grid-template-columns: 320px 1fr; }
+  .pwa-month-sidebar { position: sticky; top: 76px; }
+  .pwa-month-sidebar .month-grid { grid-template-columns: repeat(4, 1fr); }
+  .pwa-kr-grid { grid-template-columns: repeat(2, 1fr); }
 }
