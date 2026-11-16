@@ -111,12 +111,21 @@
     }
   }
 
+  function normalizeLecturer(lec) {
+    if (!lec || typeof lec !== 'object') return lec;
+    if (!Array.isArray(lec.goals)) lec.goals = [];
+    lec.goals.forEach((g) => {
+      if (!Array.isArray(g.krs)) g.krs = [];
+    });
+    return lec;
+  }
+
   function subscribeCloudLecturers() {
     if (!fbDb) return;
     fbDb.ref(`${rootPath}/lecturers`).on('value', (snap) => {
       const val = snap.val();
       if (val && typeof val === 'object') {
-        lecturers = Object.values(val);
+        lecturers = Object.values(val).map(normalizeLecturer);
         saveLocal();
         if (typeof onDataChangeCb === 'function') onDataChangeCb(lecturers);
       }
@@ -133,13 +142,18 @@
   }
 
   async function saveLecturer(lec) {
-    const idx = lecturers.findIndex((item) => item.id === lec.id);
-    if (idx >= 0) lecturers[idx] = lec;
-    else lecturers.push(lec);
+    const clean = normalizeLecturer(JSON.parse(JSON.stringify(lec)));
+    const idx = lecturers.findIndex((item) => item.id === clean.id);
+    if (idx >= 0) lecturers[idx] = clean;
+    else lecturers.push(clean);
     saveLocal();
 
     if (fbDb && fbAuth && fbAuth.currentUser) {
-      await fbDb.ref(`${rootPath}/lecturers/${lec.id}`).set(lec);
+      try {
+        await fbDb.ref(`${rootPath}/lecturers/${clean.id}`).set(clean);
+      } catch (err) {
+        console.error('Firebase save error:', err);
+      }
     }
   }
 

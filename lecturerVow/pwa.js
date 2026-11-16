@@ -439,13 +439,13 @@
           </div>
 
           <div>
-            <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">實際做法 *</label>
-            <input id="mKrAction" type="text" required placeholder="例如：每週讀一篇＋寫看法、心得" />
+            <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">實際做法（選填）</label>
+            <input id="mKrAction" type="text" placeholder="例如：每週讀一篇＋寫看法、心得" />
           </div>
 
           <div>
-            <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">原因與考量 *</label>
-            <input id="mKrReason" type="text" required placeholder="例如：從已有的文本開始練習" />
+            <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">原因與考量（選填）</label>
+            <input id="mKrReason" type="text" placeholder="例如：從已有的文本開始練習" />
           </div>
 
           <button type="submit" class="btn btn-line" style="justify-content:center;padding:12px;">確認新增並切換至該目標填報</button>
@@ -659,37 +659,58 @@
 
     const mobileAddForm = document.getElementById('mobileAddForm');
     if (mobileAddForm) {
-      mobileAddForm.onsubmit = (e) => {
+      mobileAddForm.onsubmit = async (e) => {
         e.preventDefault();
         const lec = getMyLecturer();
-        if (!lec) return;
+        if (!lec) {
+          showToast('請先建立或認領講師身分');
+          return;
+        }
+        if (!Array.isArray(lec.goals)) lec.goals = [];
+
         const choice = document.getElementById('mGoalSelect').value;
+        const krTitle = document.getElementById('mKrTitle').value.trim();
+        if (!krTitle) {
+          showToast('請輸入關鍵成果（小目標）名稱');
+          return;
+        }
         const type = document.getElementById('mKrType').value;
         const rawTarget = Number(document.getElementById('mKrTarget').value || 100);
         const newKr = {
           id: 'KR_' + Date.now(),
-          title: document.getElementById('mKrTitle').value.trim(),
-          action: document.getElementById('mKrAction').value.trim(),
-          reason: document.getElementById('mKrReason').value.trim(),
+          title: krTitle,
+          action: document.getElementById('mKrAction').value.trim() || '依計畫持續精進',
+          reason: document.getElementById('mKrReason').value.trim() || '自我道學成長',
           type,
-          durationMonths: type === 'PERIODIC' ? Math.min(12, Math.max(3, rawTarget)) : undefined,
           targetValue: type === 'PERIODIC' ? Math.min(12, Math.max(3, rawTarget)) : rawTarget,
           unitLabel: document.getElementById('mKrUnit').value.trim() || '%',
           monthlyValues: { [state.activeMonth]: type === 'PERCENT' ? 0 : (type === 'PERIODIC' ? 100 : 0) },
           reflections: {}
         };
+        if (type === 'PERIODIC') {
+          newKr.durationMonths = newKr.targetValue;
+        }
+
         if (choice === 'NEW') {
-          const gTitle = document.getElementById('mNewGoalInput').value.trim() || '新精進目標';
+          const gTitle = document.getElementById('mNewGoalInput').value.trim();
+          if (!gTitle) {
+            showToast('請輸入新的愿力大目標名稱');
+            return;
+          }
           lec.goals.push({ id: 'G_' + Date.now(), title: gTitle, krs: [newKr] });
           state.activeGoalIndex = lec.goals.length - 1;
         } else {
           const idx = lec.goals.findIndex((g) => g.id === choice);
           if (idx >= 0) {
+            if (!Array.isArray(lec.goals[idx].krs)) lec.goals[idx].krs = [];
             lec.goals[idx].krs.push(newKr);
             state.activeGoalIndex = idx;
+          } else {
+            lec.goals.push({ id: 'G_' + Date.now(), title: '我的精進目標', krs: [newKr] });
+            state.activeGoalIndex = lec.goals.length - 1;
           }
         }
-        global.VowStore.saveLecturer(lec);
+        await global.VowStore.saveLecturer(lec);
         state.tab = 'monthly';
         render();
         showToast(`已新增「${newKr.title}」`);
