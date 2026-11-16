@@ -3,7 +3,7 @@
  * - 僅管理 lecturerVow-* 快取；採用 Stale-While-Revalidate 快取同源靜態資源
  * - 業務資料走 Firebase Realtime Database（或本機 localStorage），不經 SW 快取
  */
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_PREFIX = 'lecturerVow-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
 const ASSETS = [

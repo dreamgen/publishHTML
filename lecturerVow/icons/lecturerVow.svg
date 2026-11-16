@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#09354a"/>
-      <stop offset="100%" stop-color="#0d4a66"/>
+      <stop offset="0%" stop-color="#4E2A1E"/>
+      <stop offset="100%" stop-color="#5D3426"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <circle cx="256" cy="256" r="196" fill="none" stroke="#f59e0b" stroke-width="10" stroke-opacity="0.35"/>
-  <rect x="344" y="64" width="104" height="104" rx="52" fill="#06C755"/>
-  <path d="M396 88 L406 108 L428 111 L412 126 L416 148 L396 137 L376 148 L380 126 L364 111 L386 108 Z" fill="#ffffff"/>
-  <text x="256" y="328" font-family="'Noto Sans TC', 'PingFang TC', sans-serif" font-size="230" font-weight="700" text-anchor="middle" fill="#ffffff">愿</text>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#C89B4B" stroke-width="10" stroke-opacity="0.45"/>
+  <rect x="344" y="64" width="104" height="104" rx="52" fill="#4E7A66"/>
+  <path d="M396 88 L406 108 L428 111 L412 126 L416 148 L396 137 L376 148 L380 126 L364 111 L386 108 Z" fill="#FDF9F3"/>
+  <text x="256" y="328" font-family="'Noto Sans TC', 'PingFang TC', sans-serif" font-size="230" font-weight="700" text-anchor="middle" fill="#FDF9F3">愿</text>
 </svg>

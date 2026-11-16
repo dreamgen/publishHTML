@@ -99,7 +99,7 @@
         for (let k = 1; k <= 2; k++) {
           rowsHtml += `
             <tr style="height:48px;">
-              ${k === 1 ? `<td rowspan="2" style="text-align:center;font-weight:700;background:#f8fafc;">${g}</td>` : ''}
+              ${k === 1 ? `<td rowspan="2" style="text-align:center;font-weight:700;background:#F5EFE6;">${g}</td>` : ''}
               ${k === 1 ? `<td rowspan="2"></td>` : ''}
               ${k === 1 ? `<td rowspan="2" style="text-align:center;color:#94a3b8;">☆☆☆☆☆<br/>( % )</td>` : ''}
               <td></td>
@@ -137,18 +137,18 @@
 
           rowsHtml += `
             <tr>
-              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="text-align:center;font-weight:700;background:#f1f5f9;">${gIdx + 1}</td>` : ''}
-              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="font-weight:700;background:#f8fafc;min-width:130px;">${esc(goal.title)}</td>` : ''}
+              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="text-align:center;font-weight:700;background:#F2EAE0;">${gIdx + 1}</td>` : ''}
+              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="font-weight:700;background:#F5EFE6;min-width:130px;">${esc(goal.title)}</td>` : ''}
               ${kIdx === 0 ? `
-                <td rowspan="${krs.length}" style="text-align:center;background:#f8fafc;min-width:105px;">
+                <td rowspan="${krs.length}" style="text-align:center;background:#F5EFE6;min-width:105px;">
                   <div style="color:#d97706;font-weight:700;">${gStat.starText}</div>
                   <div style="font-weight:800;">${gStat.stars.toFixed(1)}星 (${gStat.rate}%)</div>
-                  <div style="font-size:11px;color:#475569;">${gStat.badge}</div>
+                  <div style="font-size:11px;color:#66564D;">${gStat.badge}</div>
                 </td>
               ` : ''}
               <td style="min-width:140px;">
                 <div style="font-weight:700;">${esc(kr.title)}</div>
-                <div style="font-size:11px;color:#64748b;">[${typeLabel}${periodHint}]</div>
+                <div style="font-size:11px;color:#7D6C62;">[${typeLabel}${periodHint}]</div>
               </td>
               <td style="text-align:center;font-weight:800;">${krProg}%</td>
               <td style="min-width:140px;">${esc(kr.action)}</td>
@@ -164,7 +164,7 @@
       <div class="table-wrap">
         <div class="classic-banner">
           <span>核心精進愿景：${isBlankTemplate ? '＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿' : esc(lec.coreVision)}</span>
-          <span style="font-size:12px;font-weight:400;color:#bae6fd;">
+          <span style="font-size:12px;font-weight:400;color:#fde68a;">
             ${isBlankTemplate ? '單位：＿＿＿＿＿＿　講師姓名：＿＿＿＿＿＿' : `單位：${esc(lec.unit)} ｜ 講師：${esc(lec.name)}`}
           </span>
         </div>
@@ -299,7 +299,7 @@
 
         <div class="control-box">
           ${controlHtml}
-          <div style="border-top:1px solid #e2e8f0;padding-top:8px;">
+          <div style="border-top:1px solid #E6DCD0;padding-top:8px;">
             <label class="text-xs" style="font-weight:600;display:block;margin-bottom:4px;">💬 ${state.activeMonth}月份修辦心得回饋 / 成果紀錄：</label>
             <div style="display:flex;gap:8px;">
               <input type="text" value="${esc(refText)}" placeholder="輸入本月心得或成果說明..."
@@ -335,13 +335,13 @@
               <div class="row-wrap">
                 <div class="goal-index">${idx + 1}</div>
                 <div>
-                  <div class="text-xs" style="color:#7dd3fc;">愿力大目標 (Objective ${idx + 1})</div>
+                  <div class="text-xs" style="color:#fcd34d;">愿力大目標 (Objective ${idx + 1})</div>
                   <div style="font-weight:700;font-size:16px;">${esc(goal.title)}</div>
                 </div>
               </div>
               <div class="star-card" style="padding:8px 12px;min-width:170px;">
                 <div style="color:#fbbf24;font-weight:800;">${gStat.starText} <span style="color:#fff;">${gStat.stars.toFixed(1)}星</span></div>
-                <div class="text-xs" style="color:#34d399;">${gStat.badge} ‧ ${gStat.rate}%</div>
+                <div class="text-xs" style="color:#84B39D;">${gStat.badge} ‧ ${gStat.rate}%</div>
               </div>
             </div>
             <div class="kr-list">
@@ -383,20 +383,20 @@
               <div class="line-avatar">愿</div>
               <div class="line-bubble">
                 <strong>${esc(lec.name)} 講師吉祥 🙏</strong>
-                <div>核心精進愿景：<span style="color:#047857;font-weight:700;">「${esc(lec.coreVision)}」</span></div>
+                <div>核心精進愿景：<span style="color:#3D6352;font-weight:700;">「${esc(lec.coreVision)}」</span></div>
               </div>
             </div>
             <div class="line-bubble-row">
               <div class="line-avatar">愿</div>
               <div class="line-bubble">
                 <div>目前年度總五星評比：<strong>★ ${overall.stars.toFixed(1)} 星 (${overall.rate}%)</strong></div>
-                <div style="color:#64748b;margin-top:2px;">點選下方圖文選單可快速跳轉回報；本系統不主動群發推播，僅支援單人 Push 小卡。</div>
+                <div style="color:#7D6C62;margin-top:2px;">點選下方圖文選單可快速跳轉回報；本系統不主動群發推播，僅支援單人 Push 小卡。</div>
               </div>
             </div>
             ${extraBubbles}
           </div>
 
-          <div style="padding:8px 12px;background:#f1f5f9;border-top:1px solid #cbd5e1;" class="row-between">
+          <div style="padding:8px 12px;background:#F2EAE0;border-top:1px solid #E6DCD0;" class="row-between">
             <span class="text-xs" style="font-weight:600;">單人 Push 互動：</span>
             <div class="row-wrap">
               <button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:11px;" data-action="push-summary">⭐ Push 我的星級小卡</button>
@@ -430,15 +430,15 @@
                 </span>
                 <span class="badge badge-slate">綁定碼：${esc(lec.bindCode || lec.id)}</span>
               </div>
-              <h2 style="margin:0;font-size:22px;">${esc(lec.name)} <span style="font-size:14px;font-weight:400;color:#bae6fd;">講師</span></h2>
+              <h2 style="margin:0;font-size:22px;">${esc(lec.name)} <span style="font-size:14px;font-weight:400;color:#fde68a;">講師</span></h2>
               <div style="margin-top:6px;font-size:15px;">
-                <span style="color:#bae6fd;">核心精進愿景：</span>
+                <span style="color:#fde68a;">核心精進愿景：</span>
                 <strong style="color:#fcd34d;">${esc(lec.coreVision)}</strong>
                 <button type="button" class="btn btn-ghost" style="padding:2px 8px;font-size:11px;margin-left:6px;" data-action="edit-vision">✎ 修改</button>
               </div>
             </div>
             <div class="star-card">
-              <div class="text-xs" style="color:#bae6fd;">年度愿力總評比</div>
+              <div class="text-xs" style="color:#fde68a;">年度愿力總評比</div>
               <div class="stars-gold">${overall.starText} ${overall.stars.toFixed(1)} 星</div>
               <div class="row-wrap" style="justify-content:flex-end;margin-top:4px;">
                 <span class="badge badge-amber">${overall.badge}</span>
@@ -628,7 +628,7 @@
             const st = computeLecturerStats(lec);
             return `
               <div class="card stack" style="padding:0;overflow:hidden;">
-                <div style="background:#f1f5f9;padding:12px 16px;border-bottom:1px solid var(--border);" class="row-between">
+                <div style="background:#F2EAE0;padding:12px 16px;border-bottom:1px solid var(--border);" class="row-between">
                   <div class="row-wrap">
                     <span class="badge badge-sky">${esc(lec.unit)}</span>
                     <strong style="font-size:16px;">${esc(lec.name)} 講師</strong>
@@ -687,7 +687,7 @@
           <div class="card">
             <div class="text-xs" style="color:var(--muted);">篩選單位立愿人數</div>
             <div class="kpi-num">${total} <span style="font-size:13px;font-weight:400;">位講師</span></div>
-            <div class="text-xs" style="color:#15803d;">100% 完成母堂呈表建檔</div>
+            <div class="text-xs" style="color:#3D6352;">100% 完成母堂呈表建檔</div>
           </div>
           <div class="card">
             <div class="text-xs" style="color:var(--muted);">紙電雙軌比例</div>
