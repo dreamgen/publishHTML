@@ -3,7 +3,7 @@
  * - 只管理 tdAssign-* 快取；Stale-While-Revalidate，僅快取同源 GET
  * - 排班資料走 Firebase（或本機 localStorage），不經過 SW
  */
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_PREFIX = 'tdAssign-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
 const ASSETS = ['./', './index.html', './styles.css', './config.js', './data.js', './engine.js', './store.js', './app.js', './manifest.webmanifest', './icons/tdAssign.svg', './icons/tdAssign-192.png', './icons/tdAssign-512.png', './icons/apple-touch-icon.png'];

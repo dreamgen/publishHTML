@@ -24,7 +24,7 @@
 (function () {
   'use strict';
   const CFG = window.TD_CONFIG || {};
-  const TOP = ['meta', 'groups', 'assign', 'areas', 'members', 'admins', 'sched', 'users', 'pov', 'coord', 'log', 'presence'];
+  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'admins', 'sched', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'log', 'presence'];
 
   function setPath(obj, path, value) {
     const ks = path.split('/');
@@ -82,7 +82,16 @@
     };
     s.signIn = async (who) => {
       s.user = who; sessionStorage.setItem(WHO, JSON.stringify(who));
-      const up = { ['users/' + who.uid]: { name: who.name, provider: 'local' } };
+      load();
+      const prev = (s.data.users || {})[who.uid] || {};
+      const uObj = Object.assign({}, prev, { name: who.name, provider: 'local' });
+      if (who.pid && !uObj.pid) {
+        uObj.pid = who.pid;
+        uObj.bindStatus = 'ok';
+        uObj.bindArea = who.area || who.leadOf || '';
+        uObj.bindAt = Date.now();
+      }
+      const up = { ['users/' + who.uid]: uObj };
       if (who.admin) up['admins/' + who.uid] = true;
       if (who.leadOf) { up['members/' + who.leadOf + '/' + who.uid] = { name: who.name, role: 'lead', status: 'ok', by: '本機試用' }; up['sched/' + who.uid] = true; }
       await s.update(up);
@@ -147,7 +156,12 @@
           const prov = u.uid.startsWith('line:') ? 'line' : 'google';
           const known = (s.data.users || {})[u.uid];
           s.user = { uid: u.uid, name: (known && known.name) || u.displayName || '', provider: prov };
-          if (!known || !known.name) s.update({ ['users/' + u.uid]: { name: s.user.name || '未命名', provider: prov } });
+          if (!known || !known.name) {
+            s.update({
+              ['users/' + u.uid + '/name']: s.user.name || '未命名',
+              ['users/' + u.uid + '/provider']: prov
+            });
+          }
         } else s.user = null;
         resub(); // 登入前後能讀的範圍不同，重新訂閱
         s.emit();
@@ -189,7 +203,12 @@
         const j = await r.json();
         if (!r.ok || !j.token) throw new Error(j.error || 'LINE 登入失敗');
         const cred = await authm.signInWithCustomToken(auth, j.token);
-        if (j.name) await s.update({ ['users/' + cred.user.uid]: { name: j.name, provider: 'line' } });
+        if (j.name) {
+          await s.update({
+            ['users/' + cred.user.uid + '/name']: j.name,
+            ['users/' + cred.user.uid + '/provider']: 'line'
+          });
+        }
       } catch (e) { s.error = 'LINE 登入沒有完成：' + e.message; }
     }
     s.signOut = async () => { await authm.signOut(auth); };

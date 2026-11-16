@@ -228,7 +228,10 @@ window.TDEngine = function (BASE) {
         ed.area !== undefined ? { area: ed.area } : {},
         ed.grp !== undefined ? { grp: ed.grp } : {},
         ed.need !== undefined && ed.need !== '' ? { need: +ed.need } : {},
-        ed.loc ? { loc: ed.loc } : {}
+        ed.loc ? { loc: ed.loc } : {},
+        ed.d ? { d: ed.d } : {},
+        ed.e ? { e: ed.e } : (ed.d && !b.e ? { e: ed.d } : {}),
+        ed.lock !== undefined ? { lock: !!ed.lock } : {}
       );
       s.note = ed.note || '';
       s.cancel = !!ed.cancel;
@@ -718,7 +721,7 @@ window.TDEngine = function (BASE) {
     setState(s) { st = s; }, getState() { return st; },
     AREAS, ALL_WORK_AREAS, PERSON_AREAS, SPECIAL_AREAS, CATS, JOB_CLASSES, WD, RULE_META, GROUP_META_BY_ID,
     dn, ds, wdOf, fmtD, splitList, defaultRules, cloneDefaultGroups, freshState, mergeRules,
-    resolveSlotGroupKey, groupOptionsForSlot, buildModel,
+    resolveSlotGroupKey, defaultGroupForAreaCat, groupOptionsForSlot, buildModel,
     isCookSlot, isCookPerson, isHeadCook, jobClass, canLead, needsLead, slotNeed, capOf, occasions,
     personIssues, areaIssues, slotIssues, issueKey, allIssues,
     evalCandidate, poolFor, rankCandidates, assignToModel, autoSchedule

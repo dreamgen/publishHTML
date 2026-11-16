@@ -25,6 +25,12 @@ window.TD_CONFIG = {
   // 資料在 Realtime Database 的根路徑（每個年度一個）
   root: 'td116',
 
+  // 草案版號（決議套用提案時會遞增）
+  draftVersion: 'v9.3',
+
+  // 測試開關：true 時，M8 姓名綁定、代管家人與新名冊申請立即生效；正式上線完工後請改為 false（須由區長／小組長確認）
+  autoApproveBind: true,
+
   // LINE 登入：LINE Developers 的 Channel ID，以及 worker/ 部署後的網址（兩個都填才會出現 LINE 登入按鈕）
   lineChannelId: '2012639715',
   lineWorkerUrl: 'https://tdassign-line-login.ikt-checkin.workers.dev'
