@@ -78,7 +78,7 @@ const gpReturn = (() => {
     frag = `e=${encodeURIComponent(e)}${rec ? `&k=${encodeURIComponent(rec.admin_code)}` : ''}`;
   }
   history.replaceState(null, '', `${location.pathname}${location.search}#${frag}`);
-  return { gp, why: q.get('why') || '', reused: q.get('reused') === '1' };
+  return { gp, why: q.get('why') || '', ge: (q.get('ge') || '').slice(0, 40), reused: q.get('reused') === '1' };
 })();
 
 // ---------- 啟動 ----------

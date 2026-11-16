@@ -2122,8 +2122,8 @@ async function gphotosTests() {
     const au = new URL(r.data.auth_url);
     const state = au.searchParams.get('state');
     const nonceCookie = (r.headers.get('set-cookie') || '').split(';')[0];
-    ok(r.status === 200 && au.hostname === 'accounts.google.com' && au.searchParams.get('access_type') === 'offline' && au.searchParams.get('prompt') === 'consent'
-      && au.searchParams.get('scope') === SC.join(' ') && au.searchParams.get('redirect_uri') === `${BASE}/oauth/gphotos/callback`, '產生 Google 授權網址（offline、consent、appendonly 範圍）', r.data);
+    ok(r.status === 200 && au.hostname === 'accounts.google.com' && au.searchParams.get('access_type') === 'offline' && au.searchParams.get('prompt') === 'select_account consent' && !au.searchParams.get('login_hint')
+      && au.searchParams.get('scope') === SC.join(' ') && au.searchParams.get('redirect_uri') === `${BASE}/oauth/gphotos/callback`, '產生 Google 授權網址（offline、每次選帳號＋同意、appendonly 範圍）', r.data);
     ok(/^gpn=[A-Za-z0-9_-]+$/.test(nonceCookie) && /Path=\/oauth\/gphotos\/callback/.test(r.headers.get('set-cookie')) && /HttpOnly/.test(r.headers.get('set-cookie')), '設定一次性 nonce cookie（HttpOnly、限 callback 路徑）');
 
     let c = await cb(`code=GOODCODE&state=${encodeURIComponent(state)}`);
@@ -2134,6 +2134,8 @@ async function gphotosTests() {
     ok(c.frag.get('gp') === 'denied', '使用者取消授權 → gp=denied');
     c = await cb(`code=NOSCOPE&state=${encodeURIComponent(state)}`, nonceCookie);
     ok(c.frag.get('why') === 'scope', '沒勾 appendonly 權限 → why=scope');
+    c = await cb(`code=BADCODE&state=${encodeURIComponent(state)}`, nonceCookie);
+    ok(c.frag.get('why') === 'token' && c.frag.get('ge') === 'invalid_grant', '換 token 失敗 → why=token＋Google 錯誤碼 ge', c.loc);
     c = await cb(`code=NORT&state=${encodeURIComponent(state)}`, nonceCookie);
     ok(c.frag.get('why') === 'refresh', '沒有 refresh token → why=refresh');
     c = await cb(`code=GOODCODE&state=${encodeURIComponent(state)}`, nonceCookie);

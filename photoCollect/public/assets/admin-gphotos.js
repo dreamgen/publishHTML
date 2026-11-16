@@ -16,7 +16,20 @@ const WHY = {
   disabled: '伺服器尚未設定 Google 相簿匯出。',
 };
 
+// Google 回傳的錯誤碼 → 給網站管理員的處理方式
+const GE = {
+  invalid_client: '用戶端密碼不正確，或 GOOGLE_CLIENT_SECRET 與 wrangler.toml 的 GOOGLE_CLIENT_ID 不是同一個 OAuth 用戶端。請到 Google Cloud「憑證」打開該 Client ID，複製它的「用戶端密碼」，執行 npx wrangler secret put GOOGLE_CLIENT_SECRET 後重新部署。',
+  unauthorized_client: '這個 OAuth 用戶端不允許此授權方式，請確認類型是「網頁應用程式」。',
+  redirect_uri_mismatch: '「已授權的重新導向 URI」沒有登記這個網址，請在 Google Cloud 憑證加上本站的 /oauth/gphotos/callback。',
+  invalid_grant: '授權碼已過期或已被使用（例如重新整理了授權回來的頁面），請再按一次「連結 Google 相簿」。',
+  invalid_request: 'Google 認為請求格式不正確，請重新連結；若持續發生請回報。',
+  network: '伺服器連不到 Google，請稍後再試。',
+  PERMISSION_DENIED: 'Google 拒絕建立相簿：請確認 Google Cloud 已啟用 Photos Library API，且授權時有勾選相簿權限。',
+  FORBIDDEN: 'Google 拒絕建立相簿：請確認 Google Cloud 已啟用 Photos Library API。',
+};
+
 export function renderGphotos(ctx, panel) {
+  let connectErr = null;  // 從授權頁回來的錯誤（持續顯示，不只 toast）
   let st = null;         // GET /gphotos 回傳
   let loadErr = '';
   let running = false;   // 立即同步進行中
@@ -32,6 +45,7 @@ export function renderGphotos(ctx, panel) {
   }
 
   async function connect() {
+    connectErr = null;
     try {
       const r = await ctx.api('/gphotos/connect', { method: 'POST' });
       try { sessionStorage.setItem(RETURN_KEY, location.hash); } catch { /* 私密模式：回來時改用本機記住的管理碼 */ }
@@ -177,6 +191,12 @@ export function renderGphotos(ctx, panel) {
     }
     const canWrite = ctx.canWrite;
     const kids = [h('h2', { id: 'gp-h', class: 'h2', text: '同步到 Google 相簿' })];
+    if (connectErr) {
+      kids.push(h('div', { class: 'warn', role: 'alert' },
+        h('b', { text: connectErr.title }),
+        connectErr.detail ? h('div', { text: connectErr.detail }) : null,
+        connectErr.code ? h('div', { class: 'small' }, 'Google 錯誤碼：', h('code', { text: connectErr.code })) : null));
+    }
     if (!st.album_title) {
       kids.push(
         h('div', { class: 'muted' }, '用你的 Google 帳號授權後，系統會在你的 Google 相簿建立一本「', h('b', { text: ctx.cfg.basic?.name || '活動' }), '」相簿，把收到的照片自動放進去。你再到 Google 相簿 App 把相簿設成共用，就能分享給大家。'),
@@ -277,7 +297,11 @@ export function renderGphotos(ctx, panel) {
     const r = ctx.gpReturn;
     if (r.gp === 'ok') toast(r.reused ? '已重新連結，沿用原本的 Google 相簿' : '已連結 Google 相簿，並建立了新相簿');
     else if (r.gp === 'denied') toast('你取消了 Google 授權', 'err');
-    else toast(WHY[r.why] || 'Google 相簿連結失敗，請再試一次', 'err');
+    else {
+      const title = WHY[r.why] || 'Google 相簿連結失敗，請再試一次';
+      connectErr = { title, detail: GE[r.ge] || '', code: r.ge || '' };
+      toast(title, 'err');
+    }
   }
   draw();
   return { load };

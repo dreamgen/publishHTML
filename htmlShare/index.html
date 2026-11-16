@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>htmlShare — 上傳單一 HTML 並分享</title>
-  <meta name="description" content="上傳單一 HTML 檔案（例如 AI 產生的網頁），取得一個網址即可分享給其他人瀏覽">
+  <title>htmlShare — 單頁 HTML 與網址轉頁分享工具</title>
+  <meta name="description" content="上傳單一 HTML 檔案，或將長網址包裝成附帶預覽圖與介紹的短網址分享給其他人瀏覽">
 
   <!-- PWA Setup -->
   <link rel="manifest" href="./manifest.webmanifest">
@@ -90,7 +90,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback } = React;
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
     const STORAGE_WORKER_URL = 'htmlShare_workerUrl';
     const STORAGE_HISTORY = 'htmlShare_history';
@@ -98,6 +98,90 @@
     const HISTORY_LIMIT = 50;
     // 沿用 pureReader 既有的 purereader-proxy-cf Worker（同一次部署身兼代理 + htmlShare 後端）
     const DEFAULT_WORKER_URL = 'https://purereader-proxy-cf.dreamgen-dev.workers.dev';
+
+    const OG_WIDTH = 1200;
+    const OG_HEIGHT = 630;
+
+    const OG_THEMES = {
+      cyan: {
+        key: 'cyan',
+        label: '青藍科技',
+        bgFrom: '#082f49',
+        bgTo: '#0f172a',
+        glow1: 'rgba(34, 211, 238, 0.34)',
+        glow2: 'rgba(14, 165, 233, 0.24)',
+        accent: '#22d3ee',
+        badgeBg: 'rgba(34, 211, 238, 0.16)',
+        badgeBorder: 'rgba(103, 232, 249, 0.45)',
+        badgeText: '#67e8f9',
+        swatch: 'from-cyan-400 to-sky-600',
+      },
+      indigo: {
+        key: 'indigo',
+        label: '靛紫極光',
+        bgFrom: '#1e1b4b',
+        bgTo: '#0f172a',
+        glow1: 'rgba(129, 140, 248, 0.36)',
+        glow2: 'rgba(192, 132, 252, 0.24)',
+        accent: '#818cf8',
+        badgeBg: 'rgba(129, 140, 248, 0.18)',
+        badgeBorder: 'rgba(165, 180, 252, 0.45)',
+        badgeText: '#c7d2fe',
+        swatch: 'from-indigo-400 to-purple-600',
+      },
+      emerald: {
+        key: 'emerald',
+        label: '翡翠森林',
+        bgFrom: '#064e3b',
+        bgTo: '#0f172a',
+        glow1: 'rgba(52, 211, 153, 0.32)',
+        glow2: 'rgba(16, 185, 129, 0.22)',
+        accent: '#34d399',
+        badgeBg: 'rgba(52, 211, 153, 0.18)',
+        badgeBorder: 'rgba(110, 231, 183, 0.45)',
+        badgeText: '#a7f3d0',
+        swatch: 'from-emerald-400 to-teal-600',
+      },
+      amber: {
+        key: 'amber',
+        label: '溫潤暖金',
+        bgFrom: '#451a03',
+        bgTo: '#1c1917',
+        glow1: 'rgba(251, 191, 36, 0.30)',
+        glow2: 'rgba(249, 115, 22, 0.24)',
+        accent: '#fbbf24',
+        badgeBg: 'rgba(251, 191, 36, 0.18)',
+        badgeBorder: 'rgba(252, 211, 77, 0.45)',
+        badgeText: '#fde68a',
+        swatch: 'from-amber-400 to-orange-600',
+      },
+      rose: {
+        key: 'rose',
+        label: '玫瑰珊瑚',
+        bgFrom: '#4c0519',
+        bgTo: '#0f172a',
+        glow1: 'rgba(251, 113, 133, 0.34)',
+        glow2: 'rgba(244, 63, 94, 0.22)',
+        accent: '#fb7185',
+        badgeBg: 'rgba(251, 113, 133, 0.18)',
+        badgeBorder: 'rgba(253, 164, 175, 0.45)',
+        badgeText: '#fecdd3',
+        swatch: 'from-rose-400 to-pink-600',
+      },
+      slate: {
+        key: 'slate',
+        label: '深邃曜黑',
+        bgFrom: '#1e293b',
+        bgTo: '#020617',
+        glow1: 'rgba(148, 163, 184, 0.25)',
+        glow2: 'rgba(56, 189, 248, 0.16)',
+        accent: '#e2e8f0',
+        badgeBg: 'rgba(148, 163, 184, 0.18)',
+        badgeBorder: 'rgba(203, 213, 225, 0.4)',
+        badgeText: '#f1f5f9',
+        swatch: 'from-slate-400 to-slate-700',
+      },
+    };
 
     // ── Icons ────────────────────────────────────────────────────────────
     const IconUpload = (props) => (
@@ -124,6 +208,12 @@
     const IconRefresh = (props) => (
       <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
     );
+    const IconLink = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+    );
+    const IconImage = (props) => (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+    );
 
     function formatSize(bytes) {
       if (!bytes) return '';
@@ -139,6 +229,619 @@
       } catch {
         return iso;
       }
+    }
+
+    function isValidHttpUrl(raw) {
+      if (!raw || typeof raw !== 'string') return false;
+      try {
+        const u = new URL(raw.trim());
+        return u.protocol === 'http:' || u.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    }
+
+    function getDomainLabel(rawUrl, fallback = 'htmlShare') {
+      try {
+        const u = new URL(rawUrl.trim());
+        return u.hostname || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function safeScriptJson(value) {
+      return JSON.stringify(value)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026');
+    }
+
+    function withLineExternalParam(urlStr) {
+      try {
+        const u = new URL(urlStr);
+        u.searchParams.set('openExternalBrowser', '1');
+        return u.toString();
+      } catch {
+        return urlStr;
+      }
+    }
+
+    // ── Canvas 1200×630 預覽圖工具 ──────────────────────────────────────
+    function drawRoundRect(ctx, x, y, w, h, r) {
+      const radius = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+
+    function wrapCanvasText(ctx, text, maxWidth, maxLines) {
+      const normalized = String(text || '').trim();
+      if (!normalized) return [];
+      const paragraphs = normalized.split(/\r?\n/);
+      const lines = [];
+
+      for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+        const para = paragraphs[pIdx].trim();
+        if (!para) continue;
+        const tokens = para.match(/[A-Za-z0-9._:/-]+|\s+|./gu) || [];
+        let current = '';
+
+        const pushLine = (line) => {
+          lines.push(line.trimEnd());
+        };
+
+        for (let i = 0; i < tokens.length; i++) {
+          const token = tokens[i];
+          if (!current && /^\s+$/.test(token)) continue;
+          const candidate = current + token;
+          if (ctx.measureText(candidate).width <= maxWidth) {
+            current = candidate;
+            continue;
+          }
+
+          if (current) {
+            pushLine(current);
+            if (lines.length >= maxLines) break;
+            current = /^\s+$/.test(token) ? '' : token;
+          }
+
+          // 若單一長英文 token 自己就超過寬度，逐字切分避免溢出
+          while (current && ctx.measureText(current).width > maxWidth) {
+            let cut = current.length - 1;
+            while (cut > 1 && ctx.measureText(current.slice(0, cut)).width > maxWidth) {
+              cut--;
+            }
+            pushLine(current.slice(0, cut));
+            if (lines.length >= maxLines) {
+              current = '';
+              break;
+            }
+            current = current.slice(cut);
+          }
+
+          if (lines.length >= maxLines) break;
+        }
+
+        if (current && lines.length < maxLines) {
+          pushLine(current);
+        }
+
+        if (lines.length >= maxLines) {
+          // 檢查是否有剩餘文字未顯示，若有則於最後一行加上省略號
+          const consumed = lines.join('').length;
+          if (consumed < normalized.replace(/\s+/g, '').length || pIdx < paragraphs.length - 1) {
+            let last = lines[maxLines - 1];
+            while (last.length > 1 && ctx.measureText(last + '…').width > maxWidth) {
+              last = last.slice(0, -1);
+            }
+            lines[maxLines - 1] = last.trimEnd() + '…';
+          }
+          break;
+        }
+      }
+
+      return lines.slice(0, maxLines);
+    }
+
+    function renderAutoOgCanvas(canvas, { title, description, badgeText, targetUrl, themeKey }) {
+      const ctx = canvas.getContext('2d');
+      const theme = OG_THEMES[themeKey] || OG_THEMES.cyan;
+      const W = OG_WIDTH;
+      const H = OG_HEIGHT;
+      canvas.width = W;
+      canvas.height = H;
+
+      // 1. 背景漸層
+      const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+      bgGrad.addColorStop(0, theme.bgFrom);
+      bgGrad.addColorStop(1, theme.bgTo);
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // 2. 柔和光暈裝飾
+      const glow1 = ctx.createRadialGradient(W * 0.86, H * 0.14, 20, W * 0.86, H * 0.14, 440);
+      glow1.addColorStop(0, theme.glow1);
+      glow1.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow1;
+      ctx.fillRect(0, 0, W, H);
+
+      const glow2 = ctx.createRadialGradient(W * 0.14, H * 0.88, 20, W * 0.14, H * 0.88, 380);
+      glow2.addColorStop(0, theme.glow2);
+      glow2.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow2;
+      ctx.fillRect(0, 0, W, H);
+
+      // 3. 細微點陣網格紋理
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      for (let gx = 40; gx < W; gx += 48) {
+        for (let gy = 40; gy < H; gy += 48) {
+          ctx.beginPath();
+          ctx.arc(gx, gy, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // 4. 玻璃質感主卡片框
+      const padX = 56;
+      const padY = 50;
+      const cardW = W - padX * 2;
+      const cardH = H - padY * 2;
+      drawRoundRect(ctx, padX, padY, cardW, cardH, 32);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+      ctx.stroke();
+
+      // 卡片左側主題色條
+      drawRoundRect(ctx, padX + 36, padY + 42, 8, cardH - 84, 4);
+      ctx.fillStyle = theme.accent;
+      ctx.fill();
+
+      const contentX = padX + 74;
+      const contentMaxW = cardW - 122;
+
+      // 5. 頂部標籤與右側小字
+      const badge = (badgeText || '').trim();
+      let cursorY = padY + 58;
+      if (badge) {
+        ctx.font = '600 24px -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
+        const textW = ctx.measureText(badge).width;
+        const pillW = Math.min(textW + 44, contentMaxW * 0.7);
+        drawRoundRect(ctx, contentX, cursorY - 12, pillW, 48, 24);
+        ctx.fillStyle = theme.badgeBg;
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = theme.badgeBorder;
+        ctx.stroke();
+
+        ctx.fillStyle = theme.badgeText;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badge, contentX + 22, cursorY + 12, pillW - 44);
+      }
+
+      ctx.font = '600 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillStyle = 'rgba(226, 232, 240, 0.48)';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'right';
+      ctx.fillText('htmlShare', padX + cardW - 44, cursorY + 12);
+      ctx.textAlign = 'left';
+
+      // 6. 標題文字
+      const displayTitle = (title || '').trim() || getDomainLabel(targetUrl, '分享連結');
+      const titleFontSize = displayTitle.length > 26 ? 48 : 56;
+      ctx.font = `800 ${titleFontSize}px -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif`;
+      ctx.fillStyle = '#f8fafc';
+      ctx.textBaseline = 'top';
+      const titleLines = wrapCanvasText(ctx, displayTitle, contentMaxW, 3);
+      let textY = badge ? padY + 132 : padY + 106;
+      const titleLineHeight = titleFontSize * 1.26;
+      for (const line of titleLines) {
+        ctx.fillText(line, contentX, textY);
+        textY += titleLineHeight;
+      }
+
+      // 7. 介紹文字
+      const displayDesc = (description || '').trim();
+      if (displayDesc) {
+        ctx.font = '400 29px -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
+        ctx.fillStyle = 'rgba(226, 232, 240, 0.84)';
+        const descLines = wrapCanvasText(ctx, displayDesc, contentMaxW, 3);
+        let descY = Math.max(textY + 18, padY + 286);
+        const maxDescBottom = padY + cardH - 102;
+        for (const line of descLines) {
+          if (descY + 34 > maxDescBottom) break;
+          ctx.fillText(line, contentX, descY);
+          descY += 42;
+        }
+      }
+
+      // 8. 底部網域與行動按鈕
+      const footerY = padY + cardH - 58;
+      const domain = getDomainLabel(targetUrl, '線上服務連結');
+      ctx.font = '500 23px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.9)';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(domain, contentX, footerY, contentMaxW - 230);
+
+      const ctaW = 196;
+      const ctaH = 48;
+      const ctaX = padX + cardW - 44 - ctaW;
+      const ctaY = footerY - ctaH / 2;
+      drawRoundRect(ctx, ctaX, ctaY, ctaW, ctaH, 24);
+      ctx.fillStyle = theme.accent;
+      ctx.fill();
+
+      ctx.font = '700 22px -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", sans-serif';
+      ctx.fillStyle = '#0f172a';
+      ctx.textAlign = 'center';
+      ctx.fillText('點擊開啟 ↗', ctaX + ctaW / 2, footerY + 1);
+      ctx.textAlign = 'left';
+
+      return canvas.toDataURL('image/jpeg', 0.88);
+    }
+
+    function renderUploadedOgFromDataUrl(rawDataUrl, fitMode = 'cover') {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = OG_WIDTH;
+          canvas.height = OG_HEIGHT;
+          const ctx = canvas.getContext('2d');
+
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, OG_WIDTH, OG_HEIGHT);
+
+          const iw = img.naturalWidth || img.width;
+          const ih = img.naturalHeight || img.height;
+          if (!iw || !ih) {
+            reject(new Error('無法取得圖片尺寸'));
+            return;
+          }
+
+          if (fitMode === 'contain') {
+            // 先用滿版模糊背景填滿畫布，再置中完整繪製原圖
+            const coverScale = Math.max(OG_WIDTH / iw, OG_HEIGHT / ih);
+            const bw = iw * coverScale;
+            const bh = ih * coverScale;
+            ctx.save();
+            if ('filter' in ctx) ctx.filter = 'blur(28px) brightness(0.55)';
+            ctx.drawImage(img, (OG_WIDTH - bw) / 2, (OG_HEIGHT - bh) / 2, bw, bh);
+            ctx.restore();
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.38)';
+            ctx.fillRect(0, 0, OG_WIDTH, OG_HEIGHT);
+
+            const containScale = Math.min((OG_WIDTH - 48) / iw, (OG_HEIGHT - 36) / ih);
+            const dw = iw * containScale;
+            const dh = ih * containScale;
+            ctx.drawImage(img, (OG_WIDTH - dw) / 2, (OG_HEIGHT - dh) / 2, dw, dh);
+          } else {
+            const coverScale = Math.max(OG_WIDTH / iw, OG_HEIGHT / ih);
+            const dw = iw * coverScale;
+            const dh = ih * coverScale;
+            ctx.drawImage(img, (OG_WIDTH - dw) / 2, (OG_HEIGHT - dh) / 2, dw, dh);
+          }
+
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.onerror = () => reject(new Error('圖片解碼失敗，請換一張圖片試試'));
+        img.src = rawDataUrl;
+      });
+    }
+
+    function readImageFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        if (!file) { reject(new Error('沒有選擇圖片')); return; }
+        if (!/^image\/(jpeg|png|webp|gif)$/i.test(file.type) && !/\.(jpe?g|png|webp|gif)$/i.test(file.name || '')) {
+          reject(new Error('請選擇 JPG、PNG、WebP 或 GIF 圖片'));
+          return;
+        }
+        if (file.size > 15 * 1024 * 1024) {
+          reject(new Error('原始圖片過大，請選擇 15MB 以下的圖片'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('讀取圖片失敗'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // ── 產出轉頁專用 HTML 模板（關鍵：不使用 meta refresh，改用 JS 跳轉以確保 LINE/FB 爬蟲讀取 OG 標籤）
+    function buildRedirectHtml({
+      targetUrl,
+      title,
+      description,
+      ogImageSource,
+      inlineImageSrc = '',
+      redirectMode = 'instant',
+      badgeText = '',
+      themeKey = 'cyan',
+      openExternalInLine = false,
+    }) {
+      const cleanUrl = targetUrl.trim();
+      const finalTitle = (title || '').trim() || getDomainLabel(cleanUrl, '分享連結');
+      const finalDesc = (description || '').trim() || '點擊連結前往目標網頁';
+      const theme = OG_THEMES[themeKey] || OG_THEMES.cyan;
+      const domainLabel = getDomainLabel(cleanUrl, '目標網頁');
+      const hasImage = Boolean(ogImageSource && String(ogImageSource).trim());
+      const delayMs = redirectMode === 'card' ? 1500 : 0;
+
+      const ogImageTags = hasImage
+        ? `  <meta property="og:image" content="${escapeHtml(ogImageSource)}">\n` +
+          `  <meta property="og:image:width" content="${OG_WIDTH}">\n` +
+          `  <meta property="og:image:height" content="${OG_HEIGHT}">\n` +
+          `  <meta name="twitter:card" content="summary_large_image">\n` +
+          `  <meta name="twitter:image" content="${escapeHtml(ogImageSource)}">`
+        : `  <meta name="twitter:card" content="summary">`;
+
+      const headBlock = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(finalTitle)}</title>
+  <meta name="description" content="${escapeHtml(finalDesc)}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="${escapeHtml(finalTitle)}">
+  <meta property="og:description" content="${escapeHtml(finalDesc)}">
+  <meta property="og:url" content="__HTMLSHARE_URL__">
+${ogImageTags}
+  <meta name="twitter:title" content="${escapeHtml(finalTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(finalDesc)}">`;
+
+      const lineScriptBlock = `
+  <script>
+    (function () {
+      var target = ${safeScriptJson(cleanUrl)};
+      var openExternalInLine = ${openExternalInLine ? 'true' : 'false'};
+      var mode = ${safeScriptJson(redirectMode)};
+      var delay = ${delayMs};
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('preview') === '1') return;
+
+      var ua = navigator.userAgent || '';
+      var isLine = /\\bLine\\//i.test(ua);
+      if (openExternalInLine && isLine && params.get('openExternalBrowser') !== '1') {
+        try {
+          var nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.set('openExternalBrowser', '1');
+          window.location.replace(nextUrl.toString());
+          return;
+        } catch (e) {}
+      }
+
+      if (mode === 'iframe') return;
+      if (delay <= 0) {
+        window.location.replace(target);
+      } else {
+        setTimeout(function () {
+          window.location.replace(target);
+        }, delay);
+      }
+    })();
+  ${'<'}/script>`;
+
+      if (redirectMode === 'iframe') {
+        return `${headBlock}
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #ffffff; }
+    .hs-bar { position: fixed; top: 12px; right: 12px; z-index: 9999; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: rgba(15, 23, 42, 0.84); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
+    .hs-bar a { color: #f8fafc; text-decoration: none; font-size: 12px; font-weight: 600; padding: 2px 6px; }
+    .hs-bar a:hover { color: ${theme.accent}; }
+    .hs-bar button { border: 0; background: transparent; color: #94a3b8; cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; }
+  </style>${lineScriptBlock}
+</head>
+<body>
+  <iframe src="${escapeHtml(cleanUrl)}" title="${escapeHtml(finalTitle)}" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+  <div class="hs-bar" id="hs-bar">
+    <a href="${escapeHtml(cleanUrl)}" target="_blank" rel="noopener noreferrer">在新分頁開啟 ↗</a>
+    <button type="button" aria-label="收合" onclick="document.getElementById('hs-bar').style.display='none'">×</button>
+  </div>
+</body>
+</html>`;
+      }
+
+      const cardImgSrc = inlineImageSrc || ogImageSource;
+      const cardPreviewImg = redirectMode === 'card' && cardImgSrc
+        ? `<div class="cover"><img src="${escapeHtml(cardImgSrc)}" alt="${escapeHtml(finalTitle)}"></div>`
+        : '';
+      const badgeHtml = badgeText && badgeText.trim()
+        ? `<span class="badge">${escapeHtml(badgeText.trim())}</span>`
+        : '';
+      const progressHtml = redirectMode === 'card'
+        ? `<div class="progress-wrap"><div class="progress-bar"></div></div><p class="hint">正在為您安全轉導，約 1.5 秒後自動前往…</p>`
+        : `<p class="hint">正在為您轉導至目標網頁…</p>`;
+      const lineTipHtml = openExternalInLine
+        ? `<p class="line-tip">若您在 LINE 內開啟且未自動切換，請點右上角選單選擇「以預設瀏覽器開啟」，或直接點擊上方按鈕。</p>`
+        : '';
+
+      return `${headBlock}
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 20px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "Segoe UI", Roboto, sans-serif;
+      color: #f8fafc;
+      background: linear-gradient(135deg, ${theme.bgFrom} 0%, ${theme.bgTo} 100%);
+    }
+    .card {
+      width: 100%; max-width: 480px; border-radius: 24px; overflow: hidden;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    }
+    .cover img { display: block; width: 100%; aspect-ratio: 1200 / 630; object-fit: cover; background: #0f172a; }
+    .body { padding: 26px; }
+    .badge {
+      display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .03em;
+      padding: 4px 12px; border-radius: 999px; margin-bottom: 12px;
+      background: ${theme.badgeBg}; color: ${theme.badgeText}; border: 1px solid ${theme.badgeBorder};
+    }
+    h1 { margin: 0 0 10px; font-size: 1.35rem; line-height: 1.38; color: #f8fafc; }
+    .desc { margin: 0 0 16px; font-size: 0.94rem; line-height: 1.6; color: #cbd5e1; white-space: pre-line; }
+    .domain {
+      font-size: 0.78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #94a3b8; margin-bottom: 16px; word-break: break-all;
+    }
+    .progress-wrap { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; margin-bottom: 12px; }
+    .progress-bar { height: 100%; width: 0%; background: ${theme.accent}; animation: hsFill 1.5s linear forwards; }
+    @keyframes hsFill { from { width: 0%; } to { width: 100%; } }
+    .hint { margin: 0 0 16px; font-size: 0.85rem; color: #94a3b8; }
+    .btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 13px 18px; border-radius: 14px; text-decoration: none;
+      font-weight: 700; font-size: 0.95rem; color: #0f172a; background: ${theme.accent};
+      transition: transform .15s ease, opacity .15s ease;
+    }
+    .btn:hover { opacity: 0.92; transform: translateY(-1px); }
+    .line-tip { margin: 14px 0 0; font-size: 0.76rem; line-height: 1.5; color: #94a3b8; }
+  </style>${lineScriptBlock}
+</head>
+<body>
+  <main class="card">
+    ${cardPreviewImg}
+    <div class="body">
+      ${badgeHtml}
+      <h1>${escapeHtml(finalTitle)}</h1>
+      <p class="desc">${escapeHtml(finalDesc)}</p>
+      <div class="domain">前往：${escapeHtml(domainLabel)}</div>
+      ${progressHtml}
+      <a class="btn" href="${escapeHtml(cleanUrl)}" rel="noopener noreferrer">立即前往目標網頁 ↗</a>
+      ${lineTipHtml}
+    </div>
+  </main>
+</body>
+</html>`;
+    }
+
+    function createInitialRedirectState(seed = {}) {
+      const meta = seed.shareMeta || {};
+      return {
+        targetUrl: meta.targetUrl || '',
+        title: seed.title || '',
+        description: meta.description || '',
+        badgeText: meta.badgeText || '線上服務',
+        themeKey: meta.themeKey && OG_THEMES[meta.themeKey] ? meta.themeKey : 'cyan',
+        ogImageMode: meta.ogImageMode || 'auto', // 'auto' | 'upload' | 'url' | 'none'
+        imageFit: meta.imageFit || 'cover',
+        externalImageUrl: meta.ogImageUrl || '',
+        redirectMode: meta.redirectMode || 'instant', // 'instant' | 'card' | 'iframe'
+        openExternalInLine: Boolean(meta.openExternalInLine),
+        autoDataUrl: '',
+        uploadedRawDataUrl: '',
+        uploadedDataUrl: '',
+      };
+    }
+
+    function buildRedirectSubmission(state, { existingOgImageUrl = '' } = {}) {
+      const targetUrl = (state.targetUrl || '').trim();
+      if (!targetUrl) {
+        throw new Error('請輸入要轉導的目標網址');
+      }
+      if (!isValidHttpUrl(targetUrl)) {
+        throw new Error('請輸入有效的 http:// 或 https:// 網址');
+      }
+
+      const finalTitle = (state.title || '').trim() || getDomainLabel(targetUrl, '分享連結');
+      const finalDesc = (state.description || '').trim();
+
+      let ogImageSource = '';
+      let ogImagePayload; // undefined = 不更動；string = 上傳新圖片；null = 清除既有圖片
+
+      if (state.ogImageMode === 'auto') {
+        let dataUrl = state.autoDataUrl;
+        if (!dataUrl) {
+          const canvas = document.createElement('canvas');
+          dataUrl = renderAutoOgCanvas(canvas, {
+            title: finalTitle,
+            description: finalDesc,
+            badgeText: state.badgeText,
+            targetUrl,
+            themeKey: state.themeKey,
+          });
+        }
+        ogImageSource = '__HTMLSHARE_OG_IMAGE__';
+        ogImagePayload = dataUrl;
+      } else if (state.ogImageMode === 'upload') {
+        if (state.uploadedDataUrl) {
+          ogImageSource = '__HTMLSHARE_OG_IMAGE__';
+          ogImagePayload = state.uploadedDataUrl;
+        } else if (existingOgImageUrl) {
+          ogImageSource = '__HTMLSHARE_OG_IMAGE__';
+          ogImagePayload = undefined;
+        } else {
+          throw new Error('請先選擇或貼上要顯示的預覽圖片');
+        }
+      } else if (state.ogImageMode === 'url') {
+        const extUrl = (state.externalImageUrl || '').trim();
+        if (!isValidHttpUrl(extUrl)) {
+          throw new Error('請輸入有效的外部圖片網址（https://...）');
+        }
+        ogImageSource = extUrl;
+        if (existingOgImageUrl) ogImagePayload = null;
+      } else {
+        ogImageSource = '';
+        if (existingOgImageUrl) ogImagePayload = null;
+      }
+
+      const inlineImageSrc = (state.ogImageMode === 'auto' || state.ogImageMode === 'upload')
+        ? (ogImagePayload || existingOgImageUrl || '')
+        : ogImageSource;
+
+      const html = buildRedirectHtml({
+        targetUrl,
+        title: finalTitle,
+        description: finalDesc,
+        ogImageSource,
+        inlineImageSrc,
+        redirectMode: state.redirectMode,
+        badgeText: state.badgeText,
+        themeKey: state.themeKey,
+        openExternalInLine: state.openExternalInLine,
+      });
+
+      const shareMeta = {
+        type: 'redirect',
+        targetUrl,
+        description: finalDesc,
+        badgeText: (state.badgeText || '').trim(),
+        themeKey: state.themeKey,
+        ogImageMode: state.ogImageMode,
+        imageFit: state.imageFit,
+        ogImageUrl: state.ogImageMode === 'url' ? (state.externalImageUrl || '').trim() : '',
+        redirectMode: state.redirectMode,
+        openExternalInLine: Boolean(state.openExternalInLine),
+      };
+
+      return {
+        html,
+        title: finalTitle,
+        ogImage: ogImagePayload,
+        shareMeta,
+      };
     }
 
     // 讀取並驗證一個 .html 檔案，回傳檔案內容文字（供上傳與更新共用）
@@ -171,6 +874,356 @@
       try {
         localStorage.setItem(STORAGE_HISTORY, JSON.stringify(list.slice(0, HISTORY_LIMIT)));
       } catch {}
+    }
+
+    // ── LINE 分享預覽模擬卡 ───────────────────────────────────────────────
+    function LineSharePreview({ title, description, previewImageSrc, workerDomain }) {
+      const displayTitle = (title || '').trim() || '未填寫標題（將顯示目標網域）';
+      const displayDesc = (description || '').trim() || '點擊連結前往目標網頁';
+
+      return (
+        <div className="rounded-xl bg-[#7292b8]/20 border border-slate-700/70 p-3.5">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+            <span>LINE / 社群分享卡片預覽</span>
+            <span className="font-mono text-slate-500">{workerDomain}</span>
+          </div>
+          <div className="max-w-[300px] mx-auto rounded-2xl overflow-hidden bg-slate-900 border border-slate-700/80 shadow-lg">
+            {previewImageSrc ? (
+              <div className="w-full aspect-[1200/630] bg-slate-950 overflow-hidden">
+                <img src={previewImageSrc} alt="OG Preview" className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="w-full py-5 text-center text-xs text-slate-500 bg-slate-950/70 border-b border-slate-800">
+                未設定預覽圖片（純文字卡片）
+              </div>
+            )}
+            <div className="p-3 bg-slate-900/95">
+              <p className="text-sm font-bold text-slate-100 line-clamp-2 leading-snug">{displayTitle}</p>
+              <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">{displayDesc}</p>
+              <p className="text-[11px] text-slate-500 mt-1.5 font-mono truncate">{workerDomain}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── 網址轉頁編輯器（供 UploadForm 與 UpdateModal 共用）─────────────────
+    function RedirectEditor({ value, onChange, workerUrl, existingOgImageUrl = '', compact = false }) {
+      const [imageError, setImageError] = useState(null);
+      const [imgDragging, setImgDragging] = useState(false);
+      const imgInputRef = useRef(null);
+
+      const updateField = useCallback((patch) => {
+        onChange(prev => ({ ...prev, ...patch }));
+      }, [onChange]);
+
+      // 自動產生 1200×630 Canvas 預覽圖
+      useEffect(() => {
+        if (value.ogImageMode !== 'auto') return;
+        const canvas = document.createElement('canvas');
+        const dataUrl = renderAutoOgCanvas(canvas, {
+          title: value.title,
+          description: value.description,
+          badgeText: value.badgeText,
+          targetUrl: value.targetUrl,
+          themeKey: value.themeKey,
+        });
+        if (dataUrl !== value.autoDataUrl) {
+          onChange(prev => ({ ...prev, autoDataUrl: dataUrl }));
+        }
+      }, [value.ogImageMode, value.title, value.description, value.badgeText, value.targetUrl, value.themeKey]);
+
+      // 當上傳模式切換裁切／留白方式時重新渲染
+      useEffect(() => {
+        if (value.ogImageMode !== 'upload' || !value.uploadedRawDataUrl) return;
+        let cancelled = false;
+        renderUploadedOgFromDataUrl(value.uploadedRawDataUrl, value.imageFit)
+          .then(dataUrl => {
+            if (!cancelled) {
+              setImageError(null);
+              onChange(prev => ({ ...prev, uploadedDataUrl: dataUrl }));
+            }
+          })
+          .catch(err => {
+            if (!cancelled) setImageError(err.message);
+          });
+        return () => { cancelled = true; };
+      }, [value.ogImageMode, value.uploadedRawDataUrl, value.imageFit]);
+
+      const handleImageFile = async (file) => {
+        try {
+          setImageError(null);
+          const raw = await readImageFileAsDataUrl(file);
+          const processed = await renderUploadedOgFromDataUrl(raw, value.imageFit);
+          updateField({ uploadedRawDataUrl: raw, uploadedDataUrl: processed });
+        } catch (err) {
+          setImageError(err.message);
+        }
+      };
+
+      const handlePasteImage = (e) => {
+        if (value.ogImageMode !== 'upload') return;
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+          if (item.type && item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            if (file) handleImageFile(file);
+            break;
+          }
+        }
+      };
+
+      const isGasUrl = /script\.google\.com/i.test(value.targetUrl || '');
+      const urlLooksInvalid = Boolean((value.targetUrl || '').trim()) && !isValidHttpUrl(value.targetUrl);
+      const workerDomain = getDomainLabel(workerUrl, 'htmlShare');
+
+      const previewImageSrc = useMemo(() => {
+        if (value.ogImageMode === 'auto') return value.autoDataUrl;
+        if (value.ogImageMode === 'upload') return value.uploadedDataUrl || existingOgImageUrl || '';
+        if (value.ogImageMode === 'url') return isValidHttpUrl(value.externalImageUrl) ? value.externalImageUrl.trim() : '';
+        return '';
+      }, [value.ogImageMode, value.autoDataUrl, value.uploadedDataUrl, value.externalImageUrl, existingOgImageUrl]);
+
+      return (
+        <div className="space-y-4" onPaste={handlePasteImage}>
+          {/* 目標網址 */}
+          <div>
+            <label className="text-sm text-slate-300 font-medium block mb-1">
+              目標長網址 <span className="text-cyan-400">*</span>
+            </label>
+            <input
+              type="url"
+              value={value.targetUrl}
+              onChange={e => updateField({ targetUrl: e.target.value })}
+              placeholder="https://script.google.com/a/macros/.../exec"
+              className={`w-full bg-slate-800/60 border text-slate-100 text-sm rounded-xl block p-2.5 outline-none font-mono ${
+                urlLooksInvalid ? 'border-amber-500/70 focus:ring-2 focus:ring-amber-500' : 'border-slate-700 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500'
+              }`}
+            />
+            {urlLooksInvalid ? (
+              <p className="text-xs text-amber-400 mt-1">請輸入完整網址（需以 https:// 或 http:// 開頭）</p>
+            ) : (
+              <p className="text-xs text-slate-500 mt-1">
+                支援 Google Apps Script、Google 表單、Notion 等任意網址；日後目標網址變更時，可在下方紀錄原地更新，短網址不變。
+              </p>
+            )}
+          </div>
+
+          {/* 標題與介紹文字 */}
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="text-sm text-slate-300 font-medium block mb-1">
+                分享標題 <span className="text-xs text-slate-500 font-normal">（會顯示在 LINE / FB 預覽標題與預覽圖中）</span>
+              </label>
+              <input
+                type="text"
+                value={value.title}
+                onChange={e => updateField({ title: e.target.value })}
+                placeholder="例如：線上報名與查詢系統"
+                className="w-full bg-slate-800/60 border border-slate-700 text-slate-100 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-slate-300 font-medium block mb-1">
+                介紹文字 <span className="text-xs text-slate-500 font-normal">（選填，建議 15～60 字）</span>
+              </label>
+              <textarea
+                value={value.description}
+                onChange={e => updateField({ description: e.target.value })}
+                placeholder="例如：點擊即可進入線上填報與查詢頁面，支援手機與電腦操作。"
+                rows={compact ? 2 : 3}
+                className="w-full bg-slate-800/60 border border-slate-700 text-slate-100 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none resize-y"
+              />
+            </div>
+          </div>
+
+          {/* 預覽圖設定 */}
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/40 p-3.5 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="text-sm font-medium text-slate-300 flex items-center gap-1.5">
+                <IconImage className="w-4 h-4 text-cyan-400" /> 預覽圖片（1200×630）
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'auto', label: '🎨 自動產生' },
+                  { id: 'upload', label: '🖼️ 上傳圖片' },
+                  { id: 'url', label: '🌐 圖片網址' },
+                  { id: 'none', label: '🚫 不放圖' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updateField({ ogImageMode: opt.id })}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      value.ogImageMode === opt.id
+                        ? 'bg-cyan-600 text-white'
+                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700/80'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {value.ogImageMode === 'auto' && (
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-400">配色：</span>
+                    {Object.values(OG_THEMES).map(t => (
+                      <button
+                        key={t.key}
+                        type="button"
+                        title={t.label}
+                        onClick={() => updateField({ themeKey: t.key })}
+                        className={`w-6 h-6 rounded-full bg-gradient-to-br ${t.swatch} transition-transform ${
+                          value.themeKey === t.key ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-110' : 'opacity-75 hover:opacity-100'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 whitespace-nowrap">角落標籤：</span>
+                    <input
+                      type="text"
+                      value={value.badgeText}
+                      onChange={e => updateField({ badgeText: e.target.value })}
+                      placeholder="例如：線上系統"
+                      maxLength={20}
+                      className="w-32 bg-slate-800/70 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1 outline-none focus:ring-1 focus:ring-cyan-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {value.ogImageMode === 'upload' && (
+              <div className="space-y-2.5">
+                <div
+                  className={`drop-zone rounded-xl p-4 text-center cursor-pointer ${imgDragging ? 'dragging' : ''}`}
+                  onClick={() => imgInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setImgDragging(true); }}
+                  onDragLeave={() => setImgDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setImgDragging(false);
+                    handleImageFile(e.dataTransfer.files?.[0]);
+                  }}
+                >
+                  <p className="text-xs text-slate-300">
+                    {value.uploadedDataUrl
+                      ? '已處理為 1200×630 JPEG 預覽圖（點擊或拖放可更換）'
+                      : existingOgImageUrl
+                        ? '目前保留先前上傳的預覽圖（點擊、拖放或貼上可更換新圖）'
+                        : '點擊選擇、拖放圖片，或直接 Ctrl/Cmd+V 貼上截圖'}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">支援 JPG / PNG / WebP，自動裁切並壓縮</p>
+                  <input
+                    ref={imgInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="hidden"
+                    onChange={e => handleImageFile(e.target.files?.[0])}
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-400">比例處理：</span>
+                  <button
+                    type="button"
+                    onClick={() => updateField({ imageFit: 'cover' })}
+                    className={`px-2.5 py-1 rounded-lg transition-colors ${value.imageFit === 'cover' ? 'bg-cyan-600/80 text-white' : 'bg-slate-800 text-slate-300'}`}
+                  >
+                    滿版裁切
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateField({ imageFit: 'contain' })}
+                    className={`px-2.5 py-1 rounded-lg transition-colors ${value.imageFit === 'contain' ? 'bg-cyan-600/80 text-white' : 'bg-slate-800 text-slate-300'}`}
+                  >
+                    完整保留＋模糊背景
+                  </button>
+                </div>
+                {imageError && <p className="text-xs text-red-400">{imageError}</p>}
+              </div>
+            )}
+
+            {value.ogImageMode === 'url' && (
+              <div>
+                <input
+                  type="url"
+                  value={value.externalImageUrl}
+                  onChange={e => updateField({ externalImageUrl: e.target.value })}
+                  placeholder="https://example.com/cover.jpg"
+                  className="w-full bg-slate-800/70 border border-slate-700 text-slate-200 text-xs rounded-lg p-2.5 outline-none font-mono focus:ring-1 focus:ring-cyan-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">請填入公開可直接讀取的圖片網址（建議比例 1200×630）。</p>
+              </div>
+            )}
+
+            {/* 即時 LINE 分享卡片預覽 */}
+            <LineSharePreview
+              title={value.title || getDomainLabel(value.targetUrl, '')}
+              description={value.description}
+              previewImageSrc={previewImageSrc}
+              workerDomain={workerDomain}
+            />
+          </div>
+
+          {/* 轉頁方式與 LINE 外開選項 */}
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/40 p-3.5 space-y-3">
+            <div>
+              <span className="text-sm font-medium text-slate-300 block mb-2">點擊短網址後的開啟方式</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {[
+                  { id: 'instant', title: '⚡ 立即跳轉', desc: '最快進入目標網頁' },
+                  { id: 'card', title: '✨ 轉場預覽頁', desc: '停留 1.5 秒後前往' },
+                  { id: 'iframe', title: '🖥️ 全螢幕內嵌', desc: '網址列維持短網址' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updateField({ redirectMode: opt.id })}
+                    className={`p-2.5 rounded-xl text-left border transition-colors ${
+                      value.redirectMode === opt.id
+                        ? 'bg-cyan-600/20 border-cyan-500 text-slate-100'
+                        : 'bg-slate-800/40 border-slate-700/70 text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">{opt.title}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {value.redirectMode === 'iframe' && (
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  提醒：部分網站不允許被 iframe 嵌入（GAS 需設為 ALLOWALL），右上角仍會提供「在新分頁開啟」保底按鈕。
+                </p>
+              )}
+            </div>
+
+            <label className="flex items-start gap-2.5 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={value.openExternalInLine}
+                onChange={e => updateField({ openExternalInLine: e.target.checked })}
+                className="mt-0.5 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
+              />
+              <span className="text-xs text-slate-300 leading-relaxed">
+                📱 在 LINE 內強制以預設瀏覽器開啟（附加 <code className="text-cyan-300">openExternalBrowser=1</code>）
+                {isGasUrl && !value.openExternalInLine && (
+                  <span className="block text-amber-400 mt-0.5">
+                    偵測到 Google Apps Script 網址，建議勾選此項以避免 LINE 內建瀏覽器遇到 Google 帳號權限或登入異常。
+                  </span>
+                )}
+              </span>
+            </label>
+          </div>
+        </div>
+      );
     }
 
     // ── Settings panel ───────────────────────────────────────────────────
@@ -226,10 +1279,18 @@
     // ── Result panel ─────────────────────────────────────────────────────
     function ResultPanel({ result, onReset }) {
       const [copied, setCopied] = useState(false);
+      const isRedirect = result.shareMeta?.type === 'redirect';
+      const [useLineExtUrl, setUseLineExtUrl] = useState(Boolean(result.shareMeta?.openExternalInLine));
+
+      const displayUrl = useMemo(() => {
+        return isRedirect && useLineExtUrl ? withLineExternalParam(result.url) : result.url;
+      }, [isRedirect, useLineExtUrl, result.url]);
+
+      const previewImg = result.ogImageUrl || result.shareMeta?.ogImageUrl || result.localPreviewDataUrl || '';
 
       const copyUrl = async () => {
         try {
-          await navigator.clipboard.writeText(result.url);
+          await navigator.clipboard.writeText(displayUrl);
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         } catch {
@@ -241,22 +1302,55 @@
         <div className="glass-panel rounded-2xl p-6 fade-in">
           <div className="flex items-center gap-2 mb-4 text-emerald-400">
             <IconCheck className="w-5 h-5" />
-            <h2 className="text-lg font-bold">上傳成功！</h2>
+            <h2 className="text-lg font-bold">{isRedirect ? '轉頁分享連結建立成功！' : '上傳成功！'}</h2>
+            {isRedirect && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                網址轉頁
+              </span>
+            )}
           </div>
 
           <div className="flex flex-col md:flex-row gap-6">
-            <div className="flex-shrink-0 flex items-start justify-center">
+            <div className="flex-shrink-0 flex flex-col items-center gap-3">
               <div className="bg-white p-2 rounded-xl">
-                <QrCode text={result.url} />
+                <QrCode text={displayUrl} />
               </div>
+              {previewImg && (
+                <div className="w-[184px] rounded-xl overflow-hidden border border-slate-700/80">
+                  <img src={previewImg} alt="預覽圖" className="w-full aspect-[1200/630] object-cover" />
+                </div>
+              )}
             </div>
 
             <div className="flex-1 min-w-0">
+              {isRedirect && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setUseLineExtUrl(false)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      !useLineExtUrl ? 'bg-cyan-600 text-white' : 'glass-card text-slate-300'
+                    }`}
+                  >
+                    一般短網址
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUseLineExtUrl(true)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      useLineExtUrl ? 'bg-cyan-600 text-white' : 'glass-card text-slate-300'
+                    }`}
+                  >
+                    LINE 外開專用 (?openExternalBrowser=1)
+                  </button>
+                </div>
+              )}
+
               <p className="text-sm text-slate-400 mb-1">分享網址</p>
               <div className="flex gap-2 mb-4">
                 <input
                   readOnly
-                  value={result.url}
+                  value={displayUrl}
                   onFocus={e => e.target.select()}
                   className="flex-1 min-w-0 bg-slate-800/50 border border-slate-700 text-cyan-300 text-sm rounded-xl p-2.5 outline-none font-mono"
                 />
@@ -269,20 +1363,40 @@
                 </button>
               </div>
 
+              {isRedirect && result.shareMeta?.targetUrl && (
+                <div className="mb-4 rounded-xl bg-slate-900/50 border border-slate-700/70 p-3 text-xs text-slate-300 space-y-1">
+                  <div className="text-slate-400">目標網址：</div>
+                  <div className="font-mono text-slate-200 break-all line-clamp-2">{result.shareMeta.targetUrl}</div>
+                  {result.shareMeta.description && (
+                    <div className="text-slate-400 pt-1 line-clamp-2">{result.shareMeta.description}</div>
+                  )}
+                </div>
+              )}
+
               <div className="flex flex-wrap gap-3 text-sm">
                 <a
-                  href={result.url}
+                  href={isRedirect ? `${result.url}?preview=1` : result.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-4 py-2 rounded-xl glass-card hover:border-cyan-500/40 transition-colors flex items-center gap-1.5"
                 >
-                  <IconExternalLink className="w-4 h-4" /> 在新分頁開啟預覽
+                  <IconExternalLink className="w-4 h-4" /> {isRedirect ? '預覽轉導頁面' : '在新分頁開啟預覽'}
                 </a>
+                {isRedirect && (
+                  <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl glass-card hover:border-cyan-500/40 transition-colors flex items-center gap-1.5"
+                  >
+                    <IconExternalLink className="w-4 h-4" /> 測試直接跳轉
+                  </a>
+                )}
                 <button
                   onClick={onReset}
                   className="px-4 py-2 rounded-xl glass-card hover:border-cyan-500/40 transition-colors"
                 >
-                  再上傳一個
+                  {isRedirect ? '再建立一個' : '再上傳一個'}
                 </button>
               </div>
 
@@ -290,7 +1404,7 @@
                 {result.title} · {formatSize(result.size)} · {formatDate(result.uploadedAt)}
               </p>
               <p className="text-xs text-slate-600 mt-1">
-                之後想換掉內容也不用重新分享網址，到下面的「本機上傳紀錄」按更新版本即可。
+                之後想換掉{isRedirect ? '目標網址、介紹或預覽圖' : '內容'}也不用重新分享網址，到下面的「本機上傳紀錄」按更新版本即可。
               </p>
             </div>
           </div>
@@ -300,11 +1414,12 @@
 
     // ── Upload form ──────────────────────────────────────────────────────
     function UploadForm({ workerUrl, onUploaded, onNeedSettings }) {
-      const [mode, setMode] = useState('file'); // 'file' | 'paste'
+      const [mode, setMode] = useState('redirect'); // 'redirect' | 'file' | 'paste'
       const [fileName, setFileName] = useState('');
       const [htmlContent, setHtmlContent] = useState('');
       const [title, setTitle] = useState('');
       const [dragging, setDragging] = useState(false);
+      const [redirectState, setRedirectState] = useState(() => createInitialRedirectState());
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const fileInputRef = useRef(null);
@@ -340,7 +1455,22 @@
 
       const handleUpload = async () => {
         if (!workerUrl) { onNeedSettings(); return; }
-        if (!htmlContent.trim()) { setError('請先選擇檔案或貼上 HTML 內容'); return; }
+
+        let payload;
+        try {
+          if (mode === 'redirect') {
+            payload = buildRedirectSubmission(redirectState);
+          } else {
+            if (!htmlContent.trim()) {
+              setError('請先選擇檔案或貼上 HTML 內容');
+              return;
+            }
+            payload = { html: htmlContent, title: title || fileName || '未命名分享' };
+          }
+        } catch (validationErr) {
+          setError(validationErr.message);
+          return;
+        }
 
         setLoading(true);
         setError(null);
@@ -348,10 +1478,16 @@
           const res = await fetch(`${workerUrl}/api/upload`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ html: htmlContent, title: title || fileName || '未命名分享' }),
+            body: JSON.stringify(payload),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || `上傳失敗（HTTP ${res.status}）`);
+          if (!data.shareMeta && payload.shareMeta) {
+            data.shareMeta = payload.shareMeta;
+          }
+          if (typeof payload.ogImage === 'string' && payload.ogImage) {
+            data.localPreviewDataUrl = payload.ogImage;
+          }
           onUploaded(data);
         } catch (err) {
           setError(err.message === 'Failed to fetch'
@@ -362,74 +1498,97 @@
         }
       };
 
+      const canSubmit = mode === 'redirect'
+        ? Boolean((redirectState.targetUrl || '').trim())
+        : Boolean(htmlContent.trim());
+
       return (
         <div className="glass-panel rounded-2xl p-6 fade-in">
-          <div className="flex gap-2 mb-5">
+          <div className="flex flex-wrap gap-2 mb-5">
             <button
-              onClick={() => setMode('file')}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === 'file' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
+              type="button"
+              onClick={() => { setMode('redirect'); setError(null); }}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5 ${mode === 'redirect' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
             >
-              選擇檔案
+              <IconLink className="w-4 h-4" /> 網址轉頁（短網址＋預覽）
             </button>
             <button
-              onClick={() => setMode('paste')}
+              type="button"
+              onClick={() => { setMode('file'); setError(null); }}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === 'file' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
+            >
+              選擇 HTML 檔案
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('paste'); setError(null); }}
               className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === 'paste' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
             >
               貼上原始碼
             </button>
           </div>
 
-          {mode === 'file' ? (
-            <div
-              className={`drop-zone rounded-2xl p-8 text-center cursor-pointer ${dragging ? 'dragging' : ''}`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={e => {
-                e.preventDefault();
-                setDragging(false);
-                readFile(e.dataTransfer.files?.[0]);
-              }}
-            >
-              <IconUpload className="w-10 h-10 mx-auto mb-3 text-slate-400" />
-              {fileName ? (
-                <p className="text-slate-200 font-medium flex items-center justify-center gap-2">
-                  <IconFileText className="w-4 h-4" /> {fileName}
-                </p>
-              ) : (
-                <>
-                  <p className="text-slate-300 mb-1">拖放 .html 檔案到這裡，或點擊選擇</p>
-                  <p className="text-xs text-slate-500">單檔上限 {formatSize(MAX_BYTES)}</p>
-                </>
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".html,.htm,text/html"
-                className="hidden"
-                onChange={e => readFile(e.target.files?.[0])}
-              />
-            </div>
+          {mode === 'redirect' ? (
+            <RedirectEditor
+              value={redirectState}
+              onChange={setRedirectState}
+              workerUrl={workerUrl}
+            />
           ) : (
-            <textarea
-              value={htmlContent}
-              onChange={e => setHtmlContent(e.target.value)}
-              placeholder="貼上完整的 HTML 原始碼（<!DOCTYPE html> ... </html>）"
-              rows={10}
-              className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-3 outline-none font-mono resize-y"
-            />
-          )}
+            <>
+              {mode === 'file' ? (
+                <div
+                  className={`drop-zone rounded-2xl p-8 text-center cursor-pointer ${dragging ? 'dragging' : ''}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setDragging(false);
+                    readFile(e.dataTransfer.files?.[0]);
+                  }}
+                >
+                  <IconUpload className="w-10 h-10 mx-auto mb-3 text-slate-400" />
+                  {fileName ? (
+                    <p className="text-slate-200 font-medium flex items-center justify-center gap-2">
+                      <IconFileText className="w-4 h-4" /> {fileName}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-slate-300 mb-1">拖放 .html 檔案到這裡，或點擊選擇</p>
+                      <p className="text-xs text-slate-500">單檔上限 {formatSize(MAX_BYTES)}</p>
+                    </>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".html,.htm,text/html"
+                    className="hidden"
+                    onChange={e => readFile(e.target.files?.[0])}
+                  />
+                </div>
+              ) : (
+                <textarea
+                  value={htmlContent}
+                  onChange={e => setHtmlContent(e.target.value)}
+                  placeholder="貼上完整的 HTML 原始碼（<!DOCTYPE html> ... </html>）"
+                  rows={10}
+                  className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-3 outline-none font-mono resize-y"
+                />
+              )}
 
-          <div className="mt-4">
-            <label className="text-sm text-slate-400 block mb-1">標題（選填，會顯示在分享頁與紀錄裡）</label>
-            <input
-              type="text"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="例如：AI 產生的計算機小工具"
-              className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none"
-            />
-          </div>
+              <div className="mt-4">
+                <label className="text-sm text-slate-400 block mb-1">標題（選填，會顯示在分享頁與紀錄裡）</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="例如：AI 產生的計算機小工具"
+                  className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none"
+                />
+              </div>
+            </>
+          )}
 
           {error && (
             <div className="mt-4 rounded-xl border border-red-500/30 bg-red-900/10 p-3 text-sm text-red-300">
@@ -439,13 +1598,17 @@
 
           <button
             onClick={handleUpload}
-            disabled={loading || !htmlContent.trim()}
+            disabled={loading || !canSubmit}
             className="mt-5 w-full py-3 rounded-xl font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-                上傳中…
+                建立中…
+              </>
+            ) : mode === 'redirect' ? (
+              <>
+                <IconLink className="w-4 h-4" /> 產生轉頁分享連結
               </>
             ) : (
               <>
@@ -459,11 +1622,13 @@
 
     // ── Update modal（把上傳紀錄裡的某一筆換成新版本，網址不變）─────────────
     function UpdateModal({ item, workerUrl, onClose, onUpdated }) {
-      const [mode, setMode] = useState('file');
+      const initialIsRedirect = item.shareMeta?.type === 'redirect';
+      const [mode, setMode] = useState(initialIsRedirect ? 'redirect' : 'file');
       const [fileName, setFileName] = useState('');
       const [htmlContent, setHtmlContent] = useState('');
       const [title, setTitle] = useState(item.title || '');
       const [dragging, setDragging] = useState(false);
+      const [redirectState, setRedirectState] = useState(() => createInitialRedirectState(item));
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const fileInputRef = useRef(null);
@@ -475,17 +1640,43 @@
       };
 
       const handleUpdate = async () => {
-        if (!htmlContent.trim()) { setError('請先選擇新的檔案，或貼上新的 HTML 內容'); return; }
+        let payload;
+        try {
+          if (mode === 'redirect') {
+            const built = buildRedirectSubmission(redirectState, {
+              existingOgImageUrl: item.ogImageUrl || '',
+            });
+            payload = { ...built, editToken: item.editToken };
+          } else {
+            if (!htmlContent.trim()) {
+              setError('請先選擇新的檔案，或貼上新的 HTML 內容');
+              return;
+            }
+            payload = {
+              html: htmlContent,
+              title: title || item.title,
+              editToken: item.editToken,
+              ogImage: null,
+            };
+          }
+        } catch (validationErr) {
+          setError(validationErr.message);
+          return;
+        }
+
         setLoading(true);
         setError(null);
         try {
           const res = await fetch(`${workerUrl}/api/upload/${item.id}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ html: htmlContent, title: title || item.title, editToken: item.editToken }),
+            body: JSON.stringify(payload),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || `更新失敗（HTTP ${res.status}）`);
+          if (!data.shareMeta && payload.shareMeta) {
+            data.shareMeta = payload.shareMeta;
+          }
           onUpdated(data);
         } catch (err) {
           setError(err.message === 'Failed to fetch'
@@ -496,72 +1687,97 @@
         }
       };
 
+      const canUpdate = mode === 'redirect'
+        ? Boolean((redirectState.targetUrl || '').trim())
+        : Boolean(htmlContent.trim());
+
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
-          <div className="glass-panel rounded-2xl p-6 max-w-lg w-full fade-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-6 overflow-y-auto" onClick={onClose}>
+          <div className="glass-panel rounded-2xl p-6 max-w-2xl w-full fade-in my-auto max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h2 className="text-xl font-bold mb-1">更新版本</h2>
             <p className="text-sm text-slate-400 mb-4 truncate">
               網址不會改變：<span className="font-mono text-cyan-300">{item.url}</span>
             </p>
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex flex-wrap gap-2 mb-4">
               <button
-                onClick={() => setMode('file')}
+                type="button"
+                onClick={() => { setMode('redirect'); setError(null); }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1 ${mode === 'redirect' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
+              >
+                <IconLink className="w-3.5 h-3.5" /> 網址轉頁
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode('file'); setError(null); }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${mode === 'file' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
               >
                 選擇檔案
               </button>
               <button
-                onClick={() => setMode('paste')}
+                type="button"
+                onClick={() => { setMode('paste'); setError(null); }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${mode === 'paste' ? 'bg-cyan-600' : 'glass-card text-slate-300'}`}
               >
                 貼上原始碼
               </button>
             </div>
 
-            {mode === 'file' ? (
-              <div
-                className={`drop-zone rounded-xl p-6 text-center cursor-pointer ${dragging ? 'dragging' : ''}`}
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files?.[0]); }}
-              >
-                <IconUpload className="w-8 h-8 mx-auto mb-2 text-slate-400" />
-                {fileName ? (
-                  <p className="text-slate-200 text-sm font-medium flex items-center justify-center gap-2">
-                    <IconFileText className="w-4 h-4" /> {fileName}
-                  </p>
-                ) : (
-                  <p className="text-slate-300 text-sm">拖放新版的 .html 檔案到這裡，或點擊選擇</p>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".html,.htm,text/html"
-                  className="hidden"
-                  onChange={e => handleFile(e.target.files?.[0])}
-                />
-              </div>
+            {mode === 'redirect' ? (
+              <RedirectEditor
+                value={redirectState}
+                onChange={setRedirectState}
+                workerUrl={workerUrl}
+                existingOgImageUrl={item.ogImageUrl || ''}
+                compact
+              />
             ) : (
-              <textarea
-                value={htmlContent}
-                onChange={e => setHtmlContent(e.target.value)}
-                placeholder="貼上新版的完整 HTML 原始碼"
-                rows={8}
-                className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-3 outline-none font-mono resize-y"
-              />
-            )}
+              <>
+                {mode === 'file' ? (
+                  <div
+                    className={`drop-zone rounded-xl p-6 text-center cursor-pointer ${dragging ? 'dragging' : ''}`}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files?.[0]); }}
+                  >
+                    <IconUpload className="w-8 h-8 mx-auto mb-2 text-slate-400" />
+                    {fileName ? (
+                      <p className="text-slate-200 text-sm font-medium flex items-center justify-center gap-2">
+                        <IconFileText className="w-4 h-4" /> {fileName}
+                      </p>
+                    ) : (
+                      <p className="text-slate-300 text-sm">拖放新版的 .html 檔案到這裡，或點擊選擇</p>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".html,.htm,text/html"
+                      className="hidden"
+                      onChange={e => handleFile(e.target.files?.[0])}
+                    />
+                  </div>
+                ) : (
+                  <textarea
+                    value={htmlContent}
+                    onChange={e => setHtmlContent(e.target.value)}
+                    placeholder="貼上新版的完整 HTML 原始碼"
+                    rows={8}
+                    className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-3 outline-none font-mono resize-y"
+                  />
+                )}
 
-            <div className="mt-4">
-              <label className="text-sm text-slate-400 block mb-1">標題（選填）</label>
-              <input
-                type="text"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none"
-              />
-            </div>
+                <div className="mt-4">
+                  <label className="text-sm text-slate-400 block mb-1">標題（選填）</label>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                    className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 outline-none"
+                  />
+                </div>
+              </>
+            )}
 
             {error && (
               <div className="mt-4 rounded-xl border border-red-500/30 bg-red-900/10 p-3 text-sm text-red-300">
@@ -578,7 +1794,7 @@
               </button>
               <button
                 onClick={handleUpdate}
-                disabled={loading || !htmlContent.trim()}
+                disabled={loading || !canUpdate}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
               >
                 {loading ? (
@@ -605,56 +1821,74 @@
         <div className="mt-8 fade-in">
           <h2 className="text-sm font-semibold text-slate-400 mb-3">本機上傳紀錄（僅存在這個裝置的瀏覽器）</h2>
           <div className="space-y-2">
-            {history.map(item => (
-              <div key={item.id} className={`glass-card rounded-xl p-3 flex items-center gap-3 transition-colors ${justUpdatedId === item.id ? 'border-emerald-500/50' : ''}`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{item.title}</p>
-                  <p className="text-xs text-slate-500 font-mono truncate">{item.url}</p>
-                  <p className="text-xs text-slate-600">
-                    {item.updatedAt ? (
-                      <>建立於 {formatDate(item.uploadedAt)} · 更新於 {formatDate(item.updatedAt)}</>
-                    ) : (
-                      formatDate(item.uploadedAt)
-                    )} · {formatSize(item.size)}
-                  </p>
-                  {justUpdatedId === item.id && (
-                    <p className="text-xs text-emerald-400 mt-0.5 flex items-center gap-1"><IconCheck className="w-3 h-3" /> 已更新為新版本</p>
+            {history.map(item => {
+              const isRedirect = item.shareMeta?.type === 'redirect';
+              return (
+                <div key={item.id} className={`glass-card rounded-xl p-3 flex items-center gap-3 transition-colors ${justUpdatedId === item.id ? 'border-emerald-500/50' : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {isRedirect && (
+                        <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                          轉頁
+                        </span>
+                      )}
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                    </div>
+                    <p className="text-xs text-slate-500 font-mono truncate">{item.url}</p>
+                    {isRedirect && item.shareMeta?.targetUrl && (
+                      <p className="text-[11px] text-slate-400 font-mono truncate">↳ {item.shareMeta.targetUrl}</p>
+                    )}
+                    <p className="text-xs text-slate-600">
+                      {item.updatedAt ? (
+                        <>建立於 {formatDate(item.uploadedAt)} · 更新於 {formatDate(item.updatedAt)}</>
+                      ) : (
+                        formatDate(item.uploadedAt)
+                      )} · {formatSize(item.size)}
+                    </p>
+                    {justUpdatedId === item.id && (
+                      <p className="text-xs text-emerald-400 mt-0.5 flex items-center gap-1"><IconCheck className="w-3 h-3" /> 已更新為新版本</p>
+                    )}
+                  </div>
+                  {item.editToken && (
+                    <button
+                      title="更新版本（換掉內容或轉導網址，短網址不變）"
+                      onClick={() => onRequestUpdate(item)}
+                      className="p-2 rounded-lg hover:bg-slate-700/50 text-cyan-300 transition-colors"
+                    >
+                      <IconRefresh className="w-4 h-4" />
+                    </button>
                   )}
-                </div>
-                {item.editToken && (
-                  <button
-                    title="更新版本（換掉內容，網址不變）"
-                    onClick={() => onRequestUpdate(item)}
-                    className="p-2 rounded-lg hover:bg-slate-700/50 text-cyan-300 transition-colors"
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="開啟"
+                    className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-300 transition-colors"
                   >
-                    <IconRefresh className="w-4 h-4" />
+                    <IconExternalLink className="w-4 h-4" />
+                  </a>
+                  <button
+                    title="複製連結"
+                    onClick={() => {
+                      const urlToCopy = isRedirect && item.shareMeta?.openExternalInLine
+                        ? withLineExternalParam(item.url)
+                        : item.url;
+                      navigator.clipboard?.writeText(urlToCopy).catch(() => {});
+                    }}
+                    className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-300 transition-colors"
+                  >
+                    <IconCopy className="w-4 h-4" />
                   </button>
-                )}
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="開啟"
-                  className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-300 transition-colors"
-                >
-                  <IconExternalLink className="w-4 h-4" />
-                </a>
-                <button
-                  title="複製連結"
-                  onClick={() => navigator.clipboard?.writeText(item.url).catch(() => {})}
-                  className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-300 transition-colors"
-                >
-                  <IconCopy className="w-4 h-4" />
-                </button>
-                <button
-                  title="從紀錄移除（不會刪除伺服器上的檔案）"
-                  onClick={() => onRemove(item.id)}
-                  className="p-2 rounded-lg hover:bg-slate-700/50 text-red-400 transition-colors"
-                >
-                  <IconTrash className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+                  <button
+                    title="從紀錄移除（不會刪除伺服器上的檔案）"
+                    onClick={() => onRemove(item.id)}
+                    className="p-2 rounded-lg hover:bg-slate-700/50 text-red-400 transition-colors"
+                  >
+                    <IconTrash className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       );
@@ -677,8 +1911,14 @@
       const handleUploaded = (data) => {
         setResult(data);
         const entry = {
-          id: data.id, url: data.url, title: data.title, size: data.size,
-          uploadedAt: data.uploadedAt, editToken: data.editToken,
+          id: data.id,
+          url: data.url,
+          title: data.title,
+          size: data.size,
+          uploadedAt: data.uploadedAt,
+          editToken: data.editToken,
+          ...(data.ogImageUrl ? { ogImageUrl: data.ogImageUrl } : {}),
+          ...(data.shareMeta ? { shareMeta: data.shareMeta } : {}),
         };
         const next = [entry, ...history.filter(h => h.id !== data.id)];
         setHistory(next);
@@ -693,7 +1933,16 @@
 
       const handleUpdated = (data) => {
         const next = history.map(h => h.id === data.id
-          ? { ...h, title: data.title, size: data.size, uploadedAt: data.uploadedAt, updatedAt: data.updatedAt, editToken: data.editToken || h.editToken }
+          ? {
+              ...h,
+              title: data.title,
+              size: data.size,
+              uploadedAt: data.uploadedAt,
+              updatedAt: data.updatedAt,
+              editToken: data.editToken || h.editToken,
+              ogImageUrl: data.ogImageUrl || undefined,
+              shareMeta: data.shareMeta || undefined,
+            }
           : h);
         setHistory(next);
         saveHistory(next);
@@ -709,8 +1958,8 @@
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-2">
                 <span className="bg-gradient-text">htmlShare</span>
               </h1>
-              <p className="text-slate-400 text-sm max-w-md">
-                上傳一份 HTML 檔案（例如 AI 產生的網頁），拿到一個網址就能分享給別人瀏覽。
+              <p className="text-slate-400 text-sm max-w-lg">
+                上傳單一 HTML 檔案，或把長網址（例如 Google Apps Script）包裝成附帶預覽圖與介紹文字的短網址。
               </p>
             </div>
             <button

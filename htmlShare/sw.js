@@ -8,7 +8,7 @@
  * - 注意：上傳 API 請求（POST /api/upload）一律不快取，直接放行給網路
  */
 
-const SW_VERSION = 'v2';
+const SW_VERSION = 'v3';
 const CACHE_NAME = `htmlShare-${SW_VERSION}`;
 const SHARED_CACHE = `htmlShare-shared-${SW_VERSION}`;
 const ALL_CACHES = [CACHE_NAME, SHARED_CACHE];

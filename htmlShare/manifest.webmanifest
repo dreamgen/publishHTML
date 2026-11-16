@@ -2,7 +2,7 @@
   "id": "htmlShare",
   "name": "htmlShare — 單頁 HTML 分享工具",
   "short_name": "htmlShare",
-  "description": "上傳單一 HTML 檔案（例如 AI 產生的網頁），取得一個網址即可分享給其他人瀏覽",
+  "description": "上傳單一 HTML 檔案，或將長網址包裝成附帶預覽圖與介紹的短網址分享給其他人瀏覽",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

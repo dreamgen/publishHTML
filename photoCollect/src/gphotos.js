@@ -261,11 +261,11 @@ export async function connect(env, req, id) {
     response_type: 'code',
     scope: SCOPES.join(' '),
     access_type: 'offline',
-    prompt: 'consent',
+    // select_account：每次都讓使用者自己挑要存照片的帳號（不要被瀏覽器預設帳號或登入帳號自動帶走）
+    prompt: 'select_account consent',
     include_granted_scopes: 'false',
     state,
   });
-  if (ac.user && ac.user.email) p.set('login_hint', ac.user.email);
   return json({ auth_url: `${AUTH_URL}?${p}`, redirect_uri: url.origin + CALLBACK_PATH }, 200, {
     'set-cookie': `${NONCE_COOKIE}=${nonce}; ${cookieAttrs(url, STATE_TTL_S)}`,
   });
@@ -329,7 +329,12 @@ export async function callback(env, req) {
   }).catch(() => null);
   let tok = null;
   try { tok = res ? await res.json() : null; } catch { /* 非 JSON */ }
-  if (!res || !res.ok || !tok || !tok.access_token) return redirectAdmin(url, id, 'err', '&why=token');
+  if (!res || !res.ok || !tok || !tok.access_token) {
+    // 把 Google 的錯誤碼（invalid_client、redirect_uri_mismatch、invalid_grant…）帶回管理頁，方便判斷是哪個設定錯
+    const ge = !res ? 'network' : (tok && typeof tok.error === 'string' && /^[a-z_]{1,40}$/.test(tok.error) ? tok.error : `http_${res.status}`);
+    console.error('gphotos token exchange failed', res && res.status, tok && tok.error, tok && tok.error_description);
+    return redirectAdmin(url, id, 'err', `&why=token&ge=${ge}`);
+  }
   const granted = String(tok.scope || '').split(/\s+/);
   if (!granted.includes(APPEND_SCOPE)) return redirectAdmin(url, id, 'err', '&why=scope');
   if (!tok.refresh_token) return redirectAdmin(url, id, 'err', '&why=refresh');
@@ -345,7 +350,11 @@ export async function callback(env, req) {
   if (!album) {
     const title = albumTitle(cfg);
     const c = await apiJson(env, tok.access_token, '/albums', { method: 'POST', body: JSON.stringify({ album: { title } }) }).catch(() => null);
-    if (!c || !c.res.ok || !c.j || !c.j.id) return redirectAdmin(url, id, 'err', '&why=album');
+    if (!c || !c.res.ok || !c.j || !c.j.id) {
+      const st2 = c && c.j && c.j.error && typeof c.j.error.status === 'string' && /^[A-Z_]{1,40}$/.test(c.j.error.status) ? c.j.error.status : `http_${c ? c.res.status : 0}`;
+      console.error('gphotos album create failed', c && c.res.status, c && JSON.stringify(c.j));
+      return redirectAdmin(url, id, 'err', `&why=album&ge=${st2}`);
+    }
     album = { id: c.j.id, title: c.j.title || title, url: c.j.productUrl || '', reused: false };
   }
   const encRt = await encryptToken(env, tok.refresh_token);

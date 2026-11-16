@@ -43,40 +43,64 @@ htmlShare PWA（`htmlShare/index.html`）已經把這個網址設成預設值，
 ### `POST /api/upload`
 
 ```json
-{ "html": "<!DOCTYPE html>...", "title": "選填標題" }
+{
+  "html": "<!DOCTYPE html>...",
+  "title": "選填標題",
+  "ogImage": "data:image/jpeg;base64,...（選填，上限 2MB）",
+  "shareMeta": { "type": "redirect", "targetUrl": "https://...", "description": "..." }
+}
 ```
 
 回傳：
 
 ```json
-{ "id": "74LTTtFw", "url": "https://.../s/74LTTtFw", "title": "...", "size": 1234, "uploadedAt": "2026-08-16T12:00:00.000Z", "editToken": "QSLiecqfZRCYAwAQvsyNu8CXAytqQNVI" }
+{
+  "id": "74LTTtFw",
+  "url": "https://.../s/74LTTtFw",
+  "ogImageUrl": "https://.../s/74LTTtFw/og.jpg?v=...",
+  "title": "...",
+  "size": 1234,
+  "uploadedAt": "2026-08-16T12:00:00.000Z",
+  "editToken": "QSLiecqfZRCYAwAQvsyNu8CXAytqQNVI"
+}
 ```
 
-- 單檔上限 5MB（`src/index.js` 的 `HTML_SHARE_MAX_BYTES`）
+- 單檔 HTML 上限 5MB（`src/index.js` 的 `HTML_SHARE_MAX_BYTES`）；預覽圖 `ogImage` 支援 JPEG / PNG / WebP / GIF Base64 Data URL，上限 2MB（`HTML_SHARE_MAX_IMAGE_BYTES`）
+- 若 HTML 內含 `__HTMLSHARE_URL__` 與 `__HTMLSHARE_OG_IMAGE__` 佔位符，後端在存入 R2 前會自動替換為真實的 `/s/:id` 與 `/s/:id/og.jpg?v=...` 網址
 - 內容需通過「看起來像 HTML」的粗略檢查
 - 目前**任何人只要知道這個 Worker 網址就能上傳**（沿用你先前的選擇），分享 ID 是 8 碼隨機亂數，不容易被猜到或列舉
 - `editToken` 只在上傳成功時回傳這一次，htmlShare 前端會存進該裝置的本機上傳紀錄，用來之後更新這筆分享（見下方 `POST /api/upload/:id`）。這組權杖不會出現在 `/s/:id` 分享網址裡，所以只是拿到分享連結的人沒辦法用它更新內容。
 
 ### `POST /api/upload/:id`
 
-更新既有分享的內容（**同一個 id、同一個分享網址**，換掉裡面的 HTML）。用於 htmlShare 前端「上傳紀錄」裡的更新版本功能。
+更新既有分享的內容（**同一個 id、同一個分享網址**，換掉裡面的 HTML 與選填預覽圖）。用於 htmlShare 前端「上傳紀錄」裡的更新版本功能。
 
 ```json
-{ "html": "<!DOCTYPE html>...(新版內容)", "title": "選填，不填就沿用原標題", "editToken": "上傳當下拿到的那組權杖" }
+{
+  "html": "<!DOCTYPE html>...(新版內容)",
+  "title": "選填，不填就沿用原標題",
+  "ogImage": "data:image/jpeg;base64,...（選填；傳 null 可清除預覽圖；省略則保留既有預覽圖）",
+  "shareMeta": { ... },
+  "editToken": "上傳當下拿到的那組權杖"
+}
 ```
 
 回傳（成功，`200`）：
 
 ```json
-{ "id": "74LTTtFw", "url": "https://.../s/74LTTtFw", "title": "...", "size": 2345, "uploadedAt": "建立時間（不變）", "updatedAt": "這次更新的時間", "editToken": "同一組權杖" }
+{ "id": "74LTTtFw", "url": "https://.../s/74LTTtFw", "ogImageUrl": "https://.../s/74LTTtFw/og.jpg?v=...", "title": "...", "size": 2345, "uploadedAt": "建立時間（不變）", "updatedAt": "這次更新的時間", "editToken": "同一組權杖" }
 ```
 
 - `editToken` 不對會回 `403`，完全沒帶會回 `401`，`id` 不存在會回 `404`——都不會動到原本存好的內容。
-- 更新沒有次數限制，一樣受 5MB 上限與「看起來像 HTML」的檢查。
+- 更新沒有次數限制，一樣受 5MB HTML 上限、2MB 預覽圖上限與「看起來像 HTML」的檢查。
 
 ### `GET /s/:id`
 
 直接回傳先前上傳（或更新後）的 HTML 內容（`Content-Type: text/html`），也就是分享出去的網址本身。
+
+### `GET /s/:id/og.jpg`
+
+讀取該分享對應的 Open Graph 預覽圖片（支援 `/s/:id/og`、`/s/:id/og.jpg`、`/s/:id/og.png`、`/s/:id/og.webp`）。
 
 ---
 
