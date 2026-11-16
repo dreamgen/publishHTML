@@ -83,7 +83,6 @@
               <span>檢視講師：</span>
               <select id="globalLecturerSelect">${options}</select>
             </label>
-            ${hasLineLogin ? `<button class="btn btn-line" data-action="line-login">LINE 登入</button>` : ''}
             <button class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
           </div>
         </div>
@@ -366,59 +365,71 @@
 
     return `
       <div class="pwa-grid">
-        <!-- Left: LINE Official Account Panel (Messaging API 單人 Push 互動) -->
-        <aside class="line-panel">
-          <div class="line-header">
-            <div class="row-wrap">
-              <div class="line-avatar" style="width:32px;height:32px;font-size:13px;">愿</div>
-              <div>
-                <div style="font-weight:700;font-size:14px;">講師愿力表官方帳號</div>
-                <div style="font-size:11px;color:#94a3b8;">LINE Login × Messaging API (僅單人 Push)</div>
+        <!-- Left: LINE Official Account Panel + Friend QR Code -->
+        <div class="stack">
+          <aside class="line-panel">
+            <div class="line-header">
+              <div class="row-wrap">
+                <div class="line-avatar" style="width:32px;height:32px;font-size:13px;">愿</div>
+                <div>
+                  <div style="font-weight:700;font-size:14px;">講師愿力表官方帳號</div>
+                  <div style="font-size:11px;color:#94a3b8;">LINE Login × Messaging API (僅單人 Push)</div>
+                </div>
+              </div>
+              <span class="badge ${lec.lineBound ? 'badge-green' : 'badge-slate'}">${lec.lineBound ? '已綁定' : '紙本待認領'}</span>
+            </div>
+
+            <div class="line-chat" id="lineChatArea">
+              <div class="line-bubble-row">
+                <div class="line-avatar">愿</div>
+                <div class="line-bubble">
+                  <strong>${esc(lec.name)} 講師吉祥 🙏</strong>
+                  <div>核心精進愿景：<span style="color:#3D6352;font-weight:700;">「${esc(lec.coreVision)}」</span></div>
+                </div>
+              </div>
+              <div class="line-bubble-row">
+                <div class="line-avatar">愿</div>
+                <div class="line-bubble">
+                  <div>目前年度總五星評比：<strong>★ ${overall.stars.toFixed(1)} 星 (${overall.rate}%)</strong></div>
+                  <div style="color:#7D6C62;margin-top:2px;">點選下方圖文選單可快速跳轉回報；本系統不主動群發推播，僅支援單人 Push 小卡。</div>
+                </div>
+              </div>
+              ${extraBubbles}
+            </div>
+
+            <div style="padding:8px 12px;background:#F2EAE0;border-top:1px solid #E6DCD0;" class="row-between">
+              <span class="text-xs" style="font-weight:600;">單人 Push 互動：</span>
+              <div class="row-wrap">
+                <button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:11px;" data-action="push-summary">⭐ Push 我的星級小卡</button>
               </div>
             </div>
-            <span class="badge ${lec.lineBound ? 'badge-green' : 'badge-slate'}">${lec.lineBound ? '已綁定' : '紙本待認領'}</span>
-          </div>
 
-          <div class="line-chat" id="lineChatArea">
-            <div class="line-bubble-row">
-              <div class="line-avatar">愿</div>
-              <div class="line-bubble">
-                <strong>${esc(lec.name)} 講師吉祥 🙏</strong>
-                <div>核心精進愿景：<span style="color:#3D6352;font-weight:700;">「${esc(lec.coreVision)}」</span></div>
-              </div>
+            <div class="line-rich-menu">
+              <button type="button" class="rich-btn primary" data-action="rich-overview">
+                <span>🌟</span><strong>我的愿力表</strong>
+              </button>
+              <button type="button" class="rich-btn green" data-action="rich-monthly">
+                <span>📅</span><strong>本月進度回報</strong>
+              </button>
+              <button type="button" class="rich-btn" data-action="open-add-modal">
+                <span>➕</span><strong>新增目標/小目標</strong>
+              </button>
+              <button type="button" class="rich-btn" data-action="switch-view" data-view="print">
+                <span>🖨️</span><strong>母堂呈表列印</strong>
+              </button>
             </div>
-            <div class="line-bubble-row">
-              <div class="line-avatar">愿</div>
-              <div class="line-bubble">
-                <div>目前年度總五星評比：<strong>★ ${overall.stars.toFixed(1)} 星 (${overall.rate}%)</strong></div>
-                <div style="color:#7D6C62;margin-top:2px;">點選下方圖文選單可快速跳轉回報；本系統不主動群發推播，僅支援單人 Push 小卡。</div>
-              </div>
-            </div>
-            ${extraBubbles}
-          </div>
+          </aside>
 
-          <div style="padding:8px 12px;background:#F2EAE0;border-top:1px solid #E6DCD0;" class="row-between">
-            <span class="text-xs" style="font-weight:600;">單人 Push 互動：</span>
-            <div class="row-wrap">
-              <button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:11px;" data-action="push-summary">⭐ Push 我的星級小卡</button>
+          <div class="card" style="text-align:center;">
+            <span class="badge badge-green">DEMO 體驗專用</span>
+            <h3 style="margin:8px 0 4px;font-size:15px;color:var(--brand);">📱 加入 LINE 官方帳號試用</h3>
+            <p class="text-xs" style="color:var(--muted);margin:0 0 10px;">基礎忠恕講師愿力表服務（ID：<code>@533ennet</code>）</p>
+            <img src="./assets/line-oa-qr.png" alt="加入基礎忠恕講師愿力表服務 LINE 官方帳號 QR Code" style="width:170px;height:170px;border:1px solid var(--border-strong);border-radius:12px;padding:4px;background:#fff;" />
+            <div style="margin-top:10px;">
+              <a href="https://line.me/R/ti/p/@533ennet" target="_blank" rel="noopener noreferrer" class="btn btn-line" style="text-decoration:none;justify-content:center;">🟢 直接開啟 LINE 加好友</a>
             </div>
           </div>
-
-          <div class="line-rich-menu">
-            <button type="button" class="rich-btn primary" data-action="rich-overview">
-              <span>🌟</span><strong>我的愿力表</strong>
-            </button>
-            <button type="button" class="rich-btn green" data-action="rich-monthly">
-              <span>📅</span><strong>本月進度回報</strong>
-            </button>
-            <button type="button" class="rich-btn" data-action="open-add-modal">
-              <span>➕</span><strong>新增目標/小目標</strong>
-            </button>
-            <button type="button" class="rich-btn" data-action="switch-view" data-view="print">
-              <span>🖨️</span><strong>母堂呈表列印</strong>
-            </button>
-          </div>
-        </aside>
+        </div>
 
         <!-- Right: Lecturer PWA Workspace -->
         <div class="stack">
