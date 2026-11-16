@@ -81,9 +81,12 @@
 3. **手機單手頁面（`B3–B6`）與桌機寬版工作台（`A6/B1/B2`）共生排版**：
    - **原因**：原 `tdAssign` 的 `#app` 鎖定 `max-width: 720px`，若直接套用於 `A6` 進度表、`B1` 區長雙欄首頁及 `B2` 多方案並排比較表，表格欄位會過度擠壓。
    - **調整做法**：在 `styles.css` 新增 `.wide-app`（`max-width: 1392px`）與響應式雙欄 `.split-grid`，依路由自動切換容器寬度，保留手機端操作流暢度的同時完整還原設計稿桌機雙欄體驗。
-4. **`input` 事件焦點保護與表單欄位分離**：
-   - **原因**：原 `app.js` 監聽所有 `data-input` 並在每次輸入時重繪整個 `#app`，若一般多欄表單也掛載此機制會造成輸入游標跳動或他欄未儲存內容被清空。
-   - **調整做法**：僅搜尋框使用 `data-input` 搭配唯一 `id` 維持游標，多欄表單（`M8` 申請名冊、`B1` 提名、`B2` 新增提案／新增做法）採用點擊送出時讀取 DOM 值，避免輸入干擾。
+4. **`input` 事件焦點保護、IME 倉頡組字不中斷與局部 DOM 更新**：
+   - **原因**：原 `app.js` 監聽所有 `data-input` 並在每次按鍵時執行整頁 `render()` 重寫 `#app.innerHTML`，導致使用倉頡／注音等中文輸入法時，組字碼在 `compositionstart`～`compositionend` 期間因 `<input>` DOM 節點被銷毀重建與重設游標而被強行切斷；背景同步或切換時的整頁重繪也可能打斷正在輸入的文字框。
+   - **調整做法**：
+     1. 實作 `compositionstart` / `compositionend` 與 `ev.isComposing` 防護：組字期間略過 `input` 過濾並延遲背景 `render()`（設 `pendingRender`），待組字完成再更新。
+     2. 搜尋輸入改為 `updateSearchDom(k)` 局部更新結果容器（`#cands`/`#finderHint`、`#appt`、`#bindHits`、`#famHits`），完全不重建 `<input>` 元素本身。
+     3. 背景 `render()` 重繪前保存同路由非搜尋表單控制項的 `.value` 與游標選取範圍，重繪後還原，確保任何文字框都不會被同步重繪清空。
 
 ---
 

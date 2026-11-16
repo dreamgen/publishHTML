@@ -911,24 +911,34 @@
     return topbar(`116 年各區排人（${draftVer()}）`, store.mode === 'local' ? '本機試用模式 · 測試期間姓名綁定立即生效' : '人由各區排；總召檢查衝突與協調') + `<main>${body}</main>`;
   }
 
+  let isComposing = false, pendingRender = false, finderCtx = null, apptArea = '';
+
+  function renderBindHits() {
+    const q = UI.bindQ;
+    const hits = q.length >= 1 ? M.people.filter((p) => p.n.includes(q)).slice(0, 8) : [];
+    return hits.map((p) => {
+      const gs = (M.personGroups[p.id] || []).map((g) => gmOf(g).name).join('、');
+      return `<div class="bind-hit"><div><b>${esc(p.n)}　${esc(p.a)}</b><div class="muted small">${esc(roleOf(p) || '道親')}${gs ? ' · ' + esc(gs) : ''}</div></div>
+        <button class="btn sm pri" data-act="bind-me" data-pid="${p.id}">這是我</button></div>`;
+    }).join('') || (q ? '<div class="muted small">名冊找不到這個名字？可於下方申請加入名冊。</div>' : '');
+  }
+  function renderFamHits() {
+    const bp = myBoundPerson(), u = myUserRec() || {};
+    const famHits = UI.famQ.length >= 1 ? M.people.filter((p) => p.n.includes(UI.famQ) && (!bp || !bp.p || p.id !== bp.p.id) && !(u.family || {})[p.id]).slice(0, 5) : [];
+    return famHits.map((p) => `<div class="bind-hit"><div><b>${esc(p.n)}</b> <span class="muted small">${esc(p.a)}</span></div><button class="btn sm" data-act="add-fam" data-pid="${p.id}">代管</button></div>`).join('');
+  }
+
   function bindSectionHtml() {
     const bp = myBoundPerson();
     const u = myUserRec() || {};
-    const q = UI.bindQ;
-    const hits = q.length >= 1 ? M.people.filter((p) => p.n.includes(q)).slice(0, 8) : [];
     const fam = Object.values(u.family || {});
-    const famHits = UI.famQ.length >= 1 ? M.people.filter((p) => p.n.includes(UI.famQ) && (!bp || !bp.p || p.id !== bp.p.id) && !(u.family || {})[p.id]).slice(0, 5) : [];
     const isAuto = autoApproveBind();
     return `<section class="card">
       <div class="row-h"><h2>第一次登入：找到自己的名字 (M8)</h2>${tag(isAuto ? 'ok' : 'wn', isAuto ? '測試期：立即生效' : '正式期：需區長確認')}</div>
       ${bp && bp.p ? `<div class="bind-hit on"><div><b>${esc(bp.p.n)}　${esc(bp.p.a)}</b><div class="muted small">${esc(roleOf(bp.p) || '道親')} · ${esc((M.personGroups[bp.p.id] || []).map((g) => gmOf(g).name).join('、') || '尚未入組')}</div></div>
         ${tag(bp.status === 'ok' ? 'ok' : 'wn', bp.status === 'ok' ? '已綁定' : '待區長確認')}</div>` : ''}
       <label>搜尋姓名<input id="bindQ" type="search" value="${esc(UI.bindQ)}" data-input="bindQ" placeholder="輸入名字（例如：許明德）"></label>
-      <div class="list">${hits.map((p) => {
-        const gs = (M.personGroups[p.id] || []).map((g) => gmOf(g).name).join('、');
-        return `<div class="bind-hit"><div><b>${esc(p.n)}　${esc(p.a)}</b><div class="muted small">${esc(roleOf(p) || '道親')}${gs ? ' · ' + esc(gs) : ''}</div></div>
-          <button class="btn sm pri" data-act="bind-me" data-pid="${p.id}">這是我</button></div>`;
-      }).join('') || (q ? '<div class="muted small">名冊找不到這個名字？可於下方申請加入名冊。</div>' : '')}</div>
+      <div id="bindHits" class="list">${renderBindHits()}</div>
       <div class="muted small">送出後${isAuto ? '（測試期間立即生效，完工後恢復由小組長或區長確認）' : '由您的小組長或區長確認，確認前可先瀏覽班表'}。
         <button class="link" data-act="toggle-auto-bind">${isAuto ? '切換為正式審核測試' : '切換為測試立即生效'}</button></div>
       <details><summary>名冊上找不到名字？申請加入名冊</summary>
@@ -951,7 +961,7 @@
       ${fam.map((f) => `<div class="bind-hit"><div><b>${esc(f.n)}</b> <span class="muted small">${esc(f.a)}</span></div>
         <div class="acts"><button class="btn sm" data-act="person" data-pid="${f.pid}">看班表</button><button class="btn sm" data-act="rm-fam" data-pid="${f.pid}">移除</button></div></div>`).join('') || '<div class="muted small">尚未加入代管家人</div>'}
       <label>搜尋家人姓名<input id="famQ" type="search" value="${esc(UI.famQ)}" data-input="famQ" placeholder="輸入家人名字"></label>
-      ${famHits.map((p) => `<div class="bind-hit"><div><b>${esc(p.n)}</b> <span class="muted small">${esc(p.a)}</span></div><button class="btn sm" data-act="add-fam" data-pid="${p.id}">代管</button></div>`).join('')}
+      <div id="famHits">${renderFamHits()}</div>
     </section>`;
   }
 
@@ -1104,17 +1114,30 @@
         ${canEdit ? `<button class="btn sm ${ev.hard.length ? '' : 'pri'}" data-act="add" data-kind="${kind}" data-key="${key}" data-pid="${p.id}" data-area="${area}" data-label="${esc(label)}">${isAdmin() && !(memberOf(area) && memberOf(area).status === 'ok') && AREAS.includes(area) ? '預排' : '加入'}</button>` : ''}</div>`;
     }).join('') + (evs.length > L.length ? `<button class="btn wide" data-act="more">顯示全部 ${evs.length} 人</button>` : '') || '<div class="empty">沒有符合的人</div>';
   }
-  function finder(area, inIds, kind, key, label, evalFn, canEdit, localPool) {
-    const others = AREAS.filter((a) => a !== area);
-    if (UI.out && !UI.outArea) UI.outArea = others[0];
+  function computeFinderState(ctx) {
     const q = UI.out ? UI.outQ : UI.q;
     let pool, hint = '';
     if (UI.out) {
-      pool = q.length >= 1 ? M.people.filter((p) => p.a === UI.outArea && !p.off && !inIds.has(p.id) && p.n.includes(q)) : [];
+      pool = q.length >= 1 ? M.people.filter((p) => p.a === UI.outArea && !p.off && !ctx.inIds.has(p.id) && p.n.includes(q)) : [];
       hint = q.length < 1 ? '請選區域並輸入至少一個字。' : pool.length ? `找到 ${pool.length} 位。排入後對方的區也會看到這一筆。` : '這一區找不到符合的人。';
     } else {
-      pool = localPool.filter((p) => !inIds.has(p.id) && (!q || p.n.includes(q)));
+      pool = ctx.localPool.filter((p) => !ctx.inIds.has(p.id) && (!q || p.n.includes(q)));
     }
+    return { pool, hint };
+  }
+  function updateFinderDom() {
+    if (!finderCtx) return;
+    const candsEl = document.getElementById('cands'), hintEl = document.getElementById('finderHint');
+    if (!candsEl) return;
+    const { pool, hint } = computeFinderState(finderCtx);
+    if (hintEl) hintEl.textContent = hint;
+    candsEl.innerHTML = candList(finderCtx.kind, finderCtx.key, finderCtx.area, finderCtx.label, pool, finderCtx.evalFn, finderCtx.canEdit);
+  }
+  function finder(area, inIds, kind, key, label, evalFn, canEdit, localPool) {
+    const others = AREAS.filter((a) => a !== area);
+    if (UI.out && !UI.outArea) UI.outArea = others[0];
+    finderCtx = { area, inIds, kind, key, label, evalFn, canEdit, localPool };
+    const { pool, hint } = computeFinderState(finderCtx);
     const ctl = UI.out
       ? `<div class="outbox"><div class="grid2"><label>區域<select id="outArea" data-act-change="outArea">${others.map((a) => `<option ${a === UI.outArea ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
           <label>姓名（至少一個字）<input id="outQ" type="search" value="${esc(UI.outQ)}" data-input="outQ" placeholder="例如：李"></label></div>
@@ -1122,7 +1145,7 @@
       : `<label>找人（${AREAS.includes(area) ? '本區' : '全部'}）<input id="q" type="search" value="${esc(UI.q)}" data-input="q" placeholder="輸入姓名"></label>
          ${AREAS.includes(area) ? `<button class="btn wide" data-act="out" data-v="1">找非本區人員</button>` : ''}`;
     return `<section class="finder"><div class="sec-h"><h2>${UI.out ? '非本區人員 · ' + esc(UI.outArea) : '可以加入的人'}</h2><span class="muted small">${UI.out ? '輸入後才列出' : '依合適程度'}</span></div>
-      ${ctl}<div class="muted small">${hint}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit)}</div>
+      ${ctl}<div id="finderHint" class="muted small">${hint}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit)}</div>
       <div class="muted small">規則不允許的人仍可排入，但會標成違規，交給總召確認。</div></section>`;
   }
 
@@ -1227,8 +1250,14 @@
     </main>${areaNav(area, 'a')}`;
   }
 
+  function renderApptHits(area) {
+    const users = Object.entries(D().users || {}).filter(([uid, u]) => !((D().members || {})[area] || {})[uid] && UI.apptQ && (u.name || '').includes(UI.apptQ)).slice(0, 8);
+    return users.map(([uid, u]) => `<div class="cand"><div><b>${esc(u.name)}</b> <span class="muted small">${esc(u.provider || '')}</span></div><div class="acts"><button class="btn sm pri" data-act="appoint" data-area="${area}" data-uid="${uid}" data-role="sched">指定</button>${isAdmin() ? `<button class="btn sm" data-act="appoint" data-area="${area}" data-uid="${uid}" data-role="lead">設為區長</button>` : ''}</div></div>`).join('') || (UI.apptQ ? '<div class="empty">找不到，請對方先登入一次</div>' : '');
+  }
+
   /* ---------------- 畫面：B5 分工與送出 ---------------- */
   function vTeam(area) {
+    apptArea = area;
     const S = areaStats(area), mems = Object.entries((D().members || {})[area] || {});
     const boss = isLead(area) || isAdmin();
     const [cls, lab] = ST_LABEL[S.status];
@@ -1254,10 +1283,9 @@
         ${isAdmin() && m.role === 'lead' ? `<button class="btn sm" data-act="unmember" data-area="${area}" data-uid="${uid}">取消區長</button>` : ''}</div>
         <div class="muted small">${m.role === 'lead' ? '排班人員（預設）· 全部可排；可送出' : esc(sc)}${m.by ? ` · ${esc(m.by)} 指定` : ''}</div>${scopeBox}</div>`;
     };
-    const users = Object.entries(D().users || {}).filter(([uid, u]) => !((D().members || {})[area] || {})[uid] && UI.apptQ && (u.name || '').includes(UI.apptQ)).slice(0, 8);
     const appoint = boss ? `<section class="card"><h2>指定排班人員</h2><div class="muted small">對方要先登入過一次，才找得到。也可以請他在本區頁面按「申請成為排班人員」。</div>
       <label>找已登入的人<input id="apptQ" type="search" value="${esc(UI.apptQ)}" data-input="apptQ" placeholder="輸入姓名（至少一個字）"></label>
-      <div id="appt">${users.map(([uid, u]) => `<div class="cand"><div><b>${esc(u.name)}</b> <span class="muted small">${esc(u.provider || '')}</span></div><div class="acts"><button class="btn sm pri" data-act="appoint" data-area="${area}" data-uid="${uid}" data-role="sched">指定</button>${isAdmin() ? `<button class="btn sm" data-act="appoint" data-area="${area}" data-uid="${uid}" data-role="lead">設為區長</button>` : ''}</div></div>`).join('') || (UI.apptQ ? '<div class="empty">找不到，請對方先登入一次</div>' : '')}</div></section>` : '';
+      <div id="appt">${renderApptHits(area)}</div></section>` : '';
     const logs = Object.entries(D().log || {}).filter(([, l]) => l.area === area).sort((a, b) => b[1].at - a[1].at).slice(0, UI.showAll ? 60 : 8);
     const submit = isLead(area)
       ? S.status === 'editing' || S.status === 'not_started' ? `<button class="btn pri big" data-act="submit" data-area="${area}">送出給總召確認</button>` : `<button class="btn" data-act="unsubmit" data-area="${area}">收回，繼續排</button>`
@@ -1743,10 +1771,10 @@
       ${issueLines(iss, 6)}
       <h3>全年排班</h3>${otherWork(pid, [], null) || '<div class="empty">還沒有排班</div>'}
       ${editable ? `<h3>人員狀態（只有排班人員看得到）</h3>
-        <label class="ck"><input type="checkbox" data-act-change="pov-off" data-pid="${pid}" ${o.off ? 'checked' : ''}> 暫停排班</label>
-        <label>個人全年上限（次）<input type="number" min="0" max="30" value="${esc(o.cap || '')}" data-act-change="pov" data-pid="${pid}" data-k="cap"></label>
-        <label>不方便的月份（用空白分開，例：6 7 8）<input type="text" value="${esc((o.months || []).join(' '))}" data-act-change="pov-months" data-pid="${pid}"></label>
-        <label>備註<input type="text" value="${esc(o.note || '')}" data-act-change="pov" data-pid="${pid}" data-k="note"></label>` : ''}
+        <label class="ck"><input id="povOff" type="checkbox" data-act-change="pov-off" data-pid="${pid}" ${o.off ? 'checked' : ''}> 暫停排班</label>
+        <label>個人全年上限（次）<input id="povCap" type="number" min="0" max="30" value="${esc(o.cap || '')}" data-act-change="pov" data-pid="${pid}" data-k="cap"></label>
+        <label>不方便的月份（用空白分開，例：6 7 8）<input id="povMonths" type="text" value="${esc((o.months || []).join(' '))}" data-act-change="pov-months" data-pid="${pid}"></label>
+        <label>備註<input id="povNote" type="text" value="${esc(o.note || '')}" data-act-change="pov" data-pid="${pid}" data-k="note"></label>` : ''}
     </aside>`;
   }
 
@@ -1761,18 +1789,29 @@
     return { v: v || '', arg: rest.join('/') + (qs ? '?' + qs : ''), pathArg: rest.join('/') };
   }
   function render() {
+    if (isComposing) { pendingRender = true; return; }
+    pendingRender = false;
     const appEl = $('#app');
     if (!store.ready) { appEl.innerHTML = '<div class="empty">載入中…</div>'; return; }
     recompute();
     const r = route(), key = r.v + '/' + r.pathArg;
-    if (key !== lastRoute) {
+    const routeChanged = key !== lastRoute;
+    if (routeChanged) {
       UI.q = ''; UI.out = false; UI.outQ = ''; UI.showAll = false; UI.filter = '全部';
       UI.apptQ = ''; UI.b6Mode = ''; UI.b1NomOpen = false; UI.pAddOptOpen = false;
+      finderCtx = null; apptArea = '';
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
     }
     const wide = ['review', 'b1', 'p'].includes(r.v);
     appEl.className = wide ? 'wide-app' : '';
-    const ae = document.activeElement, keepId = ae && ae.id, pos = ae && ae.selectionStart;
+    const draftVals = {};
+    if (!routeChanged && appEl.querySelectorAll) {
+      for (const el of appEl.querySelectorAll('input[id], textarea[id], select[id]')) {
+        if (el.type === 'checkbox' || el.type === 'radio' || (el.dataset && el.dataset.input)) continue;
+        draftVals[el.id] = el.value;
+      }
+    }
+    const ae = document.activeElement, keepId = ae && ae.id, pos = ae && ae.selectionStart, posEnd = ae && ae.selectionEnd;
     const sc = window.scrollY;
     let html;
     if (r.v === 'login' || r.v === 'bind') html = vLogin();
@@ -1785,7 +1824,17 @@
     else if (r.v === 'review') html = vReview();
     else html = vHome();
     appEl.innerHTML = html + (UI.person ? personSheet(UI.person) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error ? `<div class="errbar">${esc(store.error)}</div>` : '');
-    if (keepId) { const el = document.getElementById(keepId); if (el) { el.focus(); try { if (pos != null && el.setSelectionRange) el.setSelectionRange(pos, pos); } catch (e) { } } }
+    for (const id in draftVals) {
+      const el = document.getElementById(id);
+      if (el && el.value !== draftVals[id]) el.value = draftVals[id];
+    }
+    if (keepId) {
+      const el = document.getElementById(keepId);
+      if (el) {
+        el.focus();
+        try { if (pos != null && el.setSelectionRange) el.setSelectionRange(pos, posEnd != null ? posEnd : pos); } catch (e) { }
+      }
+    }
     window.scrollTo(0, sc);
   }
   function onEnter(r) {
@@ -1808,7 +1857,11 @@
     else if (a === 'close-acct') { UI.acctOpen = false; render(); }
     else if (a === 'toggle-auto-bind') setAutoApproveBind(!autoApproveBind());
     else if (a === 'bind-me') bindPersonToMe(+d.pid);
-    else if (a === 'apply-new-person') applyNewPerson($('#newPerName').value, $('#newPerArea').value, $('#newPerSx').value, $('#newPerNote').value);
+    else if (a === 'apply-new-person') {
+      const nm = $('#newPerName').value, ar = $('#newPerArea').value, sx = $('#newPerSx').value, nt = $('#newPerNote').value;
+      if (String(nm || '').trim()) { $('#newPerName').value = ''; $('#newPerNote').value = ''; }
+      applyNewPerson(nm, ar, sx, nt);
+    }
     else if (a === 'add-fam') toggleFamily(+d.pid, true);
     else if (a === 'rm-fam') toggleFamily(+d.pid, false);
     else if (a === 'approve-bind') approveBind(d.uid, d.ok === '1');
@@ -1877,7 +1930,9 @@
     else if (a === 'revert-prop') revertProposal(d.pid);
     else if (a === 'send-talk') {
       if (!me()) return toast('請先登入');
-      const txt = ($('#propTalkTxt').value || '').trim(); if (!txt) return toast('請輸入留言內容');
+      const el = $('#propTalkTxt');
+      const txt = (el && el.value || '').trim(); if (!txt) return toast('請輸入留言內容');
+      if (el) el.value = '';
       const tid = store.pushId(), area = isAdmin() ? '總召' : (myAreas()[0] || (myBoundPerson() && myBoundPerson().p ? myBoundPerson().p.a : ''));
       store.set(`proposals/${d.pid}/talk/${tid}`, { who: me().name, area, at: Date.now(), text: txt });
       toast('已送出留言');
@@ -1911,9 +1966,36 @@
     }
   });
 
+  function updateSearchDom(k) {
+    if (k === 'q' || k === 'outQ') updateFinderDom();
+    else if (k === 'apptQ') { const el = document.getElementById('appt'); if (el && apptArea) el.innerHTML = renderApptHits(apptArea); }
+    else if (k === 'bindQ') { const el = document.getElementById('bindHits'); if (el) el.innerHTML = renderBindHits(); }
+    else if (k === 'famQ') { const el = document.getElementById('famHits'); if (el) el.innerHTML = renderFamHits(); }
+  }
+
+  document.addEventListener('compositionstart', () => {
+    isComposing = true;
+  });
+  document.addEventListener('compositionend', (ev) => {
+    isComposing = false;
+    const k = ev.target && ev.target.dataset && ev.target.dataset.input;
+    if (k) {
+      UI[k] = ev.target.value.trim();
+      UI.showAll = false;
+      updateSearchDom(k);
+    }
+    if (pendingRender) {
+      pendingRender = false;
+      render();
+    }
+  });
   document.addEventListener('input', (ev) => {
-    const k = ev.target.dataset && ev.target.dataset.input; if (!k) return;
-    UI[k] = ev.target.value.trim(); UI.showAll = false; render();
+    if (ev.isComposing || isComposing) return;
+    const k = ev.target && ev.target.dataset && ev.target.dataset.input;
+    if (!k) return;
+    UI[k] = ev.target.value.trim();
+    UI.showAll = false;
+    updateSearchDom(k);
   });
 
   document.addEventListener('change', (ev) => {
