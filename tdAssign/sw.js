@@ -3,10 +3,10 @@
  * - 只管理 tdAssign-* 快取；Stale-While-Revalidate，僅快取同源 GET
  * - 排班資料走 Firebase（或本機 localStorage），不經過 SW
  */
-const SW_VERSION = 'v3';
+const SW_VERSION = 'v4';
 const CACHE_PREFIX = 'tdAssign-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
-const ASSETS = ['./', './index.html', './styles.css', './config.js', './data.js', './engine.js', './store.js', './app.js', './manifest.webmanifest', './icons/tdAssign.svg', './icons/tdAssign-192.png', './icons/tdAssign-512.png', './icons/apple-touch-icon.png'];
+const ASSETS = ['./', './index.html', './styles.css', './config.js', './data.js', './engine.js', './store.js', './console.js', './app.js', './manifest.webmanifest', './icons/tdAssign.svg', './icons/tdAssign-192.png', './icons/tdAssign-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

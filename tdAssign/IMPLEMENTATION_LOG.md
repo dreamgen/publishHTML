@@ -1,6 +1,6 @@
-# 天達排班協作 (`tdAssign`) 階段一、二實作與審查紀錄
+# 天達排班協作 (`tdAssign`) 階段一～三實作與審查紀錄
 
-> 本文件記錄階段一（補齊 `B3–B6`、`A6` 與 `M8` 綁定）與階段二（`B1` 區長首頁與 `B2` 調整提案與影響試算）的開發成果、額外調整原因及自行補充假設，供後續 Review 角色與專案維護者核對。
+> 本文件記錄階段一（`B3–B6`、`A6`、`M8`）、階段二（`B1`、`B2`）與階段三（`00` 系統總覽、`A1–A5` 年度排班控制台及全站 UI/UX 優化）的開發成果、額外調整原因、自行補充假設及品質驗證結果，供專案維護者核對。
 >
 > 依專案決策：**僅開發 `publishHTML/tdAssign`**，`publishHTML/tdSchedule` 保留作為臨時過渡輔助工具，未作任何更動。
 
@@ -13,16 +13,17 @@
   - 新增 `draftVersion: 'v9.3'` 作為預設草案版號。
   - 新增測試期間開關 `autoApproveBind: true`（預設測試期姓名綁定立即生效；正式完工上線後改為 `false` 即可恢復為「須由區長／小組長確認」）。
 - **`store.js`**：
-  - 擴充頂層同步節點 `TOP`：`groupMeta`、`edits`、`extra`、`addedPeople`、`acks`、`proposals`、`nominations`、`supportReq`。
+  - 擴充頂層同步節點 `TOP`：`groupMeta`、`edits`、`extra`、`addedPeople`、`acks`、`proposals`、`nominations`、`supportReq`、`rules`。
   - 調整 `LocalStore.signIn` 與 `FirebaseStore` 的使用者寫入路徑（改為局部欄位寫入 `users/{uid}/name`、`users/{uid}/provider`），避免重新登入或換帳號時覆蓋已綁定的 `pid`、`bindStatus` 與 `family` 資料。
 - **`engine.js`**：
   - 強化 `buildModel()` 對 `edits` 的支援，除原有的 `area`、`grp`、`need`、`loc`、`note`、`cancel` 外，新增支援 `d`（換日）、`e`（結束日）、`lock`（解除外部鎖定），使 `B2` 提案的換日／換區／解除鎖定能由 `TDEngine` 即時重算所有規則違規。
   - 補匯出 `defaultGroupForAreaCat`。
 - **`database.rules.json`**：
-  - 補齊 `groupMeta`、`edits`、`extra`、`acks`、`supportReq`、`addedPeople`、`proposals`、`nominations` 的讀寫權限規則。
+  - 補齊 `groupMeta`、`edits`、`extra`、`acks`、`supportReq`、`addedPeople`、`proposals`、`nominations`、`rules` 的讀寫權限規則（`rules` 允許公開讀取，僅 `admins` 或 `sched` 可寫入）。
   - 在 `users/$uid` 下針對 `bindStatus`、`bindOkBy`、`bindOkAt` 增設 `.write` 條件，允許本區區長（透過 `sched`）或 `admins` 核准或退回道親的姓名綁定申請。
-- **`sw.js`**：
-  - 更新 `SW_VERSION` 為 `'v2'` 確保快取刷新。
+- **`index.html` & `sw.js`**：
+  - `index.html` 於 `app.js` 之前引入 `./console.js`（同源 CSP 允許）。
+  - `sw.js` 更新 `SW_VERSION` 為 `'v4'`，並於 `ASSETS` 快取清單納入 `'./console.js'`。
 
 ### 2. 階段一：補齊 `B3–B6`、`A6` 與 `M8` 姓名綁定
 - **`M8` 登入與姓名綁定（`#/login`、`#/bind` 及全域帳號抽屜 `accountSheet()`）**：
@@ -68,6 +69,35 @@
   - 實作 6 步提案進度條、**多方案並排即時影響試算（`simulateProposalOption`）**：透過 `TDEngine` 在記憶體中真實試算每個方案套用後的同日衝突變化、新增違規、新增注意、各區場次增減、受影響已排人數、外部鎖定狀態與需同意區域。
   - 支援「**＋ 新增做法進來比較**」、討論留言（`talk`）、受影響區及總召表態（`votes`），以及「**採用方案套用到總表**」（自動更新 `edits`/`extra`、升版 `meta/version` 草案版號、並保留 `prevEdits`/`prevVer` 支援總召一鍵還原決議）。
 
+### 4. 階段三：`00` 系統總覽、`A1–A5` 年度排班控制台（`console.js`）
+- **`00` 系統總覽與情境對照（`#/overview`）**：
+  - 7 階段年度流程卡片（每張卡片直接連結至對應畫板）、A/B/C 三大工作台入口卡。
+  - 18 列完整情境對照表（右欄皆對應實際可點路由連結）、「誰看到什麼」角色權限說明與「共用的資料骨幹（`td116/*`）」說明。
+- **`A1` 年度建置與初版產生（`#/a1`）**：
+  - 左側 5 步年度建置進度清單與已鎖定來源統計（依 `s.src` 彙整）。
+  - 右側 A（理想）／B（最小人力）／C（現有人力試排）三方案即時試算比較、產生選項（範圍：全年／指定月份／指定區／只補空格；排到哪一層；人數不足處理；4 項原則勾選）。
+  - 「只重排選定範圍」與「以方案 C 產生初版」：執行 `E.autoSchedule` 寫入葉節點 `assign/{sid}/{pid}` 與 `log`，其中 `keepLocked` 透過 `simSt.assign[sid].lk` 保留手動調整（`!rec.byAuto`）及已排鎖定人員，同時完整補滿 15 格 `s.lock` 空位。
+  - 5 大初版缺口問題動態診斷（交通／廚務／基隆與協辦／廚務超限／7 天內重複），支援展開「檢視明細」與一鍵「轉成提案」（寫入 `proposals/{id}` 並導向 `#/p/{id}`）。
+- **`A2` 年度總表與勤務格（`#/a2`）**：
+  - 5 張動態 KPI 卡片、月份按鈕列（全部、1–12、117）、區／類別／只看有問題篩選、搜尋框（`data-input="a2Q"` 局部更新 `#a2List` 保護倉頡 IME）、列表與 8 欄矩陣檢視切換（矩陣含自訂日期 `extra` 勤務格）、新增勤務格寫入 `extra/{id}`。
+  - 左側點選勤務格高亮 `.row-sel`，右側 `.inspector` sticky 面板提供：負責區下拉（內含 `computeAreaDelta` 即時計算各區違規±X／注意±Y 並可改派 `edits/{sid}` 連動預設組別）、已排人員與問題置頂／移出、候選人排序與預排／加入、換帶隊人／接受例外建議、預排補滿／鎖定解鎖／此日不需要恢復。
+- **`A3` 人員狀態（`#/a3`）**：
+  - 5 張動態 KPI 卡片、搜尋姓名（`data-input="a3Q"` 局部更新 `#a3List` 保護倉頡 IME）、7 種狀態篩選膠囊與區篩選。
+  - 左側人員列表顯示全年與平日已排／上限；右側 `.inspector` 包含 1–12 月互動時間軸（`.tl-grid`/`.tl-cell`/`.tl-off`，點擊月份即時切換暫停）、狀態／暫停月份／全年上限／平日上限／體力／交通／工作狀態／不可排日期／備註（即時寫入 `pov/{pid}`）、固定搭檔連結。
+  - 動態偵測「暫停／限制會影響 N 格已排勤務」，列出同班底替補建議並提供一鍵「預排替補」與「逐格處理」（跳轉 `#/a2` 定位該格）。
+- **`A4` 規則與情境試算（`#/a4`）**：
+  - 規則開關、參數與嚴重度切換（即時寫入 `rules/` 並同步 `st.rules` 重算全系統觸發數）、8×8 同日兼職互動矩陣與常用組合下拉雙向同步、待確認參數清單、版本紀錄與還原預設規則。
+  - 平日上限 2 次 vs 3 次即時比較卡與「自訂情境試算器」（純記憶體試算不改總表，確認後可「套用至規則集」）、匯出 117 規則草案 JSON。
+- **`A5` 定版與印刷版匯出（`#/a5`）**：
+  - 定版前 7 項動態檢查（支援一鍵將全部未決違規標為接受例外）、10 章節勾選與依紙張／字級即時編算頁碼、版面設定（A4/A5、起始頁碼、標準／大字版、印行日期、農曆、類別底色、章節備註、內嵌 SVG QR 碼、「兩個字的姓名中間加空格對齊」`fmtPrintName`）。
+  - 支援預覽整本、匯出草稿浮水印 PDF、定版鎖定為 `116 定版 v1.0`（寫入 `meta/published` 與 `slotDigest`）、定版後異動追蹤夾頁表與 4 種匯出（整本印刷列印、單章列印、UTF-8 BOM Excel 相容 CSV、各區一頁摘要）。
+
+### 5. 全站 UI/UX 一致化、大字無障礙與印刷樣式（`app.js` & `styles.css`）
+- **版型統一由螢幕尺寸決定**：移除依路由切換的 `.wide-app` 寬度跳動，全站統一採用單一響應式 `#app`（`max-width: 1392px`）、雙層一致頁首 `wsHeader` 與內容標題列 `.page-head`。
+- **裝置驅動之行動底部導覽 `.bnav`**：統一於全域渲染 5 格 `.bnav`，改由 `@media (min-width: 769px)` 隱藏、行動端固定顯示並同步調整 `#app` 與 `#toast` 底部空間。
+- **`B3–B6`、`M8`、工作區首頁雙欄化**：`vHome`、`vLogin (M8)`、`B3`、`B6`、`B4`、`B5` 於桌機／平板自動展開為 `.split-grid` 雙欄工作台（`B6`、`B4`、`B5` 及 `A2`、`A3` 右側統一採用 `.inspector` 桌面 sticky 獨立捲動面板）。
+- **大字版與印刷樣式**：頁首工具列與帳號抽屜提供「大字版」切換（`data-act="toggle-large"`，持久化至 `localStorage['tdAssign-large']` 並套用 `html.large-mode`）；`styles.css` 補齊完整 `@media print` 樣式（隱藏頁首／導覽／操作鈕、A4/A5 `@page`、章節強制分頁與草稿浮水印）。
+
 ---
 
 ## 二、額外調整的原因
@@ -78,15 +108,21 @@
 2. **修訂 `D10` 等預設提案所對應的真實 `slot.id`**：
    - **原因**：比對 `data.js` 後發現 12/11 冬季大典前晚在 `BASE_DATA.slots` 的實際 ID 為 `S187`（而非早先估算的編號）；2/27 內湖同日衝突為 `S007` 與 `S180`；3/21 交通為 `S200` 與 `S201`。
    - **調整做法**：改以實測驗證後的真實 `slot.id` 綁定於 `buildInitialProposals()`，使 `D10` 方案甲試算時能真實消除 `A2` 明德班日違規。
-3. **手機單手頁面（`B3–B6`）與桌機寬版工作台（`A6/B1/B2`）共生排版**：
-   - **原因**：原 `tdAssign` 的 `#app` 鎖定 `max-width: 720px`，若直接套用於 `A6` 進度表、`B1` 區長雙欄首頁及 `B2` 多方案並排比較表，表格欄位會過度擠壓。
-   - **調整做法**：在 `styles.css` 新增 `.wide-app`（`max-width: 1392px`）與響應式雙欄 `.split-grid`，依路由自動切換容器寬度，保留手機端操作流暢度的同時完整還原設計稿桌機雙欄體驗。
-4. **`input` 事件焦點保護、IME 倉頡組字不中斷與局部 DOM 更新**：
-   - **原因**：原 `app.js` 監聽所有 `data-input` 並在每次按鍵時執行整頁 `render()` 重寫 `#app.innerHTML`，導致使用倉頡／注音等中文輸入法時，組字碼在 `compositionstart`～`compositionend` 期間因 `<input>` DOM 節點被銷毀重建與重設游標而被強行切斷；背景同步或切換時的整頁重繪也可能打斷正在輸入的文字框。
+3. **手機與桌機排版由螢幕尺寸驅動，移除路由條件寬度切換（取代原 `.wide-app`）**：
+   - **原因**：階段一、二曾以 `.wide-app` 依路由切換 `720px`／`1392px` 寬度及 `.top`／`wsHeader` 雙軌頁首，但使用者反饋切換功能時版面寬度與頁首會產生跳動感。
+   - **調整做法**：移除 `.wide-app` 與 `.top` 切換，改為全站統一 `#app`（`max-width: 1392px`）＋一致的雙層 `wsHeader`＋由 `@media (min-width: 769px)` 控制的 `.bnav`，並讓 `vHome`、`M8`、`B3–B6` 在寬螢幕自動展開為 `.split-grid` 雙欄工作台，手機寬度自動收斂為單欄。
+4. **`input` 事件焦點保護、IME 倉頡組字不中斷與局部 DOM 更新（並修正 `draftVals` 覆寫問題）**：
+   - **原因**：原 `app.js` 監聽所有 `data-input` 並在每次按鍵時執行整頁 `render()` 重寫 `#app.innerHTML`，會中斷倉頡／注音組字；此外 `draftVals` 若保存 `<select>` 或非焦點 `[data-act-change]` 受控元件，會在 `A2` 改區連動組別、`A3` 點月份時間軸、`A4` 規則開關／試算套用時將 DOM 覆寫回舊值。
    - **調整做法**：
      1. 實作 `compositionstart` / `compositionend` 與 `ev.isComposing` 防護：組字期間略過 `input` 過濾並延遲背景 `render()`（設 `pendingRender`），待組字完成再更新。
-     2. 搜尋輸入改為 `updateSearchDom(k)` 局部更新結果容器（`#cands`/`#finderHint`、`#appt`、`#bindHits`、`#famHits`），完全不重建 `<input>` 元素本身。
-     3. 背景 `render()` 重繪前保存同路由非搜尋表單控制項的 `.value` 與游標選取範圍，重繪後還原，確保任何文字框都不會被同步重繪清空。
+     2. 7 個搜尋框（`a2Q`、`a3Q`、`q`、`outQ`、`apptQ`、`bindQ`、`famQ`）皆改為局部更新結果容器（`#a2List`、`#a3List`、`#cands`/`#finderHint`、`#appt`、`#bindHits`、`#famHits`），完全不重建 `<input>` 元素本身。
+     3. `draftVals` 限縮為僅保留純表單草稿（無 `data-act-change` 與 `data-input`）及此刻正在取得焦點（`el === ae`）的 `<input>`/`<textarea>`，絕不保存／覆寫 `<select>` 或未聚焦的受控元件。
+5. **`A1` 初版產生 `keepLocked` 改採 `simSt.assign[sid].lk` 機制**：
+   - **原因**：`BASE.slots` 中 `S177`、`S180`、`S181`、`S183–S188`、`S192` 等 15 格無組別勤務帶有 `lock: true`（代表負責區／日期由 115 手冊或行事曆鎖定，並非不排人）；若在 `effFilter` 直接排除 `s.lock`，會導致方案 C 產生初版時這 15 格維持 0 人（約 142 人次缺額）。
+   - **調整做法**：`effFilter` 僅依選定範圍過濾，`keepLocked` 改把「`s.lock` 格既有人員」與「非自動排入之手動調整人員（`!rec.byAuto`）」填入 `simSt.assign[s.id].lk` 交由 `E.autoSchedule` 保留，確保空的 `s.lock` 格能正常補滿且重排不洗掉手動調整。
+6. **Firebase Realtime Database 空陣列序列化防護（`A5` 定版異動追蹤）**：
+   - **原因**：Firebase Realtime Database 寫入時會省略空陣列 `[]`，自雲端重新讀取定版快照 `meta/published/slotDigest` 時，原本未排人的勤務格 `prev.pids` 會是 `undefined`。
+   - **調整做法**：`computePostPublishDiffs()` 先以 `Array.isArray(prev.pids) ? prev.pids : []` 正規化再比對人員增減。
 
 ---
 
@@ -110,3 +146,27 @@
 6. **未綁定或未設定姓名之人格預設區域（`defaultArea`）**：
    - 設計稿中「總覽 → 本區首頁／提案」需要知道目前預設查看哪一區。
    - 系統假設：依序優先取「當前使用者負責的六區之一」→「`M8` 綁定人員的所屬區」→ 預設 `'瑞芳'`（使用者可在 `B1` 右上角隨時切換其他區）。
+7. **`A1` 三方案與既有規則的執行對應假設**：
+   - 方案 A（理想）與方案 B（最小人力）為人力缺口對照指標，方案 C 為現有人力實際試排；按「產生初版」時依目前雲端／預設規則（`d.rules`）執行 `E.autoSchedule` 並於 `meta/plan` 記錄所選方案。當選項「排到哪一層」選擇「只排到區與組」時，不自動寫入個人 `assign/` 名單，交由各區後續排人。
+8. **`A5` 離線農曆、QR 碼與兩字姓名空格對齊假設**：
+   - 受限於 `index.html` 嚴格同源 CSP（`img-src 'self' data: blob: https:`、`font-src 'self'`），`A5` 手冊預覽之農曆日期採瀏覽器內建 `Intl.DateTimeFormat('zh-TW-u-ca-chinese')` 離線計算，封底 QR 碼由 `buildQrSvg()` 產出內嵌 SVG，不對外請求字型或圖檔；勾選「兩個字的姓名中間加空格對齊」時，對長度為 2 字的姓名插入全形空格 `　`（例如 `王明` → `王　明`）。
+
+---
+
+## 四、階段三驗證與審查結果
+
+- **語法與格式檢查**：
+  - `node -c` 檢查 `tdAssign/` 與 `tdAssign/worker/` 全部 8 支 `.js` 檔案（`app.js`、`config.js`、`console.js`、`data.js`、`engine.js`、`store.js`、`sw.js`、`worker/worker.js`）：全數通過。
+  - `python3 json.load` 檢查 `database.rules.json` 與 `manifest.webmanifest`：全數通過。
+  - CSS 括號平衡檢查（`styles.css`）：通過（淨層數 `0`），且全站渲染 HTML 使用之 CSS class 與 `styles.css` 完全對應。
+  - CSP 與安全掃描：`app.js`、`console.js`、`index.html` 零 `onclick`/`onchange` 內聯事件、零外部 Google Fonts 引用、`index.html` 於 `app.js` 前載入 `./console.js`、`sw.js`（`v4`）已納入 `'./console.js'`。
+- **範圍保護檢查**：
+  - `git status -s tdSchedule`：無任何輸出，確認 `publishHTML/tdSchedule` 保持完全未更動。
+- **Node 無頭端對端整合測試**：
+  - **全路由與版型一致化（18 條路由）**：`#/`、`#/overview`、`#/a1`～`#/a5`、`#/review`、`#/b1/瑞芳`、`#/p`、`#/p/D10`、`#/p/new`、`#/a/瑞芳`、`#/g/k_3`、`#/s/S171`、`#/t/瑞芳`、`#/login`、`#/bind` 全部正常渲染、零重複 DOM `id`、零 `.wide-app`／`.top` 殘留、全站統一 `<header class="ws-header no-print">` 與 `@media (min-width: 769px)` 控制之 `.bnav`。
+  - **`A1` 測試**：三方案試算切換、方案 C 產生初版寫入 53 格可排無組別勤務（含 `S180` 28 人、`S187` 12 人等 `s.lock` 格）並驗證 `keepLocked` 保留手動調整、`only-empty` 範圍重排、診斷明細展開與「轉成提案」跳轉 `#/p/P_*` 通過。
+  - **`A2` 測試**：`computeAreaDelta` 試算（`S187` 改新莊違規 `-1`）、改派負責區與 `#a2Grp_*` DOM 同步、鎖定／取消與恢復、非 `BASE.days` 自訂日期（`2027-07-25`）新增勤務並於矩陣檢視呈現、`a2Q` 搜尋倉頡 IME 保護通過。
+  - **`A3` 測試**：`a3Q` 搜尋倉頡 IME 保護、1–12 月時間軸點擊切換暫停並驗證 `#a3Months_*` 與 `#a3Status_*` DOM 同步、受影響勤務偵測與一鍵預排替補通過。
+  - **`A4` 測試**：規則開關（`P4b` 勾選後 `#a4Sev_P4b` 同步為 `注意`）、參數修改與規則集 `st.rules` 即時重算同步、記憶體試算不改總表及套用／還原預設規則、匯出 117 規則草案 JSON 通過。
+  - **`A5` 測試**：7 項定版檢查、`fmtPrintName('王明', true) === '王　明'`、預覽整本含草稿浮水印、UTF-8 BOM CSV 匯出、定版鎖定 `116 定版 v1.0`、模擬 Firebase 省略 `prev.pids` 空陣列下計算定版後異動追蹤夾頁表無誤通過。
+  - **既有功能與大字版回歸測試**：`B1`、`B2`、`B6`、`M8` 主要操作、既有 5 個搜尋框（`q`、`outQ`、`apptQ`、`bindQ`、`famQ`）IME 保護，以及 `large-mode` 切換與 `localStorage['tdAssign-large']` 持久化全部通過。

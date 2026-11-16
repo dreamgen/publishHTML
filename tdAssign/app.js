@@ -30,6 +30,23 @@
   };
 
   /* ---------------- 設定與狀態工具 ---------------- */
+  function isLargeMode() {
+    try { return localStorage.getItem('tdAssign-large') === '1'; } catch (e) { return false; }
+  }
+  function applyLargeMode(on) {
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.classList.toggle('large-mode', !!on);
+    }
+  }
+  function toggleLargeMode() {
+    const on = !(typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('large-mode'));
+    applyLargeMode(on);
+    try { localStorage.setItem('tdAssign-large', on ? '1' : '0'); } catch (e) { }
+    toast(on ? '已切換為大字版' : '已切換為標準字級');
+    render();
+  }
+  applyLargeMode(isLargeMode());
+
   function autoApproveBind() {
     try {
       const ov = localStorage.getItem('tdAssign-test-autoBind');
@@ -56,6 +73,7 @@
   function recompute() {
     const st = E.freshState();
     const d = D();
+    st.rules = E.mergeRules(d.rules);
     st.groups = {};
     for (const gm of BASE.groupsMeta) st.groups[gm.id] = Object.keys((d.groups || {})[gm.id] || {}).map(Number);
     st.assign = {};
@@ -822,52 +840,100 @@
   const ST_LABEL = { not_started: ['no', '還沒開始'], editing: ['wn', '區內排人中'], submitted: ['pl', '已送出'], confirmed: ['ok', '已確認'] };
 
   /* ---------------- 畫面：共用頂部與導覽 ---------------- */
+  function largeModeBtn() {
+    const on = typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('large-mode');
+    return `<button type="button" class="btn sm large-btn${on ? ' on' : ''}" data-act="toggle-large" aria-pressed="${on ? 'true' : 'false'}" title="切換大字版">${on ? '大字版 ✓' : '大字版'}</button>`;
+  }
   function accountBtn() {
     const u = me(), bp = myBoundPerson();
     const label = u ? (bp && bp.p ? `${u.name}（${bp.p.n}）` : u.name || '我') : '';
     const sync = store.mode === 'local' ? '本機試用' : !store.online ? `離線${store.pending ? ' · ' + store.pending + ' 筆待同步' : ''}` : store.pending ? `同步中 ${store.pending}` : '已同步';
     return `<div class="top-r"><span class="sync ${store.online ? '' : 'off'}">${esc(sync)}</span>
+      ${largeModeBtn()}
       ${u ? `<button class="btn sm" data-act="open-acct">${esc(label)}</button>` : `<a class="btn sm pri" href="#/login">登入 / 綁定</a>`}</div>`;
   }
-  function topbar(title, sub, back) {
+  function topbar(title, sub, back, backLabel) {
     return `<header class="top">
-      ${back ? `<a class="back" href="${back}">← 返回</a>` : `<a class="back" href="#/">天達排班協作</a>`}
+      ${back ? `<a class="back" href="${back}">${esc(backLabel || '← 返回')}</a>` : `<a class="back" href="#/">天達排班協作</a>`}
       ${accountBtn()}
       <div class="ttl"><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div>
     </header>`;
   }
   function wsHeader(wsKey, subKey, area) {
     const a = area || defaultArea();
-    const wsLink = (k, href, txt) => `<a href="${href}" class="${wsKey === k ? 'on' : ''}">${txt}</a>`;
+    const isA = wsKey === 'A' || wsKey === 'home';
+    const isBP = wsKey === 'B' || wsKey === 'P';
+    const isAreaGroup = isBP || wsKey === 'area';
+    const isOv = wsKey === 'overview' || wsKey === '00';
+    const navItem = (active, href, txt) => `<a href="${href}" class="${active ? 'on' : ''}">${txt}</a>`;
     let subs = '';
-    if (wsKey === 'A') {
-      subs = `<a href="#/review" class="${subKey === 'review' ? 'on' : ''}">各區進度與協調</a>
-        <a href="#/" class="${subKey === 'home' ? 'on' : ''}">工作區總覽</a>`;
-    } else if (wsKey === 'B') {
-      subs = `<a href="#/b1/${a}" class="${subKey === 'b1' ? 'on' : ''}">本區首頁</a>
-        <a href="#/a/${a}" class="${subKey === 'b3' ? 'on' : ''}">排人（手機）</a>
-        <a href="#/p" class="${subKey === 'b2' ? 'on' : ''}">提案與試算</a>`;
+    if (isA) {
+      subs = [
+        navItem(subKey === 'a1', '#/a1', '建置與初版'),
+        navItem(subKey === 'a2', '#/a2', '年度總表'),
+        navItem(subKey === 'a3', '#/a3', '人員狀態'),
+        navItem(subKey === 'a4', '#/a4', '規則與試算'),
+        navItem(subKey === 'review', '#/review', '各區進度與協調'),
+        navItem(subKey === 'a5', '#/a5', '定版與匯出')
+      ].join('');
+    } else if (isAreaGroup) {
+      subs = [
+        navItem(subKey === 'b1', `#/b1/${a}`, '本區首頁'),
+        navItem(subKey === 'b3' || subKey === 'a', `#/a/${a}`, '本區排人'),
+        navItem(subKey === 't' || subKey === 'b5', `#/t/${a}`, '分工與送出'),
+        navItem(subKey === 'b2' || subKey === 'p', '#/p', '提案與試算')
+      ].join('');
+    } else {
+      subs = [
+        navItem(isOv || subKey === 'overview', '#/overview', '系統總覽'),
+        navItem(false, '#/a1', '建置與初版'),
+        navItem(false, '#/a2', '年度總表'),
+        navItem(false, `#/b1/${a}`, '本區首頁'),
+        navItem(false, `#/a/${a}`, '各區排人'),
+        navItem(wsKey === 'login' || subKey === 'login', '#/login', '帳號與綁定')
+      ].join('');
     }
-    return `<header class="ws-header">
+    const pub = !!(D().meta && D().meta.published);
+    const verTxt = pub || String(draftVer()).includes('定版') ? esc(draftVer()) : `草案 ${esc(draftVer())}`;
+    return `<header class="ws-header no-print">
       <div class="ws-top">
         <a class="ws-brand" href="#/">
           <div class="ws-logo" aria-hidden="true">達</div>
-          <div><div class="ws-title">天達堂排班系統</div><div class="ws-sub">116 年度 · 草案 ${esc(draftVer())}</div></div>
+          <div><div class="ws-title">天達堂排班系統</div><div class="ws-sub">116 年度 · ${verTxt}</div></div>
         </a>
         <nav class="ws-nav" aria-label="工作台">
-          ${wsLink('home', '#/', '總覽')}
-          ${wsLink('A', '#/review', '各區進度(A6)')}
-          ${wsLink('B', `#/b1/${a}`, '各區討論(B1–B5)')}
-          ${wsLink('P', '#/p', '提案試算(B2)')}
+          ${navItem(isOv, '#/overview', '總覽')}
+          ${navItem(wsKey === 'A', '#/a1', '年度控制台')}
+          ${navItem(isBP, `#/b1/${a}`, '各區討論')}
+          ${navItem(wsKey === 'area', `#/a/${a}`, '各區排人')}
+          ${navItem(wsKey === 'home', '#/', '工作區首頁')}
         </nav>
         ${accountBtn()}
       </div>
-      ${subs ? `<div class="sub-nav">${subs}</div>` : ''}
+      <div class="sub-nav">${subs}</div>
     </header>`;
   }
-  function areaNav(area, cur) {
-    const it = (href, key, t) => `<a href="${href}" class="${cur === key ? 'on' : ''}">${t}</a>`;
-    return `<nav class="bnav" aria-label="區排人選單">${it('#/a/' + area, 'a', '排人')}${it('#/t/' + area, 't', '分工與送出')}${it('#/b1/' + area, 'p', '提案')}</nav>`;
+  function currentAreaForNav(r) {
+    if (r && (r.v === 'a' || r.v === 't' || r.v === 'b1') && WORK_AREAS.includes(r.pathArg)) return r.pathArg;
+    if (r && r.v === 'g' && gmOf(r.pathArg)) return gmOf(r.pathArg).area;
+    if (r && r.v === 's' && M && M.byId[r.pathArg]) return M.byId[r.pathArg].area;
+    return defaultArea();
+  }
+  function globalBottomNav(r) {
+    const a = currentAreaForNav(r);
+    const it = (href, active, t) => `<a href="${href}" class="${active ? 'on' : ''}">${t}</a>`;
+    const isHome = !r || !r.v || r.v === 'login' || r.v === 'bind';
+    const isArea = r && (r.v === 'a' || r.v === 'g' || r.v === 's');
+    const isTeam = r && r.v === 't';
+    const isProp = r && (r.v === 'b1' || r.v === 'p');
+    const isCtrl = r && ['overview', 'a1', 'a2', 'a3', 'a4', 'a5', 'review'].includes(r.v);
+    return `<nav class="bnav no-print" aria-label="行動版快捷導覽">
+      ${it('#/', isHome, '首頁')}
+      ${it('#/a/' + a, isArea, '排人')}
+      ${it('#/t/' + a, isTeam, '分工')}
+      ${it('#/b1/' + a, isProp, '提案')}
+      ${it('#/a1', isCtrl, '控制台')}
+    </nav>`;
   }
   function issueLines(list, max) {
     const active = list.filter((c) => !c.accepted), acc = list.filter((c) => c.accepted);
@@ -882,33 +948,83 @@
   function vHome() {
     const mine = myAreas(), seeded = !!(D().meta || {}).seeded, bp = myBoundPerson();
     const curArea = defaultArea();
-    let body = '';
+    let notices = '';
     if (!seeded) {
-      body += `<section class="card warnbox"><b>這個年度還沒有初始資料。</b><div class="muted">初始化會把 115 年的組別名單與初始調整提案帶進來當起點，各區再調整。</div>
+      notices += `<section class="card warnbox"><b>這個年度還沒有初始資料。</b><div class="muted">初始化會把 115 年的組別名單與初始調整提案帶進來當起點，各區再調整。</div>
         ${store.mode === 'local' || isAdmin() ? `<button class="btn pri" data-act="seed">初始化 116 年資料</button>` : `<div class="muted">請總召或調度台登入後初始化。</div>`}</section>`;
     }
     if (me()) {
       const bindLine = bp && bp.p
         ? `已綁定：<b>${esc(bp.p.n)}</b>（${esc(bp.p.a)}）${bp.status === 'pending' ? tag('wn', '待區長確認') : tag('ok', '已生效')}`
         : `尚未綁定名冊姓名 ${tag('wn', '點此綁定')}`;
-      body += `<section class="card"><div class="row-h"><span>${bindLine}</span><button class="btn sm" data-act="open-acct">帳號與綁定 (M8)</button></div>
+      notices += `<section class="card"><div class="row-h"><span>${bindLine}</span>
+        <div class="acts">${bp && bp.p ? `<button class="btn sm pri-out" data-act="person" data-pid="${bp.p.id}">看我的班表</button>` : ''}<button class="btn sm" data-act="open-acct">帳號與綁定 (M8)</button></div></div>
         ${!mine.length && !isAdmin() ? `<div class="muted small">您還不是任何一區的排班人員：可先瀏覽，或到自己的區按「申請成為排班人員」。</div>` : ''}</section>`;
+    } else {
+      notices += `<section class="card"><div class="row-h"><div><b>尚未登入</b><div class="muted small">登入並綁定姓名後可排本區名單、提案表態、代管家人。</div></div>
+        <a class="btn sm pri" href="#/login">登入 / 綁定 (M8)</a></div></section>`;
     }
-    body += `<div class="act-bar2">
-      <a class="btn blue-out" href="#/b1/${curArea}">區長首頁 (B1)</a>
-      <a class="btn blue" href="#/p">提案與影響試算 (B2)</a>
-    </div>`;
-    body += `<section class="list">` + WORK_AREAS.map((a) => {
+
+    const areaCards = WORK_AREAS.map((a) => {
       const s = seeded ? areaStats(a) : null, m = mine.includes(a);
       const tot = s ? s.groups.length + s.dated.length : 0;
       if (s && !tot) return '';
       const [cls, lab] = ST_LABEL[s ? s.status : 'editing'];
-      return `<div class="row"><div class="row-h"><a href="#/a/${a}" style="text-decoration:none"><b class="c-${a}">${a}</b></a>${m ? tag('ok', '我負責') : ''}${s ? tag(cls, lab) : ''}
-        <span style="margin-left:auto;display:flex;gap:6px"><a class="btn sm" href="#/b1/${a}">首頁</a><a class="btn sm pri" href="#/a/${a}">排人</a></span></div>
+      return `<div class="row"><div class="row-h"><div class="row-t"><a href="#/a/${a}" style="text-decoration:none"><b class="c-${a}">${a}</b></a>${m ? tag('ok', '我負責') : ''}${s ? tag(cls, lab) : ''}</div>
+        <div class="acts"><a class="btn sm" href="#/b1/${a}">首頁</a><a class="btn sm pri" href="#/a/${a}">排人</a></div></div>
         ${s ? `<div class="muted small">組別 ${s.gDone}／${s.groups.length} · 依日期 ${s.dDone}／${s.dated.length}${s.clash ? ` · <span class="t-bad">撞到 ${s.clash}</span>` : ''}${s.pre ? ` · 預排待確認 ${s.pre}` : ''}</div>` : ''}</div>`;
-    }).join('') + `</section>`;
-    body += `<a class="btn wide" href="#/review">各區進度與跨區協調 (A6)</a>`;
-    return topbar(`116 年各區排人（${draftVer()}）`, store.mode === 'local' ? '本機試用模式 · 測試期間姓名綁定立即生效' : '人由各區排；總召檢查衝突與協調') + `<main>${body}</main>`;
+    }).join('');
+
+    const sideHub = `<aside class="split-side">
+      <section class="home-hub">
+        <div class="sec-h"><h2>三個工作台與階段入口</h2><a class="link small" href="#/overview">系統總覽 (00) →</a></div>
+        <div class="hub-card hub-a">
+          <div class="hub-k">工作台 A · 總召、人資處</div>
+          <div class="hub-t">年度排班控制台</div>
+          <div class="muted small">產生初版、年度總表、人員狀態、規則試算、跨區協調與印刷定版。</div>
+          <div class="acts">
+            <a class="btn sm pri" href="#/a1">建置初版 A1</a>
+            <a class="btn sm" href="#/a2">年度總表 A2</a>
+            <a class="btn sm" href="#/a3">人員狀態 A3</a>
+            <a class="btn sm" href="#/a4">規則試算 A4</a>
+            <a class="btn sm" href="#/review">進度協調 A6</a>
+            <a class="btn sm" href="#/a5">定版匯出 A5</a>
+          </div>
+        </div>
+        <div class="hub-card hub-b">
+          <div class="hub-k">工作台 B · 區長、主廚、小組長</div>
+          <div class="hub-t">各區討論與區內排人</div>
+          <div class="muted small">查看本區任務與負擔比較、提出換日／換區／支援提案並即時試算影響。</div>
+          <div class="acts">
+            <a class="btn sm blue" href="#/b1/${curArea}">${esc(curArea)} 區長首頁 (B1)</a>
+            <a class="btn sm blue-out" href="#/p">提案與影響試算 (B2)</a>
+            <a class="btn sm" href="#/a/${curArea}">區內排人 (B3)</a>
+          </div>
+        </div>
+        <a class="btn wide" href="#/overview">查看 00 系統總覽、年度 7 階段流程與 18 情境對照</a>
+      </section>
+    </aside>`;
+
+    return `${wsHeader('home', '', curArea)}<main class="wide-main">
+      <div class="page-head">
+        <div>
+          <h1>116 年排班工作區（${esc(draftVer())}）</h1>
+          <p class="muted" style="margin:4px 0 0">${store.mode === 'local' ? '本機試用模式 · 測試期間姓名綁定立即生效' : '一份資料，三個工作台；人由各區排，總召檢查衝突與定版'}</p>
+        </div>
+        <div class="acts">
+          <a class="btn pri" href="#/overview">系統總覽 (00)</a>
+          <a class="btn blue-out" href="#/b1/${curArea}">${esc(curArea)} 區長首頁</a>
+        </div>
+      </div>
+      <div class="split-grid">
+        <div class="split-main">
+          ${notices}
+          <div class="sec-h"><h2>各區排人進度（B3／B1）</h2><span class="muted small">${seeded ? '點區域進入排人，或開區長首頁' : '尚未初始化'}</span></div>
+          <section class="area-cards-grid">${areaCards}</section>
+        </div>
+        ${sideHub}
+      </div>
+    </main>`;
   }
 
   let isComposing = false, pendingRender = false, finderCtx = null, apptArea = '';
@@ -966,33 +1082,58 @@
   }
 
   function vLogin() {
-    let body = `<section class="card login-cmp">
-      <div><div class="small muted"><b>不用登入</b></div><ul><li>本週與全年場次</li><li>各場名單、車次</li><li>組別、依姓名查詢</li><li>公告、服務指南</li></ul></div>
-      <div><div class="small t-ok"><b>登入之後</b></div><ul><li>排本區名單、提案</li><li>回覆會到、請假</li><li>代管家人</li><li>帶隊點名與回饋</li></ul></div>
-    </section>`;
+    let mainHtml = '';
     if (me()) {
-      body += bindSectionHtml();
-      body += `<button class="btn wide" data-act="signout">登出目前帳號（${esc(me().name)}）</button>`;
+      mainHtml += bindSectionHtml();
+      mainHtml += `<button class="btn wide" data-act="signout">登出目前帳號（${esc(me().name)}）</button>`;
     } else if (store.mode === 'local') {
       const sampleP = M.people.find((p) => p.a === '瑞芳' && p.n) || M.people[0];
       const opt = (who, t, d) => `<button class="row" data-act="local-in" data-who='${esc(JSON.stringify(who))}'><b>${esc(t)}</b><div class="muted small">${esc(d)}</div></button>`;
-      body += `<section class="card"><b>本機試用模式</b><div class="muted">選一個身分試用，資料只存在這台裝置；開兩個分頁選不同身分，可模擬多人同時排。</div></section>
+      mainHtml += `<section class="card"><b>本機試用模式</b><div class="muted">選一個身分試用，資料只存在這台裝置；開兩個分頁選不同身分，可模擬多人同時排。</div></section>
         <section class="list">${opt({ uid: 'local-admin', name: '總召（試用）', admin: true }, '總召、調度台', '看各區進度、協調、預排、決議套用提案、指定排班人員')}
         ${AREAS.map((a) => opt({ uid: 'local-lead-' + a, name: a + '區長（試用）', leadOf: a }, a + ' 區長', '區長首頁、排本區的人、提案表態、指定排班人員、確認預排、送出')).join('')}
         ${sampleP ? opt({ uid: 'local-bound-' + sampleP.id, name: sampleP.n, pid: sampleP.id, area: sampleP.a }, `已綁定道親：${sampleP.n}（${sampleP.a}）`, '直接體驗 M8 已綁定名冊姓名狀態') : ''}
         ${opt({ uid: 'local-u1', name: '道親甲（試用）' }, '一般道親（未綁定）', '登入後搜尋名冊姓名綁定「這是我」或申請成為排班人員')}</section>`;
     } else {
-      body += `<button class="btn pri big" data-act="in" data-kind="google">使用 Google 帳號登入</button>
-        ${CFG.lineChannelId && CFG.lineWorkerUrl ? `<button class="btn big" data-act="in" data-kind="line">使用 LINE 登入</button>` : `<div class="muted small">LINE 登入尚未設定。</div>`}`;
+      mainHtml += `<section class="card"><button class="btn pri big" data-act="in" data-kind="google">使用 Google 帳號登入</button>
+        ${CFG.lineChannelId && CFG.lineWorkerUrl ? `<button class="btn big" data-act="in" data-kind="line">使用 LINE 登入</button>` : `<div class="muted small">LINE 登入尚未設定。</div>`}</section>`;
     }
-    return topbar(me() ? '帳號與姓名綁定' : '登入', '', '#/') + `<main>${body}${store.error ? `<div class="iss bad">${esc(store.error)}</div>` : ''}</main>`;
+    const sideHtml = `<aside class="split-side">
+      <section class="card login-cmp">
+        <div><div class="small muted"><b>不用登入</b></div><ul><li>本週與全年場次</li><li>各場名單、車次</li><li>組別、依姓名查詢</li><li>公告、服務指南</li></ul></div>
+        <div><div class="small t-ok"><b>登入之後</b></div><ul><li>排本區名單、提案</li><li>回覆會到、請假</li><li>代管家人</li><li>帶隊點名與回饋</li></ul></div>
+      </section>
+      <section class="card"><h2>姓名綁定與代管說明</h2>
+        <div class="kv-row"><b>找自己</b><span class="muted">搜尋名冊姓名點「這是我」，確認身分後即可檢視全年班表。</span></div>
+        <div class="kv-row"><b>申請入冊</b><span class="muted">名冊尚未建立者可填寫姓名與所屬區申請加入。</span></div>
+        <div class="kv-row"><b>代管家人</b><span class="muted">替沒有智慧型手機的長輩或家人加入代管，一同查詢與代回。</span></div>
+      </section>
+    </aside>`;
+    return `${wsHeader('login', 'login', defaultArea())}<main class="wide-main">
+      <div class="page-head">
+        <div>
+          <div class="muted small"><a href="#/">工作區首頁</a> ／ 帳號與姓名綁定 (M8)</div>
+          <h1>${me() ? '帳號與姓名綁定' : '登入系統'}</h1>
+        </div>
+        <div class="acts"><a class="btn" href="#/">← 回工作區首頁</a></div>
+      </div>
+      <div class="split-grid">
+        <div class="split-main">${mainHtml}${store.error ? `<div class="iss bad">${esc(store.error)}</div>` : ''}</div>
+        ${sideHtml}
+      </div>
+    </main>`;
   }
 
   function accountSheet() {
     if (!me()) return '';
+    const isLg = typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('large-mode');
     return `<div class="sheet-bg" data-act="close-acct"></div><aside class="sheet" role="dialog" aria-label="帳號與姓名綁定">
       <div class="mem-h"><h2>${esc(me().name || '我')}</h2><span class="muted small">${esc(me().provider || '')}${isAdmin() ? ' · 總召/調度台' : ''}</span>
         <button class="btn sm" data-act="close-acct">關閉</button></div>
+      <div class="bind-hit">
+        <div><b>字級與閱讀模式</b><div class="muted small">${isLg ? '目前已開啟大字版，介面文字與按鈕已放大' : '目前為標準字級，可切換大字版方便閱讀'}</div></div>
+        <button type="button" class="btn sm ${isLg ? 'pri' : 'pri-out'}" data-act="toggle-large">${isLg ? '切回標準字' : '開啟大字版'}</button>
+      </div>
       ${bindSectionHtml()}
       <button class="btn wide bad-out" data-act="signout">登出</button>
     </aside>`;
@@ -1058,17 +1199,35 @@
 
     const m = memberOf(area);
     const join = me() && !isAdmin() && AREAS.includes(area) && !m ? `<button class="btn wide" data-act="join" data-area="${area}">申請成為 ${area} 的排班人員</button>` : m && m.status === 'pending' ? `<div class="card muted">已申請成為排班人員，等區長或調度台同意。</div>` : '';
-    return topbar(`${area}　本區要排的人`, `${tag(cls, lab)}${S.after ? tag('pl', `送出後變更 ${S.after}`) : ''}<a class="link" style="margin-left:auto" href="#/b1/${area}">區長首頁 →</a>`, '#/') + `<main>
+    return `${wsHeader('area', 'b3', area)}<main class="wide-main">
+      <div class="page-head">
+        <div>
+          <div class="muted small"><a href="#/">工作區首頁</a> ／ <span class="c-${area}">${esc(area)}</span> · 區內排人 (B3)</div>
+          <div class="row-t"><h1>${esc(area)}　本區要排的人</h1>${tag(cls, lab)}${S.after ? tag('pl', `送出後變更 ${S.after}`) : ''}</div>
+        </div>
+        <div class="acts" style="align-items:flex-end">
+          <label style="font-size:12px">切換區<select data-act-change="a-area">${WORK_AREAS.map((a) => `<option ${a === area ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
+          <a class="btn blue-out" href="#/b1/${area}">區長首頁 (B1)</a>
+          <a class="btn" href="#/t/${area}">分工與送出 (B5)</a>
+        </div>
+      </div>
       ${here.length ? `<div class="pres">${avatars(here)}<span class="muted small">${here.length} 人正在作業 · 改動即時同步</span></div>` : ''}
-      ${join}${reminders(area, S)}
+      ${join}
       <div class="chips">${chips}</div>
-      <div class="sec-h"><h2>組別</h2><span class="num muted">排好 ${S.gDone}／${S.groups.length} 組</span></div>
-      <div class="muted small">改組員，全年每一場自動帶入。不能只改某一天。</div>
-      <section class="list">${gRows || '<div class="empty">沒有符合的組別</div>'}</section>
-      <div class="sec-h"><h2>依日期排（沒有組別）</h2><span class="num muted">排滿 ${S.dDone}／${S.dated.length} 格</span></div>
-      <section class="list">${dRows || '<div class="empty">沒有符合的勤務</div>'}</section>
-      <div class="muted small">哪一區、哪一天、哪一組由總召排定並鎖住，要換日或換區請用提案。標「預排」的人是總召或調度台先排的，必須由區長確認或重排。</div>
-    </main>${areaNav(area, 'a')}`;
+      <div class="split-grid">
+        <div class="split-main">
+          <div class="sec-h"><h2>組別</h2><span class="num muted">排好 ${S.gDone}／${S.groups.length} 組</span></div>
+          <div class="muted small">改組員，全年每一場自動帶入。不能只改某一天。</div>
+          <section class="list">${gRows || '<div class="empty">沒有符合的組別</div>'}</section>
+          <div class="muted small">哪一區、哪一天、哪一組由總召排定並鎖住，要換日或換區請用提案。標「預排」的人是總召或調度台先排的，必須由區長確認或重排。</div>
+        </div>
+        <aside class="split-side b3-side">
+          ${reminders(area, S)}
+          <div class="sec-h"><h2>依日期排（沒有組別）</h2><span class="num muted">排滿 ${S.dDone}／${S.dated.length} 格</span></div>
+          <section class="list">${dRows || '<div class="empty">沒有符合的勤務</div>'}</section>
+        </aside>
+      </div>
+    </main>`;
   }
 
   /* ---------------- 畫面：B6 組別成員、B4 依日期勤務 ---------------- */
@@ -1192,26 +1351,43 @@
         </div><button class="btn pri" data-act="move-mem" data-gk="${gk}">確認移轉</button>` : '<div class="muted small">沒有可移轉的組員或目標組別</div>'}</section>`;
     }
 
-    return topbar(gm.name, `${lead ? `${leadLabel} ${esc(lead.n)} · ` : ''}${need ? `每場需要 ${need} 人 · ` : ''}目前 ${mem.length} 人`, '#/a/' + area) + `<main>
-      <section class="card"><div class="small muted"><b>這一組今年負責 ${slots.length} 場</b>（總召排定）</div>
-        <div class="dates">${slots.map((s) => `<span>${esc(dLabel(s))}${esc(s.label || s.cat)}</span>`).join('') || '<span>尚未排定場次</span>'}</div>
-        <div class="muted small">改組員會套用到這 ${slots.length} 場。某一天有人不能來，是定版後在調度台找代班，不在這裡改。</div></section>
-      ${ed.length ? `<div class="edbox">${avatars(ed)}<span>${esc(ed.map((u) => u.name).join('、'))} 也在改這一組，改動會立刻出現。</span></div>` : ''}
-      ${!canEdit ? `<div class="card muted">${me() ? '您不是這一區的排班人員，只能瀏覽。' : '登入並成為排班人員後才能調整。'}</div>` : ''}
-      ${postsHtml}
-      <section class="card members"><h2>組員</h2>
-        ${loud.map((x) => memberRow(x.p, x.r, x.iss, 'groups', gk, area, gm.name, canEdit, ids)).join('')}
-        ${showQuiet ? quiet.map((x) => memberRow(x.p, x.r, x.iss, 'groups', gk, area, gm.name, canEdit, ids)).join('') : `<button class="btn wide" data-act="more">其餘 ${quiet.length} 人沒有問題，點開看全部</button>`}
-        ${!mem.length ? '<div class="empty">還沒有組員</div>' : ''}</section>
-      ${canEdit ? finder(area, inIds, 'groups', gk, gm.name, (p) => evalInGroup(p, gk), canEdit, local) : ''}
-      ${subPanel}
-      ${canEdit ? `<div class="act-bar3">
-        <button class="btn" data-act="last-year" data-gk="${gk}">帶入去年</button>
-        <button class="btn" data-act="b6-mode" data-v="lead">換${leadLabel}</button>
-        <button class="btn" data-act="b6-mode" data-v="move">移到別組</button>
-      </div>` : ''}
-      <div class="muted small">檢查是把組員放進這一組全年每一場去算：全年次數、七天內重複、不方便的月份、和其他組或忠恕輪值有沒有同一天。</div>
-    </main>${areaNav(area, 'a')}`;
+    return `${wsHeader('area', 'b3', area)}<main class="wide-main">
+      <div class="page-head">
+        <div>
+          <div class="muted small"><a href="#/">工作區首頁</a> ／ <a href="#/a/${area}">${esc(area)} 排人</a> ／ 組別成員 (B6)</div>
+          <h1>${esc(gm.name)}</h1>
+          <div class="muted small" style="margin-top:4px">${lead ? `${leadLabel} ${esc(lead.n)} · ` : ''}${need ? `每場需要 ${need} 人 · ` : ''}目前 ${mem.length} 人</div>
+        </div>
+        <div class="acts">
+          <a class="btn" href="#/a/${area}">← 回 ${esc(area)} 排人</a>
+          <a class="btn blue-out" href="#/b1/${area}">本區首頁 (B1)</a>
+        </div>
+      </div>
+      <div class="split-grid">
+        <div class="split-main">
+          <section class="card"><div class="small muted"><b>這一組今年負責 ${slots.length} 場</b>（總召排定）</div>
+            <div class="dates">${slots.map((s) => `<span>${esc(dLabel(s))}${esc(s.label || s.cat)}</span>`).join('') || '<span>尚未排定場次</span>'}</div>
+            <div class="muted small">改組員會套用到這 ${slots.length} 場。某一天有人不能來，是定版後在調度台找代班，不在這裡改。</div></section>
+          ${ed.length ? `<div class="edbox">${avatars(ed)}<span>${esc(ed.map((u) => u.name).join('、'))} 也在改這一組，改動會立刻出現。</span></div>` : ''}
+          ${!canEdit ? `<div class="card muted">${me() ? '您不是這一區的排班人員，只能瀏覽。' : '登入並成為排班人員後才能調整。'}</div>` : ''}
+          ${postsHtml}
+          <section class="card members"><h2>組員</h2>
+            ${loud.map((x) => memberRow(x.p, x.r, x.iss, 'groups', gk, area, gm.name, canEdit, ids)).join('')}
+            ${showQuiet ? quiet.map((x) => memberRow(x.p, x.r, x.iss, 'groups', gk, area, gm.name, canEdit, ids)).join('') : `<button class="btn wide" data-act="more">其餘 ${quiet.length} 人沒有問題，點開看全部</button>`}
+            ${!mem.length ? '<div class="empty">還沒有組員</div>' : ''}</section>
+          ${subPanel}
+          ${canEdit ? `<div class="act-bar3">
+            <button class="btn" data-act="last-year" data-gk="${gk}">帶入去年</button>
+            <button class="btn" data-act="b6-mode" data-v="lead">換${leadLabel}</button>
+            <button class="btn" data-act="b6-mode" data-v="move">移到別組</button>
+          </div>` : ''}
+          <div class="muted small">檢查是把組員放進這一組全年每一場去算：全年次數、七天內重複、不方便的月份、和其他組或忠恕輪值有沒有同一天。</div>
+        </div>
+        <aside class="split-side inspector" aria-label="候選人搜尋">
+          ${canEdit ? finder(area, inIds, 'groups', gk, gm.name, (p) => evalInGroup(p, gk), canEdit, local) : '<div class="empty">登入並取得本區排班權限後可從此處搜尋加入組員。</div>'}
+        </aside>
+      </div>
+    </main>`;
   }
 
   function vSlot(sid) {
@@ -1230,24 +1406,41 @@
     const preList = rows.filter((x) => x.r && x.r.pre);
     const leadEdit = isLead(area) || (isAdmin() && !AREAS.includes(area));
 
-    return topbar(label, `${esc(s.loc || '')} · 需要 ${need} 人 · <b class="${A.length < need ? 't-bad' : 't-ok'}">已排 ${A.length}</b>`, '#/a/' + area) + `<main>
-      ${ed.length ? `<div class="edbox">${avatars(ed)}<span>${esc(ed.map((u) => u.name).join('、'))} 也在排這一格。加的人會立刻出現，不會互相蓋掉。</span></div>` : ''}
-      ${preList.length ? `<div class="pre-banner"><div><b>預排 ${preList.length} 人：</b>${esc(preList.map((x) => x.p.n).join('、'))}（總召或調度台先排的）。必須由區長確認或重排。</div>
-        ${leadEdit ? `<div class="act-bar2"><button class="btn pri" data-act="pre-all-ok" data-sid="${sid}" data-area="${area}" data-label="${esc(label)}">全部確認</button>
-          <button class="btn pre-out" data-act="pre-all-rm" data-sid="${sid}" data-area="${area}" data-label="${esc(label)}">全部重排（移出）</button></div>` : ''}</div>` : ''}
-      ${!canEdit ? `<div class="card muted">${me() ? '您不是這一區的排班人員，只能瀏覽。' : '登入並成為排班人員後才能調整。'}</div>` : ''}
-      ${slotOnly.length ? `<div class="card">${issueLines(slotOnly, 4)}</div>` : ''}
-      <section class="card members"><h2>已排人員</h2>
-        ${loud.map((x) => memberRow(x.p, x.r, x.iss, 'assign', sid, area, label, canEdit, [sid])).join('')}
-        ${showQuiet ? quiet.map((x) => memberRow(x.p, x.r, x.iss, 'assign', sid, area, label, canEdit, [sid])).join('') : `<button class="btn wide" data-act="more">其餘 ${quiet.length} 人沒有問題，點開看全部</button>`}
-        ${!A.length ? '<div class="empty">還沒有排人</div>' : ''}</section>
-      ${canEdit ? finder(area, inIds, 'assign', sid, label, (p) => evalInSlot(p, s), canEdit, local) : ''}
-      ${canEdit ? `<div class="act-bar2">
-        <button class="btn" data-act="slot-last-year" data-sid="${sid}">帶入去年名單</button>
-        <button class="btn pri" data-act="slot-autofill" data-sid="${sid}">系統建議補滿</button>
+    return `${wsHeader('area', 'b3', area)}<main class="wide-main">
+      <div class="page-head">
+        <div>
+          <div class="muted small"><a href="#/">工作區首頁</a> ／ <a href="#/a/${area}">${esc(area)} 排人</a> ／ 依日期勤務 (B4)</div>
+          <h1>${esc(label)}</h1>
+          <div class="muted small" style="margin-top:4px">${esc(s.loc || '')} · 需要 ${need} 人 · <b class="${A.length < need ? 't-bad' : 't-ok'}">已排 ${A.length}</b></div>
+        </div>
+        <div class="acts">
+          <a class="btn" href="#/a/${area}">← 回 ${esc(area)} 排人</a>
+          <a class="btn blue-out" href="#/p/new?area=${area}&slot=${sid}">提出調整</a>
+        </div>
       </div>
-      <div class="muted small">沒有網路時照常可以排，連上後自動同步；同一個人被兩邊同時改到時，兩邊都看得到提示。</div>` : ''}
-    </main>${areaNav(area, 'a')}`;
+      <div class="split-grid">
+        <div class="split-main">
+          ${ed.length ? `<div class="edbox">${avatars(ed)}<span>${esc(ed.map((u) => u.name).join('、'))} 也在排這一格。加的人會立刻出現，不會互相蓋掉。</span></div>` : ''}
+          ${preList.length ? `<div class="pre-banner"><div><b>預排 ${preList.length} 人：</b>${esc(preList.map((x) => x.p.n).join('、'))}（總召或調度台先排的）。必須由區長確認或重排。</div>
+            ${leadEdit ? `<div class="act-bar2"><button class="btn pri" data-act="pre-all-ok" data-sid="${sid}" data-area="${area}" data-label="${esc(label)}">全部確認</button>
+              <button class="btn pre-out" data-act="pre-all-rm" data-sid="${sid}" data-area="${area}" data-label="${esc(label)}">全部重排（移出）</button></div>` : ''}</div>` : ''}
+          ${!canEdit ? `<div class="card muted">${me() ? '您不是這一區的排班人員，只能瀏覽。' : '登入並成為排班人員後才能調整。'}</div>` : ''}
+          ${slotOnly.length ? `<div class="card">${issueLines(slotOnly, 4)}</div>` : ''}
+          <section class="card members"><h2>已排人員</h2>
+            ${loud.map((x) => memberRow(x.p, x.r, x.iss, 'assign', sid, area, label, canEdit, [sid])).join('')}
+            ${showQuiet ? quiet.map((x) => memberRow(x.p, x.r, x.iss, 'assign', sid, area, label, canEdit, [sid])).join('') : `<button class="btn wide" data-act="more">其餘 ${quiet.length} 人沒有問題，點開看全部</button>`}
+            ${!A.length ? '<div class="empty">還沒有排人</div>' : ''}</section>
+          ${canEdit ? `<div class="act-bar2">
+            <button class="btn" data-act="slot-last-year" data-sid="${sid}">帶入去年名單</button>
+            <button class="btn pri" data-act="slot-autofill" data-sid="${sid}">系統建議補滿</button>
+          </div>
+          <div class="muted small">沒有網路時照常可以排，連上後自動同步；同一個人被兩邊同時改到時，兩邊都看得到提示。</div>` : ''}
+        </div>
+        <aside class="split-side inspector" aria-label="候選人搜尋">
+          ${canEdit ? finder(area, inIds, 'assign', sid, label, (p) => evalInSlot(p, s), canEdit, local) : '<div class="empty">登入並取得本區排班權限後可從此處搜尋排入人員。</div>'}
+        </aside>
+      </div>
+    </main>`;
   }
 
   function renderApptHits(area) {
@@ -1290,24 +1483,44 @@
     const submit = isLead(area)
       ? S.status === 'editing' || S.status === 'not_started' ? `<button class="btn pri big" data-act="submit" data-area="${area}">送出給總召確認</button>` : `<button class="btn" data-act="unsubmit" data-area="${area}">收回，繼續排</button>`
       : `<div class="muted small">只有區長能送出。</div>`;
-    return topbar(`${area}　分工與送出`, tag(cls, lab), '#/a/' + area) + `<main>
+    return `${wsHeader('area', 't', area)}<main class="wide-main">
+      <div class="page-head">
+        <div>
+          <div class="muted small"><a href="#/">工作區首頁</a> ／ <a href="#/a/${area}">${esc(area)} 排人</a> ／ 分工與送出 (B5)</div>
+          <div class="row-t"><h1>${esc(area)}　分工與送出</h1>${tag(cls, lab)}</div>
+        </div>
+        <div class="acts">
+          <a class="btn" href="#/a/${area}">← 回 ${esc(area)} 排人</a>
+          <a class="btn blue-out" href="#/b1/${area}">區長首頁 (B1)</a>
+        </div>
+      </div>
       ${flowHtml}
-      <div class="muted">一開始只有區長是排班人員。其他人要由區長或調度台指定後才能排。</div>
-      ${bindPendHtml}
-      <section class="card members"><h2>本區排班人員</h2>${mems.map(row).join('') || '<div class="empty">還沒有排班人員。請調度台指定區長。</div>'}</section>
-      ${appoint}
-      <section class="card sendbox"><h2>送出給總召前</h2>
-        <div class="kv"><span>組別排好</span><b>${S.gDone}／${S.groups.length} 組</b></div>
-        <div class="kv"><span>依日期排滿</span><b>${S.dDone}／${S.dated.length} 格</b></div>
-        <div class="kv"><span>人數不足</span><b class="${S.short ? 't-bad' : ''}">${S.short}</b></div>
-        <div class="kv"><span>同一天撞到別的排班</span><b class="${S.clash ? 't-bad' : ''}">${S.clash}</b></div>
-        <div class="kv"><span>其他違規（間隔、次數上限等）</span><b class="${S.v - S.clash ? 't-warn' : ''}">${S.v - S.clash}</b></div>
-        <div class="kv"><span>注意</span><b class="${S.n ? 't-warn' : ''}">${S.n}</b></div>
-        <div class="kv"><span>預排待確認</span><b>${S.pre}</b></div>
-        ${submit}<div class="muted small">沒排好也可以送，缺的人會列給總召協調。送出後還能改，改動會標記給總召看。</div></section>
-      <section class="card"><h2>最近的改動</h2>${logs.map(([id, l]) => `<div class="logrow"><span class="num small">${ago(l.at)}</span> <b>${esc(l.name)}</b> ${esc(l.msg)}${l.undo && can(area, 'jz') && !l.undone ? ` <button class="link" data-act="undo" data-id="${id}">復原</button>` : l.undone ? ' <span class="muted small">已復原</span>' : ''}</div>`).join('') || '<div class="empty">還沒有改動</div>'}
-        ${logs.length >= 8 && !UI.showAll ? `<button class="btn wide" data-act="more">看更多</button>` : ''}</section>
-    </main>${areaNav(area, 't')}`;
+      <div class="split-grid">
+        <div class="split-main">
+          <div class="muted">一開始只有區長是排班人員。其他人要由區長或調度台指定後才能排。</div>
+          ${bindPendHtml}
+          <section class="card members"><h2>本區排班人員</h2>${mems.map(row).join('') || '<div class="empty">還沒有排班人員。請調度台指定區長。</div>'}</section>
+          ${appoint}
+          <section class="card"><h2>最近的改動</h2>${logs.map(([id, l]) => `<div class="logrow"><span class="num small">${ago(l.at)}</span> <b>${esc(l.name)}</b> ${esc(l.msg)}${l.undo && can(area, 'jz') && !l.undone ? ` <button class="link" data-act="undo" data-id="${id}">復原</button>` : l.undone ? ' <span class="muted small">已復原</span>' : ''}</div>`).join('') || '<div class="empty">還沒有改動</div>'}
+            ${logs.length >= 8 && !UI.showAll ? `<button class="btn wide" data-act="more">看更多</button>` : ''}</section>
+        </div>
+        <aside class="split-side inspector" aria-label="送出確認">
+          <section class="card sendbox"><h2>送出給總召前</h2>
+            <div class="kv"><span>組別排好</span><b>${S.gDone}／${S.groups.length} 組</b></div>
+            <div class="kv"><span>依日期排滿</span><b>${S.dDone}／${S.dated.length} 格</b></div>
+            <div class="kv"><span>人數不足</span><b class="${S.short ? 't-bad' : ''}">${S.short}</b></div>
+            <div class="kv"><span>同一天撞到別的排班</span><b class="${S.clash ? 't-bad' : ''}">${S.clash}</b></div>
+            <div class="kv"><span>其他違規（間隔、次數上限等）</span><b class="${S.v - S.clash ? 't-warn' : ''}">${S.v - S.clash}</b></div>
+            <div class="kv"><span>注意</span><b class="${S.n ? 't-warn' : ''}">${S.n}</b></div>
+            <div class="kv"><span>預排待確認</span><b>${S.pre}</b></div>
+            ${submit}<div class="muted small">沒排好也可以送，缺的人會列給總召協調。送出後還能改，改動會標記給總召看。</div></section>
+          <section class="card"><h2>分工權限說明</h2>
+            <div class="kv-row"><b>區長</b><span class="muted">可排全區全部項目、指定／撤銷排班人員、確認預排及送出給總召。</span></div>
+            <div class="kv-row"><b>排班人員</b><span class="muted">依區長勾選範圍（廚務、服務、禮節、交通、輪值或人員狀態）協助排人。</span></div>
+          </section>
+        </aside>
+      </div>
+    </main>`;
   }
 
   /* ---------------- 畫面：A6 各區進度與跨區協調 ---------------- */
@@ -1736,8 +1949,12 @@
             }).join('')}
             ${myVoteArea ? `<div style="padding-top:10px;border-top:1px solid var(--sunk);display:flex;flex-direction:column;gap:6px">
               <div class="small muted">代表「<b>${esc(myVoteArea)}</b>」表態：</div>
-              <div class="acts">${opts.map((o) => `<button class="btn sm" data-act="vote-prop" data-pid="${pr.id}" data-area="${esc(myVoteArea)}" data-st="同意${esc(o.label.slice(0, 1))}">同意${esc(o.label.slice(0, 1))}</button>`).join('')}
-                <button class="btn sm" data-act="vote-prop" data-pid="${pr.id}" data-area="${esc(myVoteArea)}" data-st="待討論">待討論</button></div>
+              <div class="acts">${opts.map((o) => {
+                const stTxt = `同意${o.label.slice(0, 1)}`;
+                const on = votes[myVoteArea] && votes[myVoteArea].st === stTxt;
+                return `<button class="btn sm ${on ? 'blue' : ''}" data-act="vote-prop" data-pid="${pr.id}" data-area="${esc(myVoteArea)}" data-st="${esc(stTxt)}">${esc(stTxt)}</button>`;
+              }).join('')}
+                <button class="btn sm ${votes[myVoteArea] && votes[myVoteArea].st === '待討論' ? 'warn' : ''}" data-act="vote-prop" data-pid="${pr.id}" data-area="${esc(myVoteArea)}" data-st="待討論">待討論</button></div>
             </div>` : ''}
             <div class="muted small">只有受影響的區需要回覆。</div>
           </section>
@@ -1778,7 +1995,20 @@
     </aside>`;
   }
 
-  /* ---------------- 路由與繪製 ---------------- */
+  /* ---------------- 控制台整合上下文 & 路由與繪製 ---------------- */
+  function consoleCtx() {
+    return {
+      store, E, BASE,
+      get M() { return M; },
+      get ISS() { return ISS; },
+      D, me, isAdmin, isLead, can, memberOf, myAreas, defaultArea,
+      draftVer, nextDraftVer,
+      wsHeader, topbar, accountBtn, tag, esc, ago, dLabel, slotName, roleOf, cnt, isClash,
+      toast, need, logOp, touchArea, stamp, addPerson, removePerson, confirmPre,
+      evalInSlot, evalInGroup, areaStats, areaMetrics, allAreaLoadRank, render
+    };
+  }
+
   let lastRoute = '';
   function route() {
     const raw = location.hash.replace(/^#\/?/, '');
@@ -1802,19 +2032,23 @@
       finderCtx = null; apptArea = '';
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
     }
-    const wide = ['review', 'b1', 'p'].includes(r.v);
-    appEl.className = wide ? 'wide-app' : '';
+    const C = window.TDConsole;
+    appEl.className = '';
+    const ae = document.activeElement, keepId = ae && ae.id;
     const draftVals = {};
     if (!routeChanged && appEl.querySelectorAll) {
-      for (const el of appEl.querySelectorAll('input[id], textarea[id], select[id]')) {
+      for (const el of appEl.querySelectorAll('input[id], textarea[id]')) {
         if (el.type === 'checkbox' || el.type === 'radio' || (el.dataset && el.dataset.input)) continue;
+        if (el.dataset && el.dataset.actChange && el !== ae) continue;
         draftVals[el.id] = el.value;
       }
     }
-    const ae = document.activeElement, keepId = ae && ae.id, pos = ae && ae.selectionStart, posEnd = ae && ae.selectionEnd;
+    let pos = null, posEnd = null;
+    try { if (ae && typeof ae.selectionStart === 'number') { pos = ae.selectionStart; posEnd = ae.selectionEnd; } } catch (e) { }
     const sc = window.scrollY;
     let html;
-    if (r.v === 'login' || r.v === 'bind') html = vLogin();
+    if (C && Array.isArray(C.ROUTES) && C.ROUTES.includes(r.v)) html = C.renderRoute(r.v, r.arg, consoleCtx());
+    else if (r.v === 'login' || r.v === 'bind') html = vLogin();
     else if (r.v === 'a' && WORK_AREAS.includes(r.pathArg)) html = vArea(r.pathArg);
     else if (r.v === 'b1') html = vAreaLead(r.pathArg);
     else if (r.v === 'p') html = vProposal(r.arg);
@@ -1823,7 +2057,7 @@
     else if (r.v === 't' && WORK_AREAS.includes(r.pathArg)) html = vTeam(r.pathArg);
     else if (r.v === 'review') html = vReview();
     else html = vHome();
-    appEl.innerHTML = html + (UI.person ? personSheet(UI.person) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error ? `<div class="errbar">${esc(store.error)}</div>` : '');
+    appEl.innerHTML = html + globalBottomNav(r) + (UI.person ? personSheet(UI.person) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error ? `<div class="errbar">${esc(store.error)}</div>` : '');
     for (const id in draftVals) {
       const el = document.getElementById(id);
       if (el && el.value !== draftVals[id]) el.value = draftVals[id];
@@ -1849,6 +2083,8 @@
   document.addEventListener('click', (ev) => {
     const t = ev.target.closest('[data-act]'); if (!t) return;
     const a = t.dataset.act, d = t.dataset;
+    if (window.TDConsole && typeof window.TDConsole.handleClick === 'function' && window.TDConsole.handleClick(a, d, ev, consoleCtx())) return;
+    if (a === 'toggle-large') { toggleLargeMode(); return; }
     if (a === 'seed') seedDefaults().then(() => toast('已帶入 115 年組別名單與初始提案'));
     else if (a === 'local-in') store.signIn(JSON.parse(d.who)).then(() => { location.hash = '#/'; });
     else if (a === 'in') store.signIn(d.kind).catch((e) => toast('登入沒有完成：' + (e.code || e.message)));
@@ -1966,7 +2202,8 @@
     }
   });
 
-  function updateSearchDom(k) {
+  function updateSearchDom(k, val) {
+    if (window.TDConsole && typeof window.TDConsole.handleSearchInput === 'function' && window.TDConsole.handleSearchInput(k, val, consoleCtx())) return;
     if (k === 'q' || k === 'outQ') updateFinderDom();
     else if (k === 'apptQ') { const el = document.getElementById('appt'); if (el && apptArea) el.innerHTML = renderApptHits(apptArea); }
     else if (k === 'bindQ') { const el = document.getElementById('bindHits'); if (el) el.innerHTML = renderBindHits(); }
@@ -1980,9 +2217,10 @@
     isComposing = false;
     const k = ev.target && ev.target.dataset && ev.target.dataset.input;
     if (k) {
-      UI[k] = ev.target.value.trim();
+      const val = ev.target.value.trim();
+      if (k in UI) UI[k] = val;
       UI.showAll = false;
-      updateSearchDom(k);
+      updateSearchDom(k, val);
     }
     if (pendingRender) {
       pendingRender = false;
@@ -1993,15 +2231,18 @@
     if (ev.isComposing || isComposing) return;
     const k = ev.target && ev.target.dataset && ev.target.dataset.input;
     if (!k) return;
-    UI[k] = ev.target.value.trim();
+    const val = ev.target.value.trim();
+    if (k in UI) UI[k] = val;
     UI.showAll = false;
-    updateSearchDom(k);
+    updateSearchDom(k, val);
   });
 
   document.addEventListener('change', (ev) => {
     const t = ev.target, a = t.dataset && t.dataset.actChange; if (!a) return;
     const d = t.dataset;
+    if (window.TDConsole && typeof window.TDConsole.handleChange === 'function' && window.TDConsole.handleChange(a, t, d, ev, consoleCtx())) return;
     if (a === 'outArea') { UI.outArea = t.value; render(); }
+    else if (a === 'a-area') { location.hash = '#/a/' + t.value; }
     else if (a === 'b1-area') { location.hash = '#/b1/' + t.value; }
     else if (a === 'b1-cook') { UI.b1ShowCook = t.checked; render(); }
     else if (a === 'set-post') {
@@ -2052,6 +2293,7 @@
     autoApproveBind, setAutoApproveBind,
     bindPersonToMe, applyNewPerson, toggleFamily, approveBind,
     bringLastYearGroup, autoAssignRitualPosts, moveGroupMember,
-    bringLastYearSlot, autoFillSlot, adoptProposalOption, revertProposal
+    bringLastYearSlot, autoFillSlot, adoptProposalOption, revertProposal,
+    consoleCtx, isLargeMode, toggleLargeMode
   };
 })();

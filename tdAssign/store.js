@@ -24,7 +24,7 @@
 (function () {
   'use strict';
   const CFG = window.TD_CONFIG || {};
-  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'admins', 'sched', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'log', 'presence'];
+  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'admins', 'sched', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'rules', 'log', 'presence'];
 
   function setPath(obj, path, value) {
     const ks = path.split('/');

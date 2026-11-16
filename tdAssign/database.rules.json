@@ -32,6 +32,7 @@
       "proposals": { ".read": true, "$id": { ".write": "auth != null" } },
       "nominations": { ".read": true, "$area": { ".write": "auth != null" } },
       "supportReq": { ".read": true, "$id": { ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())" } },
+      "rules":   { ".read": true, ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())" },
       "log":     { ".read": true, "$id": { ".write": "auth != null" } },
       "presence": { ".read": true, "$area": { "$uid": { ".write": "auth != null && auth.uid === $uid" } } }
     }
