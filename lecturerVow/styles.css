@@ -141,6 +141,7 @@ body.elder-mode .btn { padding: 9px 15px; font-size: 15px; }
   gap: 6px;
   font-size: 12px;
   color: #E6DCD0;
+  white-space: nowrap;
 }
 
 .select-pill select {
@@ -176,13 +177,56 @@ body.elder-mode .btn { padding: 9px 15px; font-size: 15px; }
 
 .pwa-grid {
   display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 20px;
+  grid-template-columns: 360px 420px;
+  justify-content: center;
+  gap: 28px;
   align-items: start;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 860px) {
   .pwa-grid { grid-template-columns: 1fr; }
+}
+
+.demo-phone-frame {
+  background: var(--bg);
+  border: 6px solid #3B2820;
+  border-radius: 30px;
+  overflow: hidden;
+  box-shadow: 0 18px 36px rgba(46, 35, 29, 0.16);
+  display: flex;
+  flex-direction: column;
+}
+
+.demo-phone-notch {
+  background: #3B2820;
+  color: #e6dcd0;
+  font-size: 11px;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.demo-phone-screen {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 760px;
+  overflow-y: auto;
+}
+
+.demo-phone-screen .month-grid {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.demo-phone-screen .star-card {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 /* Buttons & Badges */

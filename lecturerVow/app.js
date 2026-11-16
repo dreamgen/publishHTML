@@ -431,55 +431,60 @@
           </div>
         </div>
 
-        <!-- Right: Lecturer PWA Workspace -->
-        <div class="stack">
-          <div class="vision-banner">
-            <div>
-              <div class="row-wrap" style="margin-bottom:6px;">
-                <span class="badge badge-sky">所屬單位：${esc(lec.unit)}</span>
-                <span class="badge ${lec.inputMode === 'digital' ? 'badge-green' : 'badge-amber'}">
-                  ${lec.inputMode === 'digital' ? '📱 法會電子版立愿' : '📝 法會紙本版立愿'}
-                </span>
-                <span class="badge badge-slate">綁定碼：${esc(lec.bindCode || lec.id)}</span>
-              </div>
-              <h2 style="margin:0;font-size:22px;">${esc(lec.name)} <span style="font-size:14px;font-weight:400;color:#fde68a;">講師</span></h2>
-              <div style="margin-top:6px;font-size:15px;">
-                <span style="color:#fde68a;">核心精進愿景：</span>
-                <strong style="color:#fcd34d;">${esc(lec.coreVision)}</strong>
-                <button type="button" class="btn btn-ghost" style="padding:2px 8px;font-size:11px;margin-left:6px;" data-action="edit-vision">✎ 修改</button>
-              </div>
-            </div>
-            <div class="star-card">
-              <div class="text-xs" style="color:#fde68a;">年度愿力總評比</div>
-              <div class="stars-gold">${overall.starText} ${overall.stars.toFixed(1)} 星</div>
-              <div class="row-wrap" style="justify-content:flex-end;margin-top:4px;">
-                <span class="badge badge-amber">${overall.badge}</span>
-                <strong>總達成率 ${overall.rate}%</strong>
-              </div>
-            </div>
+        <!-- Right: Lecturer PWA Mobile Simulator Frame -->
+        <div class="demo-phone-frame">
+          <div class="demo-phone-notch">
+            <span>📱 講師手機端 PWA 模擬</span>
+            <span>420px 手機視窗</span>
           </div>
-
-          <div class="card">
-            <div class="row-between" style="margin-bottom:10px;">
-              <div>
-                <strong>🗓️ 選擇填報或檢視月份（1～12 月自由更新）</strong>
-                <div class="text-xs" style="color:var(--muted);">綠點表示該月已有填報紀錄；可隨時切換月份補填或修改。</div>
+          <div class="demo-phone-screen">
+            <div class="vision-banner" style="padding:14px;">
+              <div style="width:100%;">
+                <div class="row-wrap" style="margin-bottom:6px;">
+                  <span class="badge badge-sky">${esc(lec.unit)}</span>
+                  <span class="badge ${lec.inputMode === 'digital' ? 'badge-green' : 'badge-amber'}">
+                    ${lec.inputMode === 'digital' ? '📱 電子立愿' : '📝 紙本立愿'}
+                  </span>
+                  <span class="badge badge-slate">${esc(lec.bindCode || lec.id)}</span>
+                </div>
+                <h2 style="margin:0;font-size:19px;">${esc(lec.name)} <span style="font-size:13px;font-weight:400;color:#fde68a;">講師</span></h2>
+                <div style="margin-top:4px;font-size:13px;">
+                  <span style="color:#fde68a;">核心愿景：</span>
+                  <strong style="color:#fcd34d;">${esc(lec.coreVision)}</strong>
+                  <button type="button" class="btn btn-ghost" style="padding:2px 7px;font-size:11px;margin-left:4px;" data-action="edit-vision">✎</button>
+                </div>
               </div>
-              <div class="row-wrap">
-                <span class="badge badge-green">目前選擇：${state.activeMonth} 月</span>
-                <button type="button" class="btn btn-primary" data-action="open-add-modal">＋ 新增目標 / 小目標</button>
+              <div class="star-card" style="padding:10px 12px;">
+                <div>
+                  <div class="text-xs" style="color:#fde68a;">年度總評比</div>
+                  <div class="stars-gold" style="font-size:17px;">${overall.starText} ${overall.stars.toFixed(1)}★</div>
+                </div>
+                <div style="text-align:right;">
+                  <span class="badge badge-amber">${overall.badge}</span>
+                  <div style="font-weight:800;font-size:13px;margin-top:3px;">${overall.rate}%</div>
+                </div>
               </div>
             </div>
-            <div class="month-grid" id="monthGrid">${monthPills}</div>
-          </div>
 
-          <div id="goalsWrap" class="stack">${goalCards}</div>
+            <div class="card" style="padding:12px;">
+              <div class="row-between" style="margin-bottom:8px;">
+                <strong class="text-xs">🗓️ 選擇月份（1～12 月）</strong>
+                <div class="row-wrap">
+                  <span class="badge badge-green">${state.activeMonth} 月</span>
+                  <button type="button" class="btn btn-primary" style="padding:5px 10px;font-size:12px;" data-action="open-add-modal">＋ 新增目標</button>
+                </div>
+              </div>
+              <div class="month-grid" id="monthGrid">${monthPills}</div>
+            </div>
 
-          <div class="card">
-            <h3 style="margin:0 0 10px;font-size:15px;">📋 完整橫式愿力表即時預覽（對照原表格＋五星評比＋1～12月）</h3>
-            ${renderClassicTableHTML(lec, false)}
+            <div id="goalsWrap" class="stack" style="gap:12px;">${goalCards}</div>
           </div>
         </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin:0 0 10px;font-size:15px;">📋 完整橫式愿力表即時預覽（對照原表格＋五星評比＋1～12月）</h3>
+        ${renderClassicTableHTML(lec, false)}
       </div>
     `;
   }
