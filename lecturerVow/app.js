@@ -78,6 +78,7 @@
           </nav>
 
           <div class="topbar-tools">
+            <a href="./pwa.html" class="btn btn-line" style="text-decoration:none;">📲 講師實作版</a>
             <label class="select-pill">
               <span>檢視講師：</span>
               <select id="globalLecturerSelect">${options}</select>

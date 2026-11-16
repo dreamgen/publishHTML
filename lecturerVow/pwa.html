@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com https://static.line-scdn.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebasedatabase.app wss://*.firebasedatabase.app https://www.gstatic.com https://*.workers.dev https://api.line.me https://liffsdk.line-scdn.net; frame-src https://*.firebaseapp.com https://accounts.google.com https://access.line.me; worker-src 'self'; manifest-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>我的講師愿力表｜個人版 PWA</title>
+  <meta name="description" content="講師個人專屬愿力表 PWA：獨立填寫目標、頁籤切換、1～12月多元進度回報與五星評比">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/lecturerVow.svg">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="講師愿力表">
+  <meta name="theme-color" content="#4E2A1E">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="pwaApp">
+    <div class="loading-shell">講師愿力表載入中…</div>
+  </div>
+  <div id="toastBox" class="toast hidden" role="status" aria-live="polite">
+    <span class="toast-icon">✔</span>
+    <span id="toastText">已儲存</span>
+  </div>
+  <script src="./config.js"></script>
+  <script src="./engine.js"></script>
+  <script src="./store.js"></script>
+  <script src="./pwa.js"></script>
+</body>
+</html>
