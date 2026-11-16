@@ -293,11 +293,11 @@
       </div>
 
       <div class="row-between">
-        <strong style="font-size:14px;">我的愿力大目標 (${(lec.goals || []).length})</strong>
+        <strong style="font-size:15px;">我的愿力大目標 (${(lec.goals || []).length})</strong>
         <button type="button" class="btn btn-primary" data-action="go-tab" data-tab="new">＋ 新增目標 / 小目標</button>
       </div>
 
-      ${goalsList || `<div class="card text-xs" style="color:var(--muted);text-align:center;">尚未建立愿力目標，請點選「＋ 新增目標」開始填寫！</div>`}
+      ${goalsList ? `<div class="pwa-overview-grid">${goalsList}</div>` : `<div class="card text-xs" style="color:var(--muted);text-align:center;">尚未建立愿力目標，請點選「＋ 新增目標」開始填寫！</div>`}
 
       <div class="card row-between">
         <span class="text-xs" style="color:var(--muted);">需要切換或重新綁定講師身分？</span>
@@ -332,32 +332,37 @@
     const gStat = computeGoalStats(curGoal);
 
     return `
-      <div class="card" style="padding:12px;">
-        <div class="row-between" style="margin-bottom:8px;">
-          <strong class="text-xs">🗓️ 選擇填報月份</strong>
-          <span class="badge badge-green">目前：${state.activeMonth} 月</span>
-        </div>
-        <div class="month-grid">${monthPills}</div>
-      </div>
+      <div class="pwa-monthly-layout">
+        <aside class="card pwa-month-sidebar" style="padding:14px;">
+          <div class="row-between" style="margin-bottom:10px;">
+            <strong class="text-xs">🗓️ 選擇填報月份</strong>
+            <span class="badge badge-green">目前：${state.activeMonth} 月</span>
+          </div>
+          <div class="month-grid">${monthPills}</div>
+          <div class="text-xs" style="color:var(--muted);margin-top:10px;">綠點表示該月已有填報紀錄；可隨時點選補填或調整。</div>
+        </aside>
 
-      <div>
-        <div class="text-xs" style="color:var(--muted);font-weight:700;margin-bottom:6px;">📑 切換愿力目標頁籤：</div>
-        ${renderGoalTabsBar(lec)}
-      </div>
+        <div class="stack">
+          <div>
+            <div class="text-xs" style="color:var(--muted);font-weight:700;margin-bottom:6px;">📑 切換愿力目標頁籤：</div>
+            ${renderGoalTabsBar(lec)}
+          </div>
 
-      <div class="goal-header" style="border-radius:14px;">
-        <div>
-          <div class="text-xs" style="color:#fcd34d;">目標 ${state.activeGoalIndex + 1}</div>
-          <div style="font-weight:700;font-size:16px;">${esc(curGoal.title)}</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="color:#fbbf24;font-weight:800;">${gStat.starText} ${gStat.stars.toFixed(1)}★</div>
-          <div class="text-xs" style="color:#84B39D;">${gStat.badge} ‧ ${gStat.rate}%</div>
-        </div>
-      </div>
+          <div class="goal-header" style="border-radius:14px;">
+            <div>
+              <div class="text-xs" style="color:#fcd34d;">目標 ${state.activeGoalIndex + 1}</div>
+              <div style="font-weight:700;font-size:16px;">${esc(curGoal.title)}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="color:#fbbf24;font-weight:800;">${gStat.starText} ${gStat.stars.toFixed(1)}★</div>
+              <div class="text-xs" style="color:#84B39D;">${gStat.badge} ‧ ${gStat.rate}%</div>
+            </div>
+          </div>
 
-      <div class="stack">
-        ${(curGoal.krs || []).map((kr) => renderKrEditor(curGoal.id, kr)).join('')}
+          <div class="pwa-kr-grid">
+            ${(curGoal.krs || []).map((kr) => renderKrEditor(curGoal.id, kr)).join('')}
+          </div>
+        </div>
       </div>
     `;
   }
@@ -494,7 +499,15 @@
               <div style="font-size:11px;color:#fde68a;">${esc(lec.unit)} ‧ ${state.cloudMode === 'firebase' ? '雲端已同步' : '本機儲存'}</div>
             </div>
           </div>
-          <button type="button" class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:4px 10px;font-size:11px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準' : '大字'}</button>
+
+          <nav class="pwa-desktop-nav" aria-label="電腦版功能導覽">
+            <button type="button" class="nav-tab ${state.tab === 'overview' ? 'active' : ''}" data-action="go-tab" data-tab="overview">🌟 總覽</button>
+            <button type="button" class="nav-tab ${state.tab === 'monthly' ? 'active' : ''}" data-action="go-tab" data-tab="monthly">📅 月度回報</button>
+            <button type="button" class="nav-tab ${state.tab === 'new' ? 'active' : ''}" data-action="go-tab" data-tab="new">➕ 新增目標</button>
+            <button type="button" class="nav-tab ${state.tab === 'print' ? 'active' : ''}" data-action="go-tab" data-tab="print">🖨️ 呈表列印</button>
+          </nav>
+
+          <button type="button" class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:4px 10px;font-size:11px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
         </header>
 
         <main class="pwa-body">${bodyHtml}</main>

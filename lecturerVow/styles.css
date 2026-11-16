@@ -596,9 +596,9 @@ table.classic td {
   @page { size: A4 landscape; margin: 10mm; }
 }
 
-/* ==================== 獨立手機實作版 (pwa.html) 專用樣式 ==================== */
+/* ==================== 實作版 PWA (pwa.html) 全自適應樣式 (手機 + 平板 + 電腦) ==================== */
 .pwa-shell {
-  max-width: 520px;
+  max-width: 1120px;
   margin: 0 auto;
   min-height: 100vh;
   padding-bottom: 84px;
@@ -609,23 +609,86 @@ table.classic td {
 .pwa-topbar {
   background: var(--brand);
   color: #FDF9F3;
-  padding: 12px 16px;
+  padding: 12px 18px;
   position: sticky;
   top: 0;
   z-index: 40;
   border-bottom: 1px solid var(--gold-border);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+}
+
+.pwa-desktop-nav {
+  display: none;
+  gap: 6px;
+  background: var(--brand-dark);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--brand-mid);
 }
 
 .pwa-body {
-  padding: 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   flex: 1;
+}
+
+.pwa-overview-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.pwa-monthly-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.pwa-kr-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 768px) {
+  .pwa-shell {
+    padding-bottom: 32px;
+  }
+  .pwa-desktop-nav {
+    display: flex;
+  }
+  .bottom-nav {
+    display: none !important;
+  }
+  .pwa-body {
+    padding: 22px 20px;
+  }
+  .pwa-overview-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 980px) {
+  .pwa-monthly-layout {
+    grid-template-columns: 320px 1fr;
+  }
+  .pwa-month-sidebar {
+    position: sticky;
+    top: 76px;
+  }
+  .pwa-month-sidebar .month-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .pwa-kr-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .goal-tabs-bar {
@@ -712,6 +775,9 @@ table.classic td {
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 20px;
+  padding: 22px;
+  max-width: 560px;
+  width: 100%;
+  margin: 16px auto;
   box-shadow: 0 6px 20px rgba(78, 42, 30, 0.08);
 }
