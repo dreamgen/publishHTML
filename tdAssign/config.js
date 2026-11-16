@@ -26,6 +26,6 @@ window.TD_CONFIG = {
   root: 'td116',
 
   // LINE 登入：LINE Developers 的 Channel ID，以及 worker/ 部署後的網址（兩個都填才會出現 LINE 登入按鈕）
-  lineChannelId: '',
+  lineChannelId: '2012639715',
   lineWorkerUrl: 'https://tdassign-line-login.ikt-checkin.workers.dev'
 };
