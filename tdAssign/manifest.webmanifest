@@ -1,0 +1,20 @@
+{
+  "id": "tdAssign",
+  "name": "天達排班協作",
+  "short_name": "排班協作",
+  "description": "天達堂年度排班：各區排組別成員與依日期勤務，多人同時作業；總召檢查衝突與協調",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f4",
+  "theme_color": "#2c6a5d",
+  "lang": "zh-TW",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "./icons/tdAssign-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/tdAssign-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/tdAssign-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/tdAssign.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

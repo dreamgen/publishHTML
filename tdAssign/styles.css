@@ -1,0 +1,107 @@
+/* 天達排班協作 — 手機優先，沿用 tdSchedule 的配色 */
+:root {
+  --bg: #f4f6f4; --surface: #fff; --sunk: #ecefed; --ink: #1c2420; --muted: #58655e; --line: #d6ddd9;
+  --accent: #2c6a5d; --accent-ink: #1f4f45; --accent-soft: #e1eeea;
+  --bad: #b8322a; --bad-soft: #fbe8e5; --warn: #8a4a00; --warn-soft: #fdf0dc;
+  --ok: #1f6039; --ok-soft: #e3f2e8; --info: #2d5a88; --info-soft: #e6eff8; --pre: #52398a; --pre-soft: #ede8f7;
+  --f-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-disp: "Noto Serif TC", "Songti TC", serif;
+  --f-num: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #111614; --surface: #19201d; --sunk: #232c28; --ink: #e4ebe7; --muted: #a3b0a9; --line: #2f3a35;
+    --accent: #2f7a6a; --accent-ink: #8fd6c3; --accent-soft: #1f332e;
+    --bad: #ff8f83; --bad-soft: #3a1e1b; --warn: #f2ae52; --warn-soft: #3a2c15;
+    --ok: #72d298; --ok-soft: #183020; --info: #8bb5e6; --info-soft: #1c2a3a; --pre: #c0aaee; --pre-soft: #2a2340;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 16px; line-height: 1.5; }
+#app { max-width: 720px; margin: 0 auto; min-height: 100vh; padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+button, input, select { font: inherit; color: inherit; }
+a { color: var(--accent-ink); }
+h1 { margin: 0; font-family: var(--f-disp); font-size: 22px; line-height: 1.3; }
+h2 { margin: 0; font-size: 17px; }
+h3 { margin: 14px 0 6px; font-size: 15px; }
+:focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
+.muted { color: var(--muted); } .small { font-size: 13px; } .num { font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.t-bad { color: var(--bad); } .t-warn { color: var(--warn); } .t-ok { color: var(--ok); }
+.empty { color: var(--muted); padding: 16px 0; text-align: center; }
+
+.top { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); padding: 8px 16px 10px; display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; }
+.top .back { min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; text-decoration: none; }
+.top-r { display: flex; gap: 8px; align-items: center; }
+.ttl { grid-column: 1 / -1; }
+.ttl .sub { color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.sync { font-size: 12px; color: var(--muted); } .sync.off { color: var(--warn); font-weight: 700; }
+main { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+.btn { min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; color: var(--ink); }
+.btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.sm { padding: 0 12px; font-size: 14px; }
+.btn.wide { width: 100%; } .btn.big { width: 100%; min-height: 56px; font-size: 18px; }
+.link { background: none; border: 0; padding: 0; min-height: 32px; color: var(--accent-ink); font-weight: 700; text-decoration: underline; cursor: pointer; }
+.chip { min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.tag { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; display: inline-block; }
+.tag.ok { background: var(--ok-soft); color: var(--ok); } .tag.wn { background: var(--warn-soft); color: var(--warn); }
+.tag.bad { background: var(--bad-soft); color: var(--bad); } .tag.pl { background: var(--info-soft); color: var(--info); }
+.tag.pre { background: var(--pre-soft); color: var(--pre); } .tag.no { background: var(--sunk); color: var(--muted); }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.warnbox { border-color: var(--warn); } .rembox { border: 2px solid var(--pre); } .rembox h2 { color: var(--pre); }
+.rem { display: flex; flex-direction: column; gap: 2px; padding-top: 8px; border-top: 1px solid var(--sunk); }
+.rem a { min-height: 36px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; text-decoration: none; color: var(--ink); font-size: 14px; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.row { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 4px; text-align: left; cursor: pointer; width: 100%; }
+.row-h { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.row-t { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; padding-top: 6px; }
+.pres, .edbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.edbox { background: var(--info-soft); color: var(--info); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.av { width: 30px; height: 30px; border-radius: 15px; background: var(--info); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex: none; }
+.dates { display: flex; flex-wrap: wrap; gap: 6px; }
+.dates span { font-size: 13px; padding: 3px 8px; border-radius: 8px; background: var(--sunk); }
+
+.members .mem, .mem { padding: 10px 0; border-top: 1px solid var(--sunk); display: flex; flex-direction: column; gap: 4px; }
+.members .mem:first-of-type { border-top: 0; }
+.mem-h { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.mem-h .btn { margin-left: auto; }
+.mem-h .btn + .btn { margin-left: 0; }
+.iss { font-size: 14px; padding: 4px 8px; border-radius: 6px; }
+.iss.bad { background: var(--bad-soft); color: var(--bad); } .iss.warn { background: var(--warn-soft); color: var(--warn); }
+.clash { border: 1px solid var(--bad); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.other { border-left: 3px solid var(--line); padding: 2px 0 2px 8px; }
+.prebox { background: var(--pre-soft); color: var(--pre); border-radius: 8px; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.finder { display: flex; flex-direction: column; gap: 8px; }
+.cand { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-top: 8px; }
+.outbox { background: var(--info-soft); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--muted); }
+label input, label select { min-height: 44px; border-radius: 8px; border: 1px solid var(--line); padding: 0 12px; background: var(--surface); color: var(--ink); font-size: 16px; }
+label.ck { flex-direction: row; align-items: center; gap: 8px; min-height: 44px; font-size: 15px; color: var(--ink); }
+label.ck input { width: 20px; height: 20px; min-height: 0; padding: 0; }
+details summary { min-height: 40px; display: flex; align-items: center; cursor: pointer; color: var(--accent-ink); font-weight: 700; font-size: 14px; }
+.kv { display: flex; justify-content: space-between; gap: 8px; }
+.sendbox { border: 2px solid var(--accent); }
+.logrow { font-size: 14px; padding: 4px 0; border-top: 1px solid var(--sunk); }
+.arow { display: grid; grid-template-columns: auto auto 1fr auto; gap: 6px 10px; align-items: center; padding: 12px 0; border-top: 1px solid var(--sunk); }
+.arow:first-child { border-top: 0; }
+.arow > .muted, .arow > .acts { grid-column: 1 / -1; }
+.bar { height: 10px; border-radius: 5px; background: var(--sunk); min-width: 60px; } .bar div { height: 10px; border-radius: 5px; background: var(--accent); }
+
+.bnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 720px; margin: 0 auto; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bnav a { min-height: 60px; display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--muted); border-top: 3px solid transparent; }
+.bnav a.on { color: var(--accent-ink); font-weight: 700; border-top-color: var(--accent); }
+.sheet-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); z-index: 20; }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-width: 720px; margin: 0 auto; max-height: 86vh; overflow-y: auto; background: var(--surface); border-radius: 16px 16px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 6px; }
+#toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom, 0px)); z-index: 30; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 15px; max-width: 90vw; }
+.errbar { position: fixed; top: 0; left: 0; right: 0; z-index: 40; background: var(--bad); color: #fff; padding: 8px 16px; font-size: 14px; text-align: center; }
+.c-瑞芳 { color: #1f5fa8; } .c-內湖 { color: #2e7d32; } .c-松山 { color: #a84a15; } .c-三重 { color: #7b3fa8; } .c-基隆 { color: #006f6e; } .c-新莊 { color: #b8266f; }
+@media (prefers-color-scheme: dark) { .c-瑞芳 { color: #6fa8ec; } .c-內湖 { color: #77c47b; } .c-松山 { color: #f09560; } .c-三重 { color: #c08deb; } .c-基隆 { color: #4cc7c4; } .c-新莊 { color: #ee7bb5; } }

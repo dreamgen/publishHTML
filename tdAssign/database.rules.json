@@ -1,0 +1,23 @@
+{
+  "rules": {
+    "td116": {
+      "meta":    { ".read": true, ".write": "root.child('td116/admins').child(auth.uid).exists()" },
+      "groups":  { ".read": true, "$gk":   { "$pid": { ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())" } } },
+      "assign":  { ".read": true, "$slot": { "$pid": { ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())" } } },
+      "areas":   { ".read": true, "$area": { ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/members').child($area).child(auth.uid).child('role').val() === 'lead' || root.child('td116/sched').child(auth.uid).exists())" } },
+      "members": {
+        ".read": true,
+        "$area": { "$uid": {
+          ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || (root.child('td116/members').child($area).child(auth.uid).child('role').val() === 'lead' && root.child('td116/members').child($area).child(auth.uid).child('status').val() === 'ok' && (!newData.exists() || newData.child('role').val() !== 'lead')) || (auth.uid === $uid && !data.exists() && newData.child('status').val() === 'pending' && newData.child('role').val() === 'sched'))"
+        } }
+      },
+      "admins":  { ".read": "auth != null", ".write": false },
+      "sched":   { ".read": "auth != null", "$uid": { ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())" } },
+      "users":   { ".read": "auth != null", "$uid": { ".write": "auth != null && auth.uid === $uid" } },
+      "pov":     { ".read": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())", "$pid": { ".write": "auth != null && (root.child('td116/admins').child(auth.uid).exists() || root.child('td116/sched').child(auth.uid).exists())" } },
+      "coord":   { ".read": true, "$id": { ".write": "auth != null" } },
+      "log":     { ".read": true, "$id": { ".write": "auth != null" } },
+      "presence": { ".read": true, "$area": { "$uid": { ".write": "auth != null && auth.uid === $uid" } } }
+    }
+  }
+}
