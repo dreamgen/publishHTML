@@ -59,56 +59,83 @@
     return `
       <div class="pwa-shell">
         <header class="pwa-topbar">
-          <div class="row-wrap">
-            <div class="brand-logo" style="width:32px;height:32px;font-size:15px;">愿</div>
-            <strong style="font-size:15px;">我的講師愿力表</strong>
+          <div class="pwa-topbar-inner">
+            <div class="row-wrap">
+              <div class="brand-logo" style="width:32px;height:32px;font-size:15px;">愿</div>
+              <strong style="font-size:16px;">講師愿力表系統｜個人實作版</strong>
+            </div>
+            <a href="./index.html" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;text-decoration:none;">📊 總覽 / Demo 版</a>
           </div>
-          <a href="./index.html" class="btn btn-ghost" style="padding:4px 10px;font-size:11px;text-decoration:none;">總覽 / Demo</a>
         </header>
 
         <div class="pwa-body">
-          <div class="onboarding-box stack">
-            <div>
-              <span class="badge badge-green">個人實作版 PWA</span>
-              <h2 style="margin:8px 0 4px;font-size:20px;color:var(--brand);">歡迎啟用講師愿力表 🙏</h2>
-              <p class="text-xs" style="color:var(--muted);margin:0;">可透過 LINE 登入、認領法會紙本建檔碼，或直接建立您的個人愿力表。</p>
+          <div class="onboarding-layout">
+            <!-- 電腦版左側品牌與特色介紹 -->
+            <section class="onboarding-hero">
+              <div class="stack">
+                <span class="badge badge-amber" style="align-self:flex-start;">2026 年度 ‧ 紙電雙軌</span>
+                <h1 style="margin:0;font-size:28px;line-height:1.35;">法會誠心立愿<br/>平時自主精進</h1>
+                <p style="margin:0;font-size:14px;color:rgba(254,243,199,0.88);line-height:1.7;">
+                  免記帳號密碼，綁定 LINE 帳號或認領法會紙本建檔碼即可使用；支援手機單手操作與電腦大螢幕管理。
+                </p>
+              </div>
+
+              <div class="stack" style="gap:12px;margin-top:24px;">
+                <div style="background:rgba(56,28,19,0.72);border:1px solid rgba(200,155,75,0.35);border-radius:12px;padding:14px;">
+                  <strong style="color:#fcd34d;">🌟 目標頁籤切換 × 五星評比</strong>
+                  <div class="text-xs" style="color:#e6dcd0;margin-top:4px;">依百分比、累積次數、週期期限（3～12 個月）、里程碑與心得自評自動換算星級。</div>
+                </div>
+                <div style="background:rgba(56,28,19,0.72);border:1px solid rgba(200,155,75,0.35);border-radius:12px;padding:14px;">
+                  <strong style="color:#84B39D;">🗓️ 1～12 月自由回報與心得</strong>
+                  <div class="text-xs" style="color:#e6dcd0;margin-top:4px;">不強制每週打卡，隨時補填各月進度與修辦心得，並支援母堂呈表 A4 列印。</div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 右側 / 手機版啟用表單 -->
+            <div class="onboarding-box stack">
+              <div>
+                <span class="badge badge-green">個人實作版 PWA</span>
+                <h2 style="margin:8px 0 4px;font-size:20px;color:var(--brand);">歡迎啟用講師愿力表 🙏</h2>
+                <p class="text-xs" style="color:var(--muted);margin:0;">可透過 LINE 登入、認領法會紙本建檔碼，或直接建立您的個人愿力表。</p>
+              </div>
+
+              ${hasLineLogin && !state.cloudUid ? `
+                <button type="button" class="btn btn-line" style="justify-content:center;padding:12px;" data-action="line-login">
+                  🟢 使用 LINE 帳號登入並自動綁定
+                </button>
+              ` : ''}
+
+              <form id="claimCodeForm" class="control-box">
+                <strong class="text-xs">📝 若您有法會紙本代登「綁定碼」(例如 VOW-L03)：</strong>
+                <div style="display:flex;gap:8px;">
+                  <input id="claimCodeInput" type="text" placeholder="輸入綁定碼 VOW-XXXX" />
+                  <button type="submit" class="btn btn-outline" style="white-space:nowrap;">認領檔案</button>
+                </div>
+              </form>
+
+              <form id="createSelfForm" class="stack" style="border-top:1px solid var(--border);padding-top:14px;">
+                <strong style="font-size:14px;color:var(--brand);">✨ 建立我的個人愿力表</strong>
+                <div>
+                  <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">講師姓名 *</label>
+                  <input id="selfName" type="text" required placeholder="請輸入您的姓名" />
+                </div>
+                <div>
+                  <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">所屬單位 / 佛堂 *</label>
+                  <select id="selfUnit">
+                    <option value="台北一區">台北一區</option>
+                    <option value="台北二區">台北二區</option>
+                    <option value="教學組">教學組</option>
+                    <option value="成全組">成全組</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">2026 年度核心精進愿景 *</label>
+                  <input id="selfVision" type="text" required placeholder="例如：讓自己的道學更精進" />
+                </div>
+                <button type="submit" class="btn btn-primary" style="justify-content:center;padding:12px;">建立並進入我的愿力表 ➔</button>
+              </form>
             </div>
-
-            ${hasLineLogin && !state.cloudUid ? `
-              <button type="button" class="btn btn-line" style="justify-content:center;padding:12px;" data-action="line-login">
-                🟢 使用 LINE 帳號登入並自動綁定
-              </button>
-            ` : ''}
-
-            <form id="claimCodeForm" class="control-box">
-              <strong class="text-xs">📝 若您有法會紙本代登「綁定碼」(例如 VOW-L03)：</strong>
-              <div style="display:flex;gap:8px;">
-                <input id="claimCodeInput" type="text" placeholder="輸入綁定碼 VOW-XXXX" />
-                <button type="submit" class="btn btn-outline" style="white-space:nowrap;">認領檔案</button>
-              </div>
-            </form>
-
-            <form id="createSelfForm" class="stack" style="border-top:1px solid var(--border);padding-top:14px;">
-              <strong style="font-size:14px;color:var(--brand);">✨ 建立我的個人愿力表</strong>
-              <div>
-                <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">講師姓名 *</label>
-                <input id="selfName" type="text" required placeholder="請輸入您的姓名" />
-              </div>
-              <div>
-                <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">所屬單位 / 佛堂 *</label>
-                <select id="selfUnit">
-                  <option value="台北一區">台北一區</option>
-                  <option value="台北二區">台北二區</option>
-                  <option value="教學組">教學組</option>
-                  <option value="成全組">成全組</option>
-                </select>
-              </div>
-              <div>
-                <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">2026 年度核心精進愿景 *</label>
-                <input id="selfVision" type="text" required placeholder="例如：讓自己的道學更精進" />
-              </div>
-              <button type="submit" class="btn btn-primary" style="justify-content:center;padding:12px;">建立並進入我的愿力表 ➔</button>
-            </form>
           </div>
         </div>
       </div>
@@ -492,22 +519,24 @@
     root.innerHTML = `
       <div class="pwa-shell">
         <header class="pwa-topbar no-print">
-          <div class="row-wrap">
-            <div class="brand-logo" style="width:32px;height:32px;font-size:15px;">愿</div>
-            <div>
-              <div style="font-weight:700;font-size:14px;">${esc(lec.name)} 講師愿力表</div>
-              <div style="font-size:11px;color:#fde68a;">${esc(lec.unit)} ‧ ${state.cloudMode === 'firebase' ? '雲端已同步' : '本機儲存'}</div>
+          <div class="pwa-topbar-inner">
+            <div class="row-wrap">
+              <div class="brand-logo" style="width:32px;height:32px;font-size:15px;">愿</div>
+              <div>
+                <div style="font-weight:700;font-size:14px;">${esc(lec.name)} 講師愿力表</div>
+                <div style="font-size:11px;color:#fde68a;">${esc(lec.unit)} ‧ ${state.cloudMode === 'firebase' ? '雲端已同步' : '本機儲存'}</div>
+              </div>
             </div>
+
+            <nav class="pwa-desktop-nav" aria-label="電腦版功能導覽">
+              <button type="button" class="nav-tab ${state.tab === 'overview' ? 'active' : ''}" data-action="go-tab" data-tab="overview">🌟 總覽</button>
+              <button type="button" class="nav-tab ${state.tab === 'monthly' ? 'active' : ''}" data-action="go-tab" data-tab="monthly">📅 月度回報</button>
+              <button type="button" class="nav-tab ${state.tab === 'new' ? 'active' : ''}" data-action="go-tab" data-tab="new">➕ 新增目標</button>
+              <button type="button" class="nav-tab ${state.tab === 'print' ? 'active' : ''}" data-action="go-tab" data-tab="print">🖨️ 呈表列印</button>
+            </nav>
+
+            <button type="button" class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:4px 10px;font-size:11px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
           </div>
-
-          <nav class="pwa-desktop-nav" aria-label="電腦版功能導覽">
-            <button type="button" class="nav-tab ${state.tab === 'overview' ? 'active' : ''}" data-action="go-tab" data-tab="overview">🌟 總覽</button>
-            <button type="button" class="nav-tab ${state.tab === 'monthly' ? 'active' : ''}" data-action="go-tab" data-tab="monthly">📅 月度回報</button>
-            <button type="button" class="nav-tab ${state.tab === 'new' ? 'active' : ''}" data-action="go-tab" data-tab="new">➕ 新增目標</button>
-            <button type="button" class="nav-tab ${state.tab === 'print' ? 'active' : ''}" data-action="go-tab" data-tab="print">🖨️ 呈表列印</button>
-          </nav>
-
-          <button type="button" class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:4px 10px;font-size:11px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
         </header>
 
         <main class="pwa-body">${bodyHtml}</main>

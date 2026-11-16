@@ -35,10 +35,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-body.elder-mode { font-size: 18px; }
-body.elder-mode .text-xs { font-size: 15px; }
-body.elder-mode .text-sm { font-size: 17px; }
-body.elder-mode .btn { padding: 10px 16px; font-size: 16px; }
+body.elder-mode {
+  font-size: 18px;
+  zoom: 1.15;
+}
+body.elder-mode .text-xs { font-size: 14px !important; line-height: 1.5; }
+body.elder-mode .text-sm { font-size: 16px !important; line-height: 1.5; }
+body.elder-mode .btn { padding: 9px 15px; font-size: 15px; }
 
 .loading-shell {
   min-height: 60vh;
@@ -598,8 +601,7 @@ table.classic td {
 
 /* ==================== 實作版 PWA (pwa.html) 全自適應樣式 (手機 + 平板 + 電腦) ==================== */
 .pwa-shell {
-  max-width: 1120px;
-  margin: 0 auto;
+  width: 100%;
   min-height: 100vh;
   padding-bottom: 84px;
   display: flex;
@@ -609,11 +611,17 @@ table.classic td {
 .pwa-topbar {
   background: var(--brand);
   color: #FDF9F3;
-  padding: 12px 18px;
   position: sticky;
   top: 0;
   z-index: 40;
   border-bottom: 1px solid var(--gold-border);
+  width: 100%;
+}
+
+.pwa-topbar-inner {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 12px 18px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -631,11 +639,45 @@ table.classic td {
 }
 
 .pwa-body {
+  max-width: 1160px;
+  width: 100%;
+  margin: 0 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   flex: 1;
+}
+
+.onboarding-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.onboarding-hero {
+  display: none;
+}
+
+@media (min-width: 860px) {
+  .onboarding-layout {
+    grid-template-columns: 1fr 480px;
+    gap: 28px;
+    margin-top: 18px;
+    align-items: stretch;
+  }
+  .onboarding-hero {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: var(--brand);
+    color: #FDF9F3;
+    border-radius: 18px;
+    padding: 32px;
+    border: 1px solid var(--gold-border);
+    box-shadow: 0 10px 28px rgba(78, 42, 30, 0.14);
+  }
 }
 
 .pwa-overview-grid {
@@ -731,10 +773,8 @@ table.classic td {
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 22px;
-  max-width: 560px;
+  padding: 24px;
   width: 100%;
-  margin: 16px auto;
   box-shadow: 0 6px 20px rgba(78, 42, 30, 0.08);
 }
 
