@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-15T03:48:18.159Z",
-  "count": 20,
+  "generatedAt": "2026-11-16T15:14:16.833Z",
+  "count": 22,
   "apps": [
     {
       "id": "bridgeGame",
@@ -31,7 +31,7 @@
       "id": "htmlShare",
       "name": "htmlShare — 單頁 HTML 分享工具",
       "shortName": "htmlShare",
-      "description": "上傳單一 HTML 檔案（例如 AI 產生的網頁），取得一個網址即可分享給其他人瀏覽",
+      "description": "上傳單一 HTML 檔案，或將長網址包裝成附帶預覽圖與介紹的短網址分享給其他人瀏覽",
       "path": "../htmlShare/",
       "icon": "../htmlShare/icons/htmlShare-192.png",
       "themeColor": "#0891b2",
@@ -51,6 +51,19 @@
       "categories": [
         "education",
         "productivity"
+      ]
+    },
+    {
+      "id": "lecturerVow",
+      "name": "講師愿力表系統",
+      "shortName": "講師愿力表",
+      "description": "法會紙電雙軌立愿、1～12月多元進度回報、五星評比激勵與各單位分權總覽",
+      "path": "../lecturerVow/",
+      "icon": "../lecturerVow/icons/lecturerVow-192.png",
+      "themeColor": "#09354a",
+      "categories": [
+        "productivity",
+        "utilities"
       ]
     },
     {
@@ -210,6 +223,19 @@
       "path": "../talentPool/",
       "icon": "../talentPool/icons/talentPool-192.png",
       "themeColor": "#0f5e5a",
+      "categories": [
+        "productivity",
+        "utilities"
+      ]
+    },
+    {
+      "id": "tdAssign",
+      "name": "天達排班協作",
+      "shortName": "排班協作",
+      "description": "天達堂年度排班：各區排組別成員與依日期勤務，多人同時作業；總召檢查衝突與協調",
+      "path": "../tdAssign/",
+      "icon": "../tdAssign/icons/tdAssign-192.png",
+      "themeColor": "#2c6a5d",
       "categories": [
         "productivity",
         "utilities"

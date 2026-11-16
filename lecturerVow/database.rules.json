@@ -1,0 +1,30 @@
+{
+  "rules": {
+    "vow2026": {
+      "admins": {
+        ".read": "auth != null",
+        ".write": false
+      },
+      "unitLeaders": {
+        ".read": "auth != null",
+        "$unit": {
+          "$uid": {
+            ".write": "auth != null && root.child('vow2026/admins').child(auth.uid).exists()"
+          }
+        }
+      },
+      "lecturers": {
+        ".read": "auth != null",
+        "$lecturerId": {
+          ".write": "auth != null && (root.child('vow2026/admins').child(auth.uid).exists() || data.child('lineUid').val() === auth.uid || (!data.exists() && newData.child('lineUid').val() === auth.uid) || (root.child('vow2026/unitLeaders').child(data.exists() ? data.child('unit').val() : newData.child('unit').val()).child(auth.uid).exists()))"
+        }
+      },
+      "bindCodes": {
+        ".read": "auth != null",
+        "$code": {
+          ".write": "auth != null && (root.child('vow2026/admins').child(auth.uid).exists() || root.child('vow2026/unitLeaders').child(newData.child('unit').val()).child(auth.uid).exists() || (data.exists() && newData.child('claimedBy').val() === auth.uid))"
+        }
+      }
+    }
+  }
+}
