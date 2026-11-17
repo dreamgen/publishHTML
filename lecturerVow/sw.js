@@ -3,7 +3,7 @@
  * - 僅管理 lecturerVow-* 快取；採用 Network-First（有網路時永遠取最新，離線時退回快取）
  * - 業務資料走 Firebase Realtime Database（或本機 localStorage），不經 SW 快取
  */
-const SW_VERSION = 'v10';
+const SW_VERSION = 'v11';
 const CACHE_PREFIX = 'lecturerVow-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
 const ASSETS = [

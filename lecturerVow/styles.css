@@ -21,6 +21,11 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
@@ -179,7 +184,7 @@ body.elder-mode .btn { padding: 9px 15px; font-size: 15px; }
   box-shadow: 0 8px 28px -8px rgba(43, 43, 43, 0.06);
 }
 
-.stack { display: flex; flex-direction: column; gap: 16px; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 100%; }
 .row-between { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
@@ -387,7 +392,10 @@ body.elder-mode .btn { padding: 9px 15px; font-size: 15px; }
 /* Frameless Month Pills (Directly on #FAF9F6) */
 .month-strip {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   gap: 6px;
   padding-bottom: 2px;
 }
@@ -436,11 +444,14 @@ body.elder-mode .btn { padding: 9px 15px; font-size: 15px; }
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .goal-seg-btn {
-  flex: 1 0 auto;
+  flex: 0 0 auto;
   min-width: 110px;
   border: none;
   background: transparent;
@@ -883,8 +894,10 @@ table.classic td {
   box-shadow: 0 8px 28px -8px rgba(43, 43, 43, 0.08);
 }
 
-.pwa-overview-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-.pwa-monthly-layout { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+.pwa-overview-grid { display: grid; grid-template-columns: 1fr; gap: 12px; min-width: 0; }
+.pwa-monthly-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; width: 100%; }
+.pwa-monthly-layout > * { min-width: 0; max-width: 100%; }
+.pwa-month-sidebar { min-width: 0; max-width: 100%; }
 
 @media (min-width: 768px) {
   .pwa-shell { padding-bottom: 32px; }
@@ -919,7 +932,7 @@ table.classic td {
 }
 
 @media (min-width: 980px) {
-  .pwa-monthly-layout { grid-template-columns: 320px 1fr; }
+  .pwa-monthly-layout { grid-template-columns: 320px minmax(0, 1fr); }
   .pwa-month-sidebar { position: sticky; top: 76px; }
   .pwa-month-sidebar .month-strip {
     display: grid;
