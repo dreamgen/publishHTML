@@ -365,6 +365,41 @@
     return { p, hard, soft, occN, score: -hard.length * 1000 - soft.length * 10 - occN };
   }
   function evalInSlot(p, s) { const ev = E.evalCandidate(M, p, s); ev.occN = ev.occN + 1; return ev; }
+  function evalSlotCand(p, s, curSet) {
+    const ev = evalInSlot(p, s);
+    if (!s.cat.startsWith('忠恕')) return ev;
+    const isWd = s.cat === '忠恕平日';
+    const prevJz = BASE.prevJz || [];
+    const sameType = (j) => j.cat === s.cat;
+    const sameBucket = (j) => (isWd ? j.cat === '忠恕平日' : j.cat !== '忠恕平日');
+    let coopExact = 0, coopBucket = 0;
+    if (curSet && curSet.size) {
+      for (const j of prevJz) {
+        if (!j.pids.includes(p.id)) continue;
+        const shared = j.pids.filter((id) => curSet.has(id)).length;
+        if (!shared) continue;
+        if (sameType(j)) coopExact += shared;
+        else if (sameBucket(j)) coopBucket += shared;
+      }
+    }
+    const exactCnt = prevJz.filter((j) => sameType(j) && j.pids.includes(p.id)).length;
+    const holCnt = !isWd ? prevJz.filter((j) => j.cat !== '忠恕平日' && j.pids.includes(p.id)).length : 0;
+    const wd115 = p.wd115 || 0, hol115 = Math.max(0, (p.n115 || 0) - wd115);
+    const hasRightExp = isWd ? (exactCnt > 0 || wd115 > 0) : (holCnt > 0 || hol115 > 0 || !!p.zr);
+    const hasWrongOnly = isWd ? (!hasRightExp && hol115 > 0) : (!hasRightExp && wd115 > 0);
+    let boost = coopExact * 80 + coopBucket * 40;
+    if (exactCnt > 0) boost += 30 + Math.min(exactCnt, 5) * 3;
+    else if (!isWd && holCnt > 0) boost += 15;
+    else if (hasRightExp) boost += 12;
+    else if (hasWrongOnly) boost -= 20;
+    ev.score += boost;
+    if (coopExact > 0) ev.lyNote = `去年${s.cat}同日搭檔`;
+    else if (coopBucket > 0) ev.lyNote = '去年忠恕同日搭檔';
+    else if (exactCnt > 0) ev.lyNote = `去年${s.cat} ${exactCnt} 次`;
+    else if (isWd && wd115 > 0) ev.lyNote = `去年平日 ${wd115} 次`;
+    else if (!isWd && hol115 > 0) ev.lyNote = `去年假日 ${hol115} 次`;
+    return ev;
+  }
 
   /* ---------------- 各區指標計算（供 B1 使用） ---------------- */
   function areaMetrics(area) {
@@ -1690,7 +1725,7 @@
     return L.map((ev) => {
       const p = ev.p, why = ev.hard[0] || ev.soft[0];
       return `<div class="cand"><div><button class="link" data-act="person" data-pid="${p.id}">${esc(p.n)}</button> <span class="muted small">${esc(p.a)}${roleOf(p) ? ' · ' + esc(roleOf(p)) : ''}${p.src === 'N' ? ' · 還沒服務過' : ''}</span>
-        <div class="small ${ev.hard.length ? 't-bad' : ev.soft.length ? 't-warn' : 'muted'}">${why ? esc(why.msg) + (ev.hard.length ? '（排入會標成違規）' : '') : `加入後全年 ${ev.occN} 次`}${ev.mates && ev.mates.length ? ` · 常和 ${esc(ev.mates.slice(0, 2).join('、'))} 同組` : ''}</div></div>
+        <div class="small ${ev.hard.length ? 't-bad' : ev.soft.length ? 't-warn' : 'muted'}">${why ? esc(why.msg) + (ev.hard.length ? '（排入會標成違規）' : '') : `加入後全年 ${ev.occN} 次`}${ev.lyNote ? ` · <span class="t-ok">${esc(ev.lyNote)}</span>` : ''}${ev.mates && ev.mates.length ? ` · 常和 ${esc(ev.mates.slice(0, 2).join('、'))} 同組` : ''}</div></div>
         ${canEdit ? `<button class="btn sm ${ev.hard.length ? '' : 'pri'}" data-act="add" data-kind="${kind}" data-key="${key}" data-pid="${p.id}" data-area="${area}" data-label="${esc(label)}">${isAdmin() && !(memberOf(area) && memberOf(area).status === 'ok') && AREAS.includes(area) ? '預排' : '加入'}</button>` : ''}</div>`;
     }).join('') + (evs.length > L.length ? `<button class="btn wide" data-act="more">顯示全部 ${evs.length} 人</button>` : '') || '<div class="empty">沒有符合的人</div>';
   }
@@ -1862,7 +1897,7 @@
           <div class="muted small">沒有網路時照常可以排，連上後自動同步；同一個人被兩邊同時改到時，兩邊都看得到提示。</div>` : ''}
         </div>
         <aside class="split-side inspector" aria-label="候選人搜尋">
-          ${s.cancel ? '<div class="empty">這一格已取消，不能再排入人員。</div>' : canEdit ? finder(area, inIds, 'assign', sid, label, (p) => evalInSlot(p, s), canEdit, local) : '<div class="empty">登入並取得本區排班權限後可從此處搜尋排入人員。</div>'}
+          ${s.cancel ? '<div class="empty">這一格已取消，不能再排入人員。</div>' : canEdit ? finder(area, inIds, 'assign', sid, label, (p) => evalSlotCand(p, s, inIds), canEdit, local) : '<div class="empty">登入並取得本區排班權限後可從此處搜尋排入人員。</div>'}
         </aside>
       </div>
     </main>`;
