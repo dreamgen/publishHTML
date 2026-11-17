@@ -202,7 +202,11 @@ window.TDEngine = function (BASE) {
         unav: splitList(o.unav),
         months: (o.months || []).map(Number),
         cap: o.cap ? +o.cap : null,
-        off: !!o.off,
+        // 個人平日上限：pov.wdCap（0＝不排平日）；狀態「只排假日」等同 wdCap=0
+        wdCap: o.status === '只排假日' ? 0 : (o.wdCap !== undefined && o.wdCap !== null && o.wdCap !== '' && isFinite(+o.wdCap) ? Math.max(0, +o.wdCap) : null),
+        // 「不再排班」狀態等同 off；「新人見習」＝排班時照新人加權
+        off: !!o.off || o.status === '不再排班',
+        trainee: o.status === '新人見習',
         pnote: o.note || ''
       });
     });
@@ -230,12 +234,13 @@ window.TDEngine = function (BASE) {
         ed.need !== undefined && ed.need !== '' ? { need: +ed.need } : {},
         ed.loc ? { loc: ed.loc } : {},
         ed.d ? { d: ed.d } : {},
-        ed.e ? { e: ed.e } : (ed.d && !b.e ? { e: ed.d } : {}),
+        ed.e ? { e: ed.e } : (ed.d ? { e: ds(dn(ed.d) + Math.max(0, dn(b.e || b.d) - dn(b.d))) } : {}),
         ed.lock !== undefined ? { lock: !!ed.lock } : {}
       );
       s.note = ed.note || '';
       s.cancel = !!ed.cancel;
       s.edited = ed.area !== undefined && ed.area !== b.area;
+      if (s.e && dn(s.e) < dn(s.d)) s.e = s.d; // 換日後 e 不可早於 d
       s.ds = dn(s.d);
       s.de = dn(s.e || s.d);
       s.wd = wdOf(s.d);
@@ -410,8 +415,21 @@ window.TDEngine = function (BASE) {
     if (occ.length > cap.max) add('P5', S.P5, [occ[cap.max].slots[0]], `${p.n}：全年 ${occ.length} 次，超過上限 ${cap.max}`);
     else if (occ.length > cap.ideal) add('P5b', S.P5b, [occ[cap.ideal].slots[0]], `${p.n}：全年 ${occ.length} 次，超過理想 ${cap.ideal}`);
 
-    // P6 平日天數
-    if (wdScopeHit(M, p)) {
+    // P6 平日天數：個人平日上限（pov.wdCap，含 0＝只排假日）優先，且不受「適用對象」限制，一律違規；沒有個人上限時用全域規則
+    if (p.wdCap !== null && p.wdCap !== undefined) {
+      let w = 0, first = null;
+      const seen = new Set();
+      for (const s of list) {
+        for (let x = s.ds; x <= s.de; x++) {
+          const k = ds(x), wd = wdOf(k);
+          if (wd >= 1 && wd <= 5 && !M.holidays.has(k) && !seen.has(x)) {
+            seen.add(x); w++;
+            if (w > p.wdCap && !first) first = s;
+          }
+        }
+      }
+      if (first) add('P6', '違規', [first], p.wdCap === 0 ? `${p.n}：設定為只排假日，卻排到平日（${w} 天）` : `${p.n}：平日 ${w} 天，超過個人上限 ${p.wdCap} 天`);
+    } else if (wdScopeHit(M, p)) {
       let w = 0, first = null;
       const seen = new Set();
       for (const s of list) {
@@ -603,7 +621,9 @@ window.TDEngine = function (BASE) {
     return out;
   }
 
-  function issueKey(c) { return [c.rule, c.pid || '', ...c.slots].join('.').replace(/[^A-Za-z0-9_.\-]/g, '_') || c.rule; }
+  // 鍵只用 RTDB 允許的字元（不可含 . # $ [ ] /）；舊版用「.」連接，讀取端以 normAckKey 相容
+  function issueKey(c) { return [c.rule, c.pid || '', ...c.slots].join('~').replace(/[^A-Za-z0-9_~\-]/g, '_') || c.rule; }
+  function normAckKey(k) { return String(k).replace(/\./g, '~').replace(/[^A-Za-z0-9_~\-]/g, '_'); }
 
   function allIssues(M) {
     const out = areaIssues(M).map(c => Object.assign(c, { scope: '區' }));
@@ -632,7 +652,7 @@ window.TDEngine = function (BASE) {
     score -= soft.length * (+P.wSoft);
     if (!SPECIAL_AREAS.includes(s.area) && !isCookSlot(s) && p.a !== s.area) score -= +P.wCross;
     if (soft.some(c => c.rule === 'P10')) score -= +P.wMismatch;
-    if (p.src === 'N') score -= +P.wNew;
+    if (p.src === 'N' || p.trainee) score -= +P.wNew;
     let affSum = 0; const mates = [];
     for (const id of M.asg[s.id].p) {
       const v = (M.aff[p.id] || {})[id];
@@ -723,7 +743,7 @@ window.TDEngine = function (BASE) {
     dn, ds, wdOf, fmtD, splitList, defaultRules, cloneDefaultGroups, freshState, mergeRules,
     resolveSlotGroupKey, defaultGroupForAreaCat, groupOptionsForSlot, buildModel,
     isCookSlot, isCookPerson, isHeadCook, jobClass, canLead, needsLead, slotNeed, capOf, occasions,
-    personIssues, areaIssues, slotIssues, issueKey, allIssues,
+    personIssues, areaIssues, slotIssues, issueKey, normAckKey, allIssues,
     evalCandidate, poolFor, rankCandidates, assignToModel, autoSchedule
   };
 };

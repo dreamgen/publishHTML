@@ -9,6 +9,12 @@
   const CFG = window.TD_CONFIG || {};
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const getPath = window.TDStore.getPath;
+  // 資料庫鍵的白名單格式（讀進來的鍵一律過濾，避免被拿來做屬性注入）
+  const RE_PID = /^[0-9]{1,9}$/, RE_SID = /^[A-Za-z0-9_]{1,24}$/, RE_EXID = /^EX_[A-Za-z0-9_]{1,20}$/, RE_PROPID = /^[A-Za-z0-9_]{1,24}$/, RE_ACK = /^[A-Za-z0-9_~\-]{1,200}$/, RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  // 取出某節點底下「鍵為純數字人員編號、值為物件」的紀錄（髒資料的鍵或值一律略過）
+  const pidRecs = (node) => Object.keys(node && typeof node === 'object' ? node : {}).filter((k) => /^\d+$/.test(k) && RE_PID.test(k) && node[k] && typeof node[k] === 'object').map((k) => [k, node[k]]);
+  const BASE_MAX_ID = BASE.people.reduce((mx, p) => Math.max(mx, +p.id || 0), 0);
   const AREAS = E.AREAS;
   const WORK_AREAS = E.ALL_WORK_AREAS; // 六區＋青年班、新民班、機動、交通隊
   const KINDS = [['jz', '忠恕輪值與依日期勤務'], ['k', '廚務組'], ['srv', '服務組'], ['lj', '禮節隊'], ['tr', '交通隊'], ['pov', '人員狀態']];
@@ -47,18 +53,19 @@
   }
   applyLargeMode(isLargeMode());
 
+  // M8 測試開關：以資料庫 td116/config/autoApproveBind（只有總召可寫）為準；
+  // 資料庫沒有設定時才用 config.js 的值（本機試用模式的預設）。不再接受 localStorage 覆寫。
+  try { localStorage.removeItem('tdAssign-test-autoBind'); } catch (e) { }
   function autoApproveBind() {
-    try {
-      const ov = localStorage.getItem('tdAssign-test-autoBind');
-      if (ov === '1') return true;
-      if (ov === '0') return false;
-    } catch (e) { }
+    const c = (D().config || {}).autoApproveBind;
+    if (typeof c === 'boolean') return c;
     return CFG.autoApproveBind !== false;
   }
   function setAutoApproveBind(val) {
-    try { localStorage.setItem('tdAssign-test-autoBind', val ? '1' : '0'); } catch (e) { }
+    if (!need(isAdmin(), '只有總召可切換綁定審核方式')) return;
+    if (!confirm(val ? '改為「測試期：姓名綁定立即生效」？所有人的綁定將不需區長確認。' : '改為「正式審核：綁定需區長或小組長確認」？')) return;
+    store.update(Object.assign({ 'config/autoApproveBind': !!val }, logOp('總召', val ? '綁定審核切為測試期立即生效' : '綁定審核切為正式審核')));
     toast(val ? '已切為測試模式：姓名綁定立即生效' : '已切為正式審核：綁定需區長或小組長確認');
-    render();
   }
   const D = () => store.data || {};
   const draftVer = () => (D().meta && D().meta.version) || CFG.draftVersion || 'v9.3';
@@ -70,19 +77,35 @@
 
   /* ---------------- 由雲端資料算出排班模型 ---------------- */
   let M = null, ISS = [], bySlot = {}, byPid = {}, slotProps = {};
-  function recompute() {
+  // #20：模型只在「會影響排班模型的資料」變動時重算（presence、log 等變動不重算）
+  const MODEL_KEYS = ['rules', 'groups', 'assign', 'edits', 'extra', 'addedPeople', 'pov', 'acks', 'proposals', 'admins', 'sched'];
+  let lastModelSig = null;
+  function dataSigs() {
+    const d = D(), parts = {};
+    for (const k in d) if (k !== 'presence') parts[k] = JSON.stringify(d[k]);
+    const uid = me() ? me().uid : '';
+    const model = uid + '|' + MODEL_KEYS.map((k) => k + ':' + (parts[k] || '')).join('|');
+    const view = model + '|' + Object.keys(parts).filter((k) => !MODEL_KEYS.includes(k)).sort().map((k) => k + ':' + parts[k]).join('|')
+      + '|' + [me() ? me().name : '', store.mode, store.online, store.pending, store.foreignPending, store.error, store.notice, store.ready, store.authReady].join('/');
+    return { model, view };
+  }
+  function recompute(force, sg) {
+    const msig = (sg || dataSigs()).model;
+    if (!force && M && msig === lastModelSig) return false;
+    lastModelSig = msig;
     const st = E.freshState();
     const d = D();
     st.rules = E.mergeRules(d.rules);
     st.groups = {};
-    for (const gm of BASE.groupsMeta) st.groups[gm.id] = Object.keys((d.groups || {})[gm.id] || {}).map(Number);
+    for (const gm of BASE.groupsMeta) st.groups[gm.id] = Object.keys((d.groups || {})[gm.id] || {}).filter((k) => RE_PID.test(k)).map(Number);
     st.assign = {};
-    for (const sid in d.assign || {}) st.assign[sid] = { p: Object.keys(d.assign[sid]).map(Number), lk: [] };
-    st.edits = d.edits || {};
-    st.extra = d.extra || {};
-    st.addedPeople = Object.values(d.addedPeople || {}).map((p) => Object.assign({}, p, { id: +p.id }));
-    st.pov = d.pov || {};
-    st.acks = d.acks || {};
+    for (const sid in d.assign || {}) if (RE_SID.test(sid) && d.assign[sid] && typeof d.assign[sid] === 'object') st.assign[sid] = { p: Object.keys(d.assign[sid]).filter((k) => RE_PID.test(k)).map(Number), lk: [] };
+    st.edits = cleanEdits(d.edits);
+    st.extra = cleanExtra(d.extra);
+    st.addedPeople = addedPeopleList(d.addedPeople);
+    // P-01：與資料庫讀取規則一致，只有總召或排班人員（sched）才把 pov 放進模型；否則公開畫面不會出現暫停／不方便的訊息
+    st.pov = me() && (isAdmin() || (d.sched || {})[me().uid]) ? (d.pov || {}) : {};
+    st.acks = normAcks();
     E.setState(st);
     M = E.buildModel();
     ISS = E.allIssues(M);
@@ -94,12 +117,81 @@
       if (c.pid != null) (byPid[c.pid] = byPid[c.pid] || []).push(c);
     }
     slotProps = {};
-    for (const pid in d.proposals || {}) {
-      const pr = d.proposals[pid];
-      if (!pr || pr.status === 'resolved') continue;
-      for (const sid of pr.slotIds || []) (slotProps[sid] = slotProps[sid] || []).push(pr);
+    for (const pr of propList()) {
+      if (pr.status === 'resolved') continue;
+      for (const sid of Array.isArray(pr.slotIds) ? pr.slotIds : []) (slotProps[sid] = slotProps[sid] || []).push(pr);
     }
+    return true;
   }
+
+  /* ---------------- 讀入資料的清理（X-03、R-04、#14） ---------------- */
+  const str = (v, n) => (v == null ? '' : String(v)).slice(0, n || 60);
+  function cleanEdits(src) {
+    const out = {};
+    for (const sid in src || {}) {
+      const e = src[sid];
+      if (!RE_SID.test(sid) || !e || typeof e !== 'object') continue;
+      const o = {};
+      if (e.area !== undefined && WORK_AREAS.includes(e.area)) o.area = e.area;
+      if (e.grp !== undefined) o.grp = str(e.grp, 20);
+      if (e.need !== undefined && e.need !== '' && Number.isFinite(+e.need)) o.need = +e.need;
+      if (e.loc) o.loc = str(e.loc, 40);
+      if (e.d && RE_DATE.test(e.d)) o.d = e.d;
+      if (e.e && RE_DATE.test(e.e)) o.e = e.e;
+      if (e.lock !== undefined) o.lock = !!e.lock;
+      if (e.cancel) o.cancel = true;
+      if (e.note) o.note = str(e.note, 300);
+      out[sid] = o;
+    }
+    return out;
+  }
+  function cleanExtra(src) {
+    const out = {};
+    for (const k in src || {}) {
+      const x = src[k];
+      if (!RE_EXID.test(k) || !x || typeof x !== 'object' || !RE_DATE.test(x.d || '') || !WORK_AREAS.includes(x.area)) continue;
+      out[k] = Object.assign({}, x, {
+        id: k, d: x.d, e: RE_DATE.test(x.e || '') ? x.e : x.d, area: x.area,
+        cat: str(x.cat, 20) || '服務', grp: str(x.grp, 20), loc: str(x.loc, 40), label: str(x.label, 60), src: str(x.src, 40),
+        need: Number.isFinite(+x.need) && +x.need > 0 ? +x.need : 1, share: Number.isFinite(+x.share) && +x.share > 0 ? +x.share : 1
+      });
+    }
+    return out;
+  }
+  // addedPeople：以鍵為準、不得蓋掉 data.js 的編號；只有 status 為 ok（或舊資料沒有 status）的人才進名冊
+  function addedPeopleList(src, all) {
+    const out = [];
+    for (const k in src || {}) {
+      const p = src[k];
+      if (!RE_PID.test(k) || +k <= BASE_MAX_ID || !p || typeof p !== 'object') continue;
+      const status = p.status || 'ok';
+      if (!all && status !== 'ok') continue;
+      out.push({
+        id: +k, n: str(p.n, 20) || '（未命名）', a: E.PERSON_AREAS.includes(p.a) ? p.a : '瑞芳', sx: p.sx === '乾' || p.sx === '坤' ? p.sx : '',
+        age: Number.isFinite(+p.age) && p.age !== null && p.age !== '' ? +p.age : null, src: 'N',
+        lead: str(p.lead, 40), cg: [], cr: str(p.cr, 40), sg: str(p.sg, 40), li: str(p.li, 60), zr: str(p.zr, 40), tr: str(p.tr, 40),
+        n115: 0, wd115: 0, cls: '', note: str(p.note, 60), status, by: str(p.by, 128)
+      });
+    }
+    return out;
+  }
+  // acks：舊鍵含「.」，一律換成新格式的鍵讀取（S-01）
+  function normAcks() {
+    const out = {};
+    for (const k in D().acks || {}) { const v = D().acks[k]; if (v && typeof v === 'object') out[E.normAckKey(k)] = v; }
+    return out;
+  }
+  // 提案：鍵需符合格式，id 以鍵為準（X-02）
+  function propList() {
+    const out = [];
+    for (const k in D().proposals || {}) {
+      const p = D().proposals[k];
+      if (!RE_PROPID.test(k) || !p || typeof p !== 'object') continue;
+      out.push(Object.assign({}, p, { id: k, title: String(p.title || k) }));
+    }
+    return out;
+  }
+  const propById = (id) => (RE_PROPID.test(String(id || '')) && D().proposals && D().proposals[id] && typeof D().proposals[id] === 'object') ? Object.assign({}, D().proposals[id], { id, title: String(D().proposals[id].title || id) }) : null;
 
   /* ---------------- 身分、綁定與權限 ---------------- */
   const me = () => store.user;
@@ -107,8 +199,10 @@
   function myBoundPerson() {
     const u = myUserRec();
     if (!u || !u.pid || !M) return null;
+    // status：ok｜pending｜rejected（#13：被退回的不算已綁定）
     return { p: M.pById[+u.pid] || null, status: u.bindStatus || 'ok', rec: u };
   }
+  const boundOk = (bp) => !!(bp && bp.p && bp.status === 'ok');
   const isAdmin = () => !!(me() && (D().admins || {})[me().uid]);
   const memberOf = (area, uid) => ((D().members || {})[area] || {})[uid || (me() && me().uid)];
   const isLead = (area) => { const m = memberOf(area); return !!(m && m.status === 'ok' && m.role === 'lead'); };
@@ -119,8 +213,77 @@
     if (!m || m.status !== 'ok') return false;
     return !m.scope || !!m.scope[kind];
   }
-  const kindOfGroup = (gk) => gk.split('_')[0];
+  const kindOfGroup = (gk) => String(gk).split('_')[0];
   const gmOf = (gk) => E.GROUP_META_BY_ID[gk];
+
+  /* ---------------- 共用權限工具（階段 1；掛在 window.TDApp 給 console.js 與後續階段用） ---------------- */
+  // 總召替「六區」排人＝預排；總召若本身是該區排班人員則直接排入
+  const isPreFor = (area) => isAdmin() && !(memberOf(area) && memberOf(area).status === 'ok') && AREAS.includes(area);
+  // 預排只有該區區長能確認；六區以外的單位（青年班、新民班、機動、交通隊）總召可確認
+  const canConfirmPre = (area) => isLead(area) || (isAdmin() && !AREAS.includes(area));
+  const isPublished = () => !!(D().meta && D().meta.published);
+  // 一個寫入路徑需要的權限（undo 與前端判斷共用，與 database.rules.json 一致）
+  const EDIT_FIELDS = ['area', 'grp', 'need', 'loc', 'd', 'e', 'lock', 'cancel', 'note'];
+  const RITUAL_POST_SET = new Set(['操持', '燒香禮', '請壇禮', '辦道禮', '獻供人員', '填表／掛號']);
+  function pathInfo(p) {
+    const k = String(p).split('/');
+    if (k[0] === 'groups' && k.length === 3 && gmOf(k[1]) && RE_PID.test(k[2])) return { type: 'rec', area: gmOf(k[1]).area, kind: kindOfGroup(k[1]) };
+    if (k[0] === 'assign' && k.length === 3 && RE_SID.test(k[1]) && RE_PID.test(k[2]) && M && M.byId[k[1]]) return { type: 'rec', area: M.byId[k[1]].area, kind: 'jz' };
+    if (k[0] === 'groupMeta' && gmOf(k[1]) && ((k.length === 3 && k[2] === 'leadPid') || (k.length === 4 && k[2] === 'posts' && RITUAL_POST_SET.has(k[3])))) return { type: 'meta', area: gmOf(k[1]).area, kind: kindOfGroup(k[1]) };
+    return null;
+  }
+  const canPath = (p) => { const i = pathInfo(p); return !!(i && can(i.area, i.kind)); };
+  // undo 的舊值只接受排班紀錄的形狀（避免被塞入任意資料）
+  const REC_KEYS = { by: 'string', n: 'string', at: 'number', pre: 'boolean', okBy: 'string', okAt: 'number', byAuto: 'string' };
+  function undoValueOk(info, v) {
+    if (v == null) return true;
+    if (info.type === 'meta') return typeof v === 'number' && Number.isFinite(v);
+    if (typeof v !== 'object' || Array.isArray(v)) return false;
+    return Object.keys(v).every((k) => REC_KEYS[k] && typeof v[k] === REC_KEYS[k]) && (v.pre === undefined || v.pre === true);
+  }
+  // 新 undo 格式：[{ p: 'groups/k_1/12', v: 舊值, a: 寫入後的值 }]（null 會被 RTDB 省略，讀取時視為 null）
+  function mkUndo(up, paths) {
+    const list = [];
+    for (const p of paths || Object.keys(up)) {
+      const it = { p };
+      const v = getPath(D(), p); if (v != null) it.v = JSON.parse(JSON.stringify(v));
+      if (up[p] != null) it.a = JSON.parse(JSON.stringify(up[p]));
+      list.push(it);
+    }
+    return list;
+  }
+  function normUndo(undo) {
+    if (!Array.isArray(undo)) {
+      // RTDB 會把陣列存成 {0:…,1:…}；舊版物件格式（路徑為鍵）無法比對現值，不提供復原
+      if (undo && typeof undo === 'object' && Object.keys(undo).every((k) => /^\d+$/.test(k))) undo = Object.keys(undo).sort((a, b) => a - b).map((k) => undo[k]);
+      else return null;
+    }
+    const out = [];
+    for (const u of undo) {
+      if (!u || typeof u.p !== 'string') return null;
+      const info = pathInfo(u.p);
+      if (!info) return null;
+      const v = u.v == null ? null : u.v, a = u.a == null ? null : u.a;
+      if (!undoValueOk(info, v) || !undoValueOk(info, a)) return null;
+      out.push({ p: u.p, v, a, info });
+    }
+    return out.length ? out : null;
+  }
+  function sameVal(x, y) {
+    if (x == null && y == null) return true;
+    if (x == null || y == null || typeof x !== typeof y) return false;
+    if (typeof x !== 'object') return x === y;
+    const kx = Object.keys(x).filter((k) => x[k] != null), ky = Object.keys(y).filter((k) => y[k] != null);
+    return kx.length === ky.length && kx.every((k) => sameVal(x[k], y[k]));
+  }
+  // 誰看得到「復原」：本人或本區區長、總召，且每一個路徑都有權限
+  function canUndo(l) {
+    if (!me() || !l || l.undone) return false;
+    const list = normUndo(l.undo);
+    if (!list) return false;
+    if (!(l.uid === me().uid || isLead(l.area) || isAdmin())) return false;
+    return list.every((u) => canPath(u.p));
+  }
   const groupSlots = (gk) => M.slots.filter((s) => s.groupKey === gk && !s.cancel);
   const areaGroups = (area) => BASE.groupsMeta.filter((g) => g.area === area);
   const areaDated = (area) => M.slots.filter((s) => !s.groupKey && s.area === area && !s.cancel);
@@ -165,8 +328,10 @@
 
   function groupLead(gk) {
     const meta = (D().groupMeta || {})[gk] || {};
-    if (meta.leadPid && M.pById[+meta.leadPid]) return M.pById[+meta.leadPid];
-    const mem = (E.getState().groups[gk] || []).map((id) => M.pById[id]).filter(Boolean);
+    const memIds = E.getState().groups[gk] || [];
+    // #16：組長必須仍是本組組員
+    if (meta.leadPid && M.pById[+meta.leadPid] && memIds.includes(+meta.leadPid)) return M.pById[+meta.leadPid];
+    const mem = memIds.map((id) => M.pById[id]).filter(Boolean);
     const gm = gmOf(gk);
     if (!gm || !mem.length) return null;
     if (gm.cat === '廚務') return mem.find((p) => /主廚/.test(p.cr || '')) || mem.find((p) => /大廚/.test(p.cr || '')) || null;
@@ -434,10 +599,12 @@
     const nextExtra = Object.assign({}, d.extra || {}, opt.extraSlots || {});
 
     const simSt = Object.assign({}, baseSt, { edits: nextEdits, extra: nextExtra });
-    E.setState(simSt);
-    const m2 = E.buildModel();
-    const iss2 = E.allIssues(m2).filter((c) => !((d.acks || {})[c.key] && d.acks[c.key].st === '接受例外'));
-    E.setState(baseSt); // 立刻還原基準狀態
+    let m2, iss2;
+    try {
+      E.setState(simSt);
+      m2 = E.buildModel();
+      iss2 = E.allIssues(m2).filter((c) => !((d.acks || {})[c.key] && d.acks[c.key].st === '接受例外'));
+    } finally { E.setState(baseSt); } // #17：不論成敗都還原基準狀態
 
     const nextConflicts = iss2.filter((c) => c.lvl === '違規' && ['A1', 'A2', 'P1', 'P2'].includes(c.rule)).length;
     const addedViols = iss2.filter((c) => c.lvl === '違規' && !baseViols.has(c.key));
@@ -468,40 +635,66 @@
       baseConflicts, nextConflicts,
       addedViols, addedNotices,
       areaDiffs,
-      assignedHit,
       lockedText: opt.lockNote || (lockedSrcs.length ? `原為「${lockedSrcs[0]}」，採用時將解除鎖定` : '不需更動已鎖定行事曆'),
-      peopleText: opt.affectedPeopleNote || (assignedHit ? `影響已排 ${assignedHit} 人次，需確認或通知` : '尚未排到個人'),
+      assignedHit,
+      peopleText: (assignedHit ? `影響已排 ${assignedHit} 人次，需確認或通知` : '尚未排到個人') + (opt.affectedPeopleNote && !(assignedHit && /尚未排到個人/.test(opt.affectedPeopleNote)) ? `（${opt.affectedPeopleNote}）` : ''),
       needReplyText: (opt.needReply && opt.needReply.length) ? opt.needReply.join('、') : (areaDiffs.map((x) => x.area).join('、') || prop.area)
     };
   }
 
   /* ---------------- 寫入操作 ---------------- */
-  const stamp = (extra) => Object.assign({ by: me().uid, n: me().name, at: Date.now() }, extra || {});
+  const stamp = (extra) => Object.assign({ by: me().uid, n: String(me().name || '').slice(0, 40), at: Date.now() }, extra || {});
+  // logOp(area, msg, undoList)：undoList 為 mkUndo() 產生的陣列 [{p, v, a}]；舊版「路徑為鍵」的物件不再接受
   function logOp(area, msg, undo) {
     const id = store.pushId();
-    return { ['log/' + id]: { uid: me().uid, name: me().name, at: Date.now(), area, msg, undo: undo || null } };
+    const rec = { uid: me().uid, name: String(me().name || '').slice(0, 40), at: Date.now(), area: String(area || '').slice(0, 12), msg: String(msg || '').slice(0, 300) };
+    if (Array.isArray(undo) && undo.length) rec.undo = undo;
+    else if (undo && !Array.isArray(undo)) console.error('logOp：undo 必須是 mkUndo() 產生的陣列', undo);
+    return { ['log/' + id]: rec };
   }
+  // #11：送出後的每一筆變更各寫一個鍵 areas/{area}/changes/{id}（一人一筆，不再 read-modify-write）；
+  // 舊資料的數字 after 仍會計入。送出／確認／退回會整個覆寫 areas/{area}，changes 一併清空。
   function touchArea(area) {
     const a = (D().areas || {})[area];
-    return a && (a.status === 'submitted' || a.status === 'confirmed') ? { ['areas/' + area + '/after']: (a.after || 0) + 1 } : {};
+    return a && (a.status === 'submitted' || a.status === 'confirmed') && me()
+      ? { ['areas/' + area + '/changes/' + store.pushId()]: { at: Date.now(), by: String(me().name || '').slice(0, 40) } } : {};
+  }
+  function afterCount(area) {
+    const a = (D().areas || {})[area] || {};
+    return (+a.after || 0) + Object.keys(a.changes && typeof a.changes === 'object' ? a.changes : {}).length;
   }
   function addPerson(kind, key, pid, area, label) {
     const p = M.pById[pid];
-    const pre = isAdmin() && !(memberOf(area) && memberOf(area).status === 'ok') && AREAS.includes(area);
+    if (!p) return;
+    if (kind === 'assign' && M.byId[key] && M.byId[key].cancel) return toast('這一格已取消，不能再排人');
+    const pre = isPreFor(area);
     const path = `${kind}/${key}/${pid}`;
-    store.update(Object.assign({ [path]: stamp(pre ? { pre: true } : null) }, logOp(area, `${label} ${pre ? '預排' : '加入'} ${p.n}`, { [path]: null }), touchArea(area)));
+    const up = { [path]: stamp(pre ? { pre: true } : null) };
+    store.update(Object.assign(up, logOp(area, `${label} ${pre ? '預排' : '加入'} ${p.n}`, mkUndo(up)), touchArea(area)));
     toast(pre ? `已預排 ${p.n}，等 ${area} 區長確認` : `已加入 ${p.n}`);
   }
+  // 組員離開某組時，同時清掉指向他的組長／禮節崗位（同一次原子寫入，#16）
+  function metaCleanup(gk, pid) {
+    const up = {}, meta = (D().groupMeta || {})[gk] || {};
+    if (meta.leadPid != null && +meta.leadPid === +pid) up[`groupMeta/${gk}/leadPid`] = null;
+    for (const post of RITUAL_POSTS) if (meta.posts && meta.posts[post] != null && +meta.posts[post] === +pid) up[`groupMeta/${gk}/posts/${post}`] = null;
+    return up;
+  }
   function removePerson(kind, key, pid, area, label) {
-    const p = M.pById[pid], path = `${kind}/${key}/${pid}`, prev = rec(kind, key, pid) || null;
-    store.update(Object.assign({ [path]: null }, logOp(area, `${label} 移出 ${p ? p.n : pid}`, { [path]: prev }), touchArea(area)));
+    const p = M.pById[pid], path = `${kind}/${key}/${pid}`;
+    const up = Object.assign({ [path]: null }, kind === 'groups' ? metaCleanup(key, pid) : {});
+    store.update(Object.assign(up, logOp(area, `${label} 移出 ${p ? p.n : pid}`, mkUndo(up)), touchArea(area)));
     toast(`已移出 ${p ? p.n : ''}`);
   }
+  // confirmPre 內含權限檢查（#6、C-05）：只有該區區長；六區以外單位總召可確認
   function confirmPre(kind, key, pid, area, label) {
-    const r = rec(kind, key, pid); if (!r) return;
-    const next = Object.assign({}, r); delete next.pre; next.okBy = me().name; next.okAt = Date.now();
-    store.update(Object.assign({ [`${kind}/${key}/${pid}`]: next }, logOp(area, `${label} 確認預排 ${M.pById[pid].n}`)));
+    if (!need(canConfirmPre(area), '預排必須由該區區長確認')) return false;
+    const r = rec(kind, key, pid); if (!r) return false;
+    const next = Object.assign({}, r); delete next.pre; next.okBy = String(me().name || '').slice(0, 40); next.okAt = Date.now();
+    const p = M.pById[pid];
+    store.update(Object.assign({ [`${kind}/${key}/${pid}`]: next }, logOp(area, `${label} 確認預排 ${p ? p.n : pid}`)));
     toast('已確認');
+    return true;
   }
   function seedDefaults() {
     const up = {
@@ -515,34 +708,81 @@
     }
     return store.update(up);
   }
+  /* 總召開 App 時自動檢查並補寫新規則依賴的節點（acl、leads、config）。
+   * acl/g/{gk}={a,k}、acl/s/{sid}={a}、acl/p/{pid}=區、leads/{uid}=true（目前任一區的區長）、config/autoApproveBind */
+  const adminSyncTried = new Set();
+  function expectedAdminNodes() {
+    const want = {};
+    for (const gm of BASE.groupsMeta) want['acl/g/' + gm.id] = { a: gm.area, k: kindOfGroup(gm.id) };
+    for (const s of M.slots) if (RE_SID.test(s.id)) want['acl/s/' + s.id] = { a: s.area };
+    for (const p of M.people) if (E.PERSON_AREAS.includes(p.a)) want['acl/p/' + p.id] = p.a;
+    const leads = {};
+    for (const a in D().members || {}) for (const uid in D().members[a] || {}) { const m = D().members[a][uid]; if (m && m.role === 'lead' && m.status === 'ok') leads[uid] = true; }
+    return { want, leads };
+  }
+  function adminSyncMap() {
+    if (!isAdmin() || !M || !(D().meta || {}).seeded) return null;
+    const up = {};
+    const { want, leads } = expectedAdminNodes();
+    const have = D().acl || {};
+    for (const p in want) if (!sameVal(getPath({ acl: have }, p), want[p])) up[p] = want[p];
+    for (const sec of ['g', 's', 'p']) for (const k in have[sec] || {}) if (!(('acl/' + sec + '/' + k) in want)) up['acl/' + sec + '/' + k] = null;
+    for (const uid in leads) if ((D().leads || {})[uid] !== true) up['leads/' + uid] = true;
+    for (const uid in D().leads || {}) if (!leads[uid]) up['leads/' + uid] = null;
+    if (typeof (D().config || {}).autoApproveBind !== 'boolean') up['config/autoApproveBind'] = CFG.autoApproveBind !== false;
+    return Object.keys(up).length ? up : null;
+  }
+  function ensureAdminNodes() {
+    if (store.mode === 'firebase' && (!store.authReady || !store.online)) return;
+    const up = adminSyncMap(); if (!up) return;
+    const sig = JSON.stringify(up);
+    if (adminSyncTried.has(sig)) return; // 同一份差異只送一次，避免權限錯誤時無限重送
+    adminSyncTried.add(sig);
+    setTimeout(() => store.update(up), 0);
+  }
 
   /* M8 姓名綁定、加入名冊、代管家人 */
+  // 同一名冊人員已被其他帳號綁定生效（#13）
+  const boundByOther = (pid) => Object.entries(D().users || {}).some(([uid, u]) => u && +u.pid === +pid && u.bindStatus === 'ok' && (!me() || uid !== me().uid));
   function bindPersonToMe(pid) {
     if (!me()) return toast('請先登入');
     const p = M.pById[+pid]; if (!p) return;
-    const okNow = autoApproveBind() || isAdmin() || isLead(p.a);
+    const dup = boundByOther(p.id);
+    const auto = autoApproveBind(), boss = isAdmin() || isLead(p.a);
+    const okNow = !dup && (auto || boss);
     const uid = me().uid;
     store.update({
       [`users/${uid}/pid`]: +pid,
       [`users/${uid}/bindStatus`]: okNow ? 'ok' : 'pending',
       [`users/${uid}/bindArea`]: p.a,
       [`users/${uid}/bindAt`]: Date.now(),
-      [`users/${uid}/bindOkBy`]: okNow ? (autoApproveBind() ? '測試期自動生效' : me().name) : null
+      [`users/${uid}/bindOkBy`]: okNow ? (boss ? String(me().name || '').slice(0, 40) : '測試期自動生效') : null
     });
-    toast(okNow ? `已綁定為 ${p.n}（${p.a}）` : `已送出「${p.n}」綁定申請，待 ${p.a} 區長確認`);
+    toast(dup ? `「${p.n}」已被其他帳號綁定，已送出申請，待 ${p.a} 區長確認` : okNow ? `已綁定為 ${p.n}（${p.a}）` : `已送出「${p.n}」綁定申請，待 ${p.a} 區長確認`);
+  }
+  // 新名冊編號：8 位數亂數（不與 data.js 1–377 衝突，兩人同時申請也不會撞號；寫入前再檢查一次）
+  function newPersonId() {
+    const used = (id) => !!(M.pById[id] || (D().addedPeople || {})[id]);
+    for (let i = 0; i < 20; i++) {
+      const r = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 4294967296);
+      const id = 10000000 + (r % 89999999);
+      if (!used(id)) return id;
+    }
+    return 0;
   }
   function applyNewPerson(name, area, sx, note) {
     if (!me()) return toast('請先登入');
-    name = String(name || '').trim();
+    name = String(name || '').trim().slice(0, 20);
     if (!name) return toast('請輸入姓名');
-    const maxId = M.people.reduce((mx, p) => Math.max(mx, +p.id || 0), 0);
-    const newId = maxId + 1;
+    if (!E.PERSON_AREAS.includes(area)) area = '瑞芳';
+    const newId = newPersonId();
+    if (!newId) return toast('無法產生名冊編號，請稍後再試');
     const okNow = autoApproveBind() || isAdmin() || isLead(area);
     const uid = me().uid;
     const person = {
-      id: newId, n: name, a: area || '瑞芳', sx: sx || '', age: null,
-      src: 'N', lead: '', cg: [], cr: '', sg: '', li: '', zr: '', tr: '',
-      n115: 0, wd115: 0, cls: '', note: note || 'M8 申請加入名冊'
+      id: newId, n: name, a: area, sx: sx === '乾' || sx === '坤' ? sx : '',
+      src: 'N', note: String(note || 'M8 申請加入名冊').slice(0, 60),
+      status: okNow ? 'ok' : 'pending', by: uid, at: Date.now()
     };
     store.update(Object.assign({
       [`addedPeople/${newId}`]: person,
@@ -550,7 +790,7 @@
       [`users/${uid}/bindStatus`]: okNow ? 'ok' : 'pending',
       [`users/${uid}/bindArea`]: person.a,
       [`users/${uid}/bindAt`]: Date.now(),
-      [`users/${uid}/bindOkBy`]: okNow ? '測試期自動生效' : null
+      [`users/${uid}/bindOkBy`]: okNow ? (isAdmin() || isLead(area) ? String(me().name || '').slice(0, 40) : '測試期自動生效') : null
     }, logOp(person.a, `申請新增名冊與綁定：${name}`)));
     toast(okNow ? `已將 ${name} 加入名冊並綁定` : `已送出「${name}」加入名冊申請`);
   }
@@ -558,6 +798,13 @@
     if (!me()) return;
     const uid = me().uid, p = M.pById[+pid];
     if (!p) return;
+    // #26：代管家人只是自己的快捷清單（班表本來就公開、不含任何權限）；仍限制對象：不能是自己、不重複、最多 10 位
+    const bp = myBoundPerson(), fam = (myUserRec() || {}).family || {};
+    if (add) {
+      if (bp && bp.p && bp.p.id === p.id) return toast('這是您自己的姓名，不用加入代管');
+      if (fam[p.id]) return toast(`${p.n} 已經在代管清單`);
+      if (Object.keys(fam).length >= 10) return toast('代管家人最多 10 位');
+    }
     store.set(`users/${uid}/family/${pid}`, add ? { pid: +pid, n: p.n, a: p.a, at: Date.now() } : null);
     toast(add ? `已加入代管家人：${p.n}` : `已移除代管：${p.n}`);
   }
@@ -565,18 +812,22 @@
     const u = (D().users || {})[uid]; if (!u) return;
     const area = u.bindArea || '瑞芳';
     if (!need(isLead(area) || isAdmin())) return;
+    // 新名冊申請（addedPeople）一併核准或退回（#14）
+    const ap = u.pid && (D().addedPeople || {})[u.pid];
+    const apUp = ap && ap.status && ap.status !== (allow ? 'ok' : 'rejected') ? { [`addedPeople/${u.pid}/status`]: allow ? 'ok' : 'rejected' } : {};
+    const nm = String(me().name || '').slice(0, 40);
     if (allow) {
       store.update(Object.assign({
         [`users/${uid}/bindStatus`]: 'ok',
-        [`users/${uid}/bindOkBy`]: me().name,
+        [`users/${uid}/bindOkBy`]: nm,
         [`users/${uid}/bindOkAt`]: Date.now()
-      }, logOp(area, `確認 ${u.name} 綁定名冊姓名`)));
+      }, apUp, logOp(area, `確認 ${u.name} 綁定名冊姓名`)));
       toast('已確認姓名綁定');
     } else {
       store.update(Object.assign({
         [`users/${uid}/bindStatus`]: 'rejected',
-        [`users/${uid}/bindOkBy`]: me().name
-      }, logOp(area, `退回 ${u.name} 姓名綁定申請`)));
+        [`users/${uid}/bindOkBy`]: nm
+      }, apUp, logOp(area, `退回 ${u.name} 姓名綁定申請`)));
       toast('已退回綁定申請');
     }
   }
@@ -597,7 +848,7 @@
       fromNote = '115 年禮節經驗名單';
     }
     if (!ids.length) return toast('沒有可再帶入的人員');
-    const up = {}; for (const id of ids) up[`groups/${gk}/${id}`] = stamp();
+    const up = {}, pre = isPreFor(gm.area); for (const id of ids) up[`groups/${gk}/${id}`] = stamp(pre ? { pre: true } : null);
     store.update(Object.assign(up, logOp(gm.area, `${gm.name} 帶入${fromNote} ${ids.length} 人`), touchArea(gm.area)));
     toast(`已補上 ${ids.length} 人（${fromNote}）`);
   }
@@ -621,10 +872,17 @@
     if (!gmFrom || !gmTo || !p) return;
     if (!need(can(gmFrom.area, kindOfGroup(fromGk)) && can(gmTo.area, kindOfGroup(toGk)), '您沒有同時異動兩組的權限')) return;
     const prev = rec('groups', fromGk, pid) || null;
+    if (!prev) return toast(`${p.n} 不在 ${gmFrom.name}`);
+    if (rec('groups', toGk, pid)) return toast(`${p.n} 已經在 ${gmTo.name}，沒有移動`);
     const fromPath = `groups/${fromGk}/${pid}`, toPath = `groups/${toGk}/${pid}`;
+    // #5：保留原紀錄；原本是預排、或總召移入六區的組，都維持預排（不可繞過區長確認）
+    const keepPre = (prev && prev.pre) || isPreFor(gmTo.area);
+    const moved = Object.assign({}, prev, stamp());
+    if (keepPre) { moved.pre = true; delete moved.okBy; delete moved.okAt; } else delete moved.pre;
+    const up = Object.assign({ [fromPath]: null, [toPath]: moved }, metaCleanup(fromGk, pid));
     store.update(Object.assign(
-      { [fromPath]: null, [toPath]: stamp() },
-      logOp(gmFrom.area, `${p.n} 從 ${gmFrom.name} 移到 ${gmTo.name}`, { [fromPath]: prev, [toPath]: null }),
+      up,
+      logOp(gmFrom.area, `${p.n} 從 ${gmFrom.name} 移到 ${gmTo.name}`, mkUndo(up)),
       touchArea(gmFrom.area), touchArea(gmTo.area)
     ));
     UI.b6Mode = '';
@@ -634,6 +892,7 @@
   /* B4 帶入去年 & 系統建議補滿 */
   function bringLastYearSlot(sid) {
     const s = M.byId[sid]; if (!s || !need(can(s.area, 'jz'))) return;
+    if (s.cancel) return toast('這一格已取消，不能再排人');
     const cur = new Set(M.asg[sid].p), needN = E.slotNeed(M, s), left = Math.max(0, needN - cur.size);
     if (!left) return toast('這一格人數已達需求');
     const local = E.poolFor(M, s, false).filter((p) => !cur.has(p.id) && (s.cat.startsWith('忠恕') ? (p.zr || p.n115 > 0) : p.n115 > 0));
@@ -641,13 +900,14 @@
       .sort((a, b) => ((b.p.zr ? 1 : 0) - (a.p.zr ? 1 : 0)) || (b.p.n115 || 0) - (a.p.n115 || 0) || b.score - a.score);
     const pick = ranked.slice(0, left);
     if (!pick.length) return toast('去年有經驗且無衝突的人都在裡面了，請改用「系統建議補滿」');
-    const up = {}, undo = {}, label = slotName(s);
-    for (const ev of pick) { const path = `assign/${sid}/${ev.p.id}`; up[path] = stamp(); undo[path] = null; }
-    store.update(Object.assign(up, logOp(s.area, `${label} 帶入去年名單 ${pick.length} 人`, undo), touchArea(s.area)));
+    const up = {}, label = slotName(s), pre = isPreFor(s.area);
+    for (const ev of pick) up[`assign/${sid}/${ev.p.id}`] = stamp(pre ? { pre: true } : null);
+    store.update(Object.assign(up, logOp(s.area, `${label} 帶入去年名單 ${pick.length} 人`, mkUndo(up)), touchArea(s.area)));
     toast(`已帶入 ${pick.length} 人`);
   }
   function autoFillSlot(sid) {
     const s = M.byId[sid]; if (!s || !need(can(s.area, 'jz'))) return;
+    if (s.cancel) return toast('這一格已取消，不能再排人');
     const cur = new Set(M.asg[sid].p), needN = E.slotNeed(M, s);
     let left = Math.max(0, needN - cur.size);
     if (!left) return toast('這一格人數已滿');
@@ -670,9 +930,9 @@
       left--;
     }
     if (!chosen.length) return toast('目前本區沒有可無違規補入的候選人，請改用「找非本區人員」或手動排入');
-    const up = {}, undo = {}, label = slotName(s);
-    for (const p of chosen) { const path = `assign/${sid}/${p.id}`; up[path] = stamp(); undo[path] = null; }
-    store.update(Object.assign(up, logOp(s.area, `${label} 系統建議補滿 ${chosen.length} 人`, undo), touchArea(s.area)));
+    const up = {}, label = slotName(s), pre = isPreFor(s.area);
+    for (const p of chosen) up[`assign/${sid}/${p.id}`] = stamp(pre ? { pre: true } : null);
+    store.update(Object.assign(up, logOp(s.area, `${label} 系統建議補滿 ${chosen.length} 人`, mkUndo(up)), touchArea(s.area)));
     toast(`已依合適程度補入 ${chosen.length} 人`);
   }
 
@@ -681,8 +941,8 @@
     if (!me()) return toast('請先登入');
     const type = $('#npType').value;
     const sid = $('#npSlot').value;
-    const title = ($('#npTitle').value || '').trim();
-    const reason = ($('#npReason').value || '').trim();
+    const title = ($('#npTitle').value || '').trim().slice(0, 120);
+    const reason = ($('#npReason').value || '').trim().slice(0, 1000);
     const targetArea = $('#npTargetArea') ? $('#npTargetArea').value : '';
     const newDate = $('#npNewDate') ? $('#npNewDate').value : '';
     const newNeed = $('#npNewNeed') ? $('#npNewNeed').value : '';
@@ -706,13 +966,13 @@
       targetAreas: uniq([area, targetArea].filter(Boolean)),
       slotIds: s ? [s.id] : [],
       title, reason: reason || '區內討論提出調整',
-      byName: me().name, byUid: me().uid, at: Date.now(),
+      byName: String(me().name || '').slice(0, 40), byUid: me().uid, at: Date.now(),
       status: 'waiting', step: 3,
       options: [
         { id: 'A', label: labelA, changes: chA, needReply: targetArea ? [targetArea] : [area] },
         { id: 'B', label: '乙 維持原案，區內協調例外', changes: {}, needReply: [area] }
       ],
-      votes: { [area]: { st: '同意甲', by: me().name, at: Date.now() } },
+      votes: isLead(area) ? { [area]: { st: '同意甲', by: String(me().name || '').slice(0, 40), at: Date.now() } } : {},
       talk: {}
     };
     store.update(Object.assign({ ['proposals/' + id]: prop }, logOp(area, `提出調整提案 ${id}：${title}`)))
@@ -721,8 +981,10 @@
   }
   function addOptionToProposal(propId) {
     if (!me()) return toast('請先登入');
-    const pr = (D().proposals || {})[propId]; if (!pr) return;
-    const label = ($('#optLabel').value || '').trim();
+    const pr = propById(propId); if (!pr) return;
+    // 與規則一致：總召、提案人或排班人員可新增做法
+    if (!need(isAdmin() || pr.byUid === me().uid || isLead(pr.area), '只有提案人、提案所屬區的區長或總召可新增做法')) return;
+    const label = ($('#optLabel').value || '').trim().slice(0, 60);
     const sid = $('#optSlot') ? $('#optSlot').value : (pr.slotIds && pr.slotIds[0]) || '';
     const area = $('#optArea') ? $('#optArea').value : '';
     const date = $('#optDate') ? $('#optDate').value : '';
@@ -739,7 +1001,7 @@
       if (needVal) ch.need = +needVal;
       if (Object.keys(ch).length) changes[sid] = ch;
     }
-    const nextOpts = (pr.options || []).concat([{
+    const nextOpts = (Array.isArray(pr.options) ? pr.options : Object.values(pr.options || {})).concat([{
       id: letter, label: `${prefix} ${label}`, changes,
       needReply: uniq([area || pr.area].filter(Boolean))
     }]);
@@ -749,16 +1011,34 @@
   }
   function adoptProposalOption(propId, optId) {
     if (!need(isAdmin(), '決議套用到總表需由總召或調度台執行（區長請先在右側表態）')) return;
-    const pr = (D().proposals || {})[propId]; if (!pr) return;
-    const opt = (pr.options || []).find((o) => o.id === optId); if (!opt) return;
-    const up = {}, prevEdits = {}, prevExtra = {};
+    if (isPublished()) return toast('總表已定版，不能再採用提案；請先由總召取消定版');
+    const pr = propById(propId); if (!pr) return;
+    if (pr.status === 'resolved') return toast('這個提案已經決議過了');
+    const opt = (Array.isArray(pr.options) ? pr.options : Object.values(pr.options || {})).find((o) => o && o.id === optId); if (!opt) return;
+    // 高風險動作：先列出實際會改的內容（R-04、X-01）
+    const chLines = Object.keys(opt.changes || {}).map((sid) => { const s0 = M.byId[sid]; return `・${s0 ? slotName(s0) : sid}：${Object.entries(opt.changes[sid] || {}).map(([k, v]) => k + '=' + JSON.stringify(v)).join('、')}`; });
+    const exLines = Object.keys(opt.extraSlots || {}).map((eid) => { const x = opt.extraSlots[eid] || {}; return `・新增勤務 ${eid}：${x.d || ''} ${x.area || ''} ${x.cat || ''}`; });
+    const okVal = (v) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
+    const badKey = Object.keys(opt.changes || {}).some((sid) => !RE_SID.test(sid) || !opt.changes[sid] || typeof opt.changes[sid] !== 'object' || Object.keys(opt.changes[sid]).some((f) => !EDIT_FIELDS.includes(f) || !okVal(opt.changes[sid][f])))
+      || Object.keys(opt.extraSlots || {}).some((eid) => !RE_EXID.test(eid));
+    if (badKey) return toast('這個做法含有格式不正確的勤務格，無法套用');
+    if (!confirm(`採用「${opt.label}」並套用到總表？\n${chLines.concat(exLines).slice(0, 30).join('\n') || '（不改動任何勤務格）'}${chLines.length + exLines.length > 30 ? '\n…共 ' + (chLines.length + exLines.length) + ' 項' : ''}`)) return;
+    // #1／#9：逐欄寫入，並記下「動了哪些欄位（appliedEdits）」與「這些欄位原本的值（prevEdits，原本沒有的就不存）」；
+    // 還原時只處理 appliedEdits 內的欄位，且現值仍等於決議值才還原。RTDB 不存 null，所以不用 null 當記號。
+    const up = {}, prevEdits = {}, prevExtra = {}, appliedEdits = {}, appliedExtra = {};
     for (const sid in opt.changes || {}) {
-      prevEdits[sid] = (D().edits || {})[sid] || null;
-      up['edits/' + sid] = Object.assign({}, prevEdits[sid] || {}, opt.changes[sid]);
+      const cur = (D().edits || {})[sid] || {};
+      for (const f in opt.changes[sid]) {
+        up[`edits/${sid}/${f}`] = opt.changes[sid][f];
+        if (cur[f] !== undefined && cur[f] !== null) (prevEdits[sid] = prevEdits[sid] || {})[f] = cur[f];
+      }
+      appliedEdits[sid] = Object.assign({}, opt.changes[sid]);
     }
     for (const eid in opt.extraSlots || {}) {
-      prevExtra[eid] = (D().extra || {})[eid] || null;
-      up['extra/' + eid] = opt.extraSlots[eid];
+      const cur = (D().extra || {})[eid];
+      if (cur) prevExtra[eid] = cur;
+      appliedExtra[eid] = Object.assign({}, opt.extraSlots[eid], { id: eid });
+      up['extra/' + eid] = appliedExtra[eid];
     }
     const oldVer = draftVer(), newVer = nextDraftVer(oldVer);
     up['meta/version'] = newVer;
@@ -768,8 +1048,11 @@
     up[`proposals/${propId}/resolvedBy`] = me().name;
     up[`proposals/${propId}/resolvedAt`] = Date.now();
     up[`proposals/${propId}/prevVer`] = oldVer;
-    up[`proposals/${propId}/prevEdits`] = prevEdits;
-    up[`proposals/${propId}/prevExtra`] = prevExtra;
+    up[`proposals/${propId}/resolvedVer`] = newVer;
+    up[`proposals/${propId}/prevEdits`] = Object.keys(prevEdits).length ? prevEdits : null;
+    up[`proposals/${propId}/prevExtra`] = Object.keys(prevExtra).length ? prevExtra : null;
+    up[`proposals/${propId}/appliedEdits`] = Object.keys(appliedEdits).length ? appliedEdits : null;
+    up[`proposals/${propId}/appliedExtra`] = Object.keys(appliedExtra).length ? appliedExtra : null;
     const tid = store.pushId();
     up[`proposals/${propId}/talk/${tid}`] = {
       who: '系統', area: '系統', at: Date.now(),
@@ -778,18 +1061,46 @@
     store.update(Object.assign(up, logOp(pr.area || '總召', `決議套用提案 ${propId}（${opt.label}），升版為 ${newVer}`)));
     toast(`已套用到總表（${newVer}）`);
   }
+  // 還原計畫：只回復該提案動過的欄位；現值仍等於決議值才還原，否則列為衝突（#9）
+  function revertPlan(pr) {
+    const opts = Array.isArray(pr.options) ? pr.options : Object.values(pr.options || {});
+    const opt = opts.find((o) => o && o.id === pr.chosen) || {};
+    const appE = pr.appliedEdits || opt.changes || {};   // 舊資料沒有 appliedEdits：由採用的做法推得
+    const appX = pr.appliedExtra || Object.fromEntries(Object.entries(opt.extraSlots || {}).map(([k, v]) => [k, Object.assign({}, v, { id: k })]));
+    const up = {}, lines = [], conflicts = [];
+    for (const sid in appE) {
+      if (!RE_SID.test(sid) || !appE[sid] || typeof appE[sid] !== 'object') continue;
+      const cur = (D().edits || {})[sid] || {}, prevCell = (pr.prevEdits || {})[sid] || {};
+      for (const f in appE[sid]) {
+        if (!EDIT_FIELDS.includes(f)) continue;
+        if (sameVal(cur[f], appE[sid][f])) { const pv = prevCell[f]; up[`edits/${sid}/${f}`] = pv === undefined ? null : pv; lines.push(`・${sid}.${f}：${pv === undefined ? '移除' : '恢復為 ' + JSON.stringify(pv)}`); }
+        else conflicts.push(`${sid}.${f}（現為 ${JSON.stringify(cur[f] === undefined ? null : cur[f])}）`);
+      }
+    }
+    for (const eid in appX) {
+      if (!RE_EXID.test(eid)) continue;
+      const cur = (D().extra || {})[eid];
+      if (sameVal(cur, appX[eid])) { const pv = (pr.prevExtra || {})[eid]; up['extra/' + eid] = pv || null; lines.push(`・新增勤務 ${eid}：${pv ? '恢復' : '移除'}`); }
+      else conflicts.push(`新增勤務 ${eid}（已被改過）`);
+    }
+    return { up, lines, conflicts };
+  }
   function revertProposal(propId) {
     if (!need(isAdmin(), '只有總召可還原決議')) return;
-    const pr = (D().proposals || {})[propId]; if (!pr || pr.status !== 'resolved') return;
-    const up = {};
-    for (const sid in pr.prevEdits || {}) up['edits/' + sid] = pr.prevEdits[sid];
-    for (const eid in pr.prevExtra || {}) up['extra/' + eid] = pr.prevExtra[eid];
-    if (pr.prevVer) up['meta/version'] = pr.prevVer;
+    if (isPublished()) return toast('總表已定版，不能還原決議；請先由總召取消定版');
+    const pr = propById(propId); if (!pr || pr.status !== 'resolved') return;
+    const plan = revertPlan(pr), up = plan.up;
+    if (!confirm(`還原提案 ${pr.id} 的決議？\n${plan.lines.slice(0, 20).join('\n') || '（沒有可還原的欄位）'}${plan.conflicts.length ? '\n\n以下欄位在決議後已被改過，會保留不動：\n' + plan.conflicts.slice(0, 10).join('\n') : ''}`)) return;
+    // 版號只往前走：若決議之後沒有別的升版，才回到決議前的版號；否則再升一版
+    const curVer = draftVer();
+    up['meta/version'] = (pr.resolvedVer && pr.prevVer && curVer === pr.resolvedVer) ? pr.prevVer : nextDraftVer(curVer);
     up[`proposals/${propId}/status`] = 'waiting';
     up[`proposals/${propId}/step`] = 3;
     up[`proposals/${propId}/chosen`] = null;
+    const tid = store.pushId();
+    up[`proposals/${propId}/talk/${tid}`] = { who: '系統', area: '系統', at: Date.now(), text: `${me().name} 還原了決議${plan.conflicts.length ? `（${plan.conflicts.length} 個欄位決議後已被改過，保留不動）` : ''}，版號 ${up['meta/version']}。` };
     store.update(Object.assign(up, logOp(pr.area || '總召', `還原提案 ${propId} 決議前狀態`)));
-    toast('已還原決議前版本');
+    toast(plan.conflicts.length ? `已還原，但有 ${plan.conflicts.length} 個欄位已被改過而保留` : '已還原決議前版本');
   }
 
   /* 在線名單 */
@@ -810,31 +1121,39 @@
 
   /* ---------------- 各區統計 ---------------- */
   function areaStats(area) {
+    const allIss = [];
     const groups = areaGroups(area).map((gm) => {
-      const n = (E.getState().groups[gm.id] || []).length, gi = groupIssues(gm.id), iss = cnt(gi), clash = gi.filter(isClash).length;
-      const pre = Object.values((D().groups || {})[gm.id] || {}).filter((r) => r.pre).length;
+      // #12：組別不計每場的 P11（人數不足已有標籤），與依日期列口徑一致
+      const n = (E.getState().groups[gm.id] || []).length, gi = groupIssues(gm.id).filter((c) => c.rule !== 'P11'), iss = cnt(gi), clash = gi.filter(isClash).length;
+      allIss.push(...gi);
+      const pre = pidRecs((D().groups || {})[gm.id]).filter(([, r]) => r.pre).length;
       const lead = groupLead(gm.id);
       const posts = ((D().groupMeta || {})[gm.id] || {}).posts || {};
-      const postCnt = RITUAL_POSTS.filter((k) => posts[k]).length;
+      const memIds = E.getState().groups[gm.id] || [];
+      const postCnt = RITUAL_POSTS.filter((k) => posts[k] && memIds.includes(+posts[k])).length;
       return { gm, n, iss, pre, clash, lead, postCnt, done: n >= (gm.need || 1) && !clash && !pre };
     });
     const dated = areaDated(area).map((s) => {
       const si = slotIssuesOf(s.id).filter((c) => c.rule !== 'P11'), n = M.asg[s.id].p.length, need = E.slotNeed(M, s), iss = cnt(si), clash = si.filter(isClash).length;
-      const pre = Object.values((D().assign || {})[s.id] || {}).filter((r) => r.pre).length;
+      allIss.push(...si);
+      const pre = pidRecs((D().assign || {})[s.id]).filter(([, r]) => r.pre).length;
       const props = slotProps[s.id] || [];
       return { s, n, need, iss, pre, clash, props, done: n >= need && !clash && !pre };
     });
     const all = groups.concat(dated);
     const hasEdited = all.some((x) => x.n > 0) || Object.keys((D().members || {})[area] || {}).length > 0;
     const rawStatus = ((D().areas || {})[area] || {}).status;
+    // #8：區層級的違規／撞到以 issue key 去重（同一筆碰撞在組別與依日期各出現一次，只算一筆）
+    const uk = new Map(); for (const c of allIss) if (!uk.has(c.key)) uk.set(c.key, c);
+    const ul = [...uk.values()], uc = cnt(ul);
     return {
       groups, dated,
       gDone: groups.filter((x) => x.done).length, dDone: dated.filter((x) => x.done).length,
       short: dated.filter((x) => x.n < x.need).length + groups.filter((x) => x.n < (x.gm.need || 1)).length,
-      v: all.reduce((a, x) => a + x.iss.v, 0), n: all.reduce((a, x) => a + x.iss.n, 0),
-      pre: all.reduce((a, x) => a + x.pre, 0), clash: all.reduce((a, x) => a + x.clash, 0),
+      v: uc.v, n: uc.n,
+      pre: all.reduce((a, x) => a + x.pre, 0), clash: ul.filter(isClash).length,
       status: rawStatus || (hasEdited ? 'editing' : 'not_started'),
-      after: ((D().areas || {})[area] || {}).after || 0
+      after: afterCount(area)
     };
   }
   const ST_LABEL = { not_started: ['no', '還沒開始'], editing: ['wn', '區內排人中'], submitted: ['pl', '已送出'], confirmed: ['ok', '已確認'] };
@@ -846,15 +1165,16 @@
   }
   function accountBtn() {
     const u = me(), bp = myBoundPerson();
-    const label = u ? (bp && bp.p ? `${u.name}（${bp.p.n}）` : u.name || '我') : '';
-    const sync = store.mode === 'local' ? '本機試用' : !store.online ? `離線${store.pending ? ' · ' + store.pending + ' 筆待同步' : ''}` : store.pending ? `同步中 ${store.pending}` : '已同步';
+    const label = u ? (boundOk(bp) ? `${u.name}（${bp.p.n}）` : u.name || '我') : '';
+    const sync = (store.mode === 'local' ? '本機試用' : !store.online ? `離線${store.pending ? ' · ' + store.pending + ' 筆待同步' : ''}` : store.pending ? `同步中 ${store.pending}` : '已同步')
+      + (store.foreignPending ? ` · 另有 ${store.foreignPending} 筆其他帳號未送出` : '');
     return `<div class="top-r"><span class="sync ${store.online ? '' : 'off'}">${esc(sync)}</span>
       ${largeModeBtn()}
       ${u ? `<button class="btn sm" data-act="open-acct">${esc(label)}</button>` : `<a class="btn sm pri" href="#/login">登入 / 綁定</a>`}</div>`;
   }
   function topbar(title, sub, back, backLabel) {
     return `<header class="top">
-      ${back ? `<a class="back" href="${back}">${esc(backLabel || '← 返回')}</a>` : `<a class="back" href="#/">天達排班協作</a>`}
+      ${back ? `<a class="back" href="${esc(back)}">${esc(backLabel || '← 返回')}</a>` : `<a class="back" href="#/">天達排班協作</a>`}
       ${accountBtn()}
       <div class="ttl"><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div>
     </header>`;
@@ -954,11 +1274,13 @@
         ${store.mode === 'local' || isAdmin() ? `<button class="btn pri" data-act="seed">初始化 116 年資料</button>` : `<div class="muted">請總召或調度台登入後初始化。</div>`}</section>`;
     }
     if (me()) {
-      const bindLine = bp && bp.p
+      const bindLine = bp && bp.p && bp.status === 'rejected'
+        ? `綁定「${esc(bp.p.n)}」的申請${tag('bad', '已被退回')}<span class="muted small">請重新綁定或洽區長</span>`
+        : bp && bp.p
         ? `已綁定：<b>${esc(bp.p.n)}</b>（${esc(bp.p.a)}）${bp.status === 'pending' ? tag('wn', '待區長確認') : tag('ok', '已生效')}`
         : `尚未綁定名冊姓名 ${tag('wn', '點此綁定')}`;
       notices += `<section class="card"><div class="row-h"><span>${bindLine}</span>
-        <div class="acts">${bp && bp.p ? `<button class="btn sm pri-out" data-act="person" data-pid="${bp.p.id}">看我的班表</button>` : ''}<button class="btn sm" data-act="open-acct">帳號與綁定 (M8)</button></div></div>
+        <div class="acts">${boundOk(bp) || (bp && bp.p && bp.status === 'pending') ? `<button class="btn sm pri-out" data-act="person" data-pid="${+bp.p.id}">看我的班表</button>` : ''}<button class="btn sm" data-act="open-acct">帳號與綁定 (M8)</button></div></div>
         ${!mine.length && !isAdmin() ? `<div class="muted small">您還不是任何一區的排班人員：可先瀏覽，或到自己的區按「申請成為排班人員」。</div>` : ''}</section>`;
     } else {
       notices += `<section class="card"><div class="row-h"><div><b>尚未登入</b><div class="muted small">登入並綁定姓名後可排本區名單、提案表態、代管家人。</div></div>
@@ -1035,7 +1357,7 @@
     return hits.map((p) => {
       const gs = (M.personGroups[p.id] || []).map((g) => gmOf(g).name).join('、');
       return `<div class="bind-hit"><div><b>${esc(p.n)}　${esc(p.a)}</b><div class="muted small">${esc(roleOf(p) || '道親')}${gs ? ' · ' + esc(gs) : ''}</div></div>
-        <button class="btn sm pri" data-act="bind-me" data-pid="${p.id}">這是我</button></div>`;
+        <button class="btn sm pri" data-act="bind-me" data-pid="${+p.id}">這是我</button></div>`;
     }).join('') || (q ? '<div class="muted small">名冊找不到這個名字？可於下方申請加入名冊。</div>' : '');
   }
   function renderFamHits() {
@@ -1052,16 +1374,16 @@
     return `<section class="card">
       <div class="row-h"><h2>第一次登入：找到自己的名字 (M8)</h2>${tag(isAuto ? 'ok' : 'wn', isAuto ? '測試期：立即生效' : '正式期：需區長確認')}</div>
       ${bp && bp.p ? `<div class="bind-hit on"><div><b>${esc(bp.p.n)}　${esc(bp.p.a)}</b><div class="muted small">${esc(roleOf(bp.p) || '道親')} · ${esc((M.personGroups[bp.p.id] || []).map((g) => gmOf(g).name).join('、') || '尚未入組')}</div></div>
-        ${tag(bp.status === 'ok' ? 'ok' : 'wn', bp.status === 'ok' ? '已綁定' : '待區長確認')}</div>` : ''}
+        ${bp.status === 'ok' ? tag('ok', '已綁定') : bp.status === 'rejected' ? tag('bad', '已被退回，請重新綁定') : tag('wn', '待區長確認')}</div>` : ''}
       <label>搜尋姓名<input id="bindQ" type="search" value="${esc(UI.bindQ)}" data-input="bindQ" placeholder="輸入名字（例如：許明德）"></label>
       <div id="bindHits" class="list">${renderBindHits()}</div>
       <div class="muted small">送出後${isAuto ? '（測試期間立即生效，完工後恢復由小組長或區長確認）' : '由您的小組長或區長確認，確認前可先瀏覽班表'}。
-        <button class="link" data-act="toggle-auto-bind">${isAuto ? '切換為正式審核測試' : '切換為測試立即生效'}</button></div>
+        ${isAdmin() ? `<button class="link" data-act="toggle-auto-bind">${isAuto ? '總召：改為正式審核' : '總召：改為測試期立即生效'}</button>` : ''}</div>
       <details><summary>名冊上找不到名字？申請加入名冊</summary>
         <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">
           <div class="grid2">
             <label>姓名<input id="newPerName" type="text" placeholder="請輸入姓名"></label>
-            <label>所屬區<select id="newPerArea">${E.PERSON_AREAS.map((a) => `<option>${a}</option>`).join('')}</select></label>
+            <label>所屬區<select id="newPerArea">${E.PERSON_AREAS.map((a) => `<option>${esc(a)}</option>`).join('')}</select></label>
           </div>
           <div class="grid2">
             <label>乾／坤<select id="newPerSx"><option value="">未指定</option><option>乾</option><option>坤</option></select></label>
@@ -1075,7 +1397,7 @@
       <h2>代管家人（沒有手機的家人）</h2>
       <div class="muted small">加入後可替家人看全年班表、回覆出席或請假。</div>
       ${fam.map((f) => `<div class="bind-hit"><div><b>${esc(f.n)}</b> <span class="muted small">${esc(f.a)}</span></div>
-        <div class="acts"><button class="btn sm" data-act="person" data-pid="${f.pid}">看班表</button><button class="btn sm" data-act="rm-fam" data-pid="${f.pid}">移除</button></div></div>`).join('') || '<div class="muted small">尚未加入代管家人</div>'}
+        <div class="acts"><button class="btn sm" data-act="person" data-pid="${+f.pid || ''}">看班表</button><button class="btn sm" data-act="rm-fam" data-pid="${+f.pid || ''}">移除</button></div></div>`).join('') || '<div class="muted small">尚未加入代管家人</div>'}
       <label>搜尋家人姓名<input id="famQ" type="search" value="${esc(UI.famQ)}" data-input="famQ" placeholder="輸入家人名字"></label>
       <div id="famHits">${renderFamHits()}</div>
     </section>`;
@@ -1127,7 +1449,7 @@
   function accountSheet() {
     if (!me()) return '';
     const isLg = typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('large-mode');
-    return `<div class="sheet-bg" data-act="close-acct"></div><aside class="sheet" role="dialog" aria-label="帳號與姓名綁定">
+    return `<div class="sheet-bg" data-act="close-acct"></div><aside class="sheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="帳號與姓名綁定">
       <div class="mem-h"><h2>${esc(me().name || '我')}</h2><span class="muted small">${esc(me().provider || '')}${isAdmin() ? ' · 總召/調度台' : ''}</span>
         <button class="btn sm" data-act="close-acct">關閉</button></div>
       <div class="bind-hit">
@@ -1143,8 +1465,8 @@
   function reminders(area, S) {
     const out = [];
     const preRows = [];
-    for (const g of S.groups) for (const pid in (D().groups || {})[g.gm.id] || {}) if (D().groups[g.gm.id][pid].pre) preRows.push({ href: '#/g/' + g.gm.id, t: `${g.gm.name}：${(M.pById[pid] || {}).n || pid}`, r: D().groups[g.gm.id][pid] });
-    for (const x of S.dated) for (const pid in (D().assign || {})[x.s.id] || {}) if (D().assign[x.s.id][pid].pre) preRows.push({ href: '#/s/' + x.s.id, t: `${slotName(x.s)}：${(M.pById[pid] || {}).n || pid}`, r: D().assign[x.s.id][pid] });
+    for (const g of S.groups) for (const [pid, rec] of pidRecs((D().groups || {})[g.gm.id])) if (rec.pre) preRows.push({ href: '#/g/' + g.gm.id, t: `${g.gm.name}：${(M.pById[+pid] || {}).n || pid}`, r: rec });
+    for (const x of S.dated) for (const [pid, rec] of pidRecs((D().assign || {})[x.s.id])) if (rec.pre) preRows.push({ href: '#/s/' + x.s.id, t: `${slotName(x.s)}：${(M.pById[+pid] || {}).n || pid}`, r: rec });
     if (preRows.length) out.push(`<div class="rem"><b>預排待區長確認 ${preRows.length} 筆</b>${preRows.slice(0, 4).map((r) => `<a href="${r.href}">${esc(r.t)}<span class="muted small">（${esc(r.r.n || '')} 預排）</span></a>`).join('')}</div>`);
     const pend = Object.entries((D().members || {})[area] || {}).filter(([, m]) => m.status === 'pending');
     const bindPend = Object.entries(D().users || {}).filter(([, u]) => u.bindStatus === 'pending' && u.bindArea === area);
@@ -1331,7 +1653,7 @@
       postsHtml = `<section class="card"><div class="row-h"><h2>辦道 6 大崗位指派</h2>
         ${canEdit ? `<button class="btn sm" data-act="auto-posts" data-gk="${gk}">依 115 經驗自動配崗</button>` : ''}</div>
         <div class="post-grid">${RITUAL_POSTS.map((post) => `<div class="post-item"><label>${esc(post)}</label>
-          <select ${canEdit ? '' : 'disabled'} data-act-change="set-post" data-gk="${gk}" data-post="${esc(post)}">${opts(posts[post])}</select></div>`).join('')}</div></section>`;
+          <select aria-label="${esc(post)}（${esc(gm.name)}）" ${canEdit ? '' : 'disabled'} data-act-change="set-post" data-gk="${gk}" data-post="${esc(post)}">${opts(posts[post])}</select></div>`).join('')}</div></section>`;
     }
 
     // 換小組長／移到別組子面板
@@ -1343,7 +1665,8 @@
           <div class="row-h"><b>${esc(p.n)}</b>${lead && lead.id === p.id ? tag('ok', '目前' + leadLabel) : ''}</div>
           <div class="muted small">${esc(roleOf(p) || '組員')}</div></button>`).join('')}</div>` : '<div class="muted small">請先加入組員</div>'}</section>`;
     } else if (canEdit && UI.b6Mode === 'move') {
-      const targets = BASE.groupsMeta.filter((g) => g.id !== gk && (g.area === area || g.cat === gm.cat));
+      // #25(c)：只列同類別（廚務／服務／禮節）且自己有權限的組
+      const targets = BASE.groupsMeta.filter((g) => g.id !== gk && (g.area === area || g.cat === gm.cat) && kindOfGroup(g.id) === kind && can(g.area, kindOfGroup(g.id)));
       subPanel = `<section class="card warnbox"><div class="row-h"><h2>將組員移到別組</h2><button class="btn sm" data-act="b6-mode" data-v="">取消</button></div>
         ${mem.length && targets.length ? `<div class="grid2">
           <label>選擇組員<select id="mvPid">${mem.map((p) => `<option value="${p.id}">${esc(p.n)}</option>`).join('')}</select></label>
@@ -1405,6 +1728,8 @@
     const local = E.poolFor(M, s, false);
     const preList = rows.filter((x) => x.r && x.r.pre);
     const leadEdit = isLead(area) || (isAdmin() && !AREAS.includes(area));
+    const cancelBox = s.cancel ? `<div class="card warnbox"><b>此日不需要（已取消）</b><div class="muted small">這一格已被取消，不列入任何檢查，也不能再排人。${A.length ? `目前還有 ${A.length} 位殘留人員，請移出。` : ''}</div>
+      ${A.length && canEdit ? `<button class="btn sm bad-out" data-act="slot-clear-all" data-sid="${esc(sid)}">全部移出</button>` : ''}</div>` : '';
 
     return `${wsHeader('area', 'b3', area)}<main class="wide-main">
       <div class="page-head">
@@ -1420,6 +1745,7 @@
       </div>
       <div class="split-grid">
         <div class="split-main">
+          ${cancelBox}
           ${ed.length ? `<div class="edbox">${avatars(ed)}<span>${esc(ed.map((u) => u.name).join('、'))} 也在排這一格。加的人會立刻出現，不會互相蓋掉。</span></div>` : ''}
           ${preList.length ? `<div class="pre-banner"><div><b>預排 ${preList.length} 人：</b>${esc(preList.map((x) => x.p.n).join('、'))}（總召或調度台先排的）。必須由區長確認或重排。</div>
             ${leadEdit ? `<div class="act-bar2"><button class="btn pri" data-act="pre-all-ok" data-sid="${sid}" data-area="${area}" data-label="${esc(label)}">全部確認</button>
@@ -1430,14 +1756,14 @@
             ${loud.map((x) => memberRow(x.p, x.r, x.iss, 'assign', sid, area, label, canEdit, [sid])).join('')}
             ${showQuiet ? quiet.map((x) => memberRow(x.p, x.r, x.iss, 'assign', sid, area, label, canEdit, [sid])).join('') : `<button class="btn wide" data-act="more">其餘 ${quiet.length} 人沒有問題，點開看全部</button>`}
             ${!A.length ? '<div class="empty">還沒有排人</div>' : ''}</section>
-          ${canEdit ? `<div class="act-bar2">
+          ${canEdit && !s.cancel ? `<div class="act-bar2">
             <button class="btn" data-act="slot-last-year" data-sid="${sid}">帶入去年名單</button>
             <button class="btn pri" data-act="slot-autofill" data-sid="${sid}">系統建議補滿</button>
           </div>
           <div class="muted small">沒有網路時照常可以排，連上後自動同步；同一個人被兩邊同時改到時，兩邊都看得到提示。</div>` : ''}
         </div>
         <aside class="split-side inspector" aria-label="候選人搜尋">
-          ${canEdit ? finder(area, inIds, 'assign', sid, label, (p) => evalInSlot(p, s), canEdit, local) : '<div class="empty">登入並取得本區排班權限後可從此處搜尋排入人員。</div>'}
+          ${s.cancel ? '<div class="empty">這一格已取消，不能再排入人員。</div>' : canEdit ? finder(area, inIds, 'assign', sid, label, (p) => evalInSlot(p, s), canEdit, local) : '<div class="empty">登入並取得本區排班權限後可從此處搜尋排入人員。</div>'}
         </aside>
       </div>
     </main>`;
@@ -1445,7 +1771,7 @@
 
   function renderApptHits(area) {
     const users = Object.entries(D().users || {}).filter(([uid, u]) => !((D().members || {})[area] || {})[uid] && UI.apptQ && (u.name || '').includes(UI.apptQ)).slice(0, 8);
-    return users.map(([uid, u]) => `<div class="cand"><div><b>${esc(u.name)}</b> <span class="muted small">${esc(u.provider || '')}</span></div><div class="acts"><button class="btn sm pri" data-act="appoint" data-area="${area}" data-uid="${uid}" data-role="sched">指定</button>${isAdmin() ? `<button class="btn sm" data-act="appoint" data-area="${area}" data-uid="${uid}" data-role="lead">設為區長</button>` : ''}</div></div>`).join('') || (UI.apptQ ? '<div class="empty">找不到，請對方先登入一次</div>' : '');
+    return users.map(([uid, u]) => `<div class="cand"><div><b>${esc(u.name)}</b> <span class="muted small">${esc(u.provider || '')}</span></div><div class="acts"><button class="btn sm pri" data-act="appoint" data-area="${area}" data-uid="${esc(uid)}" data-role="sched">指定</button>${isAdmin() ? `<button class="btn sm" data-act="appoint" data-area="${area}" data-uid="${esc(uid)}" data-role="lead">設為區長</button>` : ''}</div></div>`).join('') || (UI.apptQ ? '<div class="empty">找不到，請對方先登入一次</div>' : '');
   }
 
   /* ---------------- 畫面：B5 分工與送出 ---------------- */
@@ -1462,18 +1788,20 @@
     const bindPendHtml = boss && bindPends.length ? `<section class="card warnbox"><h2>待確認的姓名綁定（${bindPends.length}）</h2>
       ${bindPends.map(([uid, u]) => {
         const p = M.pById[+u.pid];
-        return `<div class="mem"><div class="mem-h"><b>${esc(u.name)}</b> <span class="muted small">申請綁定為「${esc(p ? p.n : u.pid)}」</span>
-          <div class="acts" style="margin-left:auto"><button class="btn sm pri" data-act="approve-bind" data-uid="${uid}" data-ok="1">同意</button><button class="btn sm" data-act="approve-bind" data-uid="${uid}" data-ok="0">不同意</button></div></div></div>`;
+        const ap = (D().addedPeople || {})[u.pid];
+        const note = (ap && ap.status === 'pending' ? '（新名冊申請）' : '') + (Object.entries(D().users || {}).some(([x, v]) => x !== uid && v && +v.pid === +u.pid && v.bindStatus === 'ok') ? '（此姓名已被其他帳號綁定）' : '');
+        return `<div class="mem"><div class="mem-h"><b>${esc(u.name)}</b> <span class="muted small">申請綁定為「${esc(p ? p.n : (ap ? ap.n : u.pid))}」${esc(note)}</span>
+          <div class="acts" style="margin-left:auto"><button class="btn sm pri" data-act="approve-bind" data-uid="${esc(uid)}" data-ok="1">同意</button><button class="btn sm" data-act="approve-bind" data-uid="${esc(uid)}" data-ok="0">不同意</button></div></div></div>`;
       }).join('')}</section>` : '';
 
     const row = ([uid, m]) => {
       const sc = m.scope ? KINDS.filter(([k]) => m.scope[k]).map(([, t]) => t).join('、') || '尚未勾選' : '全部可排';
       const on = present(area).some((u) => u.uid === uid);
-      const scopeBox = boss && m.role !== 'lead' && m.status === 'ok' ? `<details><summary>指定只排哪些</summary><div class="grid2">${KINDS.map(([k, t]) => `<label class="ck"><input type="checkbox" data-act-change="scope" data-area="${area}" data-uid="${uid}" data-k="${k}" ${!m.scope || m.scope[k] ? 'checked' : ''}> ${t}</label>`).join('')}</div><div class="muted small">全部勾選＝全部可排。</div></details>` : '';
+      const scopeBox = boss && m.role !== 'lead' && m.status === 'ok' ? `<details><summary>指定只排哪些</summary><div class="grid2">${KINDS.map(([k, t]) => `<label class="ck"><input type="checkbox" data-act-change="scope" data-area="${area}" data-uid="${esc(uid)}" data-k="${k}" ${!m.scope || m.scope[k] ? 'checked' : ''}> ${t}</label>`).join('')}</div><div class="muted small">全部勾選＝全部可排。</div></details>` : '';
       return `<div class="mem"><div class="mem-h"><b>${esc(m.name)}</b>${tag('no', m.role === 'lead' ? '區長' : '排班人員')}${m.status === 'pending' ? tag('wn', '申請中') : ''}${on ? tag('ok', '作業中') : ''}
-        ${boss && m.status === 'pending' ? `<button class="btn sm pri" data-act="approve" data-area="${area}" data-uid="${uid}">同意</button>` : ''}
-        ${boss && m.role !== 'lead' ? `<button class="btn sm" data-act="unmember" data-area="${area}" data-uid="${uid}">${m.status === 'pending' ? '不同意' : '取消'}</button>` : ''}
-        ${isAdmin() && m.role === 'lead' ? `<button class="btn sm" data-act="unmember" data-area="${area}" data-uid="${uid}">取消區長</button>` : ''}</div>
+        ${boss && m.status === 'pending' ? `<button class="btn sm pri" data-act="approve" data-area="${area}" data-uid="${esc(uid)}">同意</button>` : ''}
+        ${boss && m.role !== 'lead' ? `<button class="btn sm" data-act="unmember" data-area="${area}" data-uid="${esc(uid)}">${m.status === 'pending' ? '不同意' : '取消'}</button>` : ''}
+        ${isAdmin() && m.role === 'lead' ? `<button class="btn sm" data-act="unmember" data-area="${area}" data-uid="${esc(uid)}">取消區長</button>` : ''}</div>
         <div class="muted small">${m.role === 'lead' ? '排班人員（預設）· 全部可排；可送出' : esc(sc)}${m.by ? ` · ${esc(m.by)} 指定` : ''}</div>${scopeBox}</div>`;
     };
     const appoint = boss ? `<section class="card"><h2>指定排班人員</h2><div class="muted small">對方要先登入過一次，才找得到。也可以請他在本區頁面按「申請成為排班人員」。</div>
@@ -1481,7 +1809,7 @@
       <div id="appt">${renderApptHits(area)}</div></section>` : '';
     const logs = Object.entries(D().log || {}).filter(([, l]) => l.area === area).sort((a, b) => b[1].at - a[1].at).slice(0, UI.showAll ? 60 : 8);
     const submit = isLead(area)
-      ? S.status === 'editing' || S.status === 'not_started' ? `<button class="btn pri big" data-act="submit" data-area="${area}">送出給總召確認</button>` : `<button class="btn" data-act="unsubmit" data-area="${area}">收回，繼續排</button>`
+      ? S.status === 'editing' || S.status === 'not_started' ? `<button class="btn pri big" data-act="submit" data-area="${area}">送出給總召確認</button>` : (S.status === 'confirmed' ? `<div class="muted small">總召已確認。要修改請聯絡總召退回。</div>` : `<button class="btn" data-act="unsubmit" data-area="${area}">收回，繼續排</button>`)
       : `<div class="muted small">只有區長能送出。</div>`;
     return `${wsHeader('area', 't', area)}<main class="wide-main">
       <div class="page-head">
@@ -1501,7 +1829,7 @@
           ${bindPendHtml}
           <section class="card members"><h2>本區排班人員</h2>${mems.map(row).join('') || '<div class="empty">還沒有排班人員。請調度台指定區長。</div>'}</section>
           ${appoint}
-          <section class="card"><h2>最近的改動</h2>${logs.map(([id, l]) => `<div class="logrow"><span class="num small">${ago(l.at)}</span> <b>${esc(l.name)}</b> ${esc(l.msg)}${l.undo && can(area, 'jz') && !l.undone ? ` <button class="link" data-act="undo" data-id="${id}">復原</button>` : l.undone ? ' <span class="muted small">已復原</span>' : ''}</div>`).join('') || '<div class="empty">還沒有改動</div>'}
+          <section class="card"><h2>最近的改動</h2>${logs.map(([id, l]) => `<div class="logrow"><span class="num small">${ago(l.at)}</span> <b>${esc(l.name)}</b> ${esc(l.msg)}${canUndo(l) ? ` <button class="link" data-act="undo" data-id="${esc(id)}">復原</button>` : l.undone ? ' <span class="muted small">已復原</span>' : ''}</div>`).join('') || '<div class="empty">還沒有改動</div>'}
             ${logs.length >= 8 && !UI.showAll ? `<button class="btn wide" data-act="more">看更多</button>` : ''}</section>
         </div>
         <aside class="split-side inspector" aria-label="送出確認">
@@ -1557,8 +1885,15 @@
     const shortSubmitted = rows.filter((x) => x.S.status === 'submitted' && x.S.short > 0);
     const afterChanges = rows.filter((x) => x.S.after > 0);
     const crossP3 = ISS.filter((c) => !c.accepted && c.rule === 'P3' && c.lvl === '違規' && c.slots.length >= 2 && (M.byId[c.slots[0]] && M.byId[c.slots[1]] && M.byId[c.slots[0]].area !== M.byId[c.slots[1]].area));
-    const acceptedAcks = Object.entries(D().acks || {}).filter(([, a]) => a.st === '接受例外');
+    const acceptedAcks = Object.entries(normAcks()).filter(([, a]) => a.st === '接受例外');
+    const issByKey = new Map(ISS.map((c) => [c.key, c]));
 
+    // #15：所屬區不在六區的綁定申請（天達、金門、青年班…）沒有區長，由總召在這裡確認
+    const orphanBinds = isAdmin() ? Object.entries(D().users || {}).filter(([, u]) => u && u.bindStatus === 'pending' && !AREAS.includes(u.bindArea)) : [];
+    const orphanHtml = orphanBinds.length ? `<section class="card warnbox"><h2>待確認的姓名綁定（無區長的單位，${orphanBinds.length}）</h2>
+      ${orphanBinds.map(([uid, u]) => { const p0 = M.pById[+u.pid], ap = (D().addedPeople || {})[u.pid];
+        return `<div class="mem"><div class="mem-h"><b>${esc(u.name)}</b> <span class="muted small">申請綁定為「${esc(p0 ? p0.n : (ap ? ap.n : u.pid))}」· ${esc(u.bindArea || '')}</span>
+        <div class="acts" style="margin-left:auto"><button class="btn sm pri" data-act="approve-bind" data-uid="${esc(uid)}" data-ok="1">同意</button><button class="btn sm" data-act="approve-bind" data-uid="${esc(uid)}" data-ok="0">不同意</button></div></div></div>`; }).join('')}</section>` : '';
     const flowHtml = `<ol class="flow-steps" aria-label="年度排班分工">
       <li class="flow-step"><div class="fs-d">總召、人資</div><div class="fs-t">1. 排到區並鎖定</div><div class="fs-d">哪一區、哪一天、哪一組</div></li>
       <li class="flow-step done"><div class="fs-d">各區</div><div class="fs-t">2. 區內排人</div><div class="fs-d">一開始只有區長能排；區長或調度台可再指定</div></li>
@@ -1586,7 +1921,7 @@
           <a class="btn pri" href="#/p">前往提案試算</a>
         </div>
       </div>
-      ${pickAreaBox}${remindBox}${flowHtml}${tbl}
+      ${pickAreaBox}${remindBox}${orphanHtml}${flowHtml}${tbl}
       <div class="split-grid">
         <div class="split-main">
           <section class="card">
@@ -1594,14 +1929,14 @@
             ${coord.map(([id, c]) => `<div class="coord-item">
               <div>${tag('bad', '區請協調')} <b class="c-${esc(c.area)}">${esc(c.area)}</b> <span class="muted small">${esc(c.name)} · ${ago(c.at)}</span>
                 <div><b>${esc(c.label)}</b>：${esc(c.msg)}</div></div>
-              <div class="muted small">${c.pid ? `<button class="link" data-act="person" data-pid="${c.pid}">看 ${(M.pById[c.pid] || {}).n || ''} 全年排班</button>` : ''}</div>
-              <div class="acts">${isAdmin() ? `<button class="btn sm pri" data-act="coord-done" data-id="${id}">標為已處理</button>` : ''}</div>
+              <div class="muted small">${+c.pid ? `<button class="link" data-act="person" data-pid="${+c.pid}">看 ${esc((M.pById[+c.pid] || {}).n || '')} 全年排班</button>` : ''}</div>
+              <div class="acts">${isAdmin() ? `<button class="btn sm pri" data-act="coord-done" data-id="${esc(id)}">標為已處理</button>` : ''}</div>
             </div>`).join('')}
             ${crossList.slice(0, UI.showAll ? 200 : 8).map((c) => `<div class="coord-item">
               <div>${tag('bad', '同一人在兩份名單')}<div style="font-weight:700;margin-top:4px">${esc(c.msg)}</div>
                 <div>${c.slots.map((sid) => { const s = M.byId[sid]; return s ? `<a class="small" href="${s.groupKey ? '#/g/' + s.groupKey : '#/s/' + sid}">${esc(s.area)} ${esc(s.groupKey ? gmOf(s.groupKey).name : s.cat)}</a>` : ''; }).join(' · ')}</div></div>
-              <div class="muted small">${c.pid ? `<button class="link" data-act="person" data-pid="${c.pid}">看全年排班</button>` : ''}</div>
-              <div class="acts">${isAdmin() ? `<button class="btn sm" data-act="ack-issue" data-key="${esc(c.key)}" data-msg="${esc(c.msg)}">接受為例外</button>` : ''}</div>
+              <div class="muted small">${c.pid ? `<button class="link" data-act="person" data-pid="${+c.pid}">看全年排班</button>` : ''}</div>
+              <div class="acts">${isAdmin() ? `<button class="btn sm" data-act="ack-issue" data-key="${esc(c.key)}">接受為例外</button>` : ''}</div>
             </div>`).join('')}
             ${shortSubmitted.map(({ a, S }) => `<div class="coord-item">
               <div>${tag('bad', '人數不足')}<div style="font-weight:700;margin-top:4px">${a} 送出時尚有 ${S.short} 格缺人</div><div class="muted small">已送出但缺額，建議向人均較低區域發支援請求</div></div>
@@ -1610,8 +1945,8 @@
             </div>`).join('')}
             ${crossP3.slice(0, 6).map((c) => `<div class="coord-item">
               <div>${tag('wn', '跨名單七天內重複')}<div style="font-weight:700;margin-top:4px">${esc(c.msg)}</div></div>
-              <div class="muted small">${c.slots.map((sid) => M.byId[sid] ? M.byId[sid].area : '').join('、')}</div>
-              <div class="acts">${c.pid ? `<button class="btn sm" data-act="person" data-pid="${c.pid}">逐筆檢視</button>` : ''}${isAdmin() ? `<button class="btn sm" data-act="ack-issue" data-key="${esc(c.key)}" data-msg="${esc(c.msg)}">接受為例外</button>` : ''}</div>
+              <div class="muted small">${esc(c.slots.map((sid) => M.byId[sid] ? M.byId[sid].area : '').join('、'))}</div>
+              <div class="acts">${c.pid ? `<button class="btn sm" data-act="person" data-pid="${+c.pid}">逐筆檢視</button>` : ''}${isAdmin() ? `<button class="btn sm" data-act="ack-issue" data-key="${esc(c.key)}">接受為例外</button>` : ''}</div>
             </div>`).join('')}
             ${afterChanges.map(({ a, S }) => `<div class="coord-item">
               <div>${tag('pl', '送出後變更')}<div style="font-weight:700;margin-top:4px">${a} 送出後又更動 ${S.after} 筆</div><div class="muted small">違規 ${S.v} · 注意 ${S.n}</div></div>
@@ -1621,10 +1956,13 @@
             ${!coord.length && !crossList.length && !shortSubmitted.length && !afterChanges.length && !crossP3.length ? '<div class="empty">目前沒有需要協調的事項</div>' : ''}
             ${crossList.length > 8 && !UI.showAll ? `<button class="btn wide" data-act="more">顯示全部碰撞（${crossList.length}）</button>` : ''}
             ${acceptedAcks.length ? `<details><summary>已接受為例外（${acceptedAcks.length}）</summary>
-              ${acceptedAcks.map(([k, v]) => `<div class="logrow">${esc(v.msg || k)} · ${esc(v.by || '')} ${isAdmin() ? `<button class="link" data-act="unack-issue" data-key="${esc(k)}">撤銷例外</button>` : ''}</div>`).join('')}</details>` : ''}
+              ${acceptedAcks.map(([k, v]) => `<div class="logrow">${esc(issByKey.has(k) ? issByKey.get(k).msg : '（此問題目前已不存在）')} · ${esc(v.by || '')} ${isAdmin() ? `<button class="link" data-act="unack-issue" data-key="${esc(k)}">撤銷例外</button>` : ''}</div>`).join('')}</details>` : ''}
           </section>
         </div>
         <aside class="split-side">
+          ${isAdmin() ? `<section class="card"><h2>姓名綁定審核方式 (M8)</h2>
+            <div class="muted small">目前：<b>${autoApproveBind() ? '測試期，綁定立即生效' : '正式審核，需區長或小組長確認'}</b>${typeof (D().config || {}).autoApproveBind === 'boolean' ? '' : '（資料庫尚未設定，暫用 config.js 預設）'}</div>
+            <button class="btn sm" data-act="toggle-auto-bind">${autoApproveBind() ? '改為正式審核' : '改為測試期立即生效'}</button></section>` : ''}
           <section class="card"><h2>檢查在哪裡出現</h2>
             <div class="kv-row"><b>區內規則</b><span class="muted">人數、個人上限、平日天數、暫停與不方便的月份：各區排的當下就看得到</span></div>
             <div class="kv-row"><b>跨區、跨名單</b><span class="muted">同一人在兩份名單、不同地點兼職、跨名單間隔：兩邊直接看得到對方內容，談不攏再請總召協調</span></div>
@@ -1670,10 +2008,10 @@
     // 1) 本區區級違規（如 12/11 明德班、2/27 內湖）
     const areaViols = ISS.filter((c) => !c.accepted && c.scope === '區' && c.lvl === '違規' && c.area === area);
     for (const c of areaViols) {
-      const relProp = Object.values(D().proposals || {}).find((p) => p.status !== 'resolved' && p.slotIds && c.slots.some((sid) => p.slotIds.includes(sid)));
+      const relProp = propList().find((p) => p.status !== 'resolved' && Array.isArray(p.slotIds) && c.slots.some((sid) => p.slotIds.includes(sid)));
       asks.push({
         cls: 'bad', tag: '同日衝突', t: c.msg, d: relProp ? `已有提案 ${relProp.id}：${relProp.title}` : '建議透過「提出調整」試算換區或換日方案。',
-        acts: relProp ? `<a class="btn sm blue-out" href="#/p/${relProp.id}">處理提案 ${relProp.id}</a>` : `<a class="btn sm blue-out" href="#/p/new?area=${area}&slot=${c.slots[0] || ''}&type=換區">提出調整</a>`
+        acts: relProp ? `<a class="btn sm blue-out" href="#/p/${encodeURIComponent(relProp.id)}">處理提案 ${esc(relProp.id)}</a>` : `<a class="btn sm blue-out" href="#/p/new?area=${area}&slot=${c.slots[0] || ''}&type=換區">提出調整</a>`
       });
     }
     // 2) 本區依日期勤務缺額且人力緊繃
@@ -1688,14 +2026,24 @@
         });
       }
     }
-    // 3) 預排待確認
-    for (const x of S.dated) for (const pid in (D().assign || {})[x.s.id] || {}) {
-      if (D().assign[x.s.id][pid].pre) {
-        const p = M.pById[pid];
+    // 3) 預排待確認（組別與依日期都要列，#10）
+    for (const g of S.groups) for (const [pid, rec] of pidRecs((D().groups || {})[g.gm.id])) {
+      if (rec.pre) {
+        const p = M.pById[+pid];
         asks.push({
-          cls: 'pre', tag: '預排', t: `調度台預排 ${p ? p.n : pid}，等區長確認`, d: `${slotName(x.s)}。只有區長能確認或重排。`,
-          acts: isLead(area) ? `<button class="btn sm pri" data-act="pre-ok" data-kind="assign" data-key="${x.s.id}" data-pid="${pid}" data-area="${area}" data-label="${esc(slotName(x.s))}">確認</button>
-            <button class="btn sm" data-act="rm" data-kind="assign" data-key="${x.s.id}" data-pid="${pid}" data-area="${area}" data-label="${esc(slotName(x.s))}">重排</button>` : `<a class="btn sm" href="#/s/${x.s.id}">查看</a>`
+          cls: 'pre', tag: '預排', t: `調度台預排 ${p ? p.n : +pid}，等區長確認`, d: `${g.gm.name}。只有區長能確認或重排。`,
+          acts: isLead(area) ? `<button class="btn sm pri" data-act="pre-ok" data-kind="groups" data-key="${esc(g.gm.id)}" data-pid="${+pid}" data-area="${area}" data-label="${esc(g.gm.name)}">確認</button>
+            <button class="btn sm" data-act="rm" data-kind="groups" data-key="${esc(g.gm.id)}" data-pid="${+pid}" data-area="${area}" data-label="${esc(g.gm.name)}">重排</button>` : `<a class="btn sm" href="#/g/${esc(g.gm.id)}">查看</a>`
+        });
+      }
+    }
+    for (const x of S.dated) for (const [pid, rec] of pidRecs((D().assign || {})[x.s.id])) {
+      if (rec.pre) {
+        const p = M.pById[+pid];
+        asks.push({
+          cls: 'pre', tag: '預排', t: `調度台預排 ${p ? p.n : +pid}，等區長確認`, d: `${slotName(x.s)}。只有區長能確認或重排。`,
+          acts: isLead(area) ? `<button class="btn sm pri" data-act="pre-ok" data-kind="assign" data-key="${esc(x.s.id)}" data-pid="${+pid}" data-area="${esc(area)}" data-label="${esc(slotName(x.s))}">確認</button>
+            <button class="btn sm" data-act="rm" data-kind="assign" data-key="${esc(x.s.id)}" data-pid="${+pid}" data-area="${esc(area)}" data-label="${esc(slotName(x.s))}">重排</button>` : `<a class="btn sm" href="#/s/${x.s.id}">查看</a>`
         });
       }
     }
@@ -1734,7 +2082,7 @@
     }).join('');
 
     // 相關提案
-    const relProps = Object.values(D().proposals || {}).filter((p) => p.area === area || (p.targetAreas || []).includes(area) || p.area === '總召')
+    const relProps = propList().filter((p) => p.area === area || (p.targetAreas || []).includes(area) || p.area === '總召')
       .sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0) || b.at - a.at);
 
     // 提名互動面板
@@ -1791,7 +2139,7 @@
           <section class="card"><h2>和本區有關的提案</h2>
             ${relProps.map((p) => {
               const stTag = p.status === 'resolved' ? tag('ok', '已決議') : p.status === 'waiting' ? tag('wn', '等待回覆') : tag('pl', '討論中');
-              return `<a class="mem" style="text-decoration:none;color:inherit" href="#/p/${p.id}">
+              return `<a class="mem" style="text-decoration:none;color:inherit" href="#/p/${encodeURIComponent(p.id)}">
                 <div class="row-h"><b>${esc(p.id)} ${esc(p.title)}</b>${stTag}</div>
                 <div class="muted small">${esc(p.byName)}提出 · ${esc(p.type)}</div></a>`;
             }).join('') || '<div class="empty">目前沒有相關提案</div>'}
@@ -1813,15 +2161,16 @@
   /* ---------------- 畫面：B2 調整提案與影響試算 ---------------- */
   function vProposal(arg) {
     if (!(D().meta || {}).seeded) return vHome();
-    const allProps = Object.values(D().proposals || {}).sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0) || b.at - a.at);
+    const allProps = propList().sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0) || b.at - a.at);
     const [rawId, qs] = (arg || '').split('?');
     const qParams = new URLSearchParams(qs || '');
 
     // 新增提案表單
     if (rawId === 'new') {
-      const defArea = qParams.get('area') || defaultArea();
-      const defSlot = qParams.get('slot') || '';
-      const defType = qParams.get('type') || '換區';
+      // 網址參數不可信：只接受已知的區、格、類型（X-02 反射式注入）
+      const defArea = WORK_AREAS.includes(qParams.get('area')) ? qParams.get('area') : defaultArea();
+      const defSlot = RE_SID.test(qParams.get('slot') || '') ? qParams.get('slot') : '';
+      const defType = PROPOSAL_TYPES.some(([t]) => t === qParams.get('type')) ? qParams.get('type') : '換區';
       const sObj = defSlot ? M.byId[defSlot] : null;
       const slotOpts = defArea
         ? M.slots.filter((s) => !s.cancel && s.area === defArea).concat(M.slots.filter((s) => !s.cancel && s.area !== defArea))
@@ -1847,7 +2196,11 @@
       </main>`;
     }
 
-    const pr = (rawId && (D().proposals || {})[rawId]) || (D().proposals || {}).D10 || allProps[0];
+    if (rawId && !propById(rawId)) {
+      return `${wsHeader('P', 'b2', defaultArea())}<main class="wide-main"><div class="page-head"><div><h1>找不到提案</h1><p class="muted">沒有編號為「${esc(rawId)}」的提案，可能已被刪除或網址有誤。</p></div></div>
+        <div class="acts"><a class="btn pri" href="#/p">回提案列表</a><a class="btn" href="#/p/new">＋ 提出新調整</a></div></main>`;
+    }
+    const pr = propById(rawId) || propById('D10') || allProps[0];
     if (!pr) return `${wsHeader('P', 'b2')}<main class="wide-main"><div class="empty">目前沒有提案，請按「提出新調整」。</div><a class="btn pri" href="#/p/new">＋ 提出新調整</a></main>`;
 
     const curStep = pr.step || (pr.status === 'resolved' ? 6 : 3);
@@ -1887,18 +2240,19 @@
         <label>改日期<input id="optDate" type="date"></label>
         <label>改需求人數<input id="optNeed" type="number" min="1" max="50"></label>
       </div>
-      <button class="btn blue" data-act="add-prop-opt" data-pid="${pr.id}">加入並重新試算</button>
+      <button class="btn blue" data-act="add-prop-opt" data-pid="${esc(pr.id)}">加入並重新試算</button>
     </section>` : '';
 
     // 相關區表態
     const replyAreas = uniq([pr.area].concat(pr.targetAreas || [], ['排班總召']).filter((a) => AREAS.includes(a) || a === '排班總召'));
     const votes = pr.votes || {};
-    const myVoteArea = isAdmin() ? '排班總召' : myAreas().find((a) => replyAreas.includes(a));
+    // #25(b)：表態代表全區，只有該區區長（總召代表「排班總召」）
+    const myVoteArea = isAdmin() ? '排班總召' : replyAreas.find((a) => AREAS.includes(a) && isLead(a));
     const talks = Object.entries(pr.talk || {}).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
 
     return `${wsHeader('P', 'b2', AREAS.includes(pr.area) ? pr.area : defaultArea())}<main class="wide-main">
       <div class="tabs-pill">
-        ${allProps.map((p) => `<a href="#/p/${p.id}" class="${p.id === pr.id ? 'on' : ''}">${esc(p.id)} ${esc(p.title.slice(0, 14))}${p.title.length > 14 ? '…' : ''}</a>`).join('')}
+        ${allProps.map((p) => `<a href="#/p/${encodeURIComponent(p.id)}" class="${p.id === pr.id ? 'on' : ''}">${esc(p.id)} ${esc(p.title.slice(0, 14))}${p.title.length > 14 ? '…' : ''}</a>`).join('')}
         <a href="#/p/new" style="border-color:var(--info);color:var(--info)">＋ 提出新調整</a>
       </div>
 
@@ -1908,7 +2262,7 @@
           <h1>${esc(pr.title)}</h1>
           <p class="muted" style="margin:4px 0 0">${esc(pr.byName)}提出 · 類型「${esc(pr.type)}」· 原因：${esc(pr.reason)}</p>
         </div>
-        <div class="acts">${stBadge}${pr.status === 'resolved' && isAdmin() ? `<button class="btn sm" data-act="revert-prop" data-pid="${pr.id}">還原決議前版本</button>` : ''}</div>
+        <div class="acts">${stBadge}${pr.status === 'resolved' && isAdmin() && !isPublished() ? `<button class="btn sm" data-act="revert-prop" data-pid="${esc(pr.id)}">還原決議前版本</button>` : ''}</div>
       </div>
 
       ${flowHtml}
@@ -1926,7 +2280,7 @@
               <div class="muted small">系統建議：${opts[bestIdx] ? esc(opts[bestIdx].label) : '—'}（衝突最少／無新增違規）</div>
               ${opts.map((o, idx) => `<div>${pr.status === 'resolved'
                 ? (pr.chosen === o.id ? tag('ok', '已採用') : tag('no', '未採用'))
-                : `<button class="btn sm ${idx === bestIdx ? 'blue' : ''}" data-act="adopt-prop" data-pid="${pr.id}" data-oid="${o.id}">採用${esc(o.label.slice(0, 1))}</button>`}</div>`).join('')}
+                : isAdmin() ? (isPublished() ? '<span class="muted small">已定版</span>' : `<button class="btn sm ${idx === bestIdx ? 'blue' : ''}" data-act="adopt-prop" data-pid="${esc(pr.id)}" data-oid="${esc(o.id)}">採用${esc(o.label.slice(0, 1))}</button>`) : ''}</div>`).join('')}
             </div>
           </div></div>
           ${addOptForm}
@@ -1934,7 +2288,7 @@
           <section class="card"><h2>討論</h2>
             ${talks.map(([, m]) => `<div class="talk-row"><div><b class="c-${esc(m.area)}">${esc(m.who)}</b><div class="muted small">${ago(m.at)}</div></div><div>${esc(m.text)}</div></div>`).join('') || '<div class="muted small">尚無留言</div>'}
             ${me() ? `<label>留言<textarea id="propTalkTxt" rows="2" placeholder="寫下本區的情況或條件"></textarea></label>
-              <button class="btn blue-out" style="align-self:flex-start" data-act="send-talk" data-pid="${pr.id}">送出留言</button>` : '<div class="muted small">登入後可留言</div>'}
+              <button class="btn blue-out" style="align-self:flex-start" data-act="send-talk" data-pid="${esc(pr.id)}">送出留言</button>` : '<div class="muted small">登入後可留言</div>'}
           </section>
         </div>
 
@@ -1952,9 +2306,9 @@
               <div class="acts">${opts.map((o) => {
                 const stTxt = `同意${o.label.slice(0, 1)}`;
                 const on = votes[myVoteArea] && votes[myVoteArea].st === stTxt;
-                return `<button class="btn sm ${on ? 'blue' : ''}" data-act="vote-prop" data-pid="${pr.id}" data-area="${esc(myVoteArea)}" data-st="${esc(stTxt)}">${esc(stTxt)}</button>`;
+                return `<button class="btn sm ${on ? 'blue' : ''}" data-act="vote-prop" data-pid="${esc(pr.id)}" data-area="${esc(myVoteArea)}" data-st="${esc(stTxt)}">${esc(stTxt)}</button>`;
               }).join('')}
-                <button class="btn sm ${votes[myVoteArea] && votes[myVoteArea].st === '待討論' ? 'warn' : ''}" data-act="vote-prop" data-pid="${pr.id}" data-area="${esc(myVoteArea)}" data-st="待討論">待討論</button></div>
+                <button class="btn sm ${votes[myVoteArea] && votes[myVoteArea].st === '待討論' ? 'warn' : ''}" data-act="vote-prop" data-pid="${esc(pr.id)}" data-area="${esc(myVoteArea)}" data-st="待討論">待討論</button></div>
             </div>` : ''}
             <div class="muted small">只有受影響的區需要回覆。</div>
           </section>
@@ -1982,16 +2336,16 @@
     const L = M.personSlots[pid] || [], iss = byPid[pid] || [], occ = E.occasions(L).length, cap = E.capOf(M, p);
     const o = (D().pov || {})[pid] || {};
     const editable = can(p.a, 'pov');
-    return `<div class="sheet-bg" data-act="close-person"></div><aside class="sheet" role="dialog" aria-label="${esc(p.n)} 的全年排班">
+    return `<div class="sheet-bg" data-act="close-person"></div><aside class="sheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="${esc(p.n)} 的全年排班">
       <div class="mem-h"><h2>${esc(p.n)}</h2><span class="muted">${esc(p.a)}${roleOf(p) ? ' · ' + esc(roleOf(p)) : ''}</span><button class="btn sm" data-act="close-person">關閉</button></div>
-      <div class="muted small">全年 ${occ} 次（上限 ${cap.max}）· 已排 ${L.length} 筆${p.off ? ' · 暫停排班' : ''}</div>
+      <div class="muted small">全年 ${occ} 次（上限 ${cap.max}）· 已排 ${L.length} 筆${p.off && (can(p.a, 'pov') || isAdmin()) ? ' · 暫停排班' : ''}</div>
       ${issueLines(iss, 6)}
       <h3>全年排班</h3>${otherWork(pid, [], null) || '<div class="empty">還沒有排班</div>'}
       ${editable ? `<h3>人員狀態（只有排班人員看得到）</h3>
-        <label class="ck"><input id="povOff" type="checkbox" data-act-change="pov-off" data-pid="${pid}" ${o.off ? 'checked' : ''}> 暫停排班</label>
-        <label>個人全年上限（次）<input id="povCap" type="number" min="0" max="30" value="${esc(o.cap || '')}" data-act-change="pov" data-pid="${pid}" data-k="cap"></label>
-        <label>不方便的月份（用空白分開，例：6 7 8）<input id="povMonths" type="text" value="${esc((o.months || []).join(' '))}" data-act-change="pov-months" data-pid="${pid}"></label>
-        <label>備註<input id="povNote" type="text" value="${esc(o.note || '')}" data-act-change="pov" data-pid="${pid}" data-k="note"></label>` : ''}
+        <label class="ck"><input id="povOff" type="checkbox" data-act-change="pov-off" data-pid="${+pid}" ${o.off ? 'checked' : ''}> 暫停排班</label>
+        <label>個人全年上限（次）<input id="povCap" type="number" min="0" max="30" value="${esc(o.cap || '')}" data-act-change="pov" data-pid="${+pid}" data-k="cap"></label>
+        <label>不方便的月份（用空白分開，例：6 7 8）<input id="povMonths" type="text" value="${esc((o.months || []).join(' '))}" data-act-change="pov-months" data-pid="${+pid}"></label>
+        <label>備註<input id="povNote" type="text" value="${esc(o.note || '')}" data-act-change="pov" data-pid="${+pid}" data-k="note"></label>` : ''}
     </aside>`;
   }
 
@@ -2005,25 +2359,72 @@
       draftVer, nextDraftVer,
       wsHeader, topbar, accountBtn, tag, esc, ago, dLabel, slotName, roleOf, cnt, isClash,
       toast, need, logOp, touchArea, stamp, addPerson, removePerson, confirmPre,
-      evalInSlot, evalInGroup, areaStats, areaMetrics, allAreaLoadRank, render
+      evalInSlot, evalInGroup, areaStats, areaMetrics, allAreaLoadRank, render,
+      // 階段 1 共用工具
+      isPreFor, canConfirmPre, isPublished, mkUndo, canPath, kindOfGroup, normAcks, autoApproveBind, afterCount
     };
   }
+  // 給 console.js 與後續階段使用的共用介面（同一組函式，與 consoleCtx() 相同來源）
+  window.TDApp = {
+    esc, isPreFor, canConfirmPre, confirmPre, logOp, mkUndo, isPublished, canPath, canUndo, normUndo, normAcks,
+    kindOfGroup, isAdmin, isLead, can, memberOf, autoApproveBind, adminSyncMap, sameVal, afterCount,
+    ctx: () => consoleCtx()
+  };
 
   let lastRoute = '';
   function route() {
     const raw = location.hash.replace(/^#\/?/, '');
     const qIdx = raw.indexOf('?');
-    const pathPart = decodeURIComponent(qIdx >= 0 ? raw.slice(0, qIdx) : raw);
+    let pathPart = '';
+    try { pathPart = decodeURIComponent(qIdx >= 0 ? raw.slice(0, qIdx) : raw); } catch (e) { pathPart = ''; } // #23：錯誤的編碼退回首頁
     const qs = qIdx >= 0 ? raw.slice(qIdx + 1) : '';
     const [v, ...rest] = (pathPart || '').split('/');
     return { v: v || '', arg: rest.join('/') + (qs ? '?' + qs : ''), pathArg: rest.join('/') };
   }
+  /* UI-01：重繪時保留焦點、select／輸入框的值、details 開合；他人 presence 心跳不重繪也不重算 */
+  function ctlKey(el) {
+    if (!el || !el.tagName) return '';
+    if (el.id) return '#' + el.id;
+    if (el.tagName === 'SUMMARY') return 'sum:' + (el.textContent || '').trim().slice(0, 40);
+    const ds = el.dataset || {}, ks = Object.keys(ds).sort();
+    if (!ks.length) return el.tagName === 'A' && el.getAttribute('href') ? 'a:' + el.getAttribute('href') : '';
+    return el.tagName + ':' + ks.map((k) => k + '=' + ds[k]).join('&');
+  }
+  function findByKey(root, key) {
+    if (!key) return null;
+    if (key[0] === '#') return document.getElementById(key.slice(1));
+    for (const el of root.querySelectorAll('button,select,input,textarea,a,summary')) if (ctlKey(el) === key) return el;
+    return null;
+  }
+  function presSig(r) {
+    let areas;
+    if (['a', 't', 'b1'].includes(r.v)) areas = [r.pathArg];
+    else if (r.v === 'g' && gmOf(r.pathArg)) areas = [gmOf(r.pathArg).area];
+    else if (r.v === 's' && M && M.byId[r.pathArg]) areas = [M.byId[r.pathArg].area];
+    else if (r.v === 'review') areas = WORK_AREAS;
+    else return '';
+    const now = Date.now(), out = [];
+    for (const a of areas) { const P = (D().presence || {})[a] || {}; for (const u in P) if (P[u] && now - P[u].at < 120000) out.push([a, u, P[u].where || '', P[u].name || ''].join('/')); }
+    return out.sort().join(',');
+  }
+  let lastViewSig = '', lastSheet = '', sheetTrigger = '';
+  const selectFocused = () => { const a = document.activeElement; return !!(a && a.tagName === 'SELECT' && a.closest && a.closest('#app')); };
+  // 資料庫／連線狀態有變時才重繪；只有 presence 心跳（在線名單沒變）就什麼都不做
+  function onStoreChange() {
+    if (!store.ready || !lastViewSig) return render();
+    if (dataSigs().view + '|' + presSig(route()) === lastViewSig) return;
+    if (isComposing || selectFocused()) { pendingRender = true; return; } // 正在輸入或操作下拉選單：等操作完再補繪
+    render();
+  }
+  function flushDeferred() { if (pendingRender && !isComposing) render(); }
   function render() {
     if (isComposing) { pendingRender = true; return; }
     pendingRender = false;
     const appEl = $('#app');
     if (!store.ready) { appEl.innerHTML = '<div class="empty">載入中…</div>'; return; }
-    recompute();
+    const sg = dataSigs();
+    recompute(false, sg);
+    ensureAdminNodes();
     const r = route(), key = r.v + '/' + r.pathArg;
     const routeChanged = key !== lastRoute;
     if (routeChanged) {
@@ -2034,14 +2435,15 @@
     }
     const C = window.TDConsole;
     appEl.className = '';
-    const ae = document.activeElement, keepId = ae && ae.id;
-    const draftVals = {};
+    const ae = document.activeElement, focusKey = ae && appEl.contains(ae) ? ctlKey(ae) : '';
+    const draftVals = {}, detailsState = [];
     if (!routeChanged && appEl.querySelectorAll) {
-      for (const el of appEl.querySelectorAll('input[id], textarea[id]')) {
+      for (const el of appEl.querySelectorAll('input[id], textarea[id], select[id]')) {
         if (el.type === 'checkbox' || el.type === 'radio' || (el.dataset && el.dataset.input)) continue;
         if (el.dataset && el.dataset.actChange && el !== ae) continue;
         draftVals[el.id] = el.value;
       }
+      for (const dt of appEl.querySelectorAll('details')) { const sm = dt.querySelector('summary'); detailsState.push([sm ? (sm.textContent || '').trim().slice(0, 40) : '', dt.open]); }
     }
     let pos = null, posEnd = null;
     try { if (ae && typeof ae.selectionStart === 'number') { pos = ae.selectionStart; posEnd = ae.selectionEnd; } } catch (e) { }
@@ -2057,19 +2459,37 @@
     else if (r.v === 't' && WORK_AREAS.includes(r.pathArg)) html = vTeam(r.pathArg);
     else if (r.v === 'review') html = vReview();
     else html = vHome();
-    appEl.innerHTML = html + globalBottomNav(r) + (UI.person ? personSheet(UI.person) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error ? `<div class="errbar">${esc(store.error)}</div>` : '');
+    const sheetNow = UI.person ? 'p' + UI.person : (UI.acctOpen && !['login', 'bind'].includes(r.v) && me() ? 'acct' : '');
+    appEl.innerHTML = html + globalBottomNav(r) + (UI.person ? personSheet(UI.person) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error || store.notice ? `<div class="errbar">${esc([store.error, store.notice].filter(Boolean).join('　'))}</div>` : '');
     for (const id in draftVals) {
       const el = document.getElementById(id);
-      if (el && el.value !== draftVals[id]) el.value = draftVals[id];
+      if (!el || el.value === draftVals[id]) continue;
+      if (el.tagName === 'SELECT' && ![...el.options].some((o) => o.value === draftVals[id])) continue; // 選項已不存在就不硬套
+      el.value = draftVals[id];
     }
-    if (keepId) {
-      const el = document.getElementById(keepId);
-      if (el) {
-        el.focus();
+    if (detailsState.length) {
+      const dts = appEl.querySelectorAll('details');
+      detailsState.forEach(([t, open], i) => { const dt = dts[i]; const sm = dt && dt.querySelector('summary'); if (dt && sm && (sm.textContent || '').trim().slice(0, 40) === t) dt.open = open; });
+    }
+    // UI-03：抽屜是模態對話框 — 背景 inert、開啟時焦點進抽屜、關閉後焦點回到觸發鈕
+    const sheetEl = appEl.querySelector('.sheet');
+    for (const ch of appEl.children) {
+      if (sheetEl && ch !== sheetEl && !ch.classList.contains('sheet-bg') && ch.id !== 'toast' && !ch.classList.contains('errbar')) ch.setAttribute('inert', '');
+    }
+    document.body.classList.toggle('sheet-open', !!sheetEl);
+    const sheetOpened = !!sheetEl && sheetNow !== lastSheet, sheetClosed = !sheetEl && !!lastSheet;
+    lastSheet = sheetEl ? sheetNow : '';
+    if (sheetOpened) { try { sheetEl.focus({ preventScroll: true }); } catch (e) { } }
+    else if (sheetClosed) { const tr = findByKey(appEl, sheetTrigger); if (tr) { try { tr.focus({ preventScroll: true }); } catch (e) { } } sheetTrigger = ''; }
+    else if (focusKey) {
+      const el = findByKey(appEl, focusKey);
+      if (el && !el.disabled) {
+        try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
         try { if (pos != null && el.setSelectionRange) el.setSelectionRange(pos, posEnd != null ? posEnd : pos); } catch (e) { }
       }
     }
     window.scrollTo(0, sc);
+    lastViewSig = sg.view + '|' + presSig(r);
   }
   function onEnter(r) {
     let area = '', where = '';
@@ -2088,8 +2508,11 @@
     if (a === 'seed') seedDefaults().then(() => toast('已帶入 115 年組別名單與初始提案'));
     else if (a === 'local-in') store.signIn(JSON.parse(d.who)).then(() => { location.hash = '#/'; });
     else if (a === 'in') store.signIn(d.kind).catch((e) => toast('登入沒有完成：' + (e.code || e.message)));
-    else if (a === 'signout') { UI.acctOpen = false; beat('', ''); store.signOut(); }
-    else if (a === 'open-acct') { UI.acctOpen = true; render(); }
+    else if (a === 'signout') {
+      if (store.pending && !confirm(`還有 ${store.pending} 筆改動尚未送到雲端，登出後要等這個帳號再登入才會送出。確定登出？`)) return;
+      UI.acctOpen = false; beat('', ''); store.signOut();
+    }
+    else if (a === 'open-acct') { if (!lastSheet) sheetTrigger = ctlKey(t); UI.acctOpen = true; render(); }
     else if (a === 'close-acct') { UI.acctOpen = false; render(); }
     else if (a === 'toggle-auto-bind') setAutoApproveBind(!autoApproveBind());
     else if (a === 'bind-me') bindPersonToMe(+d.pid);
@@ -2104,28 +2527,37 @@
     else if (a === 'filter') { UI.filter = d.v; render(); }
     else if (a === 'more') { UI.showAll = true; render(); }
     else if (a === 'out') { UI.out = d.v === '1'; UI.showAll = false; render(); const el = document.getElementById(UI.out ? 'outQ' : 'q'); if (el) el.focus(); }
-    else if (a === 'person') { UI.person = +d.pid; render(); }
+    else if (a === 'person') { if (!lastSheet) sheetTrigger = ctlKey(t); UI.person = +d.pid; render(); }
     else if (a === 'close-person') { UI.person = null; render(); }
-    else if (a === 'add') { if (need(can(d.area, d.kind === 'groups' ? kindOfGroup(d.key) : 'jz'))) addPerson(d.kind, d.key, +d.pid, d.area, d.label); }
-    else if (a === 'rm') { if (need(can(d.area, d.kind === 'groups' ? kindOfGroup(d.key) : 'jz'))) removePerson(d.kind, d.key, +d.pid, d.area, d.label); }
-    else if (a === 'pre-ok') { if (need(isLead(d.area) || (isAdmin() && !AREAS.includes(d.area)), '預排必須由區長確認')) confirmPre(d.kind, d.key, +d.pid, d.area, d.label); }
+    else if (a === 'add' || a === 'rm') {
+      // 區以資料為準（不信任按鈕上的 data-area）
+      const owner = d.kind === 'groups' ? gmOf(d.key) : d.kind === 'assign' ? M.byId[d.key] : null;
+      if (!owner || !(+d.pid > 0) || !M.pById[+d.pid] && a === 'add') return;
+      if (!need(can(owner.area, d.kind === 'groups' ? kindOfGroup(d.key) : 'jz'))) return;
+      if (a === 'add') addPerson(d.kind, d.key, +d.pid, owner.area, d.label); else removePerson(d.kind, d.key, +d.pid, owner.area, d.label);
+    }
+    else if (a === 'pre-ok') { const s0 = d.kind === 'groups' ? gmOf(d.key) : M.byId[d.key]; if (s0 && (d.kind === 'groups' || d.kind === 'assign')) confirmPre(d.kind, d.key, +d.pid, s0.area, d.label); }
     else if (a === 'pre-all-ok') {
-      if (!need(isLead(d.area) || isAdmin(), '預排必須由區長確認')) return;
+      const s0 = M.byId[d.sid]; if (!s0) return;
+      if (!need(canConfirmPre(s0.area), '預排必須由該區區長確認')) return;
       const up = {};
       for (const pid in (D().assign || {})[d.sid] || {}) {
         const r = D().assign[d.sid][pid];
-        if (r && r.pre) { const nx = Object.assign({}, r); delete nx.pre; nx.okBy = me().name; nx.okAt = Date.now(); up[`assign/${d.sid}/${pid}`] = nx; }
+        if (RE_PID.test(pid) && r && r.pre) { const nx = Object.assign({}, r); delete nx.pre; nx.okBy = String(me().name || '').slice(0, 40); nx.okAt = Date.now(); up[`assign/${d.sid}/${pid}`] = nx; }
       }
-      store.update(Object.assign(up, logOp(d.area, `${d.label} 確認全部預排`))); toast('已確認全部預排');
+      if (!Object.keys(up).length) return;
+      store.update(Object.assign(up, logOp(s0.area, `${slotName(s0)} 確認全部預排`))); toast('已確認全部預排');
     }
     else if (a === 'pre-all-rm') {
-      if (!need(isLead(d.area) || isAdmin())) return;
-      const up = {}, undo = {};
+      const s0 = M.byId[d.sid]; if (!s0) return;
+      if (!need(isLead(s0.area) || isAdmin())) return;
+      const up = {};
       for (const pid in (D().assign || {})[d.sid] || {}) {
         const r = D().assign[d.sid][pid];
-        if (r && r.pre) { const path = `assign/${d.sid}/${pid}`; up[path] = null; undo[path] = r; }
+        if (RE_PID.test(pid) && r && r.pre) up[`assign/${d.sid}/${pid}`] = null;
       }
-      store.update(Object.assign(up, logOp(d.area, `${d.label} 移出全部預排`, undo), touchArea(d.area))); toast('已移出預排人員');
+      if (!Object.keys(up).length) return;
+      store.update(Object.assign(up, logOp(s0.area, `${slotName(s0)} 移出全部預排`, mkUndo(up)), touchArea(s0.area))); toast('已移出預排人員');
     }
     else if (a === 'last-year') bringLastYearGroup(d.gk);
     else if (a === 'auto-posts') autoAssignRitualPosts(d.gk);
@@ -2133,21 +2565,38 @@
     else if (a === 'set-lead') {
       const gm = gmOf(d.gk), p = M.pById[+d.pid];
       if (!gm || !p || !need(can(gm.area, kindOfGroup(d.gk)))) return;
-      store.update(Object.assign({ [`groupMeta/${d.gk}/leadPid`]: +d.pid }, logOp(gm.area, `${gm.name} 改由 ${p.n} 帶隊`)));
+      const up = { [`groupMeta/${d.gk}/leadPid`]: +d.pid };
+      store.update(Object.assign(up, logOp(gm.area, `${gm.name} 改由 ${p.n} 帶隊`, mkUndo(up)), touchArea(gm.area)));
       UI.b6Mode = ''; toast(`已設定 ${p.n} 帶隊`);
     }
     else if (a === 'move-mem') moveGroupMember(d.gk, $('#mvToGk').value, $('#mvPid').value);
+    else if (a === 'slot-clear-all') {
+      const s0 = M.byId[d.sid]; if (!s0 || !need(can(s0.area, 'jz'))) return;
+      const up = {}; for (const pid in (D().assign || {})[d.sid] || {}) if (RE_PID.test(pid)) up[`assign/${d.sid}/${pid}`] = null;
+      if (!Object.keys(up).length) return;
+      store.update(Object.assign(up, logOp(s0.area, `${slotName(s0)}（已取消）移出全部殘留人員`, mkUndo(up)), touchArea(s0.area))); toast('已移出殘留人員');
+    }
     else if (a === 'slot-last-year') bringLastYearSlot(d.sid);
     else if (a === 'slot-autofill') autoFillSlot(d.sid);
     else if (a === 'coord') {
+      if (!me()) return toast('請先登入');
+      if (!WORK_AREAS.includes(d.area) || !(+d.pid > 0)) return;
       const id = store.pushId();
-      store.update(Object.assign({ ['coord/' + id]: { area: d.area, pid: +d.pid, label: d.label, msg: d.msg, uid: me().uid, name: me().name, at: Date.now(), st: 'open' } }, logOp(d.area, `${d.label} 請總召協調：${d.msg}`)));
+      const label = String(d.label || '').slice(0, 120), msg = String(d.msg || '').slice(0, 300);
+      store.update(Object.assign({ ['coord/' + id]: { area: d.area, pid: +d.pid, label, msg, uid: me().uid, name: String(me().name || '').slice(0, 40), at: Date.now(), st: 'open' } }, logOp(d.area, `${label} 請總召協調：${msg}`)));
       toast('已送給總召');
     }
-    else if (a === 'coord-done') { if (need(isAdmin())) store.update({ [`coord/${d.id}/st`]: 'done', [`coord/${d.id}/doneBy`]: me().name }); }
-    else if (a === 'ack-issue') { if (need(isAdmin())) { store.set(`acks/${d.key}`, { st: '接受例外', by: me().name, at: Date.now(), msg: d.msg }); toast('已標記為接受例外'); } }
-    else if (a === 'unack-issue') { if (need(isAdmin())) { store.set(`acks/${d.key}`, null); toast('已撤銷例外'); } }
-    else if (a === 'clear-after') { if (need(isAdmin())) { store.set(`areas/${d.area}/after`, 0); toast(`已標記 ${d.area} 送出後變更為已看`); } }
+    else if (a === 'coord-done') { if (need(isAdmin()) && RE_SID.test(d.id || '')) store.update({ [`coord/${d.id}/st`]: 'done', [`coord/${d.id}/doneBy`]: String(me().name || '').slice(0, 40) }); }
+    // acks 只存 {st, by, at}，訊息由 engine 即時產生（P-02）
+    else if (a === 'ack-issue') { if (need(isAdmin()) && RE_ACK.test(d.key || '')) { store.set(`acks/${d.key}`, { st: '接受例外', by: String(me().name || '').slice(0, 40), at: Date.now() }); toast('已標記為接受例外'); } }
+    else if (a === 'unack-issue') {
+      if (!need(isAdmin()) || !RE_ACK.test(d.key || '')) return;
+      // 舊資料的鍵含「.」：一併刪除
+      const up = { [`acks/${d.key}`]: null };
+      for (const k in D().acks || {}) if (k !== d.key && E.normAckKey(k) === d.key && !/[.#$\[\]\/]/.test(k)) up['acks/' + k] = null;
+      store.update(up); toast('已撤銷例外');
+    }
+    else if (a === 'clear-after') { if (need(isAdmin())) { store.update({ [`areas/${d.area}/after`]: 0, [`areas/${d.area}/changes`]: null }); toast(`已標記 ${d.area} 送出後變更為已看`); } }
     else if (a === 'toggle-a6-remind') { UI.a6RemindOpen = !UI.a6RemindOpen; render(); }
     else if (a === 'toggle-a6-pick') { UI.a6PickAreaOpen = !UI.a6PickAreaOpen; render(); }
     else if (a === 'copy-remind') { if (navigator.clipboard) navigator.clipboard.writeText(d.text).catch(() => {}); toast('已複製提醒訊息'); }
@@ -2155,7 +2604,8 @@
     else if (a === 'close-nom') { UI.b1NomOpen = false; render(); }
     else if (a === 'save-nom') {
       if (!need(isLead(d.area) || isAdmin())) return;
-      store.update(Object.assign({ [`nominations/${d.area}`]: { leads: $('#nomLeads').value.trim(), cooks: $('#nomCooks').value.trim(), updatedBy: me().name, updatedAt: Date.now() } },
+      if (!AREAS.includes(d.area)) return;
+      store.update(Object.assign({ [`nominations/${d.area}`]: { leads: $('#nomLeads').value.trim().slice(0, 500), cooks: $('#nomCooks').value.trim().slice(0, 500), updatedBy: String(me().name || '').slice(0, 40), updatedAt: Date.now() } },
         logOp(d.area, `更新帶隊人與儲備廚師提名`)));
       UI.b1NomOpen = false; toast('已儲存提名');
     }
@@ -2166,39 +2616,80 @@
     else if (a === 'revert-prop') revertProposal(d.pid);
     else if (a === 'send-talk') {
       if (!me()) return toast('請先登入');
+      if (!propById(d.pid)) return;
       const el = $('#propTalkTxt');
-      const txt = (el && el.value || '').trim(); if (!txt) return toast('請輸入留言內容');
+      const txt = (el && el.value || '').trim().slice(0, 1000); if (!txt) return toast('請輸入留言內容');
       if (el) el.value = '';
       const tid = store.pushId(), area = isAdmin() ? '總召' : (myAreas()[0] || (myBoundPerson() && myBoundPerson().p ? myBoundPerson().p.a : ''));
-      store.set(`proposals/${d.pid}/talk/${tid}`, { who: me().name, area, at: Date.now(), text: txt });
+      store.set(`proposals/${d.pid}/talk/${tid}`, { who: String(me().name || '').slice(0, 40), area: String(area || '').slice(0, 12), at: Date.now(), text: txt });
       toast('已送出留言');
     }
     else if (a === 'vote-prop') {
       if (!me()) return toast('請先登入');
-      store.set(`proposals/${d.pid}/votes/${d.area}`, { st: d.st, by: me().name, at: Date.now() });
+      // #25(b)：只能由該區區長代表全區表態（總召代表「排班總召」）
+      const okArea = d.area === '排班總召' ? isAdmin() : (AREAS.includes(d.area) && isLead(d.area));
+      if (!need(okArea && propById(d.pid), '您不能代表這一區表態')) return;
+      store.set(`proposals/${d.pid}/votes/${d.area}`, { st: String(d.st || '').slice(0, 20), by: String(me().name || '').slice(0, 40), at: Date.now() });
       toast(`已表態：${d.st}`);
     }
-    else if (a === 'join') { store.set(`members/${d.area}/${me().uid}`, { name: me().name, role: 'sched', status: 'pending', at: Date.now() }); toast('已送出申請'); }
-    else if (a === 'approve') { if (need(isLead(d.area) || isAdmin())) { const m = memberOf(d.area, d.uid); store.update({ [`members/${d.area}/${d.uid}`]: Object.assign({}, m, { status: 'ok', by: me().name }), ['sched/' + d.uid]: true }); } }
+    else if (a === 'join') {
+      if (!me() || !AREAS.includes(d.area) || memberOf(d.area)) return;
+      store.set(`members/${d.area}/${me().uid}`, { name: String(me().name || '').slice(0, 40), role: 'sched', status: 'pending', at: Date.now() }); toast('已送出申請');
+    }
+    else if (a === 'approve') {
+      if (!WORK_AREAS.includes(d.area) || !need(isLead(d.area) || isAdmin())) return;
+      const m = memberOf(d.area, d.uid);
+      if (!m || m.status !== 'pending') return toast('這筆申請已不存在或已處理');
+      if (!confirm(`同意 ${m.name} 成為 ${d.area} 的排班人員？`)) return;
+      // 只帶入允許的欄位（R-06：自行申請時塞入的其他欄位不會被帶進正式紀錄）
+      const nm = { name: String(m.name || '').slice(0, 40), role: 'sched', status: 'ok', by: String(me().name || '').slice(0, 40), at: Date.now() };
+      if (m.scope && typeof m.scope === 'object') nm.scope = Object.fromEntries(KINDS.filter(([k]) => m.scope[k] === true).map(([k]) => [k, true]));
+      store.update(Object.assign({ [`members/${d.area}/${d.uid}`]: nm, ['sched/' + d.uid]: true }, logOp(d.area, `同意 ${nm.name} 成為排班人員`)));
+    }
     else if (a === 'appoint') {
+      if (!WORK_AREAS.includes(d.area) || (d.role !== 'lead' && d.role !== 'sched')) return;
       if (!need(d.role === 'lead' ? isAdmin() : isLead(d.area) || isAdmin())) return;
       const u = (D().users || {})[d.uid];
-      store.update(Object.assign({ [`members/${d.area}/${d.uid}`]: { name: u.name, role: d.role, status: 'ok', by: me().name, at: Date.now() }, ['sched/' + d.uid]: true }, logOp(d.area, `指定 ${u.name} 為${d.role === 'lead' ? '區長' : '排班人員'}`)));
+      if (!u) return toast('找不到這個帳號，請對方先登入一次');
+      const nm = String(u.name || '未命名').slice(0, 40);
+      if (!confirm(`指定 ${nm} 為 ${d.area} 的${d.role === 'lead' ? '區長' : '排班人員'}？`)) return;
+      const up = { [`members/${d.area}/${d.uid}`]: { name: nm, role: d.role, status: 'ok', by: String(me().name || '').slice(0, 40), at: Date.now() }, ['sched/' + d.uid]: true };
+      if (d.role === 'lead') up['leads/' + d.uid] = true;
+      store.update(Object.assign(up, logOp(d.area, `指定 ${nm} 為${d.role === 'lead' ? '區長' : '排班人員'}`)));
       UI.apptQ = ''; toast('已指定');
     }
     else if (a === 'unmember') {
       const m = memberOf(d.area, d.uid); if (!m || !need(m.role === 'lead' ? isAdmin() : isLead(d.area) || isAdmin())) return;
       if (!confirm(`取消 ${m.name} 在 ${d.area} 的排班權限？`)) return;
       const still = WORK_AREAS.some((x) => x !== d.area && memberOf(x, d.uid) && memberOf(x, d.uid).status === 'ok');
-      store.update(Object.assign({ [`members/${d.area}/${d.uid}`]: null }, still ? {} : { ['sched/' + d.uid]: null }, logOp(d.area, `取消 ${m.name} 的排班權限`)));
+      const stillLead = WORK_AREAS.some((x) => x !== d.area && memberOf(x, d.uid) && memberOf(x, d.uid).status === 'ok' && memberOf(x, d.uid).role === 'lead');
+      const up = { [`members/${d.area}/${d.uid}`]: null };
+      if (!still) up['sched/' + d.uid] = null;
+      if (m.role === 'lead' && !stillLead) up['leads/' + d.uid] = null;
+      store.update(Object.assign(up, logOp(d.area, `取消 ${m.name} 的排班權限`)));
     }
-    else if (a === 'submit') { if (need(isLead(d.area), '只有區長能送出')) { store.update(Object.assign({ ['areas/' + d.area]: { status: 'submitted', by: me().name, at: Date.now(), after: 0 } }, logOp(d.area, '送出給總召確認'))); toast('已送出'); } }
-    else if (a === 'unsubmit') { if (need(isLead(d.area))) store.update(Object.assign({ ['areas/' + d.area]: { status: 'editing', by: me().name, at: Date.now() } }, logOp(d.area, '收回，繼續排'))); }
-    else if (a === 'confirm-area') { if (need(isAdmin())) store.update(Object.assign({ ['areas/' + d.area]: { status: 'confirmed', by: me().name, at: Date.now(), after: 0 } }, logOp(d.area, '總召確認'))); }
-    else if (a === 'return-area') { if (need(isAdmin())) { const why = prompt('退回的原因（會記在改動紀錄）') || ''; store.update(Object.assign({ ['areas/' + d.area]: { status: 'editing', by: me().name, at: Date.now() } }, logOp(d.area, '總召退回' + (why ? '：' + why : '')))); } }
+    else if (a === 'submit') { if (WORK_AREAS.includes(d.area) && need(isLead(d.area), '只有區長能送出')) { store.update(Object.assign({ ['areas/' + d.area]: { status: 'submitted', by: String(me().name || '').slice(0, 40), at: Date.now(), after: 0 } }, logOp(d.area, '送出給總召確認'))); toast('已送出'); } }
+    else if (a === 'unsubmit') { if (WORK_AREAS.includes(d.area) && need(isLead(d.area)) && need(((D().areas || {})[d.area] || {}).status !== 'confirmed', '總召已確認，要修改請聯絡總召退回')) store.update(Object.assign({ ['areas/' + d.area]: { status: 'editing', by: String(me().name || '').slice(0, 40), at: Date.now() } }, logOp(d.area, '收回，繼續排'))); }
+    else if (a === 'confirm-area') {
+      if (!WORK_AREAS.includes(d.area) || !need(isAdmin())) return;
+      if (!confirm(`確認 ${d.area} 的排班？`)) return;
+      store.update(Object.assign({ ['areas/' + d.area]: { status: 'confirmed', by: String(me().name || '').slice(0, 40), at: Date.now(), after: 0 } }, logOp(d.area, '總召確認')));
+    }
+    else if (a === 'return-area') { if (WORK_AREAS.includes(d.area) && need(isAdmin())) { const why = String(prompt('退回的原因（會記在改動紀錄）') || '').slice(0, 200); store.update(Object.assign({ ['areas/' + d.area]: { status: 'editing', by: String(me().name || '').slice(0, 40), at: Date.now() } }, logOp(d.area, '總召退回' + (why ? '：' + why : '')))); } }
     else if (a === 'undo') {
-      const l = (D().log || {})[d.id]; if (!l || !l.undo || !need(can(l.area, 'jz'))) return;
-      store.update(Object.assign({}, l.undo, { [`log/${d.id}/undone`]: me().name }, logOp(l.area, `復原「${l.msg}」`))); toast('已復原');
+      // #7、#22、R-01：白名單路徑、比對現值、不可重複、依每個路徑檢查權限、先確認
+      const l = (D().log || {})[d.id]; if (!l) return;
+      if (l.undone) return toast('這一筆已經復原過了');
+      if (!need(canUndo(l), '您不能復原這一筆')) return;
+      const list = normUndo(l.undo);
+      const conflict = list.filter((u) => !sameVal(getPath(D(), u.p), u.a));
+      if (conflict.length) return toast(`有 ${conflict.length} 處在這之後已被改過，無法自動復原，請手動調整`);
+      const desc = list.map((u) => { const k = u.p.split('/'); const who = RE_PID.test(k[2] || '') && M.pById[+k[2]] ? M.pById[+k[2]].n : ''; const where = k[0] === 'assign' && M.byId[k[1]] ? slotName(M.byId[k[1]]) : gmOf(k[1]) ? gmOf(k[1]).name : k[1]; return `・${where} ${who}：${u.v == null ? '移除' : '恢復'}`; });
+      if (!confirm(`復原「${l.msg}」？會改動：\n${desc.slice(0, 20).join('\n')}${desc.length > 20 ? '\n…共 ' + desc.length + ' 處' : ''}`)) return;
+      const up = {};
+      for (const u of list) up[u.p] = u.v;
+      const areas = uniq(list.map((u) => u.info.area));
+      store.update(Object.assign(up, { [`log/${d.id}/undone`]: String(me().name || '').slice(0, 40) }, logOp(l.area, `復原「${l.msg}」`), ...areas.map((x) => touchArea(x)))); toast('已復原');
     }
   });
 
@@ -2237,7 +2728,12 @@
     updateSearchDom(k, val);
   });
 
-  document.addEventListener('change', (ev) => {
+  document.addEventListener('change', (ev) => { try { onChange(ev); } finally { flushDeferred(); } });
+  // 下拉選單失去焦點後，補做操作期間延後的重繪
+  document.addEventListener('focusout', (ev) => {
+    if (pendingRender && ev.target && ev.target.tagName === 'SELECT') setTimeout(() => { if (pendingRender && !selectFocused()) flushDeferred(); }, 0);
+  });
+  function onChange(ev) {
     const t = ev.target, a = t.dataset && t.dataset.actChange; if (!a) return;
     const d = t.dataset;
     if (window.TDConsole && typeof window.TDConsole.handleChange === 'function' && window.TDConsole.handleChange(a, t, d, ev, consoleCtx())) return;
@@ -2246,35 +2742,50 @@
     else if (a === 'b1-area') { location.hash = '#/b1/' + t.value; }
     else if (a === 'b1-cook') { UI.b1ShowCook = t.checked; render(); }
     else if (a === 'set-post') {
-      const gm = gmOf(d.gk); if (!gm || !need(can(gm.area, 'lj'))) return render();
-      store.set(`groupMeta/${d.gk}/posts/${d.post}`, t.value ? +t.value : null);
+      const gm = gmOf(d.gk); if (!gm || !RITUAL_POST_SET.has(d.post) || !need(can(gm.area, 'lj'))) return render();
+      const up = { [`groupMeta/${d.gk}/posts/${d.post}`]: t.value && RE_PID.test(t.value) ? +t.value : null };
+      store.update(Object.assign(up, logOp(gm.area, `${gm.name} 設定崗位「${d.post}」`, mkUndo(up)), touchArea(gm.area)));
       toast(`已設定「${d.post}」`);
     }
     else if (a === 'scope') {
       if (!need(isLead(d.area) || isAdmin())) return render();
-      const m = memberOf(d.area, d.uid), sc = m.scope ? Object.assign({}, m.scope) : Object.fromEntries(KINDS.map(([k]) => [k, true]));
+      const m = memberOf(d.area, d.uid); if (!m || !KINDS.some(([k]) => k === d.k)) return render();
+      const sc = Object.fromEntries(KINDS.map(([k]) => [k, m.scope ? m.scope[k] === true : true]));
       sc[d.k] = t.checked;
       const all = KINDS.every(([k]) => sc[k]);
       store.set(`members/${d.area}/${d.uid}/scope`, all ? null : sc);
     }
     else if (a === 'pov-off' || a === 'pov' || a === 'pov-months') {
-      const p = M.pById[+d.pid]; if (!need(can(p.a, 'pov'))) return render();
-      const o = Object.assign({}, (D().pov || {})[d.pid] || {});
-      if (a === 'pov-off') o.off = t.checked; else if (a === 'pov-months') o.months = t.value.split(/[\s,，、]+/).map(Number).filter((n) => n >= 1 && n <= 12); else o[d.k] = t.value;
+      const p = M.pById[+d.pid]; if (!p || !need(can(p.a, 'pov'))) return render();
+      const o = Object.assign({}, (D().pov || {})[p.id] || {});
+      if (a === 'pov-off') o.off = t.checked; else if (a === 'pov-months') o.months = t.value.split(/[\s,，、]+/).map(Number).filter((n) => n >= 1 && n <= 12);
+      else if (d.k === 'cap') o.cap = t.value === '' ? '' : Math.max(0, Math.min(99, Math.round(+t.value) || 0));
+      else if (d.k === 'note') o.note = String(t.value || '').slice(0, 200);
+      else return render();
       for (const k of Object.keys(o)) if (o[k] === '' || o[k] === false || (Array.isArray(o[k]) && !o[k].length)) delete o[k];
-      store.update(Object.assign({ ['pov/' + d.pid]: Object.keys(o).length ? o : null }, logOp(p.a, `更新 ${p.n} 的人員狀態`)));
+      store.update(Object.assign({ ['pov/' + p.id]: Object.keys(o).length ? o : null }, logOp(p.a, `更新 ${p.n} 的人員狀態`)));
     }
-  });
+  }
 
   window.addEventListener('hashchange', render);
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      const sh = document.querySelector('#app .sheet'); if (!sh) return;
+      const f = [...sh.querySelectorAll('button,a[href],input,select,textarea,summary,[tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled);
+      const list = f.length ? f : [sh];
+      const first = list[0], last = list[list.length - 1], act = document.activeElement;
+      if (!sh.contains(act)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && (act === first || act === sh)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && act === last) { e.preventDefault(); first.focus(); }
+      return;
+    }
     if (e.key === 'Escape') {
       if (UI.person) { UI.person = null; render(); }
       else if (UI.acctOpen) { UI.acctOpen = false; render(); }
     }
   });
 
-  store.onChange(render);
+  store.onChange(onStoreChange);
   store.init().then(() => {
     if (store.mode === 'local' && !(store.data.meta || {}).seeded) seedDefaults();
     else if (store.mode === 'local' && !Object.keys(store.data.proposals || {}).length) {
@@ -2284,13 +2795,33 @@
     }
     render();
   }).catch((e) => { $('#app').innerHTML = `<div class="iss bad">無法啟動：${esc(e.message)}</div>`; });
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => { });
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    // N-2：有新版 Service Worker 接手時提示重新整理（第一次安裝沒有舊 controller，不提示）
+    const hadController = !!navigator.serviceWorker.controller;
+    let updShown = false;
+    const showUpdateBar = () => {
+      if (updShown || !hadController || document.getElementById('upd-bar')) return;
+      updShown = true;
+      const bar = document.createElement('div');
+      bar.id = 'upd-bar'; bar.className = 'updbar'; bar.setAttribute('role', 'alert');
+      bar.innerHTML = '<span>有新版，請重新整理</span><button type="button" class="btn sm" id="upd-reload">重新整理</button>';
+      document.body.appendChild(bar);
+      document.getElementById('upd-reload').addEventListener('click', () => location.reload());
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', showUpdateBar);
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (nw) nw.addEventListener('statechange', () => { if (nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar(); });
+      });
+    }).catch(() => { });
+  }
   window.__td = {
     store, E,
     get M() { return M; }, get ISS() { return ISS; },
-    recompute, seedDefaults, areaStats, areaMetrics,
+    recompute: () => recompute(true), seedDefaults, areaStats, areaMetrics,
     simulateProposalOption, buildInitialProposals,
-    autoApproveBind, setAutoApproveBind,
+    autoApproveBind, setAutoApproveBind, adminSyncMap, ensureAdminNodes, canUndo, normUndo, mkUndo, isPreFor, canConfirmPre, confirmPre,
     bindPersonToMe, applyNewPerson, toggleFamily, approveBind,
     bringLastYearGroup, autoAssignRitualPosts, moveGroupMember,
     bringLastYearSlot, autoFillSlot, adoptProposalOption, revertProposal,

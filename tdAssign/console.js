@@ -5,6 +5,8 @@
   'use strict';
 
   const ROUTES = ['overview', 'a1', 'a2', 'a3', 'a4', 'a5'];
+  // 模組層級的跳脫（C-18：資料庫來的值插入 HTML 前一律跳脫）
+  const h = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const CUI = {
     a1: {
@@ -15,6 +17,8 @@
       layer: 'individual',
       shortage: 'gap',
       keepLocked: true,
+      includeSubmitted: false,
+      simBusy: false,
       prefAff: true,
       noViol: true,
       newTrainee: false,
@@ -59,7 +63,8 @@
       qr: true,
       twoCharSpace: false,
       previewMode: '', // '' | 'preview' | 'draft' | 'final' | 'single' | 'areas'
-      singleCh: 'ch2'
+      singleCh: 'ch2',
+      preNotes: {}
     }
   };
 
@@ -106,17 +111,24 @@
     return s.d.slice(0, 7) === mFilter;
   }
 
-  const lunarCache = {};
+  /* C-16：農曆改用內建查表（116 年 2027-01-01～2028-02-29 範圍），不依賴瀏覽器 Intl（春節前後 Intl 會差一天）。
+   * 來源：lunardate 套件，並以 lunarcalendar 套件逐日比對 2027-01-01～2028-02-29 共 425 天，皆一致。
+   * 每一項＝[農曆月初一的西曆日期, 月份]（此範圍內沒有閏月）；超出範圍回傳空字串，不顯示農曆。 */
+  const LUNAR_MONTH_STARTS = [
+    ['2026-12-09', 11], ['2027-01-08', 12], ['2027-02-06', 1], ['2027-03-08', 2], ['2027-04-07', 3], ['2027-05-06', 4],
+    ['2027-06-05', 5], ['2027-07-04', 6], ['2027-08-02', 7], ['2027-09-01', 8], ['2027-09-30', 9], ['2027-10-29', 10],
+    ['2027-11-28', 11], ['2027-12-28', 12], ['2028-01-26', 1], ['2028-02-25', 2]
+  ];
+  const LUNAR_MONTH_NAMES = ['', '正月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '臘月'];
+  const LUNAR_DAY_NAMES = ['', '初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十', '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十'];
+  const LUNAR_LAST = '2028-03-23'; // 最後一個月份起點 + 28 天（任一月長都有效）
   function fmtLunar(d) {
-    if (!d) return '';
-    if (lunarCache[d] !== undefined) return lunarCache[d];
-    try {
-      const f = new Intl.DateTimeFormat('zh-TW-u-ca-chinese', { month: 'short', day: 'numeric' });
-      lunarCache[d] = f.format(new Date(d + 'T12:00:00Z'));
-    } catch (e) {
-      lunarCache[d] = '';
-    }
-    return lunarCache[d];
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d) || d < LUNAR_MONTH_STARTS[0][0] || d > LUNAR_LAST) return '';
+    let i = LUNAR_MONTH_STARTS.length - 1;
+    while (i > 0 && LUNAR_MONTH_STARTS[i][0] > d) i--;
+    const days = Math.round((Date.parse(d + 'T00:00:00Z') - Date.parse(LUNAR_MONTH_STARTS[i][0] + 'T00:00:00Z')) / 86400000) + 1;
+    if (days < 1 || days > 30) return '';
+    return LUNAR_MONTH_NAMES[LUNAR_MONTH_STARTS[i][1]] + LUNAR_DAY_NAMES[days];
   }
 
   /** 兩個字的姓名中間加全形空格對齊 */
@@ -125,6 +137,207 @@
     if (twoCharSpace && s.length === 2) return s[0] + '　' + s[1];
     return s;
   }
+
+  /* ================================================================
+   * QR 碼產生器（C-07）：ISO/IEC 18004、位元組模式、糾錯等級 M、版本 1–10，純 JS、無外部相依。
+   * 已用 pyzbar 解碼驗證（findings/phase2b-test.js）。
+   * ================================================================ */
+  const QRGen = (function () {
+    const ECC_PER_BLOCK = [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
+    const NUM_BLOCKS = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+    const gfMul = (x, y) => {
+      let z = 0;
+      for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; }
+      return z & 0xFF;
+    };
+    const rawModules = (v) => {
+      let r = (16 * v + 128) * v + 64;
+      if (v >= 2) { const n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; }
+      return r;
+    };
+    const alignPos = (v) => {
+      if (v === 1) return [];
+      const n = Math.floor(v / 7) + 2, size = v * 4 + 17;
+      const step = Math.ceil((v * 4 + 4) / (n * 2 - 2)) * 2;
+      const res = [6];
+      for (let pos = size - 7; res.length < n; pos -= step) res.splice(1, 0, pos);
+      return res;
+    };
+    const rsDivisor = (deg) => {
+      const r = new Array(deg).fill(0); r[deg - 1] = 1;
+      let root = 1;
+      for (let i = 0; i < deg; i++) {
+        for (let j = 0; j < deg; j++) { r[j] = gfMul(r[j], root); if (j + 1 < deg) r[j] ^= r[j + 1]; }
+        root = gfMul(root, 2);
+      }
+      return r;
+    };
+    const rsRemainder = (data, div) => {
+      const r = div.map(() => 0);
+      for (const b of data) {
+        const f = b ^ r.shift(); r.push(0);
+        div.forEach((c, i) => { r[i] ^= gfMul(c, f); });
+      }
+      return r;
+    };
+    // 文字轉 UTF-8 位元組（N-9）：優先用 TextEncoder，沒有時退回 encodeURIComponent
+    const utf8 = (s) => {
+      s = String(s);
+      if (typeof TextEncoder === 'function') return Array.from(new TextEncoder().encode(s));
+      const a = []; const u = encodeURIComponent(s);
+      for (let i = 0; i < u.length; i++) { if (u[i] === '%') { a.push(parseInt(u.substr(i + 1, 2), 16)); i += 2; } else a.push(u.charCodeAt(i)); }
+      return a;
+    };
+    // 含非 ASCII 位元組時加 ECI（編碼 26＝UTF-8），讀碼器不會再猜成 Shift-JIS 等編碼
+    const eciBits = (bytes) => (bytes.some((b) => b > 127) ? 12 : 0);
+    const MAX_VER = 10;
+    /** 這段文字最多可編碼的位元組數（版本 10、糾錯 M、位元組模式）；含 ECI 時少 2 個 */
+    const capacity = (nonAscii) => Math.floor((Math.floor(rawModules(MAX_VER) / 8) - ECC_PER_BLOCK[MAX_VER] * NUM_BLOCKS[MAX_VER]) * 8 - 4 - 16 - (nonAscii ? 12 : 0)) / 8 | 0;
+    /** 檢查文字能不能放進 QR：回傳 { ok, bytes, max } */
+    function check(text) {
+      const b = utf8(text), e = eciBits(b);
+      return { ok: b.length <= capacity(!!e), bytes: b.length, max: capacity(!!e) };
+    }
+
+    /** 回傳 { size, modules: boolean[][], version } 或 null（內容太長） */
+    function encode(text) {
+      const bytes = utf8(text);
+      let ver = 1, dataCw = 0;
+      for (; ver <= 10; ver++) {
+        dataCw = Math.floor(rawModules(ver) / 8) - ECC_PER_BLOCK[ver] * NUM_BLOCKS[ver];
+        if (eciBits(bytes) + 4 + (ver < 10 ? 8 : 16) + bytes.length * 8 <= dataCw * 8) break;
+      }
+      if (ver > 10) return null;
+      const bits = [];
+      const push = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+      if (eciBits(bytes)) { push(7, 4); push(26, 8); }
+      push(4, 4); push(bytes.length, ver < 10 ? 8 : 16);
+      bytes.forEach((b) => push(b, 8));
+      push(0, Math.min(4, dataCw * 8 - bits.length));
+      while (bits.length % 8) bits.push(0);
+      for (let pad = 0xEC; bits.length < dataCw * 8; pad ^= 0xEC ^ 0x11) push(pad, 8);
+      const data = [];
+      for (let i = 0; i < bits.length; i += 8) { let b = 0; for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j]; data.push(b); }
+
+      // 分塊、加糾錯碼、交錯
+      const nb = NUM_BLOCKS[ver], eccLen = ECC_PER_BLOCK[ver], raw = Math.floor(rawModules(ver) / 8);
+      const nShort = nb - (raw % nb), shortLen = Math.floor(raw / nb);
+      const div = rsDivisor(eccLen), blocks = [];
+      for (let i = 0, k = 0; i < nb; i++) {
+        const dat = data.slice(k, k + shortLen - eccLen + (i < nShort ? 0 : 1)); k += dat.length;
+        const ecc = rsRemainder(dat, div);
+        if (i < nShort) dat.push(0);
+        blocks.push(dat.concat(ecc));
+      }
+      const all = [];
+      for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if (i !== shortLen - eccLen || j >= nShort) all.push(b[i]); });
+
+      // 繪製
+      const size = ver * 4 + 17;
+      const mod = Array.from({ length: size }, () => new Array(size).fill(false));
+      const fn = Array.from({ length: size }, () => new Array(size).fill(false));
+      const setFn = (x, y, dark) => { mod[y][x] = !!dark; fn[y][x] = true; };
+      for (let i = 0; i < size; i++) { setFn(6, i, i % 2 === 0); setFn(i, 6, i % 2 === 0); }
+      const finder = (cx, cy) => {
+        for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+          const dist = Math.max(Math.abs(dx), Math.abs(dy)), x = cx + dx, y = cy + dy;
+          if (x >= 0 && x < size && y >= 0 && y < size) setFn(x, y, dist !== 2 && dist !== 4);
+        }
+      };
+      finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+      const ap = alignPos(ver);
+      for (let i = 0; i < ap.length; i++) for (let j = 0; j < ap.length; j++) {
+        if ((i === 0 && j === 0) || (i === 0 && j === ap.length - 1) || (i === ap.length - 1 && j === 0)) continue;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setFn(ap[i] + dx, ap[j] + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }
+      const drawFormat = (mask) => {
+        const d = (0 << 3) | mask; // 糾錯等級 M 的格式位元為 00
+        let rem = d;
+        for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+        const f = ((d << 10) | rem) ^ 0x5412;
+        const bit = (i) => ((f >>> i) & 1) !== 0;
+        for (let i = 0; i <= 5; i++) setFn(8, i, bit(i));
+        setFn(8, 7, bit(6)); setFn(8, 8, bit(7)); setFn(7, 8, bit(8));
+        for (let i = 9; i < 15; i++) setFn(14 - i, 8, bit(i));
+        for (let i = 0; i < 8; i++) setFn(size - 1 - i, 8, bit(i));
+        for (let i = 8; i < 15; i++) setFn(8, size - 15 + i, bit(i));
+        setFn(8, size - 8, true);
+      };
+      drawFormat(0);
+      if (ver >= 7) {
+        let rem = ver;
+        for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+        const v = (ver << 12) | rem;
+        for (let i = 0; i < 18; i++) {
+          const dark = ((v >>> i) & 1) !== 0, a = size - 11 + (i % 3), b = Math.floor(i / 3);
+          setFn(a, b, dark); setFn(b, a, dark);
+        }
+      }
+      // 放入資料（之字形）
+      let bi = 0;
+      for (let right = size - 1; right >= 1; right -= 2) {
+        if (right === 6) right = 5;
+        for (let vert = 0; vert < size; vert++) for (let j = 0; j < 2; j++) {
+          const x = right - j, upward = ((right + 1) & 2) === 0, y = upward ? size - 1 - vert : vert;
+          if (!fn[y][x] && bi < all.length * 8) { mod[y][x] = ((all[bi >>> 3] >>> (7 - (bi & 7))) & 1) !== 0; bi++; }
+        }
+      }
+      const applyMask = (m) => {
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+          let inv;
+          switch (m) {
+            case 0: inv = (x + y) % 2 === 0; break;
+            case 1: inv = y % 2 === 0; break;
+            case 2: inv = x % 3 === 0; break;
+            case 3: inv = (x + y) % 3 === 0; break;
+            case 4: inv = (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0; break;
+            case 5: inv = (x * y) % 2 + (x * y) % 3 === 0; break;
+            case 6: inv = ((x * y) % 2 + (x * y) % 3) % 2 === 0; break;
+            default: inv = ((x + y) % 2 + (x * y) % 3) % 2 === 0;
+          }
+          if (inv && !fn[y][x]) mod[y][x] = !mod[y][x];
+        }
+      };
+      const penalty = () => {
+        let p = 0, dark = 0;
+        const lines = [];
+        for (let y = 0; y < size; y++) { lines.push(mod[y].map((v) => (v ? '1' : '0')).join('')); }
+        for (let x = 0; x < size; x++) { let c = ''; for (let y = 0; y < size; y++) c += mod[y][x] ? '1' : '0'; lines.push(c); }
+        for (const ln of lines) {
+          for (const m of ln.match(/0{5,}|1{5,}/g) || []) p += 3 + (m.length - 5);
+          for (const pat of ['10111010000', '00001011101']) { let at = ln.indexOf(pat); while (at >= 0) { p += 40; at = ln.indexOf(pat, at + 1); } }
+        }
+        for (let y = 0; y < size - 1; y++) for (let x = 0; x < size - 1; x++) {
+          const c = mod[y][x];
+          if (c === mod[y][x + 1] && c === mod[y + 1][x] && c === mod[y + 1][x + 1]) p += 3;
+        }
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (mod[y][x]) dark++;
+        const total = size * size;
+        p += (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * 10;
+        return p;
+      };
+      let best = 0, bestP = Infinity;
+      for (let m = 0; m < 8; m++) {
+        applyMask(m); drawFormat(m);
+        const p = penalty();
+        if (p < bestP) { best = m; bestP = p; }
+        applyMask(m);
+      }
+      applyMask(best); drawFormat(best);
+      return { size, version: ver, modules: mod };
+    }
+
+    /** 轉成 SVG（含 4 模組空白邊）；內容太長回傳空字串 */
+    function toSvg(text, px, label) {
+      const q = encode(text);
+      if (!q) return '';
+      const n = q.size + 8;
+      let d = '';
+      for (let y = 0; y < q.size; y++) for (let x = 0; x < q.size; x++) if (q.modules[y][x]) d += `M${x + 4} ${y + 4}h1v1h-1z`;
+      return `<svg class="qr-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" width="${px}" height="${px}" role="img" aria-label="${h(label || 'QR 碼')}" shape-rendering="crispEdges"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+    }
+    return { encode, toSvg, check, capacity };
+  })();
 
   function fmtDelta(n, label) {
     if (!n) return `${label} 0`;
@@ -154,10 +367,10 @@
     if (o.status && o.status !== '正常') return o.status;
     if (p.off) return '不再排班';
     if (p.months && p.months.length) return `暫停 ${p.months.join('、')} 月`;
-    if (o.wdCap === 0 || o.wdCap === '0') return '只排假日';
+    if (p.wdCap === 0) return '只排假日';
     if (p.cap && p.cap <= 4) return `限量 ${p.cap} 次`;
-    if (p.src === 'N') return '新人見習';
-    if (p.age && p.age >= ctx.M.R.p.oldAge) return `${p.age} 歲`;
+    if (p.src === 'N' || p.trainee) return '新人見習';
+    if (p.age && p.age >= ctx.M.R.p.oldAge) return `${h(+p.age || '')} 歲`;
     return '正常';
   }
 
@@ -167,15 +380,16 @@
     const d = ctx.D();
     const simSt = {
       rules: E.mergeRules(d.rules),
-      edits: Object.assign({}, d.edits || {}),
-      extra: Object.assign({}, d.extra || {}),
+      // 以 app.js recompute() 清理過的 edits／extra 為準（X-03）
+      edits: Object.assign({}, baseSt.edits || {}),
+      extra: Object.assign({}, baseSt.extra || {}),
       groups: {},
       slotMod: {},
       assign: {},
       addedPeople: (baseSt.addedPeople || []).slice(),
       peopleEdits: Object.assign({}, baseSt.peopleEdits || {}),
-      pov: Object.assign({}, d.pov || {}),
-      acks: Object.assign({}, d.acks || {})
+      pov: Object.assign({}, baseSt.pov || {}),
+      acks: Object.assign({}, baseSt.acks || {})
     };
     for (const gk in baseSt.groups || {}) simSt.groups[gk] = (baseSt.groups[gk] || []).slice();
     for (const sid in baseSt.assign || {}) {
@@ -196,6 +410,53 @@
       </div>
     </section>`;
   }
+
+  /* ---- 共用：定版鎖定、唯讀提示、可捲動區、版面用的小段樣式 ---- */
+  const isPub = (ctx) => !!(ctx.isPublished && ctx.isPublished());
+  /** C-02：定版後 A1–A4 的寫入端一律擋下（回傳 true＝已擋，呼叫端直接 return） */
+  function writeBlocked(ctx, what) {
+    if (!isPub(ctx)) return false;
+    ctx.toast(`已定版鎖定，無法${what || '修改'}：定版後的異動請走調度台並留紀錄，或由總召先到 A5 解除定版`);
+    return true;
+  }
+  const pubVersionOf = (ctx) => { const p = (ctx.D().meta || {}).published; return p && p.version ? p.version : ''; };
+  /** 頁首橫幅：定版鎖定／唯讀說明（C-02、C-21） */
+  function modeBanner(ctx, adminOnlyText) {
+    let out = '';
+    if (isPub(ctx)) {
+      out += `<section class="card warnbox no-print" role="status"><b>已定版鎖定（${h(pubVersionOf(ctx))}）</b>
+        <div class="small muted">本頁的寫入功能已停用。定版後的異動請走調度台並留紀錄；若要重新排班，請總召先到 <a href="#/a5">A5</a> 解除定版。</div></section>`;
+    }
+    if (adminOnlyText && !ctx.isAdmin()) {
+      out += `<section class="card no-print" role="note"><div class="small muted">唯讀：${h(adminOnlyText)}</div></section>`;
+    }
+    return out;
+  }
+  /** 可捲動表格區（UI-07：鍵盤可聚焦、有名稱） */
+  const tw = (label, inner, cls) => `<div class="table-wrap ${cls || ''}" tabindex="0" role="region" aria-label="${h(label)}">${inner}</div>`;
+  /** 版面用樣式（手機：回到列表按鈕、橫捲提示；與 styles.css 無衝突，另見 NOTES-2B） */
+  const CONSOLE_CSS = `<style>
+    .insp-back{display:none}
+    .scroll-hint{display:none;font-size:12px;color:var(--muted)}
+    .out-row{display:flex;flex-wrap:wrap;gap:10px;padding:10px 0;border-top:1px solid var(--sunk);align-items:center;justify-content:space-between}
+    .out-row .btn{white-space:normal;max-width:100%}
+    .out-row > div{min-width:0;flex:1 1 200px}
+    @media (max-width:768px){.insp-back{display:inline-flex}.scroll-hint{display:block}}
+  </style>`;
+  /** 手機：點選勤務格／人員後捲到右側（下方）檢視器 */
+  function scrollToInspector() {
+    try {
+      if (typeof window === 'undefined' || !window.matchMedia || !window.matchMedia('(max-width: 768px)').matches) return;
+      const el = document.querySelector('.inspector');
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) { }
+  }
+  function scrollToList(id) {
+    try { const el = document.getElementById(id); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { }
+  }
+  /** 活動類別底色（C-26；115 手冊以類別區分顏色，列印時強制印出底色） */
+  const CAT_COLORS = { 廚務: '#fde3cf', 會館輪廚: '#fbd9b5', 環境整理: '#dcefd5', 服務: '#d6e8f7', 禮節: '#eadcf4', 洗碗: '#d9ecee', 忠恕: '#fff1bf', 大典前晚: '#f6d6d6', 協辦: '#e6eaed', 交通: '#d8e3f0' };
+  const catBg = (cat) => CAT_COLORS[String(cat || '').startsWith('忠恕') ? '忠恕' : cat] || '#eef1ef';
 
   /* ================================================================
    * 00 系統總覽與情境對照 (#/overview)
@@ -342,7 +603,7 @@
         <div class="row-h">
           <div><h2>情境對照：遇到這種狀況，系統怎麼處理</h2><div class="small muted">涵蓋 18 種排班情境；點擊右欄畫板連結直接前往對應畫面操作。</div></div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap" tabindex="0" role="region" aria-label="情境對照表">
           <div class="case-table">
             <div class="case-grid hd"><div>類別</div><div>情境</div><div>系統處理</div><div>畫板</div></div>
             ${cases.map(([g, s, h, w, href, cls]) => `<div class="case-grid">
@@ -374,8 +635,9 @@
 
   let simCCache = { sig: '', res: null };
 
-  function getPlanSummary(ctx) {
+  function getPlanSummary(ctx, opts) {
     const { E, M } = ctx;
+    const computeSim = !!(opts && opts.compute);
     const live = M.slots.filter((s) => !s.cancel);
     const activeAll = M.people.filter((p) => !p.off && p.a !== '金門');
     const cooks = activeAll.filter((p) => E.isCookPerson(M, p));
@@ -435,15 +697,20 @@
     }
     areaShortB.sort((x, y) => y.gap - x.gap);
 
-    // 方案 C（現有人力試排）：若尚未寫入 assign，於記憶體快取試算；若已寫入則顯示即時結果
-    const hasAssign = Object.keys(ctx.D().assign || {}).length > 0;
+    // 方案 C（現有人力試排）：若尚未寫入 assign，只在使用者按「計算試排預測」時才於記憶體試算（C-19：不在 render 內同步重跑 autoSchedule）；
+    // 已寫入則顯示即時結果
+    const d0 = ctx.D();
+    const hasAssign = Object.keys(d0.assign || {}).length > 0;
     const sig = [
       ctx.draftVer(),
       live.length,
       activeAll.length,
-      totalGot,
       JSON.stringify(M.R.p),
-      JSON.stringify(M.R.sev)
+      JSON.stringify(M.R.sev),
+      JSON.stringify(d0.edits || {}),
+      JSON.stringify(d0.extra || {}),
+      JSON.stringify(Object.keys(d0.groups || {}).sort().map((g) => g + ':' + Object.keys(d0.groups[g] || {}).sort().join('.'))),
+      JSON.stringify(d0.pov || {})
     ].join('|');
 
     let cRes;
@@ -468,13 +735,18 @@
       };
     } else if (simCCache.sig === sig && simCCache.res) {
       cRes = simCCache.res;
+    } else if (!computeSim) {
+      cRes = {
+        live: false, pending: true, got: 0, need: totalNeed, slotCnt: live.length, shortSlots: 0, shortPeople: 0, v: 0, n: 0,
+        model: M, issues: ctx.ISS
+      };
     } else {
       const { baseSt, simSt } = cloneEngineState(ctx);
       let mC, issC = [];
       try {
         E.setState(simSt);
         mC = E.buildModel();
-        E.autoSchedule(mC, null, 'fill');
+        E.autoSchedule(mC, (s) => !s.groupKey, 'fill');
         issC = E.allIssues(mC);
       } finally {
         E.setState(baseSt);
@@ -611,7 +883,7 @@
       kind: '廚務超限',
       cls: cookP5Unique.length ? 'wn' : 'ok',
       t: `廚務人員超過年度次數上限／理想值：${cookP5Unique.length} 位`,
-      why: `廚務組全年輪替場次集中（主廚／大廚多於 ${M.R.p.cookMax} 次），部分組員跨兼機動組導致超限。`,
+      why: `廚務組全年輪替場次集中（主廚／大廚多於 ${h(M.R.p.cookMax)} 次），部分組員跨兼機動組導致超限。`,
       s1: '各區增補儲備廚師分擔週日明理班與忠恕輪廚',
       s2: '檢視機動組名單，避免單一主廚連兩週出勤',
       actLabel: '檢視明細',
@@ -633,7 +905,7 @@
       id: 'diag-gap7',
       kind: '7 天內重複',
       cls: p3List.length ? 'bad' : 'ok',
-      t: `間隔 ${M.R.p.hard} 天內重複出勤：${p3List.length} 筆（含廚務組 ${p3List.filter((x) => x.rule === 'A7').length} 筆）`,
+      t: `間隔 ${h(M.R.p.hard)} 天內重複出勤：${p3List.length} 筆（含廚務組 ${p3List.filter((x) => x.rule === 'A7').length} 筆）`,
       why: '多場法會與忠恕輪值相鄰（如 11 月讀經會考、8 月中元接忠恕），使同一組或同一人一週內連排兩次。',
       s1: '改由另一廚務組對調或拆組輪替',
       s2: '個人間隔過密者於總表改排候選人或標為例外',
@@ -653,64 +925,96 @@
     return diags;
   }
 
+  /** 方案 A/B 的實際規則差異（C-04）。只用於「這一次試排」的記憶體規則，不改寫雲端規則集；產生後仍以目前規則集檢查違規。 */
+  function applyPlanRules(simSt, plan) {
+    const R = simSt.rules;
+    if (plan === 'A') {
+      // 理想：兩次服務間隔 30 天以上、不兼職、廚務人員只做廚務、年度上限用理想值
+      R.p.hard = 30;
+      R.p.soft = Math.max(30, +R.p.soft || 30);
+      if (+R.p.cookIdeal) R.p.cookMax = +R.p.cookIdeal;
+      if (+R.p.otherIdeal) R.p.otherMax = +R.p.otherIdeal;
+      R.sev.P4b = '違規';
+      for (const k in R.mx) R.mx[k] = '違規';
+    } else if (plan === 'B') {
+      // 最小人力：間隔至少 8 天、允許同日兼職、廚務人員不限定只做廚務、不平均分攤、年度上限用最大值
+      R.p.hard = 7;
+      R.p.wLoad = 0; R.p.wSoft = 0; // 不特別平均分攤，盡量用少數人排到上限
+      R.sev.P4b = '關閉';
+      for (const k in R.mx) R.mx[k] = '允許';
+    }
+  }
+  const isHumanRec = (r) => !!r && (!r.byAuto || !!r.okBy || !!r.okAt);
+
   function runA1AutoSchedule(ctx, scopeOnly) {
     if (!ctx.need(ctx.isAdmin(), '只有總召或調度台可產生初版／重排')) return;
+    if (writeBlocked(ctx, '產生初版／重排')) return;
     const { E, store, D } = ctx;
+    if (CUI.a1.layer === 'area_group') {
+      // C-24：沒有任何個人名單要寫；負責區與組別由基準與 A2 改派決定
+      ctx.toast('「只排到區與組」不會寫入任何名單：負責區與組別由基準資料與 A2 改派決定，人由各區自行排。要讓系統先排人，請改選「區、組、個人」。');
+      return;
+    }
+    const plan = CUI.a1.plan;
     const { baseSt, simSt } = cloneEngineState(ctx);
-
+    simSt.rules = JSON.parse(JSON.stringify(simSt.rules));
+    applyPlanRules(simSt, plan);
     if (!CUI.a1.prefAff) simSt.rules.p.wAff = 0;
     if (CUI.a1.newTrainee) simSt.rules.p.wNew = -12;
     if (CUI.a1.shortage === 'cross') simSt.rules.p.allowCross = true;
-    if (CUI.a1.shortage === 'min') simSt.rules.p.shortRatio = 0.85;
+    if (CUI.a1.shortage === 'min') {
+      // 降到需求下限：本次試排每格目標人數降為需求的 85%（進位）；實際需求不變，缺的人會列入缺額
+      simSt.rules.p.shortRatio = 0.85;
+      simSt.edits = Object.assign({}, simSt.edits);
+      for (const s of ctx.M.slots) {
+        if (s.cancel || s.groupKey || !(+s.need > 1)) continue;
+        simSt.edits[s.id] = Object.assign({}, simSt.edits[s.id] || {}, { need: Math.ceil(+s.need * 0.85) });
+      }
+    }
 
+    // 已送出／已確認的區預設不覆蓋（C-01）
+    const areaMap = D().areas || {};
+    const lockedAreas = CUI.a1.includeSubmitted ? [] : E.AREAS.filter((a) => ['submitted', 'confirmed'].includes((areaMap[a] || {}).status));
     const flt = (s) => {
-      if (s.cancel || !s.area) return false;
+      if (s.cancel || !s.area || s.groupKey) return false; // 組別名單由組別設定控制（C-09：不排進組別格）
+      if (lockedAreas.includes(s.area)) return false;
       if (CUI.a1.scope === 'month') return slotMonthMatch(s, CUI.a1.scopeMonth);
       if (CUI.a1.scope === 'area') return s.area === CUI.a1.scopeArea;
       if (CUI.a1.scope === 'empty') return (ctx.M.asg[s.id] ? ctx.M.asg[s.id].p.length : 0) < E.slotNeed(ctx.M, s);
       return true;
     };
 
+    // 保護人工成果：沒有 byAuto（區長／總召手動排）或已有 okBy／okAt（區長確認過）的人一律保留
     const d0 = D();
+    let keptHuman = 0;
     if (CUI.a1.keepLocked) {
       for (const s of ctx.M.slots) {
         if (s.cancel || s.groupKey) continue;
         const asgRec = (d0.assign || {})[s.id] || {};
-        const pids = Object.keys(asgRec).map(Number);
-        if (!pids.length) continue;
-        // 保留已鎖定格既有人員，以及所有非自動排入手動調整的人員
-        const lockedPids = pids.filter((pid) => s.lock || !(asgRec[pid] && asgRec[pid].byAuto));
+        const lockedPids = Object.keys(asgRec).filter((k) => /^\d+$/.test(k) && isHumanRec(asgRec[k])).map(Number);
         if (lockedPids.length) {
-          simSt.assign[s.id] = simSt.assign[s.id] || { p: pids.slice(), lk: [] };
+          simSt.assign[s.id] = simSt.assign[s.id] || { p: lockedPids.slice(), lk: [] };
           simSt.assign[s.id].lk = lockedPids;
+          keptHuman += lockedPids.length;
         }
       }
     }
 
     const mode = (CUI.a1.scope === 'empty') ? 'fill' : 'redo';
-    const effFilter = flt;
-
     let m2;
-    let added = 0;
     try {
       E.setState(simSt);
       m2 = E.buildModel();
-      if (CUI.a1.layer === 'area_group') {
-        // 只排到區與組：僅更新模型統計，不把個人寫入 assign
-        added = 0;
-      } else {
-        added = E.autoSchedule(m2, effFilter, mode);
-        if (!CUI.a1.noViol) {
-          for (const s of m2.slots) {
-            if (s.cancel || s.groupKey || !effFilter(s)) continue;
-            const need = E.slotNeed(m2, s);
-            if (m2.asg[s.id].p.length >= need) continue;
-            const cands = E.rankCandidates(m2, s, { all: CUI.a1.shortage === 'cross' });
-            for (const c of cands) {
-              if (m2.asg[s.id].p.length >= need) break;
-              E.assignToModel(m2, s, c.p.id);
-              added++;
-            }
+      E.autoSchedule(m2, flt, mode);
+      if (!CUI.a1.noViol) {
+        for (const s of m2.slots) {
+          if (!flt(s)) continue;
+          const need = E.slotNeed(m2, s);
+          if (m2.asg[s.id].p.length >= need) continue;
+          const cands = E.rankCandidates(m2, s, { all: CUI.a1.shortage === 'cross' });
+          for (const c of cands) {
+            if (m2.asg[s.id].p.length >= need) break;
+            E.assignToModel(m2, s, c.p.id);
           }
         }
       }
@@ -718,43 +1022,66 @@
       E.setState(baseSt);
     }
 
+    // 差異（先算，不寫入）
     const d = D();
-    const up = {
-      'meta/plan': CUI.a1.plan,
-      'meta/autoAt': Date.now(),
-      'meta/autoBy': ctx.me().name
-    };
-
-    if (CUI.a1.layer !== 'area_group') {
-      const nextVer = scopeOnly ? ctx.draftVer() : ctx.nextDraftVer(ctx.draftVer());
-      if (!scopeOnly) up['meta/version'] = nextVer;
-
-      for (const s of m2.slots) {
-        if (s.cancel || s.groupKey || !effFilter(s)) continue;
-        const prevRec = (d.assign || {})[s.id] || {};
-        const prevPids = Object.keys(prevRec).map(Number);
-        const nextPids = m2.asg[s.id].p;
-        for (const oldId of prevPids) {
-          if (!nextPids.includes(oldId)) up[`assign/${s.id}/${oldId}`] = null;
+    const up = {};
+    let nAdd = 0, nRem = 0, nRemHuman = 0;
+    const touched = new Set();
+    for (const s of m2.slots) {
+      if (!flt(s)) continue;
+      const prevRec = (d.assign || {})[s.id] || {};
+      const prevPids = Object.keys(prevRec).filter((k) => /^\d+$/.test(k)).map(Number);
+      const nextPids = m2.asg[s.id].p;
+      for (const oldId of prevPids) {
+        if (!nextPids.includes(oldId)) {
+          up[`assign/${s.id}/${oldId}`] = null;
+          nRem++;
+          if (isHumanRec(prevRec[oldId])) nRemHuman++;
+          touched.add(s.area);
         }
-        for (const pid of nextPids) {
-          if (!prevRec[pid]) {
-            const pre = ctx.isAdmin() && !(ctx.memberOf(s.area) && ctx.memberOf(s.area).status === 'ok') && E.AREAS.includes(s.area);
-            up[`assign/${s.id}/${pid}`] = ctx.stamp(pre ? { pre: true, byAuto: CUI.a1.plan } : { byAuto: CUI.a1.plan });
-          }
+      }
+      for (const pid of nextPids) {
+        if (!prevRec[pid]) {
+          // 總召自動排入的人，對六區一律標預排，只有該區區長能確認（C-01/C-03）
+          up[`assign/${s.id}/${pid}`] = ctx.stamp(E.AREAS.includes(s.area) ? { pre: true, byAuto: plan } : { byAuto: plan });
+          nAdd++;
+          touched.add(s.area);
         }
       }
     }
-
     const scopeDesc = CUI.a1.scope === 'month' ? monthLabel(CUI.a1.scopeMonth)
       : CUI.a1.scope === 'area' ? CUI.a1.scopeArea
       : CUI.a1.scope === 'empty' ? '只補空格' : '全年';
-    const msg = scopeOnly
-      ? `A1 重排選定範圍（${scopeDesc}），排入 ${added} 人次`
-      : `以方案 ${CUI.a1.plan} 產生初版（${scopeDesc}），共排入 ${added} 人次`;
+    const meta = { 'meta/plan': plan, 'meta/autoAt': Date.now(), 'meta/autoBy': String(ctx.me().name || '').slice(0, 40) };
+    const skipNote = lockedAreas.length ? `；已送出／確認而略過：${lockedAreas.join('、')}` : '';
 
+    if (nAdd + nRem === 0) {
+      // 冪等：輸入沒變就不改名單、不遞增版號
+      const msg0 = `A1 方案 ${plan}（${scopeDesc}）重新試排：名單沒有變動${skipNote}`;
+      store.update(Object.assign(meta, ctx.logOp('總召', msg0)));
+      simCCache = { sig: '', res: null };
+      ctx.toast(`名單沒有變動，已是最新（共排入 0 人次）${skipNote}`);
+      return;
+    }
+    if (nRem > 0 && typeof confirm === 'function') {
+      const warn = nRemHuman > 0 ? `\n\n注意：其中 ${nRemHuman} 人次是區長／總召手動排入或區長已確認的名單${CUI.a1.keepLocked ? '' : '（你已取消「保留已鎖定與手動調整」）'}，將被移除。` : '';
+      if (!confirm(`方案 ${plan}（${scopeDesc}）將新增 ${nAdd} 人次、移除 ${nRem} 人次；保留人工名單 ${keptHuman} 人次${skipNote}。${warn}\n\n完成後可在操作紀錄復原。確定要執行嗎？`)) return;
+    }
+
+    if (!scopeOnly) up['meta/version'] = ctx.nextDraftVer(ctx.draftVer());
+    Object.assign(up, meta);
+    // 復原：assign 路徑分段（rules 限制 undo 索引最多 3 碼）
+    const assignPaths = Object.keys(up).filter((k) => k.startsWith('assign/'));
+    const CH = 500, logs = {};
+    const nChunks = Math.max(1, Math.ceil(assignPaths.length / CH));
+    const msg = `以方案 ${plan} 產生初版（${scopeDesc}），共排入 ${nAdd} 人次` + (nRem ? `、移除 ${nRem} 人次` : '') + (keptHuman ? `；保留人工名單 ${keptHuman} 人次` : '') + skipNote;
+    for (let i = 0; i < nChunks; i++) {
+      const part = assignPaths.slice(i * CH, (i + 1) * CH);
+      Object.assign(logs, ctx.logOp('總召', nChunks > 1 ? `${msg}（${i + 1}/${nChunks}）` : msg, ctx.mkUndo(up, part)));
+    }
+    for (const a of touched) Object.assign(up, ctx.touchArea(a)); // 已送出／已確認的區：累計「送出後變更」
     simCCache = { sig: '', res: null };
-    store.update(Object.assign(up, ctx.logOp('總召', msg)));
+    store.update(Object.assign(up, logs));
     ctx.toast(msg);
   }
 
@@ -762,6 +1089,9 @@
     const { E, BASE, M, esc, wsHeader, tag } = ctx;
     const sum = getPlanSummary(ctx);
     const live = sum.live;
+    const canRun = ctx.isAdmin() && !isPub(ctx);
+    const dis = canRun ? '' : 'disabled';
+    const emptyGrpSlots = live.filter((s) => s.groupKey && !(E.getState().groups[s.groupKey] || []).length).length;
     const extraCnt = Object.keys(ctx.D().extra || {}).length;
     const addedCnt = Object.keys(ctx.D().addedPeople || {}).length;
     const offCnt = M.people.filter((p) => p.off).length;
@@ -777,7 +1107,7 @@
       { n: '1', t: '匯入行事曆與勤務格', d: `${live.length} 格（基準 ${BASE.slots.length} ＋ 新增 ${extraCnt}）`, st: '已完成', cls: 'done' },
       { n: '2', t: '匯入人員名冊與問卷', d: `${M.people.length} 人（可排 ${sum.activeAll.length}、暫停 ${offCnt}）`, st: '已完成', cls: 'done' },
       { n: '3', t: '確認固定組別名單', d: `已設定 ${grpReady}／${BASE.groupsMeta.length} 組（廚務／服務／禮節／交通）`, st: '已帶入', cls: 'done' },
-      { n: '4', t: '規則與參數設定', d: `廚務上限 ${M.R.p.cookMax} · 其他 ${M.R.p.otherMax} · 間隔 ${M.R.p.hard} 天`, st: '可於 A4 調整', cls: 'done' },
+      { n: '4', t: '規則與參數設定', d: `廚務上限 ${h(M.R.p.cookMax)} · 其他 ${h(M.R.p.otherMax)} · 間隔 ${h(M.R.p.hard)} 天`, st: '可於 A4 調整', cls: 'done' },
       { n: '5', t: '產生初版與方案比較', d: `目前總表 ${sum.totalGot}／${sum.totalNeed} 人次`, st: '目前步驟', cls: 'cur' }
     ];
 
@@ -786,7 +1116,7 @@
     const selPlan = CUI.a1.plan;
 
     return `${wsHeader('A', 'a1', ctx.defaultArea())}<main class="wide-main">
-      ${unseededBanner(ctx)}
+      ${CONSOLE_CSS}${unseededBanner(ctx)}${modeBanner(ctx, '只有總召可產生初版與重排；你可以查看方案比較與診斷。')}
       <div class="split-grid">
         <aside class="split-side card">
           <h2>116 年度建置</h2>
@@ -811,27 +1141,27 @@
             <div>
               <div class="small" style="font-weight:700;color:var(--accent-ink)">步驟 5</div>
               <h1>選一個規則方案，產生初版</h1>
-              <p class="muted" style="margin:4px 0 0">三個方案用同一份行事曆與名冊試算。選定後仍可於總表逐格調整，也可以只重排選定範圍。</p>
+              <p class="muted" style="margin:4px 0 0">三個方案用同一份行事曆與名冊試排，只差規則寬嚴（見各卡片）。重跑不會動到區長手動排的人、區長已確認的預排，也不會動已送出／已確認的區；產生後可在操作紀錄復原。</p>
             </div>
             <div class="acts">
-              <button type="button" class="btn" data-act="a1-run-scope">只重排選定範圍</button>
-              <button type="button" class="btn pri" data-act="a1-run-c">以方案 ${esc(selPlan)} 產生初版</button>
+              ${ctx.isAdmin() ? `<button type="button" class="btn" data-act="a1-run-scope" ${dis}>只重排選定範圍</button>
+              <button type="button" class="btn pri" data-act="a1-run-c" ${dis}>以方案 ${esc(selPlan)} 產生初版</button>` : ''}
             </div>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:14px">
             <div class="plan-card ${selPlan === 'A' ? 'on' : ''}" data-act="a1-pick-plan" data-plan="A" style="cursor:pointer">
               <div class="row-h"><h3>A 理想</h3>${tag(sum.A.gap > 0 ? 'bad' : 'ok', sum.A.gap > 0 ? '人力不足' : '可達成')}</div>
-              <div class="small muted">兩次服務間隔超過 30 天，不兼職；年度上限廚務 ${M.R.p.cookIdeal} 次、其他 ${M.R.p.otherIdeal} 次；廚務人員只做廚務。</div>
-              <div style="display:flex;align-items:baseline;gap:8px"><span class="num t-bad" style="font-size:32px;font-weight:700">${sum.A.gap}</span><span class="muted">人缺口（現有 ${sum.activeAll.length} 人共用）</span></div>
+              <div class="small muted">產生時採：兩次服務間隔超過 30 天，不兼職；年度上限廚務 ${h(M.R.p.cookIdeal)} 次、其他 ${h(M.R.p.otherIdeal)} 次；廚務人員只做廚務。（以此規則實際試排，結果仍以目前規則集檢查違規。）</div>
+              <div style="display:flex;align-items:baseline;gap:8px"><span class="num t-bad" style="font-size:32px;font-weight:700">${sum.A.gap}</span><span class="muted">人缺口（估算；現有 ${sum.activeAll.length} 人共用）</span></div>
               <div class="small muted">需要 ${sum.A.need} 人。缺口分布：一般服務 ${sum.A.gapOther}、廚務 ${sum.A.gapCook}、交通 ${sum.A.gapTr}。</div>
               <div class="small">用途：長期招募目標，每年對照距離。</div>
             </div>
 
             <div class="plan-card ${selPlan === 'B' ? 'on' : ''}" data-act="a1-pick-plan" data-plan="B" style="cursor:pointer">
               <div class="row-h"><h3>B 最小人力</h3>${tag('wn', '接近可行')}</div>
-              <div class="small muted">間隔至少 ${+M.R.p.hard + 1} 天，允許同日兼職；上限廚務 ${M.R.p.cookMax} 次、其他 ${M.R.p.otherMax} 次；主廚、大廚只做廚務。</div>
-              <div style="display:flex;align-items:baseline;gap:8px"><span class="num t-warn" style="font-size:32px;font-weight:700">${sum.B.gapShared}</span><span class="muted">人缺口（共用）· 分區合計 ${sum.B.areaGapSum}</span></div>
+              <div class="small muted">產生時採：間隔至少 8 天，允許同日兼職、不限定廚務人員只做廚務、不刻意平均分攤（盡量用少數人排到上限）；上限廚務 ${h(M.R.p.cookMax)} 次、其他 ${h(M.R.p.otherMax)} 次。（以此規則實際試排，結果仍以目前規則集檢查違規。）</div>
+              <div style="display:flex;align-items:baseline;gap:8px"><span class="num t-warn" style="font-size:32px;font-weight:700">${sum.B.gapShared}</span><span class="muted">人缺口（估算；共用）· 分區合計 ${sum.B.areaGapSum}</span></div>
               <div class="small muted">需要 ${sum.B.need} 人。分區缺口：${sum.B.areaShort.map((x) => `${x.area} ${x.gap}`).join('、')}。</div>
               <div class="small">用途：招募新人與跨區支援的底線。</div>
             </div>
@@ -839,8 +1169,10 @@
             <div class="plan-card ${selPlan === 'C' ? 'on' : ''}" data-act="a1-pick-plan" data-plan="C" style="cursor:pointer">
               <div class="row-h"><h3>C 現有人力試排</h3>${tag(selPlan === 'C' ? 'ok' : 'no', selPlan === 'C' ? '已選' : '點選')}</div>
               <div class="small muted">用目前規則與現有 ${sum.activeAll.length} 人名冊實際試排。排不進去的留空，違反的標出來。</div>
-              <div style="display:flex;align-items:baseline;gap:8px"><span class="num t-ok" style="font-size:32px;font-weight:700">${sum.C.got.toLocaleString()}</span><span class="muted">／ ${sum.C.need.toLocaleString()} 人次${sum.C.live ? '已排' : '（試排預測）'}</span></div>
-              <div class="small muted">${sum.C.slotCnt} 格勤務；違規 ${sum.C.v}、注意 ${sum.C.n}；尚缺 ${sum.C.shortPeople} 人次（${sum.C.shortSlots} 格）。</div>
+              ${sum.C.pending ? `<div class="small muted">尚未試排。試排約需 1 秒，按下按鈕才計算（不會寫入任何資料）。</div>
+              <div class="acts"><button type="button" class="btn sm pri-out" data-act="a1-sim-c" ${CUI.a1.simBusy ? 'disabled' : ''}>${CUI.a1.simBusy ? '計算中…' : '計算試排預測'}</button></div>` : `<div style="display:flex;align-items:baseline;gap:8px"><span class="num t-ok" style="font-size:32px;font-weight:700">${sum.C.got.toLocaleString()}</span><span class="muted">／ ${sum.C.need.toLocaleString()} 人次${sum.C.live ? '已排' : '（試排預測）'}</span></div>
+              <div class="small muted">${sum.C.slotCnt} 格勤務；違規 ${sum.C.v}、注意 ${sum.C.n}；尚缺 ${sum.C.shortPeople} 人次（${sum.C.shortSlots} 格）。</div>`}
+              ${emptyGrpSlots ? `<div class="small muted">另有 ${emptyGrpSlots} 格屬固定組別但組別名單是空的，系統不會排進這些格；請先到各組別頁設定名單。</div>` : ''}
               <div class="small">用途：帶進各區討論與協調的初版。</div>
             </div>
           </div>
@@ -849,7 +1181,7 @@
             <div class="row-h"><h2>產生選項</h2><span class="muted small">設定範圍與原則後點擊上方「只重排選定範圍」或「產生初版」</span></div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:12px">
               <label>範圍
-                <select id="a1Scope" data-act-change="a1-opt" data-k="scope">
+                <select id="a1Scope" ${dis} data-act-change="a1-opt" data-k="scope">
                   <option value="all" ${CUI.a1.scope === 'all' ? 'selected' : ''}>全年</option>
                   <option value="month" ${CUI.a1.scope === 'month' ? 'selected' : ''}>指定月份</option>
                   <option value="area" ${CUI.a1.scope === 'area' ? 'selected' : ''}>指定區</option>
@@ -857,34 +1189,35 @@
                 </select>
               </label>
               ${CUI.a1.scope === 'month' ? `<label>選擇月份
-                <select id="a1ScopeMonth" data-act-change="a1-opt" data-k="scopeMonth">
+                <select id="a1ScopeMonth" ${dis} data-act-change="a1-opt" data-k="scopeMonth">
                   ${months.map((m) => `<option value="${m}" ${CUI.a1.scopeMonth === m ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')}
                 </select>
               </label>` : ''}
               ${CUI.a1.scope === 'area' ? `<label>選擇區
-                <select id="a1ScopeArea" data-act-change="a1-opt" data-k="scopeArea">
+                <select id="a1ScopeArea" ${dis} data-act-change="a1-opt" data-k="scopeArea">
                   ${E.ALL_WORK_AREAS.map((a) => `<option ${CUI.a1.scopeArea === a ? 'selected' : ''}>${a}</option>`).join('')}
                 </select>
               </label>` : ''}
               <label>排到哪一層
-                <select id="a1Layer" data-act-change="a1-opt" data-k="layer">
+                <select id="a1Layer" ${dis} data-act-change="a1-opt" data-k="layer">
                   <option value="individual" ${CUI.a1.layer === 'individual' ? 'selected' : ''}>區、組、個人（系統先排，各區再改）</option>
-                  <option value="area_group" ${CUI.a1.layer === 'area_group' ? 'selected' : ''}>只排到區與組（人由各區排）</option>
+                  <option value="area_group" ${CUI.a1.layer === 'area_group' ? 'selected' : ''}>只排到區與組（不寫入名單，人由各區排）</option>
                 </select>
               </label>
               <label>人數不足時
-                <select id="a1Shortage" data-act-change="a1-opt" data-k="shortage">
+                <select id="a1Shortage" ${dis} data-act-change="a1-opt" data-k="shortage">
                   <option value="gap" ${CUI.a1.shortage === 'gap' ? 'selected' : ''}>留空並列入缺口</option>
                   <option value="cross" ${CUI.a1.shortage === 'cross' ? 'selected' : ''}>允許跨區補人</option>
-                  <option value="min" ${CUI.a1.shortage === 'min' ? 'selected' : ''}>降到需求下限</option>
+                  <option value="min" ${CUI.a1.shortage === 'min' ? 'selected' : ''}>降到需求下限（每格目標人數 85%）</option>
                 </select>
               </label>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:6px 20px">
-              <label class="ck"><input type="checkbox" data-act-change="a1-chk" data-k="keepLocked" ${CUI.a1.keepLocked ? 'checked' : ''}> 保留已鎖定與手動調整</label>
-              <label class="ck"><input type="checkbox" data-act-change="a1-chk" data-k="prefAff" ${CUI.a1.prefAff ? 'checked' : ''}> 優先帶入固定搭檔</label>
-              <label class="ck"><input type="checkbox" data-act-change="a1-chk" data-k="noViol" ${CUI.a1.noViol ? 'checked' : ''}> 不選會造成違規的人</label>
-              <label class="ck"><input type="checkbox" data-act-change="a1-chk" data-k="newTrainee" ${CUI.a1.newTrainee ? 'checked' : ''}> 新人先排見習</label>
+              <label class="ck"><input type="checkbox" ${dis} data-act-change="a1-chk" data-k="keepLocked" ${CUI.a1.keepLocked ? 'checked' : ''}> 保留已鎖定與手動調整（含區長已確認）</label>
+              <label class="ck"><input type="checkbox" ${dis} data-act-change="a1-chk" data-k="prefAff" ${CUI.a1.prefAff ? 'checked' : ''}> 優先帶入固定搭檔</label>
+              <label class="ck"><input type="checkbox" ${dis} data-act-change="a1-chk" data-k="noViol" ${CUI.a1.noViol ? 'checked' : ''}> 不選會造成違規的人</label>
+              <label class="ck"><input type="checkbox" ${dis} data-act-change="a1-chk" data-k="newTrainee" ${CUI.a1.newTrainee ? 'checked' : ''}> 新人先排見習</label>
+              <label class="ck"><input type="checkbox" ${dis} data-act-change="a1-chk" data-k="includeSubmitted" ${CUI.a1.includeSubmitted ? 'checked' : ''}> 連已送出／已確認的區一併重排（預設不動）</label>
             </div>
           </section>
 
@@ -925,7 +1258,7 @@
     const s0 = ctx.M.byId[slotId];
     if (!s0) return {};
     const { baseSt, simSt } = cloneEngineState(ctx);
-    const acks = ctx.D().acks || {};
+    const acks = ctx.normAcks();
     const isAcc = (c) => acks[E.issueKey(c)] && acks[E.issueKey(c)].st === '接受例外';
     const opts = E.isCookSlot(s0)
       ? E.AREAS.concat(['機動', '青年班'])
@@ -955,6 +1288,10 @@
       E.setState(baseSt);
     }
     return res;
+  }
+
+  function baseSlotOf(ctx, id) {
+    return (ctx.BASE.slots || []).find((x) => x.id === id) || ((ctx.E.getState().extra || {})[id]) || null;
   }
 
   function filteredA2Slots(ctx, bySlot) {
@@ -1018,7 +1355,7 @@
         lastM = ym;
       }
       const info = BASE.days[d] || {};
-      const ss = (byDay[d] || []).filter((s) => !s.cancel);
+      const ss = byDay[d] || []; // C-25：「此日不需要」的格也保留，才能點選恢復
       const w = E.wdOf(d);
       rowsHtml += `<tr>
         <td class="num" style="white-space:nowrap">${esc(E.fmtD(d))} <span class="muted">${E.WD[w]}</span></td>
@@ -1027,21 +1364,21 @@
           const c = cnt(bySlot[s.id]);
           const got = M.asg[s.id].p.length;
           const need = E.slotNeed(M, s);
-          const cls = c.v ? 'bad' : (c.n || got < need) ? 'warn' : '';
+          const cls = s.cancel ? '' : c.v ? 'bad' : (c.n || got < need) ? 'warn' : '';
           const selCls = s.id === selId ? 'row-sel' : '';
-          return `<button type="button" class="matrix-slot chip-slot ${cls} ${selCls}" data-act="a2-sel" data-sid="${s.id}">
+          return `<button type="button" class="matrix-slot chip-slot ${cls} ${selCls}" data-act="a2-sel" data-sid="${s.id}"${s.cancel ? ' title="此日不需要（點選可恢復）" style="opacity:.55;text-decoration:line-through"' : ''}>
             <span class="${E.AREAS.includes(s.area) ? 'c-' + esc(s.area) : ''}">${esc(s.area)}</span>
             ${s.grp ? `<span class="small muted">${esc(s.grp)}</span>` : ''}
-            <span class="num small muted">${got}/${need}</span>
+            <span class="num small muted">${s.cancel ? '不需要' : `${got}/${need}`}</span>
           </button>`;
         }).join(' ')}</td>`).join('')}
       </tr>`;
     }
 
-    return `<div class="table-wrap table-scroll-y"><table class="matrix-table">
+    return tw('年度勤務表（矩陣）', `<table class="matrix-table">
       <thead><tr><th>日期</th><th>活動</th>${cols.map(([n]) => `<th>${n}</th>`).join('')}</tr></thead>
       <tbody>${rowsHtml || '<tr><td colspan="10" class="empty">沒有符合條件的日期</td></tr>'}</tbody>
-    </table></div>`;
+    </table>`, 'table-scroll-y');
   }
 
   function renderA2List(ctx, passedSlots, passedBySlot, passedSelId) {
@@ -1078,7 +1415,7 @@
         stTag = tag('pre', '已鎖定');
       }
 
-      return `<div class="a2-grid ${selCls}" data-act="a2-sel" data-sid="${s.id}" style="cursor:pointer${s.cancel ? ';opacity:0.55' : ''}">
+      return `<div class="a2-grid ${selCls}" data-act="a2-sel" data-sid="${s.id}" role="button" tabindex="0" style="cursor:pointer${s.cancel ? ';opacity:0.55' : ''}">
         <div class="num small">${esc(E.fmtD(s.d))}（${E.WD[s.wd]}）</div>
         <div><div style="font-weight:500">${esc(s.label || info.act || s.cat)}</div><div class="small muted">${esc(s.loc)}${s.edited ? ' · 已改派' : ''}</div></div>
         <div><b>${esc(s.cat)}</b>${s.grp ? ` <span class="small muted">${esc(s.grp)}</span>` : ''}</div>
@@ -1088,10 +1425,10 @@
       </div>`;
     }).join('');
 
-    return `<div class="table-wrap table-scroll-y"><div class="a2-table">
+    return tw('年度勤務表', `<div class="a2-table">
       <div class="a2-grid hd"><div>日期</div><div>活動</div><div>勤務</div><div>負責</div><div>人數</div><div>檢查</div></div>
       ${rows || '<div class="empty">沒有符合條件的勤務格</div>'}
-    </div></div>`;
+    </div>`, 'table-scroll-y');
   }
 
   function renderA2Inspector(ctx, s, bySlot, byPid) {
@@ -1102,6 +1439,10 @@
     const gm = s.groupKey ? gmOf(ctx, s.groupKey) : null;
     const areaDelta = computeAreaDelta(ctx, s.id);
     const areaOpts = Object.keys(areaDelta);
+    const adminEd = ctx.isAdmin() && !isPub(ctx);
+    const canPeople = !isPub(ctx) && ctx.can(s.area, s.groupKey ? kindOfGroup(s.groupKey) : 'jz');
+    const dAdm = adminEd ? '' : 'disabled';
+    const dPpl = canPeople ? '' : 'disabled';
     const grpOpts = E.groupOptionsForSlot(s);
 
     // 已排人員與問題置頂
@@ -1144,13 +1485,14 @@
         </div>
         <div class="acts" style="flex:none">
           ${stTag}
-          ${r && r.pre ? `<button type="button" class="btn sm pri" data-act="a2-pre-ok" data-sid="${s.id}" data-pid="${p.id}">確認</button>` : ''}
-          <button type="button" class="btn sm" data-act="a2-rm-person" data-sid="${s.id}" data-pid="${p.id}" title="${gm ? '從組別移出' : '從本場移出'}">移出</button>
+          ${r && r.pre && ctx.canConfirmPre(s.area) ? `<button type="button" class="btn sm pri" data-act="a2-pre-ok" data-sid="${esc(s.id)}" data-pid="${+p.id}">確認</button>` : ''}
+          <button type="button" class="btn sm" data-act="a2-rm-person" ${dPpl} data-sid="${s.id}" data-pid="${p.id}" title="${gm ? '從組別移出' : '從本場移出'}">移出</button>
         </div>
       </div>`;
     };
 
     return `<div class="card">
+      <div><button type="button" class="btn sm insp-back" data-act="a2-back-list">↑ 回到列表</button></div>
       <div>
         <div class="num small muted">${esc(dLabel(s))} · ${esc(s.loc)}${s.lock ? ' · 已鎖定' : ''}${s.cancel ? ' · 此日不需要' : ''}</div>
         <h2 style="font-family:var(--f-disp);font-size:21px;margin:2px 0 4px">${esc(s.label || s.cat)}</h2>
@@ -1159,7 +1501,7 @@
 
       <div style="display:flex;flex-direction:column;gap:6px">
         <label>負責區（改派即時試算）
-          <select id="a2Area_${s.id}" data-act-change="a2-set-area" data-sid="${s.id}">
+          <select id="a2Area_${s.id}" ${dAdm} data-act-change="a2-set-area" data-sid="${s.id}">
             ${areaOpts.map((a) => {
               const d = areaDelta[a] || { dv: 0, dn: 0 };
               const txt = a === s.area ? `${a}（目前）` : `${a}　${fmtDelta(d.dv, '違規')}　${fmtDelta(d.dn, '注意')}`;
@@ -1168,7 +1510,7 @@
           </select>
         </label>
         ${grpOpts.length ? `<label>組別／隊別
-          <select id="a2Grp_${s.id}" data-act-change="a2-set-grp" data-sid="${s.id}">
+          <select id="a2Grp_${s.id}" ${dAdm} data-act-change="a2-set-grp" data-sid="${s.id}">
             <option value="">不指定組別</option>
             ${grpOpts.map((g) => `<option value="${esc(g)}" ${g === s.grp ? 'selected' : ''}>${esc(g)}</option>`).join('')}
           </select>
@@ -1203,7 +1545,7 @@
               <div><button type="button" class="link" data-act="person" data-pid="${p.id}">${esc(p.n)}</button> <span class="small muted">${esc(p.a)}${roleOf(p) ? ' · ' + esc(roleOf(p)) : ''}</span></div>
               <div class="small ${ev.hard.length ? 't-bad' : ev.soft.length ? 't-warn' : 'muted'}">${esc(why)}</div>
             </div>
-            <button type="button" class="btn sm pri-out" data-act="a2-add-person" data-sid="${s.id}" data-pid="${p.id}">${preBtnLabel}</button>
+            <button type="button" class="btn sm pri-out" data-act="a2-add-person" ${dPpl} data-sid="${s.id}" data-pid="${p.id}">${preBtnLabel}</button>
           </div>`;
         }).join('') || '<div class="muted small">目前沒有其他可排候選人</div>'}
         ${ranked.length > visibleCands.length ? `<button type="button" class="btn sm" data-act="a2-show-cands">顯示全部 ${ranked.length} 位候選人</button>` : ''}
@@ -1213,15 +1555,15 @@
         <div style="font-weight:700;color:var(--warn)">這一格的建議</div>
         <div class="small">${esc(topHintIss.msg)}。可改由同區可帶隊人員接替，或標記為接受例外。</div>
         <div class="acts">
-          <button type="button" class="btn sm warn" data-act="a2-swap-lead" data-sid="${s.id}">換帶隊人</button>
-          <button type="button" class="btn sm warn-out" data-act="a2-ack-slot" data-sid="${s.id}">接受例外</button>
+          <button type="button" class="btn sm warn" data-act="a2-swap-lead" ${dPpl} data-sid="${s.id}">換帶隊人</button>
+          <button type="button" class="btn sm warn-out" data-act="a2-ack-slot" ${dAdm} data-sid="${s.id}">接受例外</button>
         </div>
       </div>` : ''}
 
       <div class="acts">
-        <button type="button" class="btn pri" data-act="a2-autofill" data-sid="${s.id}">預排補滿</button>
-        <button type="button" class="btn" data-act="a2-toggle-lock" data-sid="${s.id}">${s.lock ? '解除鎖定' : '鎖定這一格'}</button>
-        <button type="button" class="btn" data-act="a2-toggle-cancel" data-sid="${s.id}">${s.cancel ? '恢復此格' : '此日不需要'}</button>
+        <button type="button" class="btn pri" data-act="a2-autofill" ${dPpl} data-sid="${s.id}">預排補滿</button>
+        <button type="button" class="btn" data-act="a2-toggle-lock" ${dAdm} data-sid="${s.id}">${s.lock ? '解除鎖定' : '鎖定這一格'}</button>
+        <button type="button" class="btn" data-act="a2-toggle-cancel" ${dAdm} data-sid="${s.id}">${s.cancel ? '恢復此格' : '此日不需要'}</button>
       </div>
     </div>`;
   }
@@ -1252,23 +1594,24 @@
 
     const monthBtns = [['', '全部'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5'], ['6', '6'], ['7', '7'], ['8', '8'], ['9', '9'], ['10', '10'], ['11', '11'], ['12', '12'], ['117', '117']];
 
+    const ns = CUI.a2.ns = CUI.a2.ns || { cat: E.CATS[0], area: E.ALL_WORK_AREAS[0], loc: '天達堂' };
     const addForm = CUI.a2.addOpen ? `<section class="card warnbox">
       <div class="row-h"><h2>新增勤務格（寫入雲端 extra）</h2><button type="button" class="btn sm" data-act="a2-add-toggle">關閉</button></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:10px">
         <label>開始日期<input id="a2NsD" type="date" value="2027-07-18" min="2027-01-01" max="2028-02-29"></label>
         <label>結束日期（同日可留空）<input id="a2NsE" type="date" min="2027-01-01" max="2028-02-29"></label>
-        <label>類別<select id="a2NsCat">${E.CATS.map((c) => `<option>${c}</option>`).join('')}</select></label>
-        <label>負責區<select id="a2NsArea">${E.ALL_WORK_AREAS.map((a) => `<option>${a}</option>`).join('')}</select></label>
+        <label>類別<select id="a2NsCat" data-act-change="a2-ns-opt" data-k="cat">${E.CATS.map((c) => `<option ${ns.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+        <label>負責區<select id="a2NsArea" data-act-change="a2-ns-opt" data-k="area">${E.ALL_WORK_AREAS.map((a) => `<option ${ns.area === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></label>
         <label>組別（可留空）<input id="a2NsGrp" type="text" placeholder="如 1、A、機動"></label>
         <label>需要人數<input id="a2NsNeed" type="number" min="1" max="80" value="10"></label>
-        <label>地點<select id="a2NsLoc">${['天達堂', '道院', '會館', '德光', '各區'].map((x) => `<option>${x}</option>`).join('')}</select></label>
+        <label>地點<select id="a2NsLoc" data-act-change="a2-ns-opt" data-k="loc">${['天達堂', '道院', '會館', '德光', '各區'].map((x) => `<option ${ns.loc === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
         <label>活動說明<input id="a2NsLabel" type="text" placeholder="例：臨時活動支援"></label>
       </div>
       <div class="acts"><button type="button" class="btn pri" data-act="a2-create-slot">建立勤務格</button></div>
     </section>` : '';
 
     return `${wsHeader('A', 'a2', ctx.defaultArea())}<main class="wide-main">
-      ${unseededBanner(ctx)}
+      ${CONSOLE_CSS}${unseededBanner(ctx)}${modeBanner(ctx)}
       <div class="kpi-grid">
         <div class="kpi-card"><div class="kpi-l">年度勤務格</div><div class="kpi-v">${live.length}</div><div class="kpi-s">已鎖定 ${lockedCnt} · 取消 ${M.slots.length - live.length}</div></div>
         <div class="kpi-card"><div class="kpi-l">已排人次／需要</div><div class="kpi-v">${totalGot.toLocaleString()}</div><div class="kpi-s">需要 ${totalNeed.toLocaleString()}（${totalNeed ? Math.round(totalGot / totalNeed * 100) : 0}%）</div></div>
@@ -1293,7 +1636,7 @@
           <input id="a2Q" type="search" data-input="a2Q" value="${esc(CUI.a2.q)}" placeholder="搜尋活動、勤務或姓名" aria-label="搜尋總表" style="min-height:44px;border-radius:8px;border:1px solid var(--line);padding:0 12px;background:var(--surface)">
           <label class="ck" style="padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)"><input id="a2OnlyChk" type="checkbox" data-act-change="a2-only" ${CUI.a2.only ? 'checked' : ''}> 只看有問題</label>
           <button type="button" class="btn" data-act="a2-mode">${CUI.a2.mode === 'matrix' ? '切換為列表' : '切換為矩陣'}</button>
-          <button type="button" class="btn pri" data-act="a2-add-toggle">＋ 新增勤務</button>
+          <button type="button" class="btn pri" data-act="a2-add-toggle" ${ctx.isAdmin() && !isPub(ctx) ? '' : 'disabled'}>＋ 新增勤務</button>
         </div>
       </div>
 
@@ -1315,14 +1658,14 @@
     const occ = ctx.E.occasions(ctx.M.personSlots[p.id] || []).length;
     const cap = ctx.E.capOf(ctx.M, p);
     const wd = personWeekdayDays(ctx, p.id);
-    const wdLimit = (o.wdCap !== undefined && o.wdCap !== '') ? +o.wdCap : +ctx.M.R.p.wdMax;
+    const wdLimit = p.wdCap != null ? p.wdCap : +ctx.M.R.p.wdMax;
 
     if (chip === '全部') return true;
     if (chip === '暫停／不方便') return (p.months && p.months.length > 0) || o.status === '暫停一段時間';
-    if (chip === '限量／只排假日') return o.status === '限量' || o.status === '只排假日' || !!p.cap || o.wdCap === 0 || o.wdCap === '0';
-    if (chip === '超過上限') return occ > cap.max || ((o.wdCap !== undefined && o.wdCap !== '' ? true : (p.work === '上班中' || !p.work)) && wd > wdLimit);
-    if (chip === '新人見習') return p.src === 'N' || o.status === '新人見習';
-    if (chip === '高齡／健康') return (p.age && p.age >= ctx.M.R.p.oldAge) || o.stamina === '輕工作' || o.stamina === '以坐著為主';
+    if (chip === '限量／只排假日') return o.status === '限量' || o.status === '只排假日' || !!p.cap || p.wdCap === 0;
+    if (chip === '超過上限') return occ > cap.max || ((p.wdCap != null || p.work === '上班中' || !p.work) && wd > wdLimit);
+    if (chip === '新人見習') return p.src === 'N' || !!p.trainee;
+    if (chip === '高齡／健康') return !!(p.age && p.age >= ctx.M.R.p.oldAge) || o.stamina === '輕工作' || o.stamina === '以坐著為主';
     if (chip === '不再排班') return !!p.off || o.status === '不再排班';
     return true;
   }
@@ -1350,15 +1693,15 @@
       const occ = E.occasions(M.personSlots[p.id] || []).length;
       const cap = E.capOf(M, p);
       const wd = personWeekdayDays(ctx, p.id);
-      const wdLim = (o.wdCap !== undefined && o.wdCap !== '') ? +o.wdCap : +M.R.p.wdMax;
-      const wdOver = (o.wdCap !== undefined && o.wdCap !== '' ? wd > wdLim : (p.work === '上班中' || !p.work) && wd > wdLim);
+      const wdLim = p.wdCap != null ? p.wdCap : +M.R.p.wdMax;
+      const wdOver = (p.wdCap != null || p.work === '上班中' || !p.work) && wd > wdLim;
       const stTxt = personStatusText(ctx, p);
-      const stCls = stTxt === '不再排班' ? 'bad' : (stTxt.includes('暫停') || stTxt === '只排假日' || stTxt.includes('限量')) ? 'wn' : stTxt === '新人見習' ? 'pl' : 'ok';
-      const trTxt = o.trans || p.tr || '—';
+      const stCls = stTxt === '不再排班' ? 'bad' : (stTxt.includes('暫停') || stTxt.includes('限量')) ? 'wn' : stTxt === '新人見習' ? 'pl' : 'ok';
+      const trTxt = (o.trans ? o.trans + (o.seats ? `（載 ${esc(o.seats)} 人）` : '') : p.tr) || '—';
       const selCls = p.id === selPid ? 'row-sel' : '';
 
-      return `<div class="a3-grid ${selCls}" data-act="a3-sel" data-pid="${p.id}" style="cursor:pointer">
-        <div><b>${esc(p.n)}</b>${p.age ? ` <span class="small muted">${p.age}歲</span>` : ''}</div>
+      return `<div class="a3-grid ${selCls}" data-act="a3-sel" data-pid="${p.id}" role="button" tabindex="0" style="cursor:pointer">
+        <div><b>${esc(p.n)}</b>${p.age ? ` <span class="small muted">${h(p.age)}歲</span>` : ''}</div>
         <div class="${E.AREAS.includes(p.a) ? 'c-' + esc(p.a) : ''}" style="font-weight:700">${esc(p.a)}</div>
         <div class="small muted">${esc(roleOf(p) || (p.src === 'N' ? '新人' : '一般'))}</div>
         <div class="num small ${occ > cap.max ? 't-bad' : ''}">${occ}／${cap.max}</div>
@@ -1368,10 +1711,10 @@
       </div>`;
     }).join('');
 
-    return `<div class="table-wrap table-scroll-y"><div class="a3-table">
+    return `${tw('人員狀態表', `<div class="a3-table">
       <div class="a3-grid hd"><div>姓名</div><div>區</div><div>角色</div><div>全年</div><div>平日</div><div>狀態</div><div>交通</div></div>
       ${rows || '<div class="empty">沒有符合條件的人員</div>'}
-    </div></div>
+    </div>`, 'table-scroll-y')}
     ${list.length > shown.length ? `<button type="button" class="btn wide" style="margin-top:8px" data-act="a3-show-all">顯示全部 ${list.length} 人（目前顯示 ${shown.length} 人）</button>` : ''}
     <div class="small muted" style="margin-top:6px">全年與平日欄：已排次數／上限。紅字表示超過上限。點擊任一列可於右側編輯狀態與時間軸。</div>`;
   }
@@ -1387,14 +1730,13 @@
         continue;
       }
       let hitWhy = '';
+      if (p.wdCap === 0 && s.weekday) hitWhy = '只排假日';
       for (let x = s.ds; x <= s.de; x++) {
         const k = ctx.E.ds(x);
         const m = +k.slice(5, 7);
+        if (hitWhy) break;
         if (p.unav.includes(k)) { hitWhy = ctx.E.fmtD(k) + ' 不可排'; break; }
         if (p.months.includes(m)) { hitWhy = m + ' 月暫停'; break; }
-      }
-      if (!hitWhy && (o.wdCap === 0 || o.wdCap === '0' || o.status === '只排假日') && s.weekday) {
-        hitWhy = '只排假日';
       }
       if (hitWhy) out.push({ s, why: hitWhy });
     }
@@ -1430,7 +1772,10 @@
       if (monthCnt[m] !== undefined) monthCnt[m]++;
     }
     const cap = E.capOf(M, p);
-    const curStatus = o.status || (p.off ? '不再排班' : p.months.length ? '暫停一段時間' : (o.wdCap === 0 || o.wdCap === '0') ? '只排假日' : p.cap ? '限量' : p.src === 'N' ? '新人見習' : '正常');
+    const curStatus = p.off ? '不再排班' : o.status || (p.months.length ? '暫停一段時間' : p.wdCap === 0 ? '只排假日' : p.cap ? '限量' : p.trainee || p.src === 'N' ? '新人見習' : '正常');
+    const aboutStatus = o.status === '限量' && !p.cap ? '「限量」要搭配「全年上限」才會生效，請填全年上限。' : o.status === '暫停一段時間' && !p.months.length ? '「暫停一段時間」要搭配「暫停月份」才會生效，請填月份（或點上方時間軸）。' : '';
+    const canEditP = !isPub(ctx) && (ctx.can(p.a, 'pov') || ctx.isAdmin());
+    const dP = canEditP ? '' : 'disabled';
 
     // 固定搭檔
     const mates = Object.entries(M.aff[p.id] || {}).sort((a, b) => b[1] - a[1]).slice(0, 4);
@@ -1449,10 +1794,11 @@
       .slice(0, 4);
 
     return `<div class="card">
+      <div><button type="button" class="btn sm insp-back" data-act="a3-back-list">↑ 回到列表</button></div>
       <div class="row-h">
         <div>
           <h2 style="font-family:var(--f-disp);font-size:21px">${esc(p.n)}</h2>
-          <div class="small muted">${esc(p.a)}${p.sx ? ' · ' + esc(p.sx) : ''}${p.age ? ' · ' + p.age + ' 歲' : ''}${roleOf(p) ? ' · ' + esc(roleOf(p)) : ''}</div>
+          <div class="small muted">${esc(p.a)}${p.sx ? ' · ' + esc(p.sx) : ''}${p.age ? ' · ' + h(p.age) + ' 歲' : ''}${roleOf(p) ? ' · ' + esc(roleOf(p)) : ''}</div>
         </div>
         <div class="acts">
           ${tag(stCls, stText)}
@@ -1467,7 +1813,7 @@
             const off = p.months.includes(m);
             const c = monthCnt[m];
             return `<div class="tl-item">
-              <button type="button" class="tl-cell ${off ? 'tl-off' : c > 0 ? 'tl-has' : ''}" data-act="a3-toggle-month" data-pid="${p.id}" data-m="${m}" title="點擊切換 ${m} 月是否暫停">${off ? '／' : c}</button>
+              <button type="button" class="tl-cell ${off ? 'tl-off' : c > 0 ? 'tl-has' : ''}" data-act="a3-toggle-month" ${dP} data-pid="${p.id}" data-m="${m}" title="點擊切換 ${m} 月是否暫停">${off ? '／' : c}</button>
               <div class="tl-m">${m}月</div>
             </div>`;
           }).join('')}
@@ -1477,48 +1823,50 @@
 
       <div class="grid2" style="gap:10px">
         <label>狀態
-          <select id="a3Status_${p.id}" data-act-change="a3-pov" data-pid="${p.id}" data-k="status">
-            ${['正常', '暫停一段時間', '限量', '只排假日', '新人見習', '不再排班'].map((opt) => `<option value="${opt}" ${curStatus === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+          <select id="a3Status_${p.id}" ${dP} data-act-change="a3-pov" data-pid="${p.id}" data-k="status">
+            ${['正常', '限量', '暫停一段時間', '只排假日', '新人見習', '不再排班'].map((opt) => `<option value="${opt}" ${curStatus === opt ? 'selected' : ''}>${opt}</option>`).join('')}
           </select>
         </label>
         <label>暫停月份（空白分隔）
-          <input id="a3Months_${p.id}" type="text" value="${esc((o.months || []).join(' '))}" data-act-change="a3-pov" data-pid="${p.id}" data-k="months" placeholder="例：6 7 8">
+          <input id="a3Months_${p.id}" type="text" ${dP} value="${esc((o.months || []).join(' '))}" data-act-change="a3-pov" data-pid="${p.id}" data-k="months" placeholder="例：6 7 8">
         </label>
-        <label>全年上限（次）
-          <input id="a3Cap_${p.id}" type="number" min="0" max="30" value="${esc(o.cap != null ? o.cap : '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="cap" placeholder="依規則 (${cap.max})">
+        <label>全年上限（次，1–30）
+          <input id="a3Cap_${p.id}" type="number" ${dP} min="1" max="30" value="${esc(o.cap != null ? o.cap : '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="cap" placeholder="依規則 (${cap.max})">
         </label>
         <label>平日上限
-          <select id="a3WdCap_${p.id}" data-act-change="a3-pov" data-pid="${p.id}" data-k="wdCap">
-            <option value="" ${(o.wdCap === undefined || o.wdCap === '') ? 'selected' : ''}>依規則 (${M.R.p.wdMax} 天)</option>
-            <option value="0" ${o.wdCap === 0 || o.wdCap === '0' ? 'selected' : ''}>不排平日 (0 天)</option>
-            <option value="1" ${+o.wdCap === 1 ? 'selected' : ''}>最多 1 天</option>
-            <option value="2" ${+o.wdCap === 2 ? 'selected' : ''}>最多 2 天</option>
-            <option value="3" ${+o.wdCap === 3 ? 'selected' : ''}>最多 3 天</option>
-            <option value="5" ${+o.wdCap === 5 ? 'selected' : ''}>最多 5 天</option>
+          <select id="a3WdCap_${p.id}" ${dP} data-act-change="a3-pov" data-pid="${p.id}" data-k="wdCap">
+            <option value="" ${(p.wdCap == null) ? 'selected' : ''}>依規則 (${h(M.R.p.wdMax)} 天)</option>
+            <option value="0" ${p.wdCap === 0 ? 'selected' : ''}>不排平日 (0 天)</option>
+            ${[1, 2, 3, 5].map((n) => `<option value="${n}" ${p.wdCap === n ? 'selected' : ''}>最多 ${n} 天</option>`).join('')}
           </select>
         </label>
         <label>體力
-          <select id="a3Stamina_${p.id}" data-act-change="a3-pov" data-pid="${p.id}" data-k="stamina">
+          <select id="a3Stamina_${p.id}" ${dP} data-act-change="a3-pov" data-pid="${p.id}" data-k="stamina">
             ${['一般', '輕工作', '以坐著為主'].map((opt) => `<option value="${opt}" ${(o.stamina || '一般') === opt ? 'selected' : ''}>${opt}</option>`).join('')}
           </select>
         </label>
         <label>交通
-          <select id="a3Trans_${p.id}" data-act-change="a3-pov" data-pid="${p.id}" data-k="trans">
+          <select id="a3Trans_${p.id}" ${dP} data-act-change="a3-pov" data-pid="${p.id}" data-k="trans">
             <option value="" ${!o.trans ? 'selected' : ''}>未指定${p.tr ? '（名冊：' + esc(p.tr) + '）' : ''}</option>
             ${['需要接送', '自行前往', '會開車、可載人'].map((opt) => `<option value="${opt}" ${o.trans === opt ? 'selected' : ''}>${opt}</option>`).join('')}
           </select>
         </label>
-        <label>工作狀態
-          <select id="a3Work_${p.id}" data-act-change="a3-pov" data-pid="${p.id}" data-k="work">
+        <label>載客數（可載幾人，0–8）
+          <input id="a3Seats_${p.id}" type="number" ${dP} min="0" max="8" value="${esc(o.seats != null ? o.seats : '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="seats" placeholder="未填">
+        </label>
+        <label>工作狀態（影響平日上限是否適用）
+          <select id="a3Work_${p.id}" ${dP} data-act-change="a3-pov" data-pid="${p.id}" data-k="work">
             ${[['', '未填'], ['上班中', '上班中'], ['退休／自由', '退休／自由'], ['學生', '學生']].map(([v, t]) => `<option value="${v}" ${(o.work || '') === v ? 'selected' : ''}>${t}</option>`).join('')}
           </select>
         </label>
         <label>不可排日期
-          <input id="a3Unav_${p.id}" type="text" value="${esc(o.unav || '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="unav" placeholder="2027-05-29">
+          <input id="a3Unav_${p.id}" type="text" ${dP} value="${esc(o.unav || '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="unav" placeholder="2027-05-29">
         </label>
       </div>
+      ${aboutStatus ? `<div class="small muted">${esc(aboutStatus)}</div>` : ''}
+      <div class="small muted">會影響排班的欄位：狀態（不再排班、只排假日）、暫停月份、全年上限、平日上限、工作狀態、不可排日期；體力、交通、載客數只是資訊，不進規則。這些資料只有排班人員與總召看得到。</div>
       <label>備註
-        <input id="a3Note_${p.id}" type="text" value="${esc(o.note || '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="note" placeholder="個人排班備註">
+        <input id="a3Note_${p.id}" type="text" ${dP} value="${esc(o.note || '')}" data-act-change="a3-pov" data-pid="${p.id}" data-k="note" placeholder="個人排班備註">
       </label>
 
       <div class="small muted">
@@ -1536,7 +1884,7 @@
           <span>${esc(h.s.label || h.s.cat)}（${esc(h.why)}） <span class="muted">→ 建議 ${h.sub ? esc(h.sub.c.n) + (h.sub.affWithP ? '（同班底）' : '') : '無無違規人選'}</span></span>
         </div>`).join('')}
         <div class="acts">
-          <button type="button" class="btn sm warn" data-act="a3-pre-subs" data-pid="${p.id}">預排 ${hits.filter((h) => !h.s.groupKey && h.sub).length || hits.length} 位替補</button>
+          <button type="button" class="btn sm warn" data-act="a3-pre-subs" ${dP} data-pid="${p.id}">預排 ${hits.filter((h) => !h.s.groupKey && h.sub).length || hits.length} 位替補</button>
           <button type="button" class="btn sm warn-out" data-act="a3-inspect-hits" data-pid="${p.id}">逐格處理</button>
         </div>
         <div class="small muted">「預排替補」將為依日期勤務替補同班底並標為預排標籤，待區長確認；連動組別可按「逐格處理」前往調整。</div>
@@ -1575,12 +1923,12 @@
     const selPerson = selPid ? M.pById[selPid] : null;
 
     return `${wsHeader('A', 'a3', ctx.defaultArea())}<main class="wide-main">
-      ${unseededBanner(ctx)}
+      ${CONSOLE_CSS}${unseededBanner(ctx)}${modeBanner(ctx)}
       <div class="kpi-grid">
         <div class="kpi-card"><div class="kpi-l">名冊總人數</div><div class="kpi-v">${allP.length}</div><div class="kpi-s">可排 ${allP.length - offCnt} · 不再排班 ${offCnt}</div></div>
         <div class="kpi-card"><div class="kpi-l">有個人限制</div><div class="kpi-v">${restrictedCnt}</div><div class="kpi-s">暫停月份／限量／只排假日</div></div>
-        <div class="kpi-card"><div class="kpi-l">超過上限</div><div class="kpi-v ${overCnt ? 't-bad' : 't-ok'}">${overCnt}</div><div class="kpi-s">全年或平日超過個人上限</div></div>
-        <div class="kpi-card"><div class="kpi-l">高齡／健康關注</div><div class="kpi-v">${seniorCnt}</div><div class="kpi-s">${M.R.p.oldAge} 歲以上或輕工作／坐姿</div></div>
+        <div class="kpi-card"><div class="kpi-l">超過上限</div><div class="kpi-v ${overCnt ? 't-bad' : 't-ok'}">${overCnt}</div><div class="kpi-s">全年或平日超過上限</div></div>
+        <div class="kpi-card"><div class="kpi-l">高齡／健康關注</div><div class="kpi-v">${seniorCnt}</div><div class="kpi-s">${h(M.R.p.oldAge)} 歲以上或輕工作／坐姿</div></div>
         <div class="kpi-card"><div class="kpi-l">新人見習</div><div class="kpi-v">${newbieCnt}</div><div class="kpi-s">尚未有 115 年服務紀錄</div></div>
       </div>
 
@@ -1604,7 +1952,7 @@
 
       <div class="split-grid">
         <div class="split-main" id="a3List">${renderA3List(ctx, filtered, selPid)}</div>
-        <aside class="split-side inspector" aria-label="個人狀態與時間軸">${renderA3Inspector(ctx, selPerson)}</aside>
+        <aside class="split-side inspector" id="a3Inspector" aria-label="個人狀態與時間軸">${renderA3Inspector(ctx, selPerson)}</aside>
       </div>
     </main>`;
   }
@@ -1616,7 +1964,7 @@
   function simulateRulesDelta(ctx, patchP, patchSev) {
     const { E } = ctx;
     const { baseSt, simSt } = cloneEngineState(ctx);
-    const acks = ctx.D().acks || {};
+    const acks = ctx.normAcks();
     const isAcc = (c) => acks[E.issueKey(c)] && acks[E.issueKey(c)].st === '接受例外';
 
     const baseIss = ctx.ISS.filter((c) => !c.accepted);
@@ -1641,6 +1989,14 @@
     return { v0, n0, v1, n1, dv: v1 - v0, dn: n1 - n0, byRule };
   }
 
+  /** C-22：規則參數的合理範圍（超出或空白不寫入；空白改回預設值） */
+  const PARAM_LIMITS = {
+    hard: [1, 60], soft: [1, 120], cookGap: [1, 60], densDays: [1, 60], densMax: [1, 30], jzMax: [1, 7], jzDiff: [0, 7], jzDiffMax: [0, 7],
+    cookIdeal: [1, 30], cookMax: [1, 30], otherIdeal: [1, 30], otherMax: [1, 30], jzMaxN: [1, 30], wdMax: [1, 10], hotelDays: [1, 30],
+    oldAge: [40, 120], minorAge: [10, 30], shortRatio: [0.1, 1], wLoad: [0, 100], wSoft: [0, 100], wAff: [0, 100], wCross: [0, 100], wNew: [-50, 100], wMismatch: [0, 100]
+  };
+  const paramLimit = (k) => PARAM_LIMITS[k] || [0, 100];
+
   function renderA4(ctx) {
     const { E, M, ISS, esc, wsHeader, tag } = ctx;
     const R = M.R;
@@ -1652,19 +2008,21 @@
       else counts[c.rule].n++;
     }
 
+    const aOK = ctx.isAdmin() && !isPub(ctx);
+    const dA = aOK ? '' : 'disabled';
     const renderParamCtrl = (p) => {
       const [k, label, type, opts] = p;
       const v = R.p[k];
       if (type === 'bool') {
-        return `<label class="ck small" style="min-height:36px"><input type="checkbox" id="a4P_${k}" data-act-change="a4-param" data-param="${k}" data-ptype="bool" ${v ? 'checked' : ''}> ${esc(label)}</label>`;
+        return `<label class="ck small" style="min-height:36px"><input type="checkbox" id="a4P_${k}" ${dA} data-act-change="a4-param" data-param="${k}" data-ptype="bool" ${v ? 'checked' : ''}> ${esc(label)}</label>`;
       }
       if (type === 'sel') {
-        return `<label class="small" style="gap:2px">${esc(label)}<select id="a4P_${k}" data-act-change="a4-param" data-param="${k}" data-ptype="sel" style="min-height:36px;font-size:13px">${opts.map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+        return `<label class="small" style="gap:2px">${esc(label)}<select id="a4P_${k}" ${dA} data-act-change="a4-param" data-param="${k}" data-ptype="sel" style="min-height:36px;font-size:13px">${opts.map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
       }
       if (type === 'text') {
-        return `<label class="small" style="gap:2px">${esc(label)}<input id="a4P_${k}" type="text" value="${esc(v)}" data-act-change="a4-param" data-param="${k}" data-ptype="text" style="min-height:36px;font-size:13px"></label>`;
+        return `<label class="small" style="gap:2px">${esc(label)}<input id="a4P_${k}" type="text" ${dA} value="${esc(v)}" data-act-change="a4-param" data-param="${k}" data-ptype="text" style="min-height:36px;font-size:13px"></label>`;
       }
-      return `<label class="small" style="gap:2px">${esc(label)}<input id="a4P_${k}" type="number" value="${esc(v)}" data-act-change="a4-param" data-param="${k}" data-ptype="num" style="min-height:36px;font-size:13px;width:90px"></label>`;
+      return `<label class="small" style="gap:2px">${esc(label)}<input id="a4P_${k}" type="number" ${dA} min="${paramLimit(k)[0]}" max="${paramLimit(k)[1]}" ${k === 'shortRatio' ? 'step="0.05"' : ''} value="${esc(v)}" data-act-change="a4-param" data-param="${k}" data-ptype="num" style="min-height:36px;font-size:13px;width:90px"></label>`;
     };
 
     // 平日上限 2 vs 3 即時比較
@@ -1706,7 +2064,7 @@
     const simRule = CUI.a4.simRule;
 
     return `${wsHeader('A', 'a4', ctx.defaultArea())}<main class="wide-main">
-      ${unseededBanner(ctx)}
+      ${CONSOLE_CSS}${unseededBanner(ctx)}${modeBanner(ctx, '只有總召可修改規則；你可以查看規則與情境試算。')}
       <div class="page-head">
         <div>
           <h1>規則集 116-v${R.v || 1}</h1>
@@ -1715,7 +2073,7 @@
         <div class="acts">
           <button type="button" class="btn" data-act="a4-toggle-ver">版本紀錄</button>
           <button type="button" class="btn" data-act="a4-export-json">匯出 117 草案 JSON</button>
-          <button type="button" class="btn bad-out" data-act="a4-reset-rules">還原預設規則</button>
+          <button type="button" class="btn bad-out" data-act="a4-reset-rules" ${dA}>還原預設規則</button>
         </div>
       </div>
 
@@ -1726,7 +2084,7 @@
 
       <div class="split-grid">
         <div class="split-main">
-          <div class="table-wrap table-scroll-y"><div class="a4-table">
+          <div class="table-wrap table-scroll-y" tabindex="0" role="region" aria-label="規則表"><div class="a4-table">
             <div class="a4-grid hd"><div>啟用</div><div>層級</div><div>規則</div><div>參數</div><div>嚴重度</div><div>目前總表結果</div></div>
             ${E.RULE_META.map((r) => {
               const sev = r.matrix ? '依矩陣' : (R.sev[r.id] || '關閉');
@@ -1734,13 +2092,13 @@
               const rc = counts[r.id] || { v: 0, n: 0 };
               const tot = rc.v + rc.n;
               return `<div class="a4-grid" style="${on ? '' : 'opacity:0.6'}">
-                <div><input id="a4En_${r.id}" type="checkbox" ${on ? 'checked' : ''} ${r.matrix ? 'disabled' : ''} data-act-change="a4-toggle" data-rule="${r.id}" aria-label="啟用 ${esc(r.id)}" style="width:20px;height:20px"></div>
+                <div><label class="ck"><input id="a4En_${r.id}" type="checkbox" ${on ? 'checked' : ''} ${r.matrix || !aOK ? 'disabled' : ''} data-act-change="a4-toggle" data-rule="${r.id}" aria-label="啟用 ${esc(r.id)}"> 啟用</label></div>
                 <div>${tag(r.lv === '區' ? 'pl' : r.lv === '人' ? 'wn' : 'no', r.lv)}</div>
                 <div><div style="font-weight:700">${esc(r.id)} · ${esc(r.name)}</div>${r.desc ? `<div class="small muted">${esc(r.desc)}</div>` : ''}</div>
                 <div style="display:flex;flex-direction:column;gap:6px">${r.params ? r.params.map(renderParamCtrl).join('') : '<span class="small muted">—</span>'}</div>
                 <div>${r.matrix
                   ? tag('pl', '對照矩陣')
-                  : `<select id="a4Sev_${r.id}" data-act-change="a4-sev" data-rule="${r.id}" style="min-height:38px;border-radius:8px;border:1px solid var(--line);padding:0 8px;background:var(--surface)">
+                  : `<select id="a4Sev_${r.id}" ${dA} aria-label="${esc(r.id)} 嚴重度" data-act-change="a4-sev" data-rule="${r.id}" style="min-height:38px;border-radius:8px;border:1px solid var(--line);padding:0 8px;background:var(--surface)">
                       ${['違規', '注意', '關閉'].map((sOpt) => `<option ${sev === sOpt ? 'selected' : ''}>${sOpt}</option>`).join('')}
                     </select>`}</div>
                 <div class="small">
@@ -1752,14 +2110,14 @@
 
           <section class="card">
             <div class="row-h"><h2>同日兼職 8×8 互動矩陣 (P1)</h2><span class="muted small">點擊切換同一人同日同地點兩項職務的判定</span></div>
-            <div class="table-wrap">
+            <div class="table-wrap" tabindex="0" role="region" aria-label="同日兼職 8×8 矩陣">
               <table class="mx-table">
                 <thead><tr><th></th>${E.JOB_CLASSES.map((c) => `<th>${c}</th>`).join('')}</tr></thead>
                 <tbody>
                   ${E.JOB_CLASSES.map((a, i) => `<tr><th>${a}</th>${E.JOB_CLASSES.map((b, j) => {
                     if (j < i) return `<td class="muted">·</td>`;
                     const v = R.mx[a + '|' + b] || '違規';
-                    return `<td><select data-act-change="a4-mx" data-pair="${a}|${b}" style="min-height:34px;border-radius:6px;border:1px solid var(--line);padding:0 4px;background:var(--surface)">
+                    return `<td><select ${dA} aria-label="${esc(a)}與${esc(b)}同日兼職" data-act-change="a4-mx" data-pair="${a}|${b}" style="min-height:34px;border-radius:6px;border:1px solid var(--line);padding:0 4px;background:var(--surface)">
                       ${['違規', '注意', '允許'].map((o) => `<option ${v === o ? 'selected' : ''}>${o}</option>`).join('')}
                     </select></td>`;
                   }).join('')}</tr>`).join('')}
@@ -1777,7 +2135,7 @@
               const v = R.mx[a + '|' + b] || '違規';
               return `<div class="row-h" style="padding-top:8px;border-top:1px solid var(--sunk)">
                 <span><b>${a} ＋ ${b}</b></span>
-                <select data-act-change="a4-mx" data-pair="${a}|${b}" style="min-height:38px;border-radius:8px;border:1px solid var(--line);padding:0 8px;background:var(--surface)">
+                <select ${dA} aria-label="${esc(a)}與${esc(b)}同日兼職" data-act-change="a4-mx" data-pair="${a}|${b}" style="min-height:38px;border-radius:8px;border:1px solid var(--line);padding:0 8px;background:var(--surface)">
                   ${['違規', '注意', '允許'].map((o) => `<option ${v === o ? 'selected' : ''}>${o}</option>`).join('')}
                 </select>
               </div>`;
@@ -1837,7 +2195,7 @@
             <button type="button" class="btn pri-out" data-act="a4-run-sim">用目前總表試算</button>
             ${sr ? `<div class="card" style="padding:10px;background:var(--sunk)">
               <div class="small"><b>試算結果：</b>違規 ${sr.v0} → <b class="${sr.dv > 0 ? 't-bad' : sr.dv < 0 ? 't-ok' : ''}">${sr.v1}</b>（${fmtDelta(sr.dv, '差')}） · 注意 ${sr.n0} → <b>${sr.n1}</b>（${fmtDelta(sr.dn, '差')}）</div>
-              <button type="button" class="btn sm pri" data-act="a4-apply-sim">套用至規則集</button>
+              <button type="button" class="btn sm pri" data-act="a4-apply-sim" ${dA}>套用至規則集</button>
             </div>` : ''}
           </div>
         </div>
@@ -1855,6 +2213,8 @@
     for (const s of M.slots) {
       dig[s.id] = {
         d: s.d,
+        e: s.e || s.d,
+        loc: s.loc || '',
         cat: s.cat,
         area: s.area || '',
         grp: s.grp || '',
@@ -1881,6 +2241,9 @@
       const ch = [];
       if (prev.area !== (s.area || '')) ch.push(`負責區 ${prev.area} → ${s.area}`);
       if (prev.grp !== (s.grp || '')) ch.push(`組別 ${prev.grp || '無'} → ${s.grp || '無'}`);
+      if (prev.d !== undefined && prev.d !== s.d) ch.push(`日期 ${ctx.E.fmtD(prev.d)} → ${ctx.E.fmtD(s.d)}`);
+      else if (prev.e !== undefined && prev.e !== (s.e || s.d)) ch.push(`結束日 ${ctx.E.fmtD(prev.e)} → ${ctx.E.fmtD(s.e || s.d)}`);
+      if (prev.loc !== undefined && prev.loc !== (s.loc || '')) ch.push(`地點 ${prev.loc || '無'} → ${s.loc || '無'}`);
       if (!!prev.cancel !== !!s.cancel) ch.push(s.cancel ? '改為此日不需要' : '恢復此格');
       if (prev.need !== (s.need || 0)) ch.push(`需求 ${prev.need} → ${s.need}`);
       const prevPids = Array.isArray(prev.pids) ? prev.pids : [];
@@ -1893,6 +2256,23 @@
     return diffs;
   }
 
+  /** 尚未由區長確認的預排：依負責區統計（C-13） */
+  function preSummary(ctx) {
+    const byArea = {};
+    let total = 0;
+    const add = (area) => { byArea[area || '未知'] = (byArea[area || '未知'] || 0) + 1; total++; };
+    const d = ctx.D();
+    for (const sid in d.assign || {}) {
+      const sl = ctx.M.byId[sid];
+      for (const pid in d.assign[sid] || {}) if (d.assign[sid][pid] && d.assign[sid][pid].pre) add(sl && sl.area);
+    }
+    for (const gk in d.groups || {}) {
+      const gm = gmOf(ctx, gk);
+      for (const pid in d.groups[gk] || {}) if (d.groups[gk][pid] && d.groups[gk][pid].pre) add(gm && gm.area);
+    }
+    return { total, byArea };
+  }
+
   function buildA5Checks(ctx) {
     const { E, M, ISS } = ctx;
     const live = M.slots.filter((s) => !s.cancel);
@@ -1903,9 +2283,7 @@
     const openViols = ISS.filter((c) => !c.accepted && c.lvl === '違規');
     const accViols = ISS.filter((c) => c.accepted && c.lvl === '違規');
     const openWarns = ISS.filter((c) => !c.accepted && c.lvl === '注意');
-    let preCnt = 0;
-    for (const sid in ctx.D().assign || {}) for (const pid in ctx.D().assign[sid]) if (ctx.D().assign[sid][pid].pre) preCnt++;
-    for (const gk in ctx.D().groups || {}) for (const pid in ctx.D().groups[gk]) if (ctx.D().groups[gk][pid].pre) preCnt++;
+    const preCnt = preSummary(ctx).total;
     const openProps = Object.values(ctx.D().proposals || {}).filter((p) => p && p.status !== 'resolved');
     const openCoords = Object.values(ctx.D().coord || {}).filter((c) => c && c.st !== 'done');
 
@@ -1917,69 +2295,226 @@
         { t: '各格人數充足（P11）', d: shortSlots.length ? `尚有 ${shortSlots.length} 格未達需求人數` : '所有有效勤務格均已達需求人數', cls: shortSlots.length ? 'wn' : 'ok', st: shortSlots.length ? `缺 ${shortSlots.length} 格` : '已滿額' },
         { t: '未決違規處理', d: `未處理違規 ${openViols.length} 筆 · 已標為接受例外 ${accViols.length} 筆`, cls: openViols.length ? 'bad' : 'ok', st: openViols.length ? `未決 ${openViols.length}` : '已清零' },
         { t: '未決注意提醒', d: `尚有 ${openWarns.length} 筆注意提醒`, cls: openWarns.length ? 'wn' : 'ok', st: openWarns.length ? `注意 ${openWarns.length}` : '已確認' },
-        { t: '總召預排待區長確認', d: preCnt ? `尚有 ${preCnt} 筆預排待各區區長確認` : '無待確認之預排項目', cls: preCnt ? 'wn' : 'ok', st: preCnt ? `待確認 ${preCnt}` : '已完成' },
+        { t: '總召預排待區長確認', d: preCnt ? `尚有 ${preCnt} 筆預排待各區區長確認` : '無待確認之預排項目', cls: preCnt ? 'bad' : 'ok', st: preCnt ? `待確認 ${preCnt}（預設擋定版）` : '已完成' },
         { t: '調整提案與跨區協調單', d: `未結提案 ${openProps.length} 件 · 未結協調 ${openCoords.length} 件`, cls: (openProps.length || openCoords.length) ? 'wn' : 'ok', st: (openProps.length || openCoords.length) ? `待結 ${openProps.length + openCoords.length}` : '全數結案' }
       ]
     };
   }
 
-  function buildA5Chapters(ctx) {
-    const { E, M } = ctx;
-    const live = M.slots.filter((s) => !s.cancel);
-    const scale = (CUI.a5.paper === 'A5' ? 1.4 : 1) * (CUI.a5.fontSize === 'large' ? 1.3 : 1);
-    const basePage = Math.max(1, parseInt(CUI.a5.startPage, 10) || 48);
+  /* ================================================================
+   * 列印分頁（C-08）：每一頁是一個固定高度的頁面框（.pg），頁數＝實際列印頁數；
+   * 目錄頁碼、各章頁碼、每頁頁尾頁碼都來自同一份分頁結果，不再用公式估算。
+   * 每列高度以「行數 × 行高 ＋ 內距」由字數估算（偏保守），頁面框內容不會超出（有測試以 Chrome 列印驗證）。
+   * ================================================================ */
+  const visLen = (str) => { let n = 0; for (const ch of String(str == null ? '' : str)) n += ch.charCodeAt(0) > 255 ? 1 : 0.6; return n; };
 
-    const defs = [
-      { id: 'ch1', u: '道務處／總召', t: '總目錄與 116 年行事曆說明', src: `${live.length} 格總表`, pages: 2, slots: live.slice(0, 12), ready: true },
-      { id: 'ch2', u: '各區主廚／總召', t: '廚務輪值表（天達堂／道院）', src: `${live.filter((s) => s.cat === '廚務').length} 場`, pages: Math.max(2, Math.ceil(live.filter((s) => s.cat === '廚務').length / 18)), slots: live.filter((s) => s.cat === '廚務'), ready: true },
-      { id: 'ch3', u: '各區人事組', t: '環境整理與週日服務輪值表', src: `${live.filter((s) => s.cat === '環境整理' || s.cat === '服務').length} 場`, pages: Math.max(2, Math.ceil(live.filter((s) => s.cat === '環境整理' || s.cat === '服務').length / 16)), slots: live.filter((s) => s.cat === '環境整理' || s.cat === '服務'), ready: true },
-      { id: 'ch4', u: '禮節小組長', t: '禮節辦道與 6 大崗位名單', src: `${live.filter((s) => s.cat === '禮節').length} 場`, pages: Math.max(2, Math.ceil(live.filter((s) => s.cat === '禮節').length / 12)), slots: live.filter((s) => s.cat === '禮節'), ready: true },
-      { id: 'ch5', u: '輪值組', t: '忠恕道院輪廚與輪值總表', src: `${live.filter((s) => s.cat === '會館輪廚' || s.cat.startsWith('忠恕')).length} 場`, pages: Math.max(2, Math.ceil(live.filter((s) => s.cat === '會館輪廚' || s.cat.startsWith('忠恕')).length / 14)), slots: live.filter((s) => s.cat === '會館輪廚' || s.cat.startsWith('忠恕')), ready: true },
-      { id: 'ch6', u: '交通隊', t: '天達交通隊與道院交通接駁表', src: `${live.filter((s) => s.cat === '交通').length} 場`, pages: Math.max(1, Math.ceil(live.filter((s) => s.cat === '交通').length / 16)), slots: live.filter((s) => s.cat === '交通'), ready: true },
-      { id: 'ch7', u: '輪值組／區長', t: '洗碗、大典前晚與跨單位協辦', src: `${live.filter((s) => ['洗碗', '大典前晚', '協辦'].includes(s.cat)).length} 場`, pages: 2, slots: live.filter((s) => ['洗碗', '大典前晚', '協辦'].includes(s.cat)), ready: true },
-      { id: 'ch8', u: '各區人事組', t: '各區固定組別名單（30 組）', src: `${ctx.BASE.groupsMeta.length} 組`, pages: Math.max(4, Math.ceil(ctx.BASE.groupsMeta.length / 6)), slots: [], isGroups: true, ready: true },
-      { id: 'ch9', u: '人資處', t: '個人全年出勤統計與注意事項', src: `${M.people.filter((p) => !p.off).length} 人`, pages: Math.max(2, Math.ceil(M.people.filter((p) => !p.off).length / 45)), slots: [], isPeopleStats: true, ready: true },
-      { id: 'ch10', u: '調度台', t: '定版異動追蹤夾頁與線上查詢', src: ctx.draftVer(), pages: 1, slots: [], isChangelog: true, ready: true }
-    ];
+  function printGeo() {
+    const a5 = CUI.a5.paper === 'A5', large = CUI.a5.fontSize === 'large';
+    return {
+      a5, large,
+      W: a5 ? 128 : 186,        // 可印寬度（mm）：A4 210−24、A5 148−20
+      H: a5 ? 184 : 262,        // 可印高度（mm）：已扣 3–7mm 安全邊
+      fs: large ? 12 : 9,       // 表格字級（pt）
+      cw: large ? 4.3 : 3.2,    // 一個中文字寬（mm）
+      lh: large ? 6.4 : 4.9,    // 行高（mm）
+      pad: 2.6,                 // 每列上下內距＋框線（mm）
+      foot: 9,                  // 頁尾保留
+      titleFirst: 20, titleFirstNoNote: 15, titleNext: 10,
+      f: large ? 1.3 : 1
+    };
+  }
+  const estLines = (str, widthMm, g) => Math.max(1, Math.ceil(visLen(str) / Math.max(1, Math.floor((widthMm - 3) / g.cw))));
 
-    let curP = basePage;
-    return defs.map((ch) => {
-      const checked = !!CUI.a5.chapters[ch.id];
-      const pgCount = Math.max(1, Math.round(ch.pages * scale));
-      const pRange = checked ? (pgCount === 1 ? `${curP}` : `${curP}–${curP + pgCount - 1}`) : '不印';
-      const startP = curP;
-      if (checked) curP += pgCount;
-      return Object.assign(ch, { checked, pgCount, pRange, startP });
-    });
+  /** 一章（或一個區摘要）的內容：{ id, t, u, note, cols:[mm], head:[], items:[{kind:'tr'|'p', h, html}] } → 分頁 */
+  function paginate(g, def, tailH) {
+    const cap = g.H - g.foot;
+    const theadH = g.lh + g.pad;
+    const pages = [{ items: [], tail: false }];
+    let used = def.note ? g.titleFirst : g.titleFirstNoNote, run = false;
+    const items = def.items.length ? def.items : [{ kind: 'p', h: g.lh + g.pad, html: '<div class="small muted">本章無符合場次</div>' }];
+    for (const it of items) {
+      const needH = it.h + (it.kind === 'tr' && !run ? theadH : 0);
+      const cur = pages[pages.length - 1];
+      if (used + needH > cap && cur.items.length) {
+        pages.push({ items: [], tail: false });
+        used = g.titleNext; run = false;
+      }
+      if (it.kind === 'tr' && !run) { used += theadH; run = true; }
+      if (it.kind !== 'tr') run = false;
+      used += it.h;
+      pages[pages.length - 1].items.push(it);
+    }
+    if (tailH) {
+      if (used + tailH > cap) pages.push({ items: [], tail: true });
+      else pages[pages.length - 1].tail = true;
+    }
+    return pages;
   }
 
-  function buildQrSvg(text) {
-    // 產生穩定合法的 SVG QR 圖樣（不依賴外部圖片請求）
-    const size = 21;
-    let hash = 2166136261;
-    for (let i = 0; i < text.length; i++) {
-      hash ^= text.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
-    }
-    const isFinder = (r, c) => (r < 7 && c < 7) || (r < 7 && c >= size - 7) || (r >= size - 7 && c < 7);
-    const finderOn = (r, c) => {
-      const rr = r >= size - 7 ? r - (size - 7) : r;
-      const cc = c >= size - 7 ? c - (size - 7) : c;
-      return rr === 0 || rr === 6 || cc === 0 || cc === 6 || (rr >= 2 && rr <= 4 && cc >= 2 && cc <= 4);
+  function slotItems(ctx, slots, g) {
+    const { E, M, esc } = ctx;
+    const twoSp = CUI.a5.twoCharSpace, lunar = CUI.a5.lunar;
+    const f = g.f;
+    const wDate = 22 * f, wLun = lunar ? 19 * f : 0, wArea = 16 * f;
+    const rest = Math.max(30, g.W - wDate - wLun - wArea);
+    const wCat = Math.round(rest * 0.38), wNames = rest - wCat;
+    const cols = [wDate].concat(lunar ? [wLun] : [], [wCat, wArea, wNames]);
+    const head = ['日期'].concat(lunar ? ['農曆'] : [], ['類別／活動', '區／組', '名單']);
+    const items = slots.map((s) => {
+      const names = (M.asg[s.id] ? M.asg[s.id].p : []).map((pid) => fmtPrintName((M.pById[pid] || {}).n || pid, twoSp)).join('、') || '（待補）';
+      const catTxt = `${s.cat} ${s.label || ''}`;
+      const areaTxt = `${s.area || ''} ${s.grp || ''}`;
+      const dateTxt = `${E.fmtD(s.d)}（${E.WD[s.wd]}）`;
+      const lines = Math.max(estLines(names, wNames, g), estLines(catTxt, wCat, g), estLines(areaTxt, wArea, g), estLines(dateTxt, wDate, g), lunar ? estLines(fmtLunar(s.d), wLun, g) : 1);
+      const bg = CUI.a5.catColor ? `background:${catBg(s.cat)};` : '';
+      return {
+        kind: 'tr', h: lines * g.lh + g.pad,
+        html: `<tr style="${bg}"><td class="num">${esc(dateTxt)}</td>${lunar ? `<td>${esc(fmtLunar(s.d))}</td>` : ''}<td><b>${esc(s.cat)}</b> ${esc(s.label || '')}</td><td class="col-area">${E.AREAS.includes(s.area) ? `<span class="c-${esc(s.area)}">${esc(s.area || '')}</span>` : esc(s.area || '')} ${esc(s.grp || '')}</td><td>${esc(names)}</td></tr>`
+      };
+    });
+    return { cols, head, items };
+  }
+
+  function twoColItems(ctx, rows, g, w1) {
+    // rows: [[left, right]]；左欄固定寬、右欄自動換行
+    const { esc } = ctx;
+    const w2 = g.W - w1;
+    return {
+      cols: [w1, w2],
+      items: rows.map(([a, b]) => ({ kind: 'tr', h: Math.max(estLines(a, w1, g), estLines(b, w2, g)) * g.lh + g.pad, html: `<tr><td><b>${esc(a)}</b></td><td>${esc(b)}</td></tr>` }))
     };
-    let rects = '';
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        let on = false;
-        if (isFinder(r, c)) on = finderOn(r, c);
-        else {
-          const bit = ((hash >>> ((r * 3 + c * 7) % 24)) ^ (r * 13 + c * 5)) & 1;
-          on = bit === 1;
-        }
-        if (on) rects += `<rect x="${c * 4}" y="${r * 4}" width="4" height="4" fill="#1c2420"/>`;
-      }
+  }
+
+  function chapterDefs(ctx, g) {
+    const { E, M, BASE, esc } = ctx;
+    const live = M.slots.filter((s) => !s.cancel);
+    const twoSp = CUI.a5.twoCharSpace;
+    const of = (pred) => live.filter(pred);
+    const jz = (s) => s.cat === '會館輪廚' || s.cat.startsWith('忠恕');
+    const slotCh = (id, u, t, slots) => Object.assign({ id, u, t, src: `${slots.length} 場` }, slotItems(ctx, slots, g));
+    const active = M.people.filter((p) => !p.off);
+    const nCol = Math.max(2, Math.floor(g.W / (g.large ? 64 : 44)));
+    const wCell = g.W / nCol;
+    const pItems = [];
+    for (let i = 0; i < active.length; i += nCol) {
+      const row = active.slice(i, i + nCol).map((p) => `${fmtPrintName(p.n, twoSp)}（${p.a}）${E.occasions(M.personSlots[p.id] || []).length}次`);
+      pItems.push({ kind: 'tr', h: Math.max(...row.map((x) => estLines(x, wCell, g))) * g.lh + g.pad, html: `<tr>${row.map((x) => `<td>${esc(x)}</td>`).join('')}${'<td></td>'.repeat(nCol - row.length)}</tr>` });
     }
-    return `<svg viewBox="0 0 ${size * 4} ${size * 4}" width="84" height="84" role="img" aria-label="線上查詢 QR 碼" style="background:#fff;padding:4px;border:1px solid #d6ddd9;border-radius:4px">${rects}</svg>`;
+    const grpRows = BASE.groupsMeta.map((gm) => {
+      const pids = (E.getState().groups[gm.id] || []).filter((id) => M.pById[id]);
+      return [`${gm.name}（${pids.length} 人）`, pids.map((id) => fmtPrintName(M.pById[id].n, twoSp)).join('、') || '—'];
+    });
+    const pub = (ctx.D().meta || {}).published;
+    const diffs = pub ? computePostPublishDiffs(ctx, pub) : [];
+    const diffRows = diffs.map((df) => [df.slot, df.desc]);
+    return [
+      { id: 'ch1', u: '道務處／總召', t: '總目錄與 116 年行事曆說明', src: `${live.length} 格總表`, isToc: true, cols: [], items: [] },
+      slotCh('ch2', '各區主廚／總召', '廚務輪值表（天達堂／道院）', of((s) => s.cat === '廚務')),
+      slotCh('ch3', '各區人事組', '環境整理與週日服務輪值表', of((s) => s.cat === '環境整理' || s.cat === '服務')),
+      slotCh('ch4', '禮節小組長', '禮節辦道與 6 大崗位名單', of((s) => s.cat === '禮節')),
+      slotCh('ch5', '輪值組', '忠恕道院輪廚與輪值總表', of(jz)),
+      slotCh('ch6', '交通隊', '天達交通隊與道院交通接駁表', of((s) => s.cat === '交通')),
+      slotCh('ch7', '輪值組／區長', '洗碗、大典前晚與跨單位協辦', of((s) => ['洗碗', '大典前晚', '協辦'].includes(s.cat))),
+      Object.assign({ id: 'ch8', u: '各區人事組', t: `各區固定組別名單（${BASE.groupsMeta.length} 組）`, src: `${BASE.groupsMeta.length} 組`, head: ['組別', '成員'] }, twoColItems(ctx, grpRows, g, Math.round(32 * g.f))),
+      { id: 'ch9', u: '人資處', t: '個人全年出勤統計與注意事項', src: `${active.length} 人`, cols: new Array(nCol).fill(wCell), head: null, items: pItems },
+      Object.assign({ id: 'ch10', u: '調度台', t: '定版異動追蹤夾頁與線上查詢', src: ctx.draftVer(), head: ['勤務格', '異動內容'], emptyMsg: '目前尚無定版後異動。' }, twoColItems(ctx, diffRows, g, Math.round(60 * g.f)))
+    ];
+  }
+
+  function qrUrl() {
+    return typeof location !== 'undefined' && location.origin && location.origin !== 'null' ? location.origin + location.pathname : '';
+  }
+  const QR_TAIL_H = 34;
+
+  function buildA5Chapters(ctx) {
+    const g = printGeo();
+    const defs = chapterDefs(ctx, g);
+    const basePage = Math.max(1, parseInt(CUI.a5.startPage, 10) || 48);
+    const checked = defs.filter((d) => !!CUI.a5.chapters[d.id]);
+    const lastId = checked.length ? checked[checked.length - 1].id : '';
+    const tail = CUI.a5.qr && qrUrl() ? QR_TAIL_H : 0;
+    // 第一輪：先分頁（目錄的列數固定，頁碼文字不影響高度）
+    const tocTitle = (d) => `${d.t}（${d.u}）`;
+    const tocItemsFor = (ranges) => checked.map((d) => ({ kind: 'tr', h: Math.max(estLines(tocTitle(d), g.W - 30 * g.f, g), 1) * g.lh + g.pad, ranges, d }));
+    let cur = basePage;
+    const out = defs.map((d) => {
+      const isChecked = !!CUI.a5.chapters[d.id];
+      if (!isChecked) return Object.assign(d, { checked: false, pgCount: 0, pRange: '不印', startP: 0, pages: [] });
+      let def = d;
+      if (d.isToc) def = Object.assign({}, d, { cols: [g.W - 30 * g.f, 30 * g.f], head: ['章節（負責單位）', '頁碼'], items: tocItemsFor(null) });
+      const pages = paginate(g, Object.assign({ note: CUI.a5.chNote }, def), d.id === lastId ? tail : 0);
+      const startP = cur;
+      cur += pages.length;
+      return Object.assign(d, { checked: true, pgCount: pages.length, startP, pages, pRange: pages.length === 1 ? `${startP}` : `${startP}–${startP + pages.length - 1}` });
+    });
+    // 第二輪：目錄內容（實際頁碼）
+    const toc = out.find((c) => c.isToc && c.checked);
+    if (toc) {
+      const { esc } = ctx;
+      toc.pages = toc.pages.map((pg) => ({
+        tail: pg.tail,
+        items: pg.items.map((it) => it.d ? { kind: 'tr', h: it.h, html: `<tr><td>${esc(tocTitle(it.d))}</td><td class="num">第 ${esc(out.find((c) => c.id === it.d.id).pRange)} 頁</td></tr>` } : it)
+      }));
+    }
+    return out;
+  }
+
+  const PRINT_CSS = `<style>
+    .pg-wrap{display:block}
+    .pg{position:relative;background:#fff;color:#1c2420;border:1px solid #d6ddd9;border-radius:6px;padding:12px 14px 38px;margin:0 0 14px}
+    .pg-ft{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:12px;color:#55635c}
+    .pg-title{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:.5mm solid #2c6a5d;margin:0 0 2mm;padding:0 0 1mm}
+    .pg-title h2,.pg-cont{margin:0;padding:0;border:0;font-size:14pt;line-height:1.25}
+    .pg-cont{font-size:10pt;margin:0 0 2mm;font-weight:700}
+    .pg-note{font-size:8pt;line-height:1.3;color:#55635c;margin:0 0 2mm}
+    .pg table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:var(--fs);line-height:var(--lh)}
+    .pg th,.pg td{border:.2mm solid #999;padding:.9mm 1.4mm;text-align:left;vertical-align:top;word-break:break-all;overflow-wrap:anywhere}
+    .pg th{background:#ecefed;color:#1c2420}
+    .pg tr{-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
+    .pg .qr-box{margin-top:3mm;display:flex;gap:4mm;align-items:center;break-inside:avoid}
+    .pg .qr-svg{width:24mm;height:24mm;flex:none;border:.2mm solid #999}
+    @media print{
+      .print-book{display:block !important;padding:0 !important;gap:0 !important}
+      .pg{height:var(--h);overflow:hidden;border:0;border-radius:0;padding:0;margin:0;break-after:page;page-break-after:always}
+      .pg-wrap > .pg:last-child{break-after:auto;page-break-after:auto}
+      .pg-ft{bottom:0}
+    }
+  </style>`;
+
+  function renderPagesHtml(ctx, g, def, pages, startNo, rangeText, totalLabel) {
+    const { esc } = ctx;
+    const tailHtml = () => {
+      const url = qrUrl();
+      const pub = (ctx.D().meta || {}).published;
+      const qrChk = QRGen.check(url);
+      const qrHtml = qrChk.ok ? QRGen.toSvg(url, 96, '線上即時班表查詢 QR 碼')
+        : `<div class="qr-svg qr-over small" role="alert" style="display:flex;align-items:center;justify-content:center;text-align:center;padding:2mm;box-sizing:border-box">網址過長（${qrChk.bytes} 位元組，上限 ${qrChk.max}），無法產生 QR 碼，請縮短網址</div>`;
+      return `<div class="qr-box">${qrHtml}
+        <div>
+          <div style="font-weight:700">線上即時班表查詢</div>
+          <div class="small muted">掃描 QR 碼進入天達排班協作系統，可依姓名查詢最新調動與代班資訊。</div>
+          <div class="small num muted">${esc(CUI.a5.printDate)} · ${esc(pub ? pub.version : ctx.draftVer())}</div>
+        </div></div>`;
+    };
+    return pages.map((pg, i) => {
+      const no = startNo + i;
+      let body = '';
+      let run = [];
+      const flush = () => {
+        if (!run.length) return;
+        const th = def.head ? `<thead><tr>${def.head.map((x) => `<th>${esc(x)}</th>`).join('')}</tr></thead>` : '';
+        body += `<table><colgroup>${def.cols.map((w) => `<col style="width:${w}mm">`).join('')}</colgroup>${th}<tbody>${run.join('')}</tbody></table>`;
+        run = [];
+      };
+      for (const it of pg.items) { if (it.kind === 'tr') run.push(it.html); else { flush(); body += it.html; } }
+      flush();
+      if (!pg.items.length && !pg.tail) body = '';
+      const head = i === 0
+        ? `<div class="pg-title"><h2>${esc(def.t)}</h2><span class="num small muted">${rangeText ? `p.${esc(rangeText)} · ` : ''}${esc(def.u || '')}</span></div>${CUI.a5.chNote && def.note !== false ? `<div class="pg-note">印行日期：${esc(CUI.a5.printDate)} · 資料來源：${esc(def.src || '')}</div>` : ''}`
+        : `<div class="pg-cont">${esc(def.t)}（續）</div>`;
+      const emptyMsg = !def.items.length && i === 0 && def.emptyMsg ? `<div class="small muted">${esc(def.emptyMsg)}</div>` : '';
+      return `<div class="pg" data-page="${no}" data-ch="${esc(def.id)}" style="--h:${g.H}mm"><div class="pg-body">${head}${def.items.length ? body : (emptyMsg || body)}${pg.tail ? tailHtml() : ''}</div><div class="pg-ft">天達堂 116 年服務手冊 · ${esc(CUI.a5.printDate)} · 第 ${no} 頁${totalLabel || ''}</div></div>`;
+    }).join('');
   }
 
   function renderPrintBook(ctx, chapters) {
@@ -1992,108 +2527,75 @@
     const clsList = ['print-book'];
     if (CUI.a5.paper === 'A5') clsList.push('print-page-a5');
     if (CUI.a5.fontSize === 'large') clsList.push('print-large');
-    const twoSp = CUI.a5.twoCharSpace;
-
-    const slotRowsHtml = (slots) => {
-      if (!slots.length) return '<div class="small muted">本章無符合場次</div>';
-      return `<table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr><th>日期</th>${CUI.a5.lunar ? '<th>農曆</th>' : ''}<th>類別／活動</th><th>區／組</th><th>名單</th></tr></thead>
-        <tbody>${slots.map((s) => {
-          const names = (M.asg[s.id] ? M.asg[s.id].p : []).map((pid) => fmtPrintName((M.pById[pid] || {}).n || pid, twoSp)).join('、');
-          const bgStyle = CUI.a5.catColor ? 'background:var(--sunk);' : '';
-          return `<tr>
-            <td class="num" style="white-space:nowrap">${esc(E.fmtD(s.d))}（${E.WD[s.wd]}）</td>
-            ${CUI.a5.lunar ? `<td class="small muted" style="white-space:nowrap">${esc(fmtLunar(s.d))}</td>` : ''}
-            <td style="${bgStyle}"><b>${esc(s.cat)}</b> ${esc(s.label || '')}</td>
-            <td><span class="${E.AREAS.includes(s.area) ? 'c-' + esc(s.area) : ''}">${esc(s.area)}</span> ${esc(s.grp || '')}</td>
-            <td>${esc(names || '（待補）')}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>`;
-    };
+    const g = printGeo();
+    const wrapStyle = `--fs:${g.fs}pt;--lh:${g.lh}mm`;
+    const watermark = isDraft ? `<div class="print-watermark">草案 ${esc(ctx.draftVer())} · 僅供校對</div>` : '';
 
     if (mode === 'areas') {
-      return `<section class="${clsList.join(' ')} card" aria-label="各區一頁摘要列印預覽">
-        ${isDraft ? `<div class="print-watermark">草案 ${esc(ctx.draftVer())} · 僅供校對</div>` : ''}
+      // 各區摘要：每區固定組別 + 依日期勤務，自行分頁並編頁碼（1 起算）
+      let no = 1;
+      const parts = [];
+      for (const a of E.AREAS) {
+        const grps = BASE.groupsMeta.filter((gm) => gm.area === a);
+        const slots = M.slots.filter((s) => !s.cancel && s.area === a && !s.groupKey);
+        const grpLine = grps.map((gm) => {
+          const pids = (E.getState().groups[gm.id] || []).filter((id) => M.pById[id]);
+          return `<b>${esc(gm.name)}（${pids.length} 人）：</b>${esc(pids.map((id) => fmtPrintName(M.pById[id].n, CUI.a5.twoCharSpace)).join('、') || '尚未設定')}`;
+        });
+        const intro = grpLine.map((html, i) => {
+          const gm = grps[i];
+          const pids = (E.getState().groups[gm.id] || []).filter((id) => M.pById[id]);
+          const txt = `${gm.name}（${pids.length} 人）：` + (pids.map((id) => fmtPrintName(M.pById[id].n, CUI.a5.twoCharSpace)).join('、') || '尚未設定');
+          return { kind: 'p', h: estLines(txt, g.W, g) * g.lh + 1.5, html: `<div style="font-size:${g.fs}pt;line-height:${g.lh}mm;margin-bottom:1.5mm">${html}</div>` };
+        });
+        const si = slotItems(ctx, slots, g);
+        const def = { id: 'area-' + a, t: `天達堂 116 年服務手冊 — ${a}區摘要`, u: `固定組別 ${grps.length} 組 · 依日期勤務 ${slots.length} 場`, src: `${slots.length} 場`, cols: si.cols, head: si.head, items: intro.concat(si.items) };
+        const pages = paginate(g, Object.assign({ note: true }, def), 0);
+        parts.push({ def, pages, no });
+        no += pages.length;
+      }
+      return `<section class="${clsList.join(' ')} card" aria-label="各區摘要列印預覽">${PRINT_CSS}
+        ${watermark}
         <div class="row-h no-print">
-          <h2>各區一頁摘要預覽（6 頁）</h2>
+          <h2>各區摘要預覽（${no - 1} 頁）</h2>
           <div class="acts"><button type="button" class="btn sm pri" data-act="a5-exec-print">列印此摘要</button><button type="button" class="btn sm" data-act="a5-close-preview">關閉預覽</button></div>
         </div>
-        ${E.AREAS.map((a) => {
-          const grps = BASE.groupsMeta.filter((g) => g.area === a);
-          const slots = M.slots.filter((s) => !s.cancel && s.area === a && !s.groupKey);
-          return `<div class="print-chapter">
-            <div class="row-h"><h2>天達堂 116 年服務手冊 — ${esc(a)}區一頁摘要</h2><span class="small muted">${esc(CUI.a5.printDate)}</span></div>
-            <div class="small muted" style="margin-bottom:8px">固定組別 ${grps.length} 組 · 依日期勤務 ${slots.length} 場</div>
-            ${grps.map((g) => {
-              const pids = (E.getState().groups[g.id] || []).filter((id) => M.pById[id]);
-              return `<div style="margin-bottom:6px"><b>${esc(g.name)}（${pids.length} 人）：</b>${esc(pids.map((id) => fmtPrintName(M.pById[id].n, twoSp)).join('、') || '尚未設定')}</div>`;
-            }).join('')}
-            ${slotRowsHtml(slots)}
-          </div>`;
-        }).join('')}
+        <div class="pg-wrap" style="${wrapStyle}">${parts.map((x) => renderPagesHtml(ctx, g, x.def, x.pages, x.no, '', '')).join('')}</div>
       </section>`;
     }
 
-    const targetChs = mode === 'single'
+    const target = mode === 'single'
       ? chapters.filter((c) => c.id === CUI.a5.singleCh)
       : chapters.filter((c) => c.checked);
-
-    const diffs = pub ? computePostPublishDiffs(ctx, pub) : [];
-
-    return `<section class="${clsList.join(' ')} card" aria-label="116 服務手冊預覽">
-      ${isDraft ? `<div class="print-watermark">草案 ${esc(ctx.draftVer())} · 僅供校對</div>` : ''}
+    // 單章列印沿用整本的頁碼；單章不印封底 QR
+    const single = mode === 'single';
+    let html = '';
+    for (const ch of target) {
+      let pages = ch.pages;
+      if (!ch.checked) {
+        // 單章列印一個「整本未勾選」的章節：獨立分頁，頁碼從起始頁碼起算
+        pages = paginate(g, Object.assign({ note: CUI.a5.chNote }, ch.isToc ? Object.assign({}, ch, { cols: [g.W - 30 * g.f, 30 * g.f], head: ['章節（負責單位）', '頁碼'], items: chapters.filter((x) => x.checked).map((x) => ({ kind: 'tr', h: g.lh + g.pad, html: `<tr><td>${esc(x.t)}（${esc(x.u)}）</td><td class="num">第 ${esc(x.pRange)} 頁</td></tr>` })) }) : ch), 0);
+      }
+      if (single && pages.length && pages[pages.length - 1].tail) pages = pages.map((p) => Object.assign({}, p, { tail: false }));
+      const startNo = ch.checked ? ch.startP : Math.max(1, parseInt(CUI.a5.startPage, 10) || 48);
+      const range = pages.length === 1 ? `${startNo}` : `${startNo}–${startNo + pages.length - 1}`;
+      const defForRender = ch.isToc ? Object.assign({}, ch, { cols: [g.W - 30 * g.f, 30 * g.f], head: ['章節（負責單位）', '頁碼'], items: pages.reduce((a, p) => a.concat(p.items), []) }) : ch;
+      html += renderPagesHtml(ctx, g, defForRender, pages, startNo, range, '');
+    }
+    const total = target.reduce((a, c) => a + (c.checked ? c.pgCount : 0), 0);
+    return `<section class="${clsList.join(' ')} card" aria-label="116 服務手冊預覽">${PRINT_CSS}
+      ${watermark}
       <div class="row-h no-print">
         <div>
           <h2>116 年服務手冊預覽（${esc(CUI.a5.paper)} · ${CUI.a5.fontSize === 'large' ? '大字版' : '標準字級'}${CUI.a5.twoCharSpace ? ' · 兩字姓名加空格對齊' : ''}）</h2>
-          <div class="small muted">${esc(CUI.a5.printDate)} · 共 ${targetChs.length} 章</div>
+          <div class="small muted">${esc(CUI.a5.printDate)} · 共 ${target.length} 章${single ? '' : `、${total} 頁`}（頁碼與目錄由同一份分頁結果產生）</div>
         </div>
         <div class="acts">
           <button type="button" class="btn sm pri" data-act="a5-exec-print">立即列印／存為 PDF</button>
           <button type="button" class="btn sm" data-act="a5-close-preview">關閉預覽</button>
         </div>
       </div>
-
-      ${targetChs.map((ch) => {
-        let body = '';
-        if (ch.id === 'ch1') {
-          body = `<div style="margin-bottom:8px"><b>目錄總覽</b></div>
-            ${chapters.filter((x) => x.checked).map((x) => `<div class="kv small"><span>${esc(x.t)}（${esc(x.u)}）</span><span class="num">第 ${esc(x.pRange)} 頁</span></div>`).join('')}`;
-        } else if (ch.isGroups) {
-          body = BASE.groupsMeta.map((g) => {
-            const pids = (E.getState().groups[g.id] || []).filter((id) => M.pById[id]);
-            return `<div style="padding:4px 0;border-top:1px solid var(--sunk)"><b>${esc(g.name)}（${pids.length} 人）</b>：${esc(pids.map((id) => fmtPrintName(M.pById[id].n, twoSp)).join('、') || '—')}</div>`;
-          }).join('');
-        } else if (ch.isPeopleStats) {
-          const active = M.people.filter((p) => !p.off);
-          body = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px 12px;font-size:12px">
-            ${active.slice(0, 120).map((p) => `<div>${esc(fmtPrintName(p.n, twoSp))} <span class="muted">(${esc(p.a)})</span> <span class="num">${E.occasions(M.personSlots[p.id] || []).length}次</span></div>`).join('')}
-          </div>${active.length > 120 ? `<div class="small muted">（預覽顯示前 120 位，列印與 CSV 含全體 ${active.length} 位）</div>` : ''}`;
-        } else if (ch.isChangelog) {
-          body = diffs.length
-            ? diffs.map((df) => `<div class="kv small"><span>${esc(df.slot)}</span><span>${esc(df.desc)}</span></div>`).join('')
-            : '<div class="small muted">目前尚無定版後異動。</div>';
-        } else {
-          body = slotRowsHtml(ch.slots);
-        }
-        return `<div class="print-chapter">
-          <div class="row-h" style="margin-bottom:4px">
-            <h2>${esc(ch.t)}</h2>
-            <span class="num small muted">p.${esc(ch.pRange)} · ${esc(ch.u)}</span>
-          </div>
-          ${CUI.a5.chNote ? `<div class="small muted" style="margin-bottom:8px">印行日期：${esc(CUI.a5.printDate)} · 資料來源：${esc(ch.src)}</div>` : ''}
-          ${body}
-        </div>`;
-      }).join('')}
-
-      ${CUI.a5.qr ? `<div class="qr-box">
-        ${buildQrSvg((typeof location !== 'undefined' ? location.href.split('#')[0] : 'https://tdassign/') + '#' + ctx.draftVer())}
-        <div>
-          <div style="font-weight:700">線上即時班表查詢</div>
-          <div class="small muted">掃描 QR 碼進入天達排班協作系統，可依姓名查詢最新調動與代班資訊。</div>
-          <div class="small num muted">${esc(CUI.a5.printDate)} · ${esc(pub ? pub.version : ctx.draftVer())}</div>
-        </div>
-      </div>` : ''}
+      <div class="pg-wrap" style="${wrapStyle}">${html}</div>
     </section>`;
   }
 
@@ -2105,8 +2607,8 @@
       const A = M.asg[s.id];
       const names = A.p.map((pid) => fmtPrintName((M.pById[pid] || {}).n || pid, twoSp)).join('、');
       rows.push([
-        E.fmtD(s.d),
-        s.e && s.e !== s.d ? E.fmtD(s.e) : '',
+        s.d, // ISO 日期（含年份，Excel 不會丟年）
+        s.e && s.e !== s.d ? s.e : '',
         E.WD[s.wd],
         s.weekday ? '平日' : '',
         (BASE.days[s.d] || {}).act || s.label || '',
@@ -2122,7 +2624,8 @@
       ]);
     }
     const content = '\ufeff' + rows.map((r) => r.map((v) => {
-      const str = String(v == null ? '' : v);
+      let str = String(v == null ? '' : v);
+      if (typeof v === 'string' && /^[=+\-@\t\r]/.test(str)) str = "'" + str; // C-15：防公式注入
       return /[",\n\r]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
     }).join(',')).join('\r\n');
     triggerDownload(`116天達堂排班總表_${new Date().toISOString().slice(0, 10)}.csv`, content, 'text/csv;charset=utf-8');
@@ -2154,8 +2657,12 @@
     const diffs = pub ? computePostPublishDiffs(ctx, pub) : [];
     const postLogs = pub ? Object.values(ctx.D().log || {}).filter((l) => l && l.at >= pub.at).sort((a, b) => b.at - a.at).slice(0, 15) : [];
 
+    const isAd = ctx.isAdmin();
+    const preS = preSummary(ctx);
+    const preAreas = Object.keys(preS.byArea);
+    const pubHist = Object.keys((ctx.D().meta || {}).publishedHistory || {}).length;
     return `${wsHeader('A', 'a5', ctx.defaultArea())}<main class="wide-main">
-      ${unseededBanner(ctx)}
+      ${CONSOLE_CSS}${unseededBanner(ctx)}
       <div class="page-head no-print">
         <div>
           <div class="row-h" style="justify-content:flex-start;gap:8px">
@@ -2168,8 +2675,8 @@
           <button type="button" class="btn" data-act="a5-preview">預覽整本</button>
           <button type="button" class="btn pri-out" data-act="a5-draft-pdf">匯出草稿 PDF（有浮水印）</button>
           ${pub
-            ? `<button type="button" class="btn bad-out" data-act="a5-unpublish">解除定版鎖定</button>`
-            : `<button type="button" class="btn pri" data-act="a5-publish">定版（鎖為 116 定版 v1.0）</button>`}
+            ? `<button type="button" class="btn bad-out" data-act="a5-unpublish" ${isAd ? '' : 'disabled'}>解除定版鎖定</button>`
+            : `<button type="button" class="btn pri" data-act="a5-publish" ${isAd ? '' : 'disabled'}>定版（鎖為 116 定版 v1.${pubHist}）</button>`}
         </div>
       </div>
 
@@ -2179,7 +2686,7 @@
           <button type="button" class="btn sm pri" data-act="a5-print-ch" data-ch="ch10">列印異動追蹤夾頁</button>
         </div>
         <div style="font-weight:700;margin-top:6px">定版後異動追蹤夾頁表（${diffs.length} 格變更 · ${postLogs.length} 筆紀錄）</div>
-        ${diffs.length ? `<div class="table-wrap"><table style="width:100%;border-collapse:collapse;font-size:13px">
+        ${diffs.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="定版後異動追蹤表"><table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr><th>勤務格</th><th>異動內容</th></tr></thead>
           <tbody>${diffs.map((df) => `<tr><td><b>${esc(df.slot)}</b></td><td>${esc(df.desc)}</td></tr>`).join('')}</tbody>
         </table></div>` : '<div class="small muted">自定版以來尚無勤務格異動。</div>'}
@@ -2192,23 +2699,29 @@
             <div><div style="font-weight:700">${esc(c.t)}</div><div class="small muted">${esc(c.d)}</div></div>
             ${tag(c.cls, c.st)}
           </div>`).join('')}
-          ${openViols.length ? `<button type="button" class="btn sm warn" data-act="a5-ack-all-viol">全部未決違規標為接受例外 (${openViols.length})</button>` : ''}
+          ${preS.total && !pub ? `<div class="card warnbox" role="group" aria-label="未確認預排備案" style="padding:10px">
+            <div style="font-weight:700;color:var(--bad)">有 ${preS.total} 筆預排尚未由區長確認，預設不能定版</div>
+            <div class="small muted">請先請各區區長確認（到各區頁面按「確認」）。若確定要放行，請逐區寫下備案（為何這幾筆可以先印），全部填完才能定版；備案會記在定版紀錄。</div>
+            ${preAreas.map((a) => `<label class="small" style="gap:2px">${esc(a)}：${preS.byArea[a]} 筆
+              <input type="text" maxlength="100" ${isAd ? '' : 'disabled'} value="${esc((CUI.a5.preNotes || {})[a] || '')}" data-act-change="a5-pre-note" data-area="${esc(a)}" placeholder="備案說明（例：已電話確認，區長稍後補按）" aria-label="${esc(a)} 預排備案"></label>`).join('')}
+          </div>` : ''}
+          ${openViols.length ? `<button type="button" class="btn sm warn" data-act="a5-ack-all-viol" ${isAd ? '' : 'disabled'}>全部未決違規標為接受例外 (${openViols.length})</button>` : ''}
           <div class="small" style="padding:10px;border-radius:8px;background:var(--warn-soft);color:var(--warn)">有未處理項目時仍可定版，建議先標為「接受例外」並註記備案，手冊上不會印出警語。</div>
         </aside>
 
         <div class="split-main">
-          <div class="table-wrap"><div class="a5-table">
+          <div class="scroll-hint">← 左右滑動可看全部欄位 →</div><div class="table-wrap" tabindex="0" role="region" aria-label="服務手冊章節表"><div class="a5-table">
             <div class="table-head-pad"><h2>服務手冊章節（10 章）</h2><span class="small muted">勾選要印的章節；目錄與頁碼依字級／紙張自動計算</span></div>
             <div class="a5-grid hd"><div>印</div><div>負責單位</div><div>內容</div><div>頁碼</div><div>資料來源</div><div>狀態</div></div>
             ${chapters.map((ch) => `<div class="a5-grid">
-              <div><input type="checkbox" ${ch.checked ? 'checked' : ''} data-act-change="a5-ch" data-ch="${ch.id}" aria-label="列印 ${esc(ch.t)}" style="width:20px;height:20px"></div>
+              <div><label class="ck"><input type="checkbox" ${ch.checked ? 'checked' : ''} data-act-change="a5-ch" data-ch="${ch.id}" aria-label="列印 ${esc(ch.t)}"> 印</label></div>
               <div class="small">${esc(ch.u)}</div>
               <div style="font-weight:700">${esc(ch.t)}</div>
               <div class="num small">${esc(ch.pRange)}</div>
               <div class="small muted">${esc(ch.src)}</div>
               <div>${tag(ch.checked ? 'ok' : 'no', ch.checked ? '納入列印' : '略過')}</div>
             </div>`).join('')}
-            <div class="small muted" style="padding:10px 16px;border-top:1px solid var(--sunk)">目錄頁碼由系統依勾選章節順序與紙張字級即時編算，避免人工排版頁碼錯置。</div>
+            <div class="small muted" style="padding:10px 16px;border-top:1px solid var(--sunk)">每章從新的一頁開始；頁碼是依實際分頁結果編的（每頁底部也印有頁碼），目錄與內頁一致。</div>
           </div></div>
         </div>
       </div>
@@ -2247,25 +2760,25 @@
 
         <section class="card">
           <h2>輸出（4 種匯出格式）</h2>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--sunk);align-items:center">
-            <div><div style="font-weight:700">整本印刷列印</div><div class="small muted">含目錄、已勾選章節、頁碼${CUI.a5.qr ? '與封底 QR 碼' : ''}</div></div>
+          <div class="out-row">
+            <div><div style="font-weight:700">整本印刷列印</div><div class="small muted">含目錄、已勾選章節、每頁頁碼${CUI.a5.qr ? '與封底 QR 碼' : ''}</div></div>
             <button type="button" class="btn sm pri-out" data-act="a5-print-book">匯出／列印</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--sunk);align-items:center">
+          <div class="out-row">
             <div>
               <div style="font-weight:700">單章列印</div>
-              <select id="a5SingleCh" data-act-change="a5-opt" data-k="singleCh" style="margin-top:4px;min-height:36px;border-radius:6px;border:1px solid var(--line);padding:0 8px;background:var(--surface)">
+              <select id="a5SingleCh" aria-label="選擇要匯出的章節" data-act-change="a5-opt" data-k="singleCh" style="margin-top:4px;min-height:36px;border-radius:6px;border:1px solid var(--line);padding:0 8px;background:var(--surface)">
                 ${chapters.map((ch) => `<option value="${ch.id}" ${CUI.a5.singleCh === ch.id ? 'selected' : ''}>${esc(ch.t)}</option>`).join('')}
               </select>
             </div>
             <button type="button" class="btn sm pri-out" data-act="a5-print-single">匯出此章</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--sunk);align-items:center">
+          <div class="out-row">
             <div><div style="font-weight:700">Excel 相容 CSV</div><div class="small muted">UTF-8 BOM 編碼，含日期、類別、負責區與人員名單</div></div>
             <button type="button" class="btn sm pri-out" data-act="a5-export-csv">匯出 CSV</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--sunk);align-items:center">
-            <div><div style="font-weight:700">各區一頁摘要</div><div class="small muted">六區各一頁（固定組別＋依日期場次）方便交給區長核對</div></div>
+          <div class="out-row">
+            <div><div style="font-weight:700">各區摘要</div><div class="small muted">六區各自一份（固定組別＋依日期場次，內容多時自動分頁）方便交給區長核對</div></div>
             <button type="button" class="btn sm pri-out" data-act="a5-print-areas">匯出摘要</button>
           </div>
         </section>
@@ -2287,10 +2800,15 @@
     if (act === 'a1-pick-plan') { CUI.a1.plan = d.plan; ctx.render(); return true; }
     if (act === 'a1-run-c') { runA1AutoSchedule(ctx, false); return true; }
     if (act === 'a1-run-scope') { runA1AutoSchedule(ctx, true); return true; }
+    if (act === 'a1-sim-c') {
+      CUI.a1.simBusy = true; ctx.render();
+      setTimeout(() => { try { getPlanSummary(ctx, { compute: true }); } finally { CUI.a1.simBusy = false; ctx.render(); } }, 20);
+      return true;
+    }
     if (act === 'a1-diag-detail') { CUI.a1.openDiag = CUI.a1.openDiag === d.id ? '' : d.id; ctx.render(); return true; }
     if (act === 'a1-to-prop') {
       if (!ctx.need(ctx.me(), '請先登入')) return true;
-      const sum = getPlanSummary(ctx);
+      const sum = getPlanSummary(ctx, { compute: true });
       const diags = buildA1Diagnostics(ctx, sum.C);
       const diag = diags.find((x) => x.id === d.id);
       if (!diag) return true;
@@ -2324,19 +2842,23 @@
     if (act === 'a2-month') { CUI.a2.month = d.v; ctx.render(); return true; }
     if (act === 'a2-mode') { CUI.a2.mode = CUI.a2.mode === 'matrix' ? 'list' : 'matrix'; ctx.render(); return true; }
     if (act === 'a2-add-toggle') { CUI.a2.addOpen = !CUI.a2.addOpen; ctx.render(); return true; }
-    if (act === 'a2-sel') { CUI.a2.selId = d.sid; CUI.a2.showAllStaff = false; CUI.a2.showAllCands = false; ctx.render(); return true; }
+    if (act === 'a2-sel') { CUI.a2.selId = d.sid; CUI.a2.showAllStaff = false; CUI.a2.showAllCands = false; ctx.render(); scrollToInspector(); return true; }
+    if (act === 'a2-back-list') { scrollToList('a2List'); return true; }
+    if (act === 'a3-back-list') { scrollToList('a3List'); return true; }
     if (act === 'a2-show-staff') { CUI.a2.showAllStaff = true; ctx.render(); return true; }
     if (act === 'a2-show-cands') { CUI.a2.showAllCands = true; ctx.render(); return true; }
     if (act === 'a2-create-slot') {
       if (!ctx.need(ctx.isAdmin(), '只有總召或調度台可新增勤務格')) return true;
+      if (writeBlocked(ctx, '新增勤務格')) return true;
       const g = (id) => (typeof document !== 'undefined' && document.getElementById(id) ? document.getElementById(id).value : '');
       const dStr = g('a2NsD'), eStr = g('a2NsE') || dStr;
       if (!dStr) { ctx.toast('請選擇日期'); return true; }
-      const cat = g('a2NsCat') || '服務';
-      const area = g('a2NsArea') || '瑞芳';
+      const nsv = CUI.a2.ns || {};
+      const cat = nsv.cat || '服務';
+      const area = nsv.area || '瑞芳';
       const grp = g('a2NsGrp').trim();
       const needN = Math.max(1, parseInt(g('a2NsNeed'), 10) || 10);
-      const loc = g('a2NsLoc') || '天達堂';
+      const loc = nsv.loc || '天達堂';
       const label = g('a2NsLabel').trim() || cat;
       const nid = 'EX_' + store.pushId().slice(-6).toUpperCase();
       const slot = { id: nid, d: dStr, e: eStr < dStr ? dStr : eStr, cat, area, grp, share: 1, need: needN, loc, label, src: '總召新增', extra: true };
@@ -2353,6 +2875,7 @@
       const key = s.groupKey || s.id;
       const permKind = s.groupKey ? kindOfGroup(s.groupKey) : 'jz';
       if (!ctx.need(ctx.can(s.area, permKind), '沒有權限異動此格人員')) return true;
+      if (writeBlocked(ctx, '異動人員')) return true;
       const label = s.groupKey ? ((gmOf(ctx, s.groupKey) || {}).name || ctx.slotName(s)) : ctx.slotName(s);
       if (act === 'a2-add-person') ctx.addPerson(kind, key, pid, s.area, label);
       else ctx.removePerson(kind, key, pid, s.area, label);
@@ -2361,7 +2884,7 @@
     if (act === 'a2-pre-ok') {
       const s = M.byId[d.sid], pid = +d.pid;
       if (!s || !pid) return true;
-      if (!ctx.need(ctx.isLead(s.area) || ctx.isAdmin(), '只有區長或總召可確認預排')) return true;
+      // C-05：與 app.js 相同規則（confirmPre 內含權限檢查：只限該區區長；六區以外單位總召可確認）
       const kind = s.groupKey ? 'groups' : 'assign';
       const key = s.groupKey || s.id;
       ctx.confirmPre(kind, key, pid, s.area, ctx.slotName(s));
@@ -2371,6 +2894,7 @@
       const s = M.byId[d.sid];
       if (!s) return true;
       if (!ctx.need(ctx.isAdmin() || ctx.can(s.area, s.groupKey ? kindOfGroup(s.groupKey) : 'jz'), '沒有權限補滿此格')) return true;
+      if (writeBlocked(ctx, '補滿')) return true;
       const cur = new Set(M.asg[s.id].p);
       const needN = E.slotNeed(M, s);
       let left = Math.max(0, needN - cur.size);
@@ -2396,14 +2920,10 @@
       if (!chosen.length) { ctx.toast('沒有可無違規補入的候選人，可勾選「含其他區」再試'); return true; }
       const kind = s.groupKey ? 'groups' : 'assign';
       const key = s.groupKey || s.id;
-      const pre = ctx.isAdmin() && !(ctx.memberOf(s.area) && ctx.memberOf(s.area).status === 'ok') && E.AREAS.includes(s.area);
-      const up = {}, undo = {};
-      for (const p of chosen) {
-        const path = `${kind}/${key}/${p.id}`;
-        up[path] = ctx.stamp(pre ? { pre: true } : null);
-        undo[path] = null;
-      }
-      store.update(Object.assign(up, ctx.logOp(s.area, `${ctx.slotName(s)} ${pre ? '預排補滿' : '補滿'} ${chosen.length} 人`, undo), ctx.touchArea(s.area)));
+      const pre = ctx.isPreFor(s.area);
+      const up = {};
+      for (const p of chosen) up[`${kind}/${key}/${p.id}`] = ctx.stamp(pre ? { pre: true } : null);
+      store.update(Object.assign(up, ctx.logOp(s.area, `${ctx.slotName(s)} ${pre ? '預排補滿' : '補滿'} ${chosen.length} 人`, ctx.mkUndo(up)), ctx.touchArea(s.area)));
       ctx.toast(`已${pre ? '預排' : ''}補入 ${chosen.length} 人`);
       return true;
     }
@@ -2411,6 +2931,7 @@
       const s = M.byId[d.sid];
       if (!s) return true;
       if (!ctx.need(ctx.isAdmin() || ctx.can(s.area, 'jz'), '沒有權限更換帶隊人')) return true;
+      if (writeBlocked(ctx, '更換帶隊人')) return true;
       const kind = s.groupKey ? 'groups' : 'assign';
       const key = s.groupKey || s.id;
       const curPids = M.asg[s.id].p;
@@ -2431,6 +2952,7 @@
     }
     if (act === 'a2-ack-slot') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可標記接受例外')) return true;
+      if (writeBlocked(ctx, '標記接受例外')) return true;
       const s = M.byId[d.sid];
       if (!s) return true;
       const { bySlot } = buildIndexes(ctx);
@@ -2438,7 +2960,7 @@
       if (!open.length) { ctx.toast('此格目前沒有未解決的問題'); return true; }
       const up = {};
       for (const c of open) {
-        up['acks/' + c.key] = { st: '接受例外', by: ctx.me().name, at: Date.now(), msg: c.msg };
+        up['acks/' + c.key] = { st: '接受例外', by: String(ctx.me().name || '').slice(0, 40), at: Date.now() }; // P-02：不存訊息
       }
       store.update(Object.assign(up, ctx.logOp(s.area, `${ctx.slotName(s)} 標記 ${open.length} 項為接受例外`)));
       ctx.toast(`已將 ${open.length} 項標記為接受例外`);
@@ -2446,6 +2968,7 @@
     }
     if (act === 'a2-toggle-lock') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可鎖定或解鎖勤務格')) return true;
+      if (writeBlocked(ctx, '鎖定或解鎖勤務格')) return true;
       const s = M.byId[d.sid];
       if (!s) return true;
       const nextLock = !s.lock;
@@ -2456,6 +2979,7 @@
     }
     if (act === 'a2-toggle-cancel') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可調整勤務格是否需要')) return true;
+      if (writeBlocked(ctx, '調整勤務格')) return true;
       const s = M.byId[d.sid];
       if (!s) return true;
       const nextCancel = !s.cancel;
@@ -2467,12 +2991,13 @@
 
     // A3
     if (act === 'a3-chip') { CUI.a3.chip = d.v; ctx.render(); return true; }
-    if (act === 'a3-sel') { CUI.a3.selPid = +d.pid; ctx.render(); return true; }
+    if (act === 'a3-sel') { CUI.a3.selPid = +d.pid; ctx.render(); scrollToInspector(); return true; }
     if (act === 'a3-show-all') { CUI.a3.showAllPeople = true; ctx.render(); return true; }
     if (act === 'a3-toggle-month') {
       const p = M.pById[+d.pid];
       if (!p) return true;
       if (!ctx.need(ctx.can(p.a, 'pov') || ctx.isAdmin(), '沒有權限修改此人月份狀態')) return true;
+      if (writeBlocked(ctx, '修改人員狀態')) return true;
       const m = +d.m;
       const o = Object.assign({}, (ctx.D().pov || {})[p.id] || {});
       const cur = new Set((o.months || []).map(Number));
@@ -2485,24 +3010,30 @@
         delete o.months;
         if (o.status === '暫停一段時間') delete o.status;
       }
-      store.update(Object.assign({ ['pov/' + p.id]: Object.keys(o).length ? o : null }, ctx.logOp(p.a, `${p.n} ${cur.has(m) ? '設為' + m + '月暫停' : '取消' + m + '月暫停'}`)));
+      // P-02：log 公開可讀，不寫月份或原因
+      store.update(Object.assign({ ['pov/' + p.id]: Object.keys(o).length ? o : null }, ctx.logOp(p.a, `更新 ${p.n} 的人員狀態`)));
       return true;
     }
     if (act === 'a3-pre-subs') {
       const p = M.pById[+d.pid];
       if (!p) return true;
       if (!ctx.need(ctx.isAdmin() || ctx.can(p.a, 'jz'), '沒有權限預排替補人員')) return true;
+      if (writeBlocked(ctx, '預排替補')) return true;
       const hits = findAffectedSlotsForPerson(ctx, p);
       const up = {};
-      let cntDone = 0, grpSkipped = 0;
+      let cntDone = 0, grpSkipped = 0, noPerm = 0;
+      const touched = new Set();
       for (const h of hits) {
         const s = h.s;
+        // C-12：以每一格的負責區逐格檢查權限，沒有權限的格只計數、不寫入
+        if (!ctx.isAdmin() && !ctx.can(s.area, s.groupKey ? kindOfGroup(s.groupKey) : 'jz')) { noPerm++; continue; }
+        touched.add(s.area);
         if (s.groupKey) {
           if (p.off) {
             const sub = findSubstituteForSlot(ctx, p, s);
             up[`groups/${s.groupKey}/${p.id}`] = null;
             if (sub) {
-              const pre = ctx.isAdmin() && !(ctx.memberOf(s.area) && ctx.memberOf(s.area).status === 'ok') && E.AREAS.includes(s.area);
+              const pre = ctx.isPreFor(s.area);
               up[`groups/${s.groupKey}/${sub.c.id}`] = ctx.stamp(pre ? { pre: true } : null);
               cntDone++;
             }
@@ -2514,17 +3045,18 @@
         const sub = findSubstituteForSlot(ctx, p, s);
         up[`assign/${s.id}/${p.id}`] = null;
         if (sub) {
-          const pre = ctx.isAdmin() && !(ctx.memberOf(s.area) && ctx.memberOf(s.area).status === 'ok') && E.AREAS.includes(s.area);
+          const pre = ctx.isPreFor(s.area);
           up[`assign/${s.id}/${sub.c.id}`] = ctx.stamp(pre ? { pre: true } : null);
           cntDone++;
         }
       }
       if (!Object.keys(up).length) {
-        ctx.toast(grpSkipped ? '受影響勤務屬固定組別，請按「逐格處理」或進組別頁面調整' : '沒有可執行的替補異動');
+        ctx.toast(noPerm ? `受影響的 ${noPerm} 格不屬於您可排的範圍，請總召處理` : grpSkipped ? '受影響勤務屬固定組別，請按「逐格處理」或進組別頁面調整' : '沒有可執行的替補異動');
         return true;
       }
-      store.update(Object.assign(up, ctx.logOp(p.a, `替暫停人員 ${p.n} 預排 ${cntDone} 位替補`)));
-      ctx.toast(`已預排 ${cntDone} 位替補${grpSkipped ? `（另有 ${grpSkipped} 格屬固定組別）` : ''}`);
+      const undo = ctx.mkUndo(up);
+      store.update(Object.assign(up, ctx.logOp(p.a, `為 ${p.n} 的勤務預排 ${cntDone} 位替補`, undo), ...[...touched].map((a) => ctx.touchArea(a))));
+      ctx.toast(`已預排 ${cntDone} 位替補${grpSkipped ? `（另有 ${grpSkipped} 格屬固定組別）` : ''}${noPerm ? `（另有 ${noPerm} 格非您可排的範圍，未處理）` : ''}`);
       return true;
     }
     if (act === 'a3-inspect-hits') {
@@ -2542,6 +3074,7 @@
     if (act === 'a4-toggle-ver') { CUI.a4.verOpen = !CUI.a4.verOpen; ctx.render(); return true; }
     if (act === 'a4-reset-rules') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可還原預設規則')) return true;
+      if (writeBlocked(ctx, '還原規則')) return true;
       const ok = typeof confirm === 'function' ? confirm('確定要將所有規則與兼職矩陣還原為預設值嗎？') : true;
       if (!ok) return true;
       store.update(Object.assign({ rules: null }, ctx.logOp('總召', '還原規則集為預設值')));
@@ -2565,7 +3098,7 @@
       let patchP = null, patchSev = null;
       if (rule === 'P4b') patchSev = { P4b: rawVal || '注意' };
       else if (rule === 'allowCross') patchP = { allowCross: rawVal === 'true' || rawVal === true };
-      else patchP = { [rule]: Math.max(0, Number(rawVal) || 0) };
+      else { const [lo, hi] = paramLimit(rule); patchP = { [rule]: Math.min(hi, Math.max(lo, Number(rawVal) || 0)) }; }
       CUI.a4.simResult = Object.assign({ rule, val: rawVal, patchP, patchSev }, simulateRulesDelta(ctx, patchP, patchSev));
       ctx.render();
       ctx.toast('已完成記憶體情境試算（未修改總表）');
@@ -2573,6 +3106,7 @@
     }
     if (act === 'a4-apply-sim') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可套用規則變更')) return true;
+      if (writeBlocked(ctx, '套用規則')) return true;
       const sr = CUI.a4.simResult;
       if (!sr) return true;
       const up = {};
@@ -2587,11 +3121,12 @@
     // A5
     if (act === 'a5-ack-all-viol') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可批量標為接受例外')) return true;
+      if (writeBlocked(ctx, '標記接受例外')) return true;
       const { openViols } = buildA5Checks(ctx);
       if (!openViols.length) { ctx.toast('目前沒有未決違規'); return true; }
       const up = {};
       for (const c of openViols) {
-        up['acks/' + c.key] = { st: '接受例外', by: ctx.me().name, at: Date.now(), msg: c.msg, note: '定版前統一標為接受例外' };
+        up['acks/' + c.key] = { st: '接受例外', by: String(ctx.me().name || '').slice(0, 40), at: Date.now(), note: '定版前統一標為接受例外' };
       }
       store.update(Object.assign(up, ctx.logOp('總召', `定版前將 ${openViols.length} 筆未決違規標為接受例外`)));
       ctx.toast(`已將 ${openViols.length} 筆違規標為接受例外`);
@@ -2642,38 +3177,56 @@
     }
     if (act === 'a5-publish') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可執行定版')) return true;
+      if (isPub(ctx)) { ctx.toast('目前已是定版狀態'); return true; }
+      // C-13：仍有未確認預排時預設阻擋；逐區寫下備案才放行
+      const pre = preSummary(ctx);
+      const notes = CUI.a5.preNotes || {};
+      const missing = Object.keys(pre.byArea).filter((a) => !String(notes[a] || '').trim());
+      if (missing.length) {
+        ctx.toast(`尚有 ${pre.total} 筆預排未由區長確認（${missing.map((a) => `${a} ${pre.byArea[a]} 筆`).join('、')}），不能定版。請區長先確認，或在「定版前檢查」下方逐區填寫備案後再定版。`);
+        ctx.render();
+        return true;
+      }
       const { openViols } = buildA5Checks(ctx);
-      if (openViols.length && typeof confirm === 'function') {
-        if (!confirm(`目前尚有 ${openViols.length} 筆未處理違規，建議先標為「接受例外」。確定仍要鎖定為 116 定版 v1.0 嗎？`)) return true;
+      const hist = Object.keys((ctx.D().meta || {}).publishedHistory || {}).length;
+      const ver = `116 定版 v1.${hist}`;
+      if (typeof confirm === 'function') {
+        const warn = openViols.length ? `目前尚有 ${openViols.length} 筆未處理違規，建議先標為「接受例外」。\n` : '';
+        if (!confirm(`${warn}確定要鎖定為「${ver}」嗎？鎖定後 A1–A4 與提案採用都會停用，之後的異動走調度台並留紀錄。`)) return true;
       }
       const live = M.slots.filter((s) => !s.cancel);
       const totalGot = live.reduce((acc, s) => acc + M.asg[s.id].p.length, 0);
+      const preNotes = {};
+      for (const a of Object.keys(pre.byArea)) preNotes[a] = { n: pre.byArea[a], note: String(notes[a] || '').trim().slice(0, 100) };
       const pubObj = {
-        version: '116 定版 v1.0',
+        version: ver,
+        draftVersionAtPublish: ctx.draftVer(), // C-20：解除定版時還原
         at: Date.now(),
         by: ctx.me().name,
         uid: ctx.me().uid,
         printDate: CUI.a5.printDate,
-        snapshotCounts: {
-          slots: live.length,
-          assigned: totalGot,
-          people: M.people.length
-        },
+        snapshotCounts: { slots: live.length, assigned: totalGot, people: M.people.length },
         slotDigest: buildSlotDigest(M)
       };
-      store.update(Object.assign({
-        'meta/published': pubObj,
-        'meta/version': '116 定版 v1.0'
-      }, ctx.logOp('總召', '定版鎖定為 116 定版 v1.0')));
-      ctx.toast('已定版鎖定為 116 定版 v1.0');
+      if (Object.keys(preNotes).length) pubObj.preNotes = preNotes;
+      const msg = `定版鎖定為 ${ver}` + (pre.total ? `（含 ${pre.total} 筆未確認預排，已逐區備案）` : '');
+      store.update(Object.assign({ 'meta/published': pubObj, 'meta/version': ver }, ctx.logOp('總召', msg)));
+      CUI.a5.preNotes = {};
+      ctx.toast(`已定版鎖定為 ${ver}`);
       return true;
     }
     if (act === 'a5-unpublish') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可解除定版')) return true;
-      store.update(Object.assign({
+      const pub = (ctx.D().meta || {}).published;
+      if (!pub) { ctx.toast('目前沒有定版'); return true; }
+      if (typeof confirm === 'function' && !confirm('解除定版鎖定？定版基準會被移除（只留一筆歷史紀錄），總表恢復為可修訂的草案，草案版號還原為定版前的版本。')) return true;
+      const restore = pub.draftVersionAtPublish || 'v9.3';
+      const up = {
         'meta/published': null,
-        'meta/version': 'v9.4'
-      }, ctx.logOp('總召', '解除定版鎖定，恢復修訂')));
+        'meta/version': restore,
+        ['meta/publishedHistory/' + (+pub.at || Date.now())]: { version: String(pub.version || ''), at: +pub.at || 0, by: String(pub.by || '').slice(0, 40), unAt: Date.now(), unBy: String(ctx.me().name || '').slice(0, 40), draftVersionAtPublish: restore }
+      };
+      store.update(Object.assign(up, ctx.logOp('總召', `解除定版鎖定（${pub.version || ''}），草案版號還原為 ${restore}`)));
       ctx.toast('已解除定版鎖定');
       return true;
     }
@@ -2690,24 +3243,34 @@
     if (actChange === 'a1-chk') { CUI.a1[d.k] = !!target.checked; ctx.render(); return true; }
 
     // A2
+    if (actChange === 'a2-ns-opt') { CUI.a2.ns = Object.assign({}, CUI.a2.ns || {}, { [d.k]: target.value }); ctx.render(); return true; }
     if (actChange === 'a2-area') { CUI.a2.area = target.value; ctx.render(); return true; }
     if (actChange === 'a2-cat') { CUI.a2.cat = target.value; ctx.render(); return true; }
     if (actChange === 'a2-only') { CUI.a2.only = !!target.checked; ctx.render(); return true; }
     if (actChange === 'a2-cross') { CUI.a2.crossCands = !!target.checked; ctx.render(); return true; }
     if (actChange === 'a2-set-area') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可改派勤務格負責區')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '改派負責區')) { ctx.render(); return true; }
       const s = M.byId[d.sid];
       if (!s) return true;
       const newArea = target.value;
-      const newGrp = E.defaultGroupForAreaCat(newArea, s.cat) || '';
-      const prevEd = (ctx.D().edits || {})[s.id] || {};
-      const nextEd = Object.assign({}, prevEd, { area: newArea, grp: newGrp });
-      store.update(Object.assign({ ['edits/' + s.id]: nextEd }, ctx.logOp(newArea, `${ctx.slotName(s)} 改派負責區：${s.area} → ${newArea}`)));
+      const prevEd = Object.assign({}, (ctx.D().edits || {})[s.id] || {});
+      const nextEd = Object.assign({}, prevEd);
+      const base = baseSlotOf(ctx, s.id);
+      if (base && newArea === base.area) {
+        // C-10：改回原負責區＝還原基準（不留 area/grp 覆寫），原本的組別跟著回來
+        delete nextEd.area; delete nextEd.grp;
+      } else {
+        nextEd.area = newArea;
+        nextEd.grp = E.defaultGroupForAreaCat(newArea, s.cat) || '';
+      }
+      store.update(Object.assign({ ['edits/' + s.id]: Object.keys(nextEd).length ? nextEd : null }, ctx.logOp(newArea, `${ctx.slotName(s)} 改派負責區：${s.area} → ${newArea}`)));
       ctx.toast(`已改派為 ${newArea}`);
       return true;
     }
     if (actChange === 'a2-set-grp') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可調整組別')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '調整組別')) { ctx.render(); return true; }
       const s = M.byId[d.sid];
       if (!s) return true;
       const prevEd = (ctx.D().edits || {})[s.id] || {};
@@ -2723,31 +3286,69 @@
       const p = M.pById[+d.pid];
       if (!p) return true;
       if (!ctx.need(ctx.can(p.a, 'pov') || ctx.isAdmin(), '沒有權限修改此人狀態')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '修改人員狀態')) { ctx.render(); return true; }
       const o = Object.assign({}, (ctx.D().pov || {})[p.id] || {});
       const k = d.k;
       const val = target.value;
+      // status 與 months／cap／wdCap／off 保持一致；engine 讀 months／cap／wdCap／off（以及 status 的只排假日／不再排班／新人見習）
       if (k === 'months') {
         const ms = val.split(/[\s,，、]+/).map(Number).filter((n) => n >= 1 && n <= 12);
         o.months = [...new Set(ms)].sort((a, b) => a - b);
+        if (o.months.length) { if (!o.status || o.status === '正常') o.status = '暫停一段時間'; }
+        else if (o.status === '暫停一段時間') delete o.status;
       } else if (k === 'cap') {
-        o.cap = val === '' ? '' : Math.max(0, +val);
-      } else if (k === 'wdCap') {
-        o.wdCap = val === '' ? '' : +val;
-      } else if (k === 'status') {
-        o.status = val;
-        if (val === '不再排班') o.off = true;
+        if (val === '') { delete o.cap; if (o.status === '限量') delete o.status; }
         else {
-          o.off = false;
-          if (val === '只排假日') o.wdCap = 0;
-          else if (o.wdCap === 0) delete o.wdCap;
+          const n = Math.round(+val);
+          if (!(n >= 1 && n <= 30)) {
+            ctx.toast('全年上限請輸入 1–30 次；不要再排這個人請改選「不再排班」');
+            ctx.render();
+            return true;
+          }
+          o.cap = n;
+          if (!o.status || o.status === '正常') o.status = '限量';
         }
+      } else if (k === 'wdCap') {
+        if (val === '') { delete o.wdCap; if (o.status === '只排假日') delete o.status; }
+        else {
+          const n = Math.round(+val);
+          if (!(n >= 0 && n <= 10)) { ctx.render(); return true; }
+          o.wdCap = n;
+          if (n === 0 && (!o.status || o.status === '正常')) o.status = '只排假日';
+          else if (n > 0 && o.status === '只排假日') delete o.status;
+        }
+      } else if (k === 'status') {
+        if (!['正常', '限量', '暫停一段時間', '只排假日', '新人見習', '不再排班'].includes(val)) { ctx.render(); return true; }
+        if (o.status === '只排假日' && val !== '只排假日' && o.wdCap === 0) delete o.wdCap;
+        o.off = val === '不再排班';
+        if (val === '正常') delete o.status; else o.status = val;
+        if (val === '只排假日') o.wdCap = 0;
+      } else if (k === 'seats') {
+        if (val === '') delete o.seats;
+        else {
+          const n = Math.round(+val);
+          if (!(n >= 0 && n <= 8)) { ctx.toast('載客數請輸入 0–8'); ctx.render(); return true; }
+          o.seats = n;
+        }
+      } else if (k === 'stamina') {
+        if (!['一般', '輕工作', '以坐著為主'].includes(val)) { ctx.render(); return true; }
+        if (val === '一般') delete o.stamina; else o.stamina = val;
+      } else if (k === 'trans') {
+        if (val !== '' && !['需要接送', '自行前往', '會開車、可載人'].includes(val)) { ctx.render(); return true; }
+        o.trans = val;
+      } else if (k === 'work') {
+        if (!['', '上班中', '退休／自由', '學生'].includes(val)) { ctx.render(); return true; }
+        o.work = val;
+      } else if (k === 'unav' || k === 'note') {
+        o[k] = String(val).slice(0, 300);
       } else {
-        o[k] = val;
+        ctx.render();
+        return true;
       }
       for (const key of Object.keys(o)) {
         if (o[key] === '' || o[key] === false || (Array.isArray(o[key]) && !o[key].length)) delete o[key];
       }
-      store.update(Object.assign({ ['pov/' + p.id]: Object.keys(o).length ? o : null }, ctx.logOp(p.a, `更新 ${p.n} 的人員狀態（${k}）`)));
+      store.update(Object.assign({ ['pov/' + p.id]: Object.keys(o).length ? o : null }, ctx.logOp(p.a, `更新 ${p.n} 的人員狀態`)));
       ctx.toast(`已更新 ${p.n} 的狀態`);
       return true;
     }
@@ -2755,6 +3356,7 @@
     // A4
     if (actChange === 'a4-toggle') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可修改規則')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '修改規則')) { ctx.render(); return true; }
       const rid = d.rule;
       if (target.checked) {
         const defSev = E.defaultRules().sev[rid] || '注意';
@@ -2768,20 +3370,38 @@
     }
     if (actChange === 'a4-sev') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可修改規則嚴重度')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '修改規則')) { ctx.render(); return true; }
       const rid = d.rule;
+      if (!['違規', '注意', '關閉'].includes(target.value)) { ctx.render(); return true; }
       store.update(Object.assign({ ['rules/sev/' + rid]: target.value }, ctx.logOp('總召', `規則 ${rid} 嚴重度設為 ${target.value}`)));
       return true;
     }
     if (actChange === 'a4-param') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可修改規則參數')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '修改規則')) { ctx.render(); return true; }
       const pk = d.param;
       const ptype = d.ptype;
-      const val = ptype === 'bool' ? !!target.checked : ptype === 'num' ? (target.value === '' ? 0 : +target.value) : target.value;
+      let val;
+      if (ptype === 'bool') val = !!target.checked;
+      else if (ptype === 'num') {
+        const [lo, hi] = paramLimit(pk);
+        if (target.value === '') {
+          val = E.defaultRules().p[pk];
+          ctx.toast(`空白不可存：已改回預設值 ${val}`);
+        } else {
+          val = Number(target.value);
+          if (!Number.isFinite(val) || val < lo || val > hi) { ctx.toast(`此參數請輸入 ${lo}–${hi} 之間的數字`); ctx.render(); return true; }
+          if (pk !== 'shortRatio') val = Math.round(val);
+        }
+      } else if (ptype === 'sel') val = String(target.value);
+      else val = String(target.value).slice(0, 80);
       store.update(Object.assign({ ['rules/p/' + pk]: val }, ctx.logOp('總召', `調整規則參數 ${pk} = ${val}`)));
       return true;
     }
     if (actChange === 'a4-mx') {
       if (!ctx.need(ctx.isAdmin(), '只有總召可修改同日兼職矩陣')) { ctx.render(); return true; }
+      if (writeBlocked(ctx, '修改兼職矩陣')) { ctx.render(); return true; }
+      if (!['違規', '注意', '允許'].includes(target.value)) { ctx.render(); return true; }
       const [a, b] = String(d.pair || '').split('|');
       if (!a || !b) return true;
       const up = {
@@ -2804,6 +3424,7 @@
     }
 
     // A5
+    if (actChange === 'a5-pre-note') { CUI.a5.preNotes = Object.assign({}, CUI.a5.preNotes || {}, { [d.area]: String(target.value || '').slice(0, 100) }); ctx.render(); return true; }
     if (actChange === 'a5-ch') { CUI.a5.chapters[d.ch] = !!target.checked; ctx.render(); return true; }
     if (actChange === 'a5-opt') { CUI.a5[d.k] = target.value; ctx.render(); return true; }
     if (actChange === 'a5-chk') { CUI.a5[d.k] = !!target.checked; ctx.render(); return true; }
@@ -2851,6 +3472,8 @@
     fmtPrintName,
     computeAreaDelta,
     simulateRulesDelta,
+    QRGen,
+    fmtLunar,
     _ui: CUI
   };
 

@@ -10,6 +10,10 @@
  *   FIREBASE_CLIENT_EMAIL  Firebase 服務帳戶的 client_email
  *   FIREBASE_PRIVATE_KEY   服務帳戶的 private_key（整段 PEM，含 BEGIN/END）
  *   ALLOWED_ORIGIN         前端網址的 origin，例如 https://dreamgen.github.io
+ *   ALLOWED_REDIRECTS      （建議）允許的 redirect_uri 完整網址，逗號分隔，例如 https://dreamgen.github.io/publishHTML/tdAssign/
+ *                          沒有設定時，至少要求 redirect_uri 的 origin 與 ALLOWED_ORIGIN 完全相同（L-02）
+ *
+ * 頻率限制請在 Cloudflare 設定 Rate Limiting rule（例如每個 IP 每分鐘 20 次）。
  */
 const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const enc = (obj) => b64url(new TextEncoder().encode(JSON.stringify(obj)));
@@ -36,8 +40,14 @@ export default {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     if (origin !== env.ALLOWED_ORIGIN) return json({ error: 'origin not allowed' }, 403);
     try {
-      const { code, redirectUri } = await request.json();
-      if (!code || !redirectUri || !String(redirectUri).startsWith(env.ALLOWED_ORIGIN)) return json({ error: 'bad request' }, 400);
+      const { code, redirectUri, nonce } = await request.json();
+      if (!code || !redirectUri || typeof code !== 'string' || typeof redirectUri !== 'string') return json({ error: 'bad request' }, 400);
+      // L-02：redirect_uri 完全比對（不再只比前綴，避免 https://dreamgen.github.io.evil.com 通過）
+      const allowed = String(env.ALLOWED_REDIRECTS || '').split(',').map((x) => x.trim()).filter(Boolean);
+      let okRedirect = false;
+      if (allowed.length) okRedirect = allowed.includes(redirectUri);
+      else { try { okRedirect = new URL(redirectUri).origin === env.ALLOWED_ORIGIN; } catch (e) { okRedirect = false; } }
+      if (!okRedirect) return json({ error: 'bad request' }, 400);
       const tok = await fetch('https://api.line.me/oauth2/v2.1/token', {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: env.LINE_CHANNEL_ID, client_secret: env.LINE_CHANNEL_SECRET })
@@ -48,6 +58,8 @@ export default {
         body: new URLSearchParams({ id_token: tok.id_token, client_id: env.LINE_CHANNEL_ID })
       }).then((r) => r.json());
       if (!who.sub) return json({ error: 'LINE 身分驗證失敗' }, 401);
+      // L-01：前端送來的 nonce 必須和 id_token 內的 nonce 相同（防止 login CSRF／重放）
+      if (nonce && who.nonce !== nonce) return json({ error: 'LINE 身分驗證失敗' }, 401);
       return json({ token: await customToken(env, 'line:' + who.sub), name: who.name || '' });
     } catch (e) {
       return json({ error: '登入後端發生錯誤' }, 500);
