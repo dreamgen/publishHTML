@@ -974,18 +974,20 @@
     if (s.cancel) return toast('這一格已取消，不能再排人');
     const cur = new Set(M.asg[sid].p), needN = E.slotNeed(M, s), left = Math.max(0, needN - cur.size);
     if (!left) return toast('這一格人數已達需求');
-    const pool = E.poolFor(M, s, false).filter((p) => !cur.has(p.id));
-    let preferredGroup = null;
+    let pick = [];
     if (s.cat.startsWith('忠恕') && groupIdx >= 0) {
-      const groups = jzPrevGroups(s);
-      preferredGroup = groups[groupIdx] || null;
+      const g = jzPrevGroups(s)[groupIdx];
+      if (!g) return toast('找不到該去年組合');
+      pick = g.pids.map((id) => M.pById[id]).filter((p) => p && !p.off && !cur.has(p.id)).slice(0, left).map((p) => ({ p }));
+    } else {
+      const pool = E.poolFor(M, s, false).filter((p) => !cur.has(p.id));
+      const ranked = s.cat.startsWith('忠恕')
+        ? jzLastYearRank(pool, s, cur, null)
+        : pool.filter((p) => p.n115 > 0).map((p) => evalInSlot(p, s)).filter((ev) => !ev.hard.length)
+            .sort((a, b) => (b.p.n115 || 0) - (a.p.n115 || 0) || b.score - a.score);
+      pick = ranked.slice(0, left);
     }
-    const ranked = s.cat.startsWith('忠恕')
-      ? jzLastYearRank(pool, s, cur, preferredGroup)
-      : pool.filter((p) => p.n115 > 0).map((p) => evalInSlot(p, s)).filter((ev) => !ev.hard.length)
-          .sort((a, b) => (b.p.n115 || 0) - (a.p.n115 || 0) || b.score - a.score);
-    const pick = ranked.slice(0, left);
-    if (!pick.length) return toast('去年有經驗且無衝突的人都在裡面了，請改用「系統建議補滿」');
+    if (!pick.length) return toast(groupIdx >= 0 ? '這一組沒有可帶入的人員' : '去年有經驗且無衝突的人都在裡面了，請改用「系統建議補滿」');
     const up = {}, label = slotName(s), pre = isPreFor(s.area);
     for (const ev of pick) up[`assign/${sid}/${ev.p.id}`] = stamp(pre ? { pre: true } : null);
     UI.lyPick = null;
@@ -2450,16 +2452,20 @@
     const s = M && M.byId[sid]; if (!s) return '';
     const groups = jzPrevGroups(s);
     const items = groups.map((g, i) => {
+      let hardCnt = 0;
       const names = g.pids.map((id) => {
         const p = M.pById[id]; if (!p) return '';
-        return esc(p.n) + (p.zr ? `（${esc(p.zr)}）` : '');
+        const ev = evalInSlot(p, s);
+        if (ev.hard.length) hardCnt++;
+        return esc(p.n) + (p.zr ? `（${esc(p.zr)}）` : '') + (ev.hard.length ? '⚠' : '');
       }).filter(Boolean).join('、');
       const statusTag = g.overlap === 0
         ? tag('ok', '推薦・本年未排')
         : tag('warn', `與 ${g.usedDates.join('、')} 重疊 ${g.overlap} 人`);
+      const hardTag = hardCnt ? ' ' + tag('bad', `${hardCnt} 人有規則衝突`) : '';
       return `<div class="cand-row">
         <div>
-          <div class="cand-name">${esc(g.d)}（${esc(g.cat)}） ${statusTag}</div>
+          <div class="cand-name">${esc(g.d)}（${esc(g.cat)}） ${statusTag}${hardTag}</div>
           <div class="muted small">${names}</div>
         </div>
         <button class="btn pri sm" data-act="pick-ly-group" data-sid="${sid}" data-idx="${i}">帶入這組</button>
