@@ -30,7 +30,7 @@
 
   const UI = {
     filter: '全部', q: '', out: false, outArea: '', outQ: '', showAll: false,
-    person: null, acctOpen: false, apptQ: '', bindQ: '', famQ: '', toast: '',
+    person: null, acctOpen: false, lyPick: null, apptQ: '', bindQ: '', famQ: '', toast: '',
     b6Mode: '', b1NomOpen: false, b1ShowCook: false,
     pAddOptOpen: false, a6RemindOpen: false, a6PickAreaOpen: false
   };
@@ -890,21 +890,55 @@
   }
 
   /* B4 帶入去年 & 系統建議補滿 */
-  function jzLastYearRank(pool, s, cur) {
+  function jzOtherUsedMap(s) {
+    const used = {};
+    for (const o of M.slots) {
+      if (o.cancel || o.id === s.id || o.area !== s.area || o.cat !== s.cat) continue;
+      for (const id of M.asg[o.id].p) {
+        if (!used[id]) used[id] = [];
+        used[id].push(E.fmtD(o.d));
+      }
+    }
+    return used;
+  }
+  function jzPrevGroups(s) {
+    const isWd = s.cat === '忠恕平日';
+    const prevJz = BASE.prevJz || [];
+    const exact = prevJz.filter((j) => j.area === s.area && j.cat === s.cat);
+    const bucket = prevJz.filter((j) => j.area === s.area && (isWd ? j.cat === '忠恕平日' : j.cat !== '忠恕平日'));
+    const raw = exact.length ? exact : bucket;
+    const seen = new Map();
+    for (let i = raw.length - 1; i >= 0; i--) {
+      const j = raw[i];
+      const key = [...j.pids].sort((a, b) => a - b).join(',');
+      if (!seen.has(key)) seen.set(key, j);
+    }
+    const used = jzOtherUsedMap(s);
+    const groups = [...seen.values()].map((j) => {
+      let overlap = 0;
+      const dates = new Set();
+      for (const id of j.pids) {
+        if (used[id]) { overlap++; used[id].forEach((d) => dates.add(d)); }
+      }
+      return Object.assign({}, j, { overlap, usedDates: [...dates] });
+    });
+    groups.sort((a, b) => (a.overlap - b.overlap) || (a.d < b.d ? 1 : -1));
+    return groups;
+  }
+  function jzLastYearRank(pool, s, cur, preferredGroup) {
     const isWd = s.cat === '忠恕平日';
     const prevJz = BASE.prevJz || [];
     const sameType = (j) => j.cat === s.cat;
     const sameBucket = (j) => (isWd ? j.cat === '忠恕平日' : j.cat !== '忠恕平日');
-    // 若這格尚未排人，先挑出去年「同區且同類型（平日／週六／週日）」最近一次的整日班底作為合作組合基準
-    let anchor = null;
-    if (!cur.size && prevJz.length) {
-      const exactArea = prevJz.filter((j) => j.area === s.area && sameType(j));
-      const bucketArea = prevJz.filter((j) => j.area === s.area && sameBucket(j));
-      const cand = exactArea.length ? exactArea : bucketArea;
-      if (cand.length) anchor = cand[cand.length - 1];
+    const used = jzOtherUsedMap(s);
+    let anchor = preferredGroup || null;
+    if (!anchor && !cur.size) {
+      const groups = jzPrevGroups(s);
+      if (groups.length) anchor = groups[0];
     }
     const anchorSet = new Set(anchor ? anchor.pids : []);
     return pool.filter((p) => {
+      if (anchorSet.has(p.id)) return true;
       const exactCnt = prevJz.filter((j) => sameType(j) && j.pids.includes(p.id)).length;
       const holCnt = !isWd ? prevJz.filter((j) => j.cat !== '忠恕平日' && j.pids.includes(p.id)).length : 0;
       const wd115 = p.wd115 || 0;
@@ -916,7 +950,9 @@
       const exactCnt = prevJz.filter((j) => sameType(j) && j.pids.includes(p.id)).length;
       const holCnt = !isWd ? prevJz.filter((j) => j.cat !== '忠恕平日' && j.pids.includes(p.id)).length : 0;
       let coop = 0;
-      if (cur.size) {
+      if (preferredGroup) {
+        coop = anchorSet.has(p.id) ? 20000 : 0;
+      } else if (cur.size) {
         for (const j of prevJz) {
           if (!j.pids.includes(p.id)) continue;
           const shared = j.pids.filter((id) => cur.has(id)).length;
@@ -925,29 +961,46 @@
       } else if (anchorSet.has(p.id)) {
         coop = 10000;
       }
+      const dupPenalty = !preferredGroup && used[p.id] ? used[p.id].length * 5000 : 0;
       const typeScore = (exactCnt ? 2000 + exactCnt * 100 : (!isWd && holCnt ? 500 + holCnt * 50 : 0))
         + (isWd ? (p.wd115 || 0) * 20 : Math.max(0, (p.n115 || 0) - (p.wd115 || 0)) * 20)
         + (p.zr ? 300 : 0);
-      ev.lyScore = coop + typeScore + ev.score;
+      ev.lyScore = coop - dupPenalty + typeScore + ev.score;
       return ev;
     }).filter(Boolean).sort((a, b) => b.lyScore - a.lyScore);
   }
-  function bringLastYearSlot(sid) {
+  function applyLastYearSlot(sid, groupIdx) {
     const s = M.byId[sid]; if (!s || !need(can(s.area, 'jz'))) return;
     if (s.cancel) return toast('這一格已取消，不能再排人');
     const cur = new Set(M.asg[sid].p), needN = E.slotNeed(M, s), left = Math.max(0, needN - cur.size);
     if (!left) return toast('這一格人數已達需求');
     const pool = E.poolFor(M, s, false).filter((p) => !cur.has(p.id));
+    let preferredGroup = null;
+    if (s.cat.startsWith('忠恕') && groupIdx >= 0) {
+      const groups = jzPrevGroups(s);
+      preferredGroup = groups[groupIdx] || null;
+    }
     const ranked = s.cat.startsWith('忠恕')
-      ? jzLastYearRank(pool, s, cur)
+      ? jzLastYearRank(pool, s, cur, preferredGroup)
       : pool.filter((p) => p.n115 > 0).map((p) => evalInSlot(p, s)).filter((ev) => !ev.hard.length)
           .sort((a, b) => (b.p.n115 || 0) - (a.p.n115 || 0) || b.score - a.score);
     const pick = ranked.slice(0, left);
     if (!pick.length) return toast('去年有經驗且無衝突的人都在裡面了，請改用「系統建議補滿」');
     const up = {}, label = slotName(s), pre = isPreFor(s.area);
     for (const ev of pick) up[`assign/${sid}/${ev.p.id}`] = stamp(pre ? { pre: true } : null);
+    UI.lyPick = null;
     store.update(Object.assign(up, logOp(s.area, `${label} 帶入去年名單 ${pick.length} 人`, mkUndo(up)), touchArea(s.area)));
     toast(`已帶入 ${pick.length} 人`);
+  }
+  function bringLastYearSlot(sid) {
+    const s = M.byId[sid]; if (!s || !need(can(s.area, 'jz'))) return;
+    if (s.cancel) return toast('這一格已取消，不能再排人');
+    const cur = new Set(M.asg[sid].p);
+    if (!cur.size && s.cat.startsWith('忠恕')) {
+      const groups = jzPrevGroups(s);
+      if (groups.length > 1) { UI.lyPick = sid; render(); return; }
+    }
+    applyLastYearSlot(sid, -1);
   }
   function autoFillSlot(sid) {
     const s = M.byId[sid]; if (!s || !need(can(s.area, 'jz'))) return;
@@ -2393,6 +2446,33 @@
     </aside>`;
   }
 
+  function lastYearPickSheet(sid) {
+    const s = M && M.byId[sid]; if (!s) return '';
+    const groups = jzPrevGroups(s);
+    const items = groups.map((g, i) => {
+      const names = g.pids.map((id) => {
+        const p = M.pById[id]; if (!p) return '';
+        return esc(p.n) + (p.zr ? `（${esc(p.zr)}）` : '');
+      }).filter(Boolean).join('、');
+      const statusTag = g.overlap === 0
+        ? tag('ok', '推薦・本年未排')
+        : tag('warn', `與 ${g.usedDates.join('、')} 重疊 ${g.overlap} 人`);
+      return `<div class="cand-row">
+        <div>
+          <div class="cand-name">${esc(g.d)}（${esc(g.cat)}） ${statusTag}</div>
+          <div class="muted small">${names}</div>
+        </div>
+        <button class="btn pri sm" data-act="pick-ly-group" data-sid="${sid}" data-idx="${i}">帶入這組</button>
+      </div>`;
+    }).join('');
+    return `<div class="sheet-bg" data-act="close-ly"></div><aside class="sheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="選擇去年合作組合">
+      <div class="mem-h"><h2>選擇去年合作組合</h2><span class="muted">${esc(s.area)} · ${esc(s.cat)}（${E.fmtD(s.d)}）</span><button class="btn sm" data-act="close-ly">關閉</button></div>
+      <div class="muted small">共找到 ${groups.length} 組去年組合；已優先將本年度尚未排過的組合排在前面。</div>
+      <div class="cand-list" style="margin-top:10px">${items}</div>
+      <div class="row" style="margin-top:12px"><button class="btn" data-act="pick-ly-group" data-sid="${sid}" data-idx="-1">自動挑選（避開本年已排）</button></div>
+    </aside>`;
+  }
+
   /* ---------------- 控制台整合上下文 & 路由與繪製 ---------------- */
   function consoleCtx() {
     return {
@@ -2503,8 +2583,8 @@
     else if (r.v === 't' && WORK_AREAS.includes(r.pathArg)) html = vTeam(r.pathArg);
     else if (r.v === 'review') html = vReview();
     else html = vHome();
-    const sheetNow = UI.person ? 'p' + UI.person : (UI.acctOpen && !['login', 'bind'].includes(r.v) && me() ? 'acct' : '');
-    appEl.innerHTML = html + globalBottomNav(r) + (UI.person ? personSheet(UI.person) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error || store.notice ? `<div class="errbar">${esc([store.error, store.notice].filter(Boolean).join('　'))}</div>` : '');
+    const sheetNow = UI.person ? 'p' + UI.person : (UI.lyPick ? 'ly' + UI.lyPick : (UI.acctOpen && !['login', 'bind'].includes(r.v) && me() ? 'acct' : ''));
+    appEl.innerHTML = html + globalBottomNav(r) + (UI.person ? personSheet(UI.person) : '') + (UI.lyPick ? lastYearPickSheet(UI.lyPick) : '') + (UI.acctOpen && !['login', 'bind'].includes(r.v) ? accountSheet() : '') + `<div id="toast" role="status" hidden></div>` + (store.error || store.notice ? `<div class="errbar">${esc([store.error, store.notice].filter(Boolean).join('　'))}</div>` : '');
     for (const id in draftVals) {
       const el = document.getElementById(id);
       if (!el || el.value === draftVals[id]) continue;
@@ -2620,7 +2700,9 @@
       if (!Object.keys(up).length) return;
       store.update(Object.assign(up, logOp(s0.area, `${slotName(s0)}（已取消）移出全部殘留人員`, mkUndo(up)), touchArea(s0.area))); toast('已移出殘留人員');
     }
-    else if (a === 'slot-last-year') bringLastYearSlot(d.sid);
+    else if (a === 'slot-last-year') { if (!lastSheet) sheetTrigger = ctlKey(t); bringLastYearSlot(d.sid); }
+    else if (a === 'pick-ly-group') applyLastYearSlot(d.sid, +d.idx);
+    else if (a === 'close-ly') { UI.lyPick = null; render(); }
     else if (a === 'slot-autofill') autoFillSlot(d.sid);
     else if (a === 'coord') {
       if (!me()) return toast('請先登入');
@@ -2825,6 +2907,7 @@
     }
     if (e.key === 'Escape') {
       if (UI.person) { UI.person = null; render(); }
+      else if (UI.lyPick) { UI.lyPick = null; render(); }
       else if (UI.acctOpen) { UI.acctOpen = false; render(); }
     }
   });
