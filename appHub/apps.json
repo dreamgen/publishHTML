@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-16T15:55:59.159Z",
+  "generatedAt": "2026-11-17T02:23:48.879Z",
   "count": 22,
   "apps": [
     {
@@ -60,7 +60,7 @@
       "description": "法會紙電雙軌立愿、1～12月多元進度回報、五星評比激勵與各單位分權總覽",
       "path": "../lecturerVow/",
       "icon": "../lecturerVow/icons/lecturerVow-192.png",
-      "themeColor": "#4E2A1E",
+      "themeColor": "#7C8B74",
       "categories": [
         "productivity",
         "utilities"

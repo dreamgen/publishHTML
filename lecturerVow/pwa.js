@@ -1,8 +1,8 @@
-/* 講師愿力表系統 — 實作版講師手機端 PWA (獨立填寫 + 目標頁籤切換) */
+/* 講師愿力表系統 — 實作版講師 PWA (禪意留白追蹤風 + 手機/電腦自適應) */
 (function (global) {
   'use strict';
 
-  const { METRIC_META, computeKrProgress, computeGoalStats, computeLecturerStats } = global.VowEngine;
+  const { computeKrProgress, computeGoalStats, computeLecturerStats } = global.VowEngine;
   const MY_ID_KEY = 'vow_my_lecturer_id_v1';
 
   const urlTab = new URLSearchParams(global.location.search).get('tab');
@@ -11,6 +11,7 @@
     tab: ['overview', 'monthly', 'new', 'print'].includes(urlTab) ? urlTab : 'monthly',
     activeGoalIndex: 0,
     activeMonth: new Date().getMonth() + 1,
+    openReflectionIds: {},
     elderMode: false,
     cloudMode: 'local',
     cloudUid: null
@@ -62,41 +63,39 @@
           <div class="pwa-topbar-inner">
             <div class="row-wrap">
               <div class="brand-logo" style="width:32px;height:32px;font-size:15px;">愿</div>
-              <strong style="font-size:16px;">講師愿力表系統｜個人實作版</strong>
+              <strong style="font-size:16px;">講師愿力表｜個人實作版</strong>
             </div>
-            <a href="./index.html" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;text-decoration:none;">📊 總覽 / Demo 版</a>
+            <a href="./index.html" class="btn btn-outline" style="padding:5px 12px;font-size:12px;text-decoration:none;">📊 總覽 / Demo 版</a>
           </div>
         </header>
 
         <div class="pwa-body">
           <div class="onboarding-layout">
-            <!-- 電腦版左側品牌與特色介紹 -->
             <section class="onboarding-hero">
               <div class="stack">
                 <span class="badge badge-amber" style="align-self:flex-start;">2026 年度 ‧ 紙電雙軌</span>
                 <h1 style="margin:0;font-size:28px;line-height:1.35;">法會誠心立愿<br/>平時自主精進</h1>
-                <p style="margin:0;font-size:14px;color:rgba(254,243,199,0.88);line-height:1.7;">
-                  免記帳號密碼，綁定 LINE 帳號或認領法會紙本建檔碼即可使用；支援手機單手操作與電腦大螢幕管理。
+                <p style="margin:0;font-size:14px;color:#D6D2C9;line-height:1.7;">
+                  免記帳號密碼，綁定 LINE 帳號或認領法會紙本建檔碼即可使用；支援手機單手聚焦回報與電腦大螢幕管理。
                 </p>
               </div>
 
               <div class="stack" style="gap:12px;margin-top:24px;">
-                <div style="background:rgba(56,28,19,0.72);border:1px solid rgba(200,155,75,0.35);border-radius:12px;padding:14px;">
-                  <strong style="color:#fcd34d;">🌟 目標頁籤切換 × 五星評比</strong>
-                  <div class="text-xs" style="color:#e6dcd0;margin-top:4px;">依百分比、累積次數、週期期限（3～12 個月）、里程碑與心得自評自動換算星級。</div>
+                <div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:14px;">
+                  <strong style="color:#C9A24D;">🌟 目標聚焦切換 × 五星評比</strong>
+                  <div class="text-xs" style="color:#D6D2C9;margin-top:4px;">依百分比、累積次數、週期期限（3～12 個月）、里程碑與心得自評自動換算星級與圓環進度。</div>
                 </div>
-                <div style="background:rgba(56,28,19,0.72);border:1px solid rgba(200,155,75,0.35);border-radius:12px;padding:14px;">
-                  <strong style="color:#84B39D;">🗓️ 1～12 月自由回報與心得</strong>
-                  <div class="text-xs" style="color:#e6dcd0;margin-top:4px;">不強制每週打卡，隨時補填各月進度與修辦心得，並支援母堂呈表 A4 列印。</div>
+                <div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:14px;">
+                  <strong style="color:#A6B89D;">🗓️ 1～12 月自由回報與心得</strong>
+                  <div class="text-xs" style="color:#D6D2C9;margin-top:4px;">不強制每週打卡，隨時補填各月進度與修辦心得，並支援母堂呈表 A4 列印。</div>
                 </div>
               </div>
             </section>
 
-            <!-- 右側 / 手機版啟用表單 -->
             <div class="onboarding-box stack">
               <div>
-                <span class="badge badge-green">個人實作版 PWA</span>
-                <h2 style="margin:8px 0 4px;font-size:20px;color:var(--brand);">歡迎啟用講師愿力表 🙏</h2>
+                <span class="badge badge-green">禪意留白實作版</span>
+                <h2 style="margin:8px 0 4px;font-size:20px;color:var(--text);">歡迎啟用講師愿力表 🙏</h2>
                 <p class="text-xs" style="color:var(--muted);margin:0;">可透過 LINE 登入、認領法會紙本建檔碼，或直接建立您的個人愿力表。</p>
               </div>
 
@@ -115,7 +114,7 @@
               </form>
 
               <form id="createSelfForm" class="stack" style="border-top:1px solid var(--border);padding-top:14px;">
-                <strong style="font-size:14px;color:var(--brand);">✨ 建立我的個人愿力表</strong>
+                <strong style="font-size:14px;color:var(--text);">✨ 建立我的個人愿力表</strong>
                 <div>
                   <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">講師姓名 *</label>
                   <input id="selfName" type="text" required placeholder="請輸入您的姓名" />
@@ -133,7 +132,7 @@
                   <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">2026 年度核心精進愿景 *</label>
                   <input id="selfVision" type="text" required placeholder="例如：讓自己的道學更精進" />
                 </div>
-                <button type="submit" class="btn btn-primary" style="justify-content:center;padding:12px;">建立並進入我的愿力表 ➔</button>
+                <button type="submit" class="btn btn-dark" style="justify-content:center;padding:12px;">建立並進入我的愿力表 ➔</button>
               </form>
             </div>
           </div>
@@ -142,48 +141,23 @@
     `;
   }
 
-  function renderGoalTabsBar(lec) {
-    const goals = lec.goals || [];
-    if (state.activeGoalIndex >= goals.length) state.activeGoalIndex = 0;
-
-    const tabsHtml = goals
-      .map((g, idx) => {
-        const st = computeGoalStats(g);
-        return `
-          <button type="button" class="goal-tab ${idx === state.activeGoalIndex ? 'active' : ''}" data-action="select-goal-tab" data-idx="${idx}">
-            <span>目標 ${idx + 1}</span>
-            <span class="tab-star">★${st.stars.toFixed(1)}</span>
-          </button>
-        `;
-      })
-      .join('');
-
-    return `
-      <div class="goal-tabs-bar" role="tablist" aria-label="愿力目標頁籤">
-        ${tabsHtml}
-        <button type="button" class="goal-tab" data-action="go-tab" data-tab="new" style="border-style:dashed;color:var(--line-green);">＋ 新增目標</button>
-      </div>
-    `;
-  }
-
   function renderKrEditor(goalId, kr) {
-    const meta = METRIC_META[kr.type] || METRIC_META.PERCENT;
     const progress = computeKrProgress(kr, 12);
     const mv = kr.monthlyValues || {};
     const monthVal = mv[state.activeMonth] !== undefined ? mv[state.activeMonth] : '';
     const refText = (kr.reflections && kr.reflections[state.activeMonth]) || '';
+    const isRefOpen = Boolean(state.openReflectionIds[kr.id]);
 
     let controlHtml = '';
     if (kr.type === 'PERCENT') {
       const val = monthVal !== '' ? Number(monthVal) : progress;
       controlHtml = `
-        <div class="row-between text-xs">
-          <strong>${state.activeMonth}月進度：</strong>
-          <strong style="color:var(--brand);font-size:16px;">${val}%</strong>
-        </div>
-        <input type="range" min="0" max="100" step="5" value="${val}" data-action="range-kr" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
-        <div class="row-wrap">
-          ${[0, 25, 50, 75, 100].map((p) => `<button type="button" class="btn ${val === p ? 'btn-primary' : 'btn-outline'}" style="padding:6px 10px;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${p}">${p}%</button>`).join('')}
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div class="row-between text-xs" style="color:var(--muted);">
+            <span>${state.activeMonth}月進度調整</span>
+            <strong style="color:var(--text);">${val}%</strong>
+          </div>
+          <input type="range" min="0" max="100" step="5" value="${val}" data-action="range-kr" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
         </div>
       `;
     } else if (kr.type === 'COUNT') {
@@ -191,14 +165,11 @@
       const totalSum = Object.values(mv).reduce((a, b) => a + Number(b || 0), 0);
       controlHtml = `
         <div class="row-between">
-          <div class="text-xs">
-            <strong>${state.activeMonth}月新增（目標 ${kr.targetValue} ${esc(kr.unitLabel)}）</strong><br/>
-            <span style="color:var(--muted);">累計：${totalSum} ${esc(kr.unitLabel)}（上限 100%）</span>
-          </div>
-          <div class="row-wrap">
-            <button type="button" class="btn btn-outline" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${Math.max(0, val - 1)}">－</button>
-            <strong style="min-width:44px;text-align:center;">${val}</strong>
-            <button type="button" class="btn btn-primary" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${val + 1}">＋</button>
+          <span class="text-xs" style="color:var(--muted);">${state.activeMonth}月新增 <span style="color:var(--moss-dark);">(累計 ${totalSum}/${kr.targetValue} ${esc(kr.unitLabel)})</span></span>
+          <div class="row-wrap" style="gap:6px;">
+            <button type="button" class="btn btn-outline" style="width:32px;height:32px;padding:0;justify-content:center;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${Math.max(0, val - 1)}">－</button>
+            <strong style="min-width:44px;text-align:center;">${val} ${esc(kr.unitLabel)}</strong>
+            <button type="button" class="btn btn-primary" style="width:32px;height:32px;padding:0;justify-content:center;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${val + 1}">＋</button>
           </div>
         </div>
       `;
@@ -206,86 +177,96 @@
       const val = monthVal !== '' ? Number(monthVal) : -1;
       const dur = Math.min(12, Math.max(3, Number(kr.durationMonths || kr.targetValue || 12)));
       controlHtml = `
-        <div class="row-between text-xs">
-          <strong>${state.activeMonth}月打卡（期限 ${dur} 個月）：</strong>
-          <select data-action="set-periodic-duration" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" style="width:auto;padding:3px 8px;font-size:12px;">
-            ${[3, 4, 5, 6, 9, 12].map((d) => `<option value="${d}" ${dur === d ? 'selected' : ''}>${d} 個月</option>`).join('')}
-          </select>
-        </div>
-        <div class="row-wrap">
-          <button type="button" class="btn ${val === 100 ? 'btn-line' : 'btn-outline'}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="100">✅ 達成</button>
-          <button type="button" class="btn ${val === 50 ? 'btn-amber' : 'btn-outline'}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="50">⏳ 進行中</button>
-          <button type="button" class="btn ${val === 0 ? 'btn-primary' : 'btn-outline'}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="0">❌ 未執行</button>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div class="row-between text-xs" style="color:var(--muted);">
+            <span>${state.activeMonth}月狀態（期限 ${dur} 個月）</span>
+            <select data-action="set-periodic-duration" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" style="width:auto;padding:2px 8px;font-size:11px;border-radius:999px;">
+              ${[3, 4, 5, 6, 9, 12].map((d) => `<option value="${d}" ${dur === d ? 'selected' : ''}>期限 ${d} 個月</option>`).join('')}
+            </select>
+          </div>
+          <div class="periodic-pill-group">
+            <button type="button" class="periodic-pill-btn ${val === 100 ? 'active-done' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="100">✓ 已達成</button>
+            <button type="button" class="periodic-pill-btn ${val === 50 ? 'active-prog' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="50">⋯ 進行中</button>
+            <button type="button" class="periodic-pill-btn ${val === 0 ? 'active-miss' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="0">✕ 未執行</button>
+          </div>
         </div>
       `;
     } else if (kr.type === 'MILESTONE') {
       const steps = kr.milestones || ['階段 1：資料準備', '階段 2：初稿撰寫', '階段 3：演練修正', '階段 4：正式圓滿'];
       const doneCount = monthVal !== '' ? Number(monthVal) : Math.round((progress / 100) * steps.length);
       controlHtml = `
-        <div class="text-xs"><strong>截至 ${state.activeMonth}月完成階段：</strong></div>
         <div class="milestone-grid">
           ${steps.map((sName, idx) => {
             const stepNum = idx + 1;
             const checked = stepNum <= doneCount;
             const nextVal = checked && doneCount === stepNum ? stepNum - 1 : stepNum;
-            return `<button type="button" class="milestone-btn ${checked ? 'done' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${nextVal}"><span>${checked ? '☑' : '☐'}</span><span>${esc(sName)}</span></button>`;
+            return `<button type="button" class="milestone-btn ${checked ? 'done' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${nextVal}"><span>${checked ? '✓' : '○'}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sName)}</span></button>`;
           }).join('')}
         </div>
       `;
     } else if (kr.type === 'QUALITATIVE') {
       const score = monthVal !== '' ? Number(monthVal) : Math.round((progress / 100) * 5);
       controlHtml = `
-        <div class="text-xs"><strong>${state.activeMonth}月修辦自評（1～5 分）：</strong></div>
-        <div class="row-wrap">
-          ${[1, 2, 3, 4, 5].map((sc) => `<button type="button" class="btn ${score === sc ? 'btn-primary' : 'btn-outline'}" style="padding:6px 10px;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${sc}">★${sc}</button>`).join('')}
+        <div class="row-between">
+          <span class="text-xs" style="color:var(--muted);">${state.activeMonth}月自評</span>
+          <div class="row-wrap" style="gap:4px;">
+            ${[1, 2, 3, 4, 5].map((sc) => `<button type="button" class="btn ${score === sc ? 'btn-dark' : 'btn-outline'}" style="width:32px;height:32px;padding:0;justify-content:center;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${sc}">${sc}</button>`).join('')}
+          </div>
         </div>
       `;
     }
 
     return `
-      <div class="card stack" style="gap:10px;">
-        <div class="row-between">
-          <div>
-            <span class="badge ${meta.badgeClass}">${meta.icon} ${meta.label}</span>
-            <div style="font-weight:700;font-size:15px;margin-top:4px;">${esc(kr.title)}</div>
-          </div>
-          <strong style="font-size:18px;color:var(--brand);">${progress}%</strong>
+      <div class="kr-zen-row">
+        <div class="row-between" style="gap:8px;">
+          <span style="font-weight:600;font-size:15px;color:var(--text);">${esc(kr.title)}</span>
+          <strong style="font-size:16px;color:var(--moss);flex-shrink:0;">${progress}%</strong>
         </div>
-        <div class="text-xs" style="color:var(--muted);">
-          <div><strong>做法：</strong>${esc(kr.action)}</div>
-          <div><strong>考量：</strong>${esc(kr.reason)}</div>
-        </div>
-        <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
-        <div class="control-box">
-          ${controlHtml}
-          <div style="border-top:1px solid var(--border);padding-top:8px;">
-            <label class="text-xs" style="font-weight:600;display:block;margin-bottom:4px;">💬 ${state.activeMonth}月心得回饋：</label>
-            <div style="display:flex;gap:6px;">
-              <input type="text" value="${esc(refText)}" placeholder="記錄本月心得或成果..." data-action="reflection-input" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
-              <button type="button" class="btn btn-outline" style="white-space:nowrap;padding:6px 10px;" data-action="voice-reflection" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}">🎙️</button>
+
+        ${controlHtml}
+
+        <div class="kr-footer-links">
+          <details>
+            <summary>做法與考量</summary>
+            <div class="kr-note-drawer">
+              <div><strong>做法：</strong>${esc(kr.action)}</div>
+              <div><strong>考量：</strong>${esc(kr.reason)}</div>
             </div>
-          </div>
+          </details>
+          <button type="button" class="kr-footer-link-btn" style="${refText ? 'color:#5F6F58;font-weight:600;' : ''}" data-action="toggle-reflection" data-kr="${esc(kr.id)}">
+            💬 ${refText ? '已寫心得' : '寫心得'}
+          </button>
         </div>
+
+        ${isRefOpen ? `
+          <div style="display:flex;gap:6px;padding-top:2px;">
+            <input type="text" value="${esc(refText)}" placeholder="記錄 ${state.activeMonth}月心得或成果..." data-action="reflection-input" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
+            <button type="button" class="btn btn-outline" style="padding:6px 10px;flex-shrink:0;" data-action="voice-reflection" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}">🎙️</button>
+          </div>
+        ` : ''}
       </div>
     `;
   }
 
   function renderOverviewTab(lec) {
     const overall = computeLecturerStats(lec);
+    const circumference = 263.89;
+    const dashOffset = circumference - (overall.rate / 100) * circumference;
+
     const goalsList = (lec.goals || [])
       .map((g, idx) => {
         const st = computeGoalStats(g);
         return `
-          <div class="card" style="cursor:pointer;" data-action="open-goal-monthly" data-idx="${idx}">
+          <div class="zen-card" style="cursor:pointer;" data-action="open-goal-monthly" data-idx="${idx}">
             <div class="row-between">
-              <div>
-                <span class="badge badge-sky">目標 ${idx + 1}</span>
-                <div style="font-weight:700;font-size:15px;margin-top:4px;">${esc(g.title)}</div>
-                <div class="text-xs" style="color:var(--muted);margin-top:2px;">包含 ${(g.krs || []).length} 個關鍵成果 ‧ 點擊切換頁籤填報 ➔</div>
+              <div style="min-width:0;flex:1;">
+                <span class="badge badge-sky">目標 ${String(idx + 1).padStart(2, '0')}</span>
+                <div style="font-weight:700;font-size:15px;margin-top:6px;">${esc(g.title)}</div>
+                <div class="text-xs" style="color:var(--muted);margin-top:2px;">包含 ${(g.krs || []).length} 個關鍵成果 ‧ 點擊聚焦填報 ➔</div>
               </div>
-              <div style="text-align:right;">
-                <div style="color:#d97706;font-weight:800;">${st.starText}</div>
-                <div class="text-xs" style="font-weight:700;">${st.stars.toFixed(1)}星 (${st.rate}%)</div>
+              <div style="text-align:right;flex-shrink:0;">
+                <div style="color:var(--gold);font-weight:800;">${st.starText}</div>
+                <div class="text-xs" style="font-weight:700;color:var(--moss-dark);">${st.stars.toFixed(1)}星 (${st.rate}%)</div>
               </div>
             </div>
           </div>
@@ -294,27 +275,35 @@
       .join('');
 
     return `
-      <div class="vision-banner">
-        <div>
+      <div class="zen-vision-card">
+        <div style="flex:1;min-width:0;">
           <div class="row-wrap" style="margin-bottom:6px;">
             <span class="badge badge-sky">${esc(lec.unit)}</span>
             <span class="badge badge-slate">綁定碼：${esc(lec.bindCode || lec.id)}</span>
           </div>
-          <h2 style="margin:0;font-size:20px;">${esc(lec.name)} 講師</h2>
+          <h2 style="margin:0;font-size:21px;">${esc(lec.name)} <span style="font-size:13px;font-weight:400;color:var(--muted);">講師</span></h2>
           <div style="margin-top:6px;font-size:14px;">
-            <span style="color:#fde68a;">核心精進愿景：</span>
-            <strong>${esc(lec.coreVision)}</strong>
-            <button type="button" class="btn btn-ghost" style="padding:2px 8px;font-size:11px;margin-left:4px;" data-action="edit-vision">✎</button>
+            <span style="color:var(--muted);">2026 核心精進愿景：</span>
+            <div style="font-weight:600;display:flex;align-items:center;gap:6px;margin-top:2px;">
+              <span>${esc(lec.coreVision)}</span>
+              <button type="button" class="kr-footer-link-btn" style="background:var(--surface-warm);padding:2px 8px;border-radius:999px;" data-action="edit-vision">✎ 修改</button>
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+            <span style="color:var(--gold);font-weight:700;font-size:13px;">${overall.starText} ${overall.stars.toFixed(1)} 星</span>
+            <span class="badge badge-green">${overall.badge}</span>
           </div>
         </div>
-        <div class="star-card" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <div class="text-xs" style="color:#fde68a;">年度總五星評比</div>
-            <div class="stars-gold" style="font-size:20px;">${overall.starText} ${overall.stars.toFixed(1)}★</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="badge badge-amber">${overall.badge}</span>
-            <div style="font-weight:800;margin-top:4px;">${overall.rate}%</div>
+
+        <div class="zen-ring-wrap">
+          <svg style="width:100%;height:100%;transform:rotate(-90deg);" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#EFECE6" stroke-width="8" />
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#7C8B74" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset.toFixed(2)}" />
+          </svg>
+          <div class="zen-ring-text">
+            <strong style="font-size:18px;color:var(--text);">${overall.rate}%</strong>
+            <span style="font-size:10px;color:var(--muted);">總達成率</span>
           </div>
         </div>
       </div>
@@ -324,9 +313,9 @@
         <button type="button" class="btn btn-primary" data-action="go-tab" data-tab="new">＋ 新增目標 / 小目標</button>
       </div>
 
-      ${goalsList ? `<div class="pwa-overview-grid">${goalsList}</div>` : `<div class="card text-xs" style="color:var(--muted);text-align:center;">尚未建立愿力目標，請點選「＋ 新增目標」開始填寫！</div>`}
+      ${goalsList ? `<div class="pwa-overview-grid">${goalsList}</div>` : `<div class="zen-card text-xs" style="color:var(--muted);text-align:center;">尚未建立愿力目標，請點選「＋ 新增目標」開始填寫！</div>`}
 
-      <div class="card row-between">
+      <div class="zen-card row-between">
         <span class="text-xs" style="color:var(--muted);">需要切換或重新綁定講師身分？</span>
         <button type="button" class="btn btn-outline" data-action="switch-identity">切換 / 重設身分</button>
       </div>
@@ -337,12 +326,14 @@
     const goals = lec.goals || [];
     if (goals.length === 0) {
       return `
-        <div class="card stack" style="text-align:center;">
+        <div class="zen-card stack" style="text-align:center;">
           <p class="text-sm" style="margin:0;">您尚未建立任何愿力目標與關鍵成果。</p>
           <button type="button" class="btn btn-primary" style="justify-content:center;" data-action="go-tab" data-tab="new">＋ 立即新增第一個目標</button>
         </div>
       `;
     }
+
+    if (state.activeGoalIndex >= goals.length) state.activeGoalIndex = 0;
 
     const monthPills = Array.from({ length: 12 }, (_, idx) => {
       const m = idx + 1;
@@ -355,39 +346,58 @@
       `;
     }).join('');
 
+    const goalTabsHtml = goals
+      .map((g, idx) => {
+        const numLabel = String(idx + 1).padStart(2, '0');
+        return `
+          <button type="button" class="goal-seg-btn ${idx === state.activeGoalIndex ? 'active' : ''}" data-action="select-goal-tab" data-idx="${idx}">
+            <span>${numLabel}</span>
+            <span style="font-weight:400;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(g.title)}</span>
+          </button>
+        `;
+      })
+      .join('');
+
     const curGoal = goals[state.activeGoalIndex] || goals[0];
     const gStat = computeGoalStats(curGoal);
 
     return `
       <div class="pwa-monthly-layout">
-        <aside class="card pwa-month-sidebar" style="padding:14px;">
-          <div class="row-between" style="margin-bottom:10px;">
-            <strong class="text-xs">🗓️ 選擇填報月份</strong>
-            <span class="badge badge-green">目前：${state.activeMonth} 月</span>
+        <!-- Frameless Month Pills directly on #FAF9F6 -->
+        <aside class="pwa-month-sidebar">
+          <div class="row-between" style="padding:0 4px;margin-bottom:8px;">
+            <span class="text-xs" style="color:var(--muted);font-weight:600;">月份進度</span>
+            <span class="text-xs" style="color:var(--moss-dark);font-weight:700;">${state.activeMonth} 月</span>
           </div>
-          <div class="month-grid">${monthPills}</div>
-          <div class="text-xs" style="color:var(--muted);margin-top:10px;">綠點表示該月已有填報紀錄；可隨時點選補填或調整。</div>
+          <div class="month-strip no-scrollbar">${monthPills}</div>
         </aside>
 
         <div class="stack">
+          <!-- Frameless Segmented Goal Switcher directly on #FAF9F6 -->
           <div>
-            <div class="text-xs" style="color:var(--muted);font-weight:700;margin-bottom:6px;">📑 切換愿力目標頁籤：</div>
-            ${renderGoalTabsBar(lec)}
+            <div class="row-between" style="padding:0 4px;margin-bottom:6px;">
+              <span class="text-xs" style="color:var(--muted);font-weight:600;">聚焦目標</span>
+              <button type="button" class="kr-footer-link-btn" style="color:var(--moss-dark);font-weight:600;" data-action="go-tab" data-tab="new">＋ 新增目標</button>
+            </div>
+            <div class="goal-seg-bar no-scrollbar">${goalTabsHtml}</div>
           </div>
 
-          <div class="goal-header" style="border-radius:14px;">
-            <div>
-              <div class="text-xs" style="color:#fcd34d;">目標 ${state.activeGoalIndex + 1}</div>
-              <div style="font-weight:700;font-size:16px;">${esc(curGoal.title)}</div>
+          <!-- Focused Goal Card (No nested gray boxes) -->
+          <div class="goal-focus-card">
+            <div class="goal-focus-header">
+              <div>
+                <div style="font-size:11px;color:var(--muted);">目標 ${state.activeGoalIndex + 1} / ${goals.length}</div>
+                <div style="font-weight:700;font-size:17px;color:var(--text);">${esc(curGoal.title)}</div>
+              </div>
+              <div style="background:var(--bg);padding:5px 12px;border-radius:999px;font-size:12px;">
+                <span style="color:var(--gold);font-weight:700;">${gStat.starText} ${gStat.stars.toFixed(1)}</span>
+                <span style="color:var(--muted);margin:0 4px;">·</span>
+                <strong style="color:var(--moss-dark);">${gStat.rate}%</strong>
+              </div>
             </div>
-            <div style="text-align:right;">
-              <div style="color:#fbbf24;font-weight:800;">${gStat.starText} ${gStat.stars.toFixed(1)}★</div>
-              <div class="text-xs" style="color:#84B39D;">${gStat.badge} ‧ ${gStat.rate}%</div>
+            <div class="kr-zen-list">
+              ${(curGoal.krs || []).map((kr) => renderKrEditor(curGoal.id, kr)).join('')}
             </div>
-          </div>
-
-          <div class="pwa-kr-grid">
-            ${(curGoal.krs || []).map((kr) => renderKrEditor(curGoal.id, kr)).join('')}
           </div>
         </div>
       </div>
@@ -401,8 +411,8 @@
     const hasGoals = (lec.goals || []).length > 0;
 
     return `
-      <div class="card stack">
-        <h2 style="margin:0;font-size:18px;color:var(--brand);">＋ 新增愿力目標 / 關鍵成果</h2>
+      <div class="zen-card stack" style="max-width:640px;margin:0 auto;width:100%;">
+        <h2 style="margin:0;font-size:18px;">＋ 新增愿力目標 / 關鍵成果</h2>
         <form id="mobileAddForm" class="stack">
           <div>
             <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">選擇大目標 *</label>
@@ -448,7 +458,7 @@
             <input id="mKrReason" type="text" placeholder="例如：從已有的文本開始練習" />
           </div>
 
-          <button type="submit" class="btn btn-line" style="justify-content:center;padding:12px;">確認新增並切換至該目標填報</button>
+          <button type="submit" class="btn btn-primary" style="justify-content:center;padding:12px;">確認新增並切換至該目標填報</button>
         </form>
       </div>
     `;
@@ -463,10 +473,10 @@
           .map((kr) => `<li>${esc(kr.title)}（<strong>${computeKrProgress(kr, 12)}%</strong>）— ${esc(kr.action)}</li>`)
           .join('');
         return `
-          <div style="border:1px solid var(--border-strong);border-radius:10px;padding:10px;">
+          <div style="border:1px solid var(--border-strong);border-radius:12px;padding:12px;">
             <div class="row-between">
               <strong>目標 ${i + 1}：${esc(g.title)}</strong>
-              <span style="color:#d97706;font-weight:700;">${st.starText} ${st.stars.toFixed(1)}星 (${st.rate}%)</span>
+              <span style="color:var(--gold);font-weight:700;">${st.starText} ${st.stars.toFixed(1)}星 (${st.rate}%)</span>
             </div>
             <ul style="margin:6px 0 0 18px;padding:0;font-size:12px;color:var(--text-sub);">${krs}</ul>
           </div>
@@ -476,17 +486,17 @@
 
     return `
       <div class="stack">
-        <div class="card row-between no-print">
+        <div class="zen-card row-between no-print">
           <div>
             <strong>🖨️ 我的母堂呈表預覽</strong>
             <div class="text-xs" style="color:var(--muted);">可於法會現場直接列印或存成 PDF。</div>
           </div>
-          <button type="button" class="btn btn-line" data-action="do-print">🖨️ 列印 / PDF</button>
+          <button type="button" class="btn btn-primary" data-action="do-print">🖨️ 列印 / PDF</button>
         </div>
 
         <div class="print-sheet stack">
-          <div style="text-align:center;border-bottom:2px solid var(--brand);padding-bottom:10px;">
-            <h2 style="margin:0;color:var(--brand);font-size:19px;">講 師 精 進 愿 力 表</h2>
+          <div style="text-align:center;border-bottom:2px solid var(--moss);padding-bottom:10px;">
+            <h2 style="margin:0;color:var(--text);font-size:19px;">講 師 精 進 愿 力 表</h2>
             <div class="text-xs" style="color:var(--text-sub);margin-top:4px;">
               單位：${esc(lec.unit)} ｜ 講師：${esc(lec.name)} ｜ 總評：${overall.starText} (${overall.stars.toFixed(1)}星 / ${overall.rate}%)
             </div>
@@ -524,7 +534,7 @@
               <div class="brand-logo" style="width:32px;height:32px;font-size:15px;">愿</div>
               <div>
                 <div style="font-weight:700;font-size:14px;">${esc(lec.name)} 講師愿力表</div>
-                <div style="font-size:11px;color:#fde68a;">${esc(lec.unit)} ‧ ${state.cloudMode === 'firebase' ? '雲端已同步' : '本機儲存'}</div>
+                <div style="font-size:11px;color:var(--muted);">${esc(lec.unit)} ‧ ${state.cloudMode === 'firebase' ? '雲端已同步' : '本機儲存'}</div>
               </div>
             </div>
 
@@ -535,24 +545,29 @@
               <button type="button" class="nav-tab ${state.tab === 'print' ? 'active' : ''}" data-action="go-tab" data-tab="print">🖨️ 呈表列印</button>
             </nav>
 
-            <button type="button" class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:4px 10px;font-size:11px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
+            <button type="button" class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:5px 11px;font-size:12px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
           </div>
         </header>
 
         <main class="pwa-body">${bodyHtml}</main>
 
+        <!-- Minimalist Zen Outline SVG Bottom Nav -->
         <nav class="bottom-nav no-print" aria-label="手機功能導覽">
           <button type="button" class="bottom-nav-btn ${state.tab === 'overview' ? 'active' : ''}" data-action="go-tab" data-tab="overview">
-            <span class="bottom-nav-icon">🌟</span><span>總覽</span>
+            <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1v-9.5z"/></svg>
+            <span>總覽</span>
           </button>
           <button type="button" class="bottom-nav-btn ${state.tab === 'monthly' ? 'active' : ''}" data-action="go-tab" data-tab="monthly">
-            <span class="bottom-nav-icon">📅</span><span>回報</span>
+            <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+            <span>回報</span>
           </button>
           <button type="button" class="bottom-nav-btn ${state.tab === 'new' ? 'active' : ''}" data-action="go-tab" data-tab="new">
-            <span class="bottom-nav-icon">➕</span><span>新增</span>
+            <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            <span>新增</span>
           </button>
           <button type="button" class="bottom-nav-btn ${state.tab === 'print' ? 'active' : ''}" data-action="go-tab" data-tab="print">
-            <span class="bottom-nav-icon">🖨️</span><span>呈表</span>
+            <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659"/></svg>
+            <span>呈表</span>
           </button>
         </nav>
       </div>
@@ -766,6 +781,10 @@
         render();
       } else if (action === 'select-month') {
         state.activeMonth = Number(btn.dataset.month);
+        render();
+      } else if (action === 'toggle-reflection') {
+        const krId = btn.dataset.kr;
+        state.openReflectionIds[krId] = !state.openReflectionIds[krId];
         render();
       } else if (action === 'set-kr-val') {
         const val = Number(btn.dataset.val);

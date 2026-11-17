@@ -1,4 +1,4 @@
-/* 講師愿力表系統 — 主程式與 UI 渲染 */
+/* 講師愿力表系統 — DEMO 與管理端主程式（禪意留白追蹤風） */
 (function (global) {
   'use strict';
 
@@ -7,7 +7,10 @@
   const state = {
     view: 'pwa',
     activeLecturerId: 'L01',
-    activeMonth: new Date().getMonth() + 1 <= 12 ? 3 : 3, // 預設 3 月以利展示第1季歷程
+    activeMonth: 3,
+    activeGoalIndex: 0,
+    openReflectionIds: {},
+    adminExpandedMap: { L01: true },
     printBlankMode: false,
     elderMode: false,
     cloudMode: 'local',
@@ -56,21 +59,18 @@
       })
       .join('');
 
-    const cfg = global.VOW_CONFIG || {};
-    const hasLineLogin = Boolean(cfg.lineChannelId && cfg.lineWorkerUrl);
-
     return `
       <header class="topbar no-print">
         <div class="topbar-inner">
           <div class="brand-wrap">
             <div class="brand-logo">愿</div>
             <div>
-              <h1 class="brand-title">講師愿力表系統 <span class="badge badge-green" style="font-size:10px;padding:1px 6px;">${state.cloudMode === 'firebase' ? '雲端同步' : '本機試用'}</span></h1>
-              <p class="brand-sub">法會紙電雙軌立愿 ‧ 1～12月多元回報 ‧ 五星評比 ‧ 各單位分權總覽</p>
+              <h1 class="brand-title">講師愿力表 <span class="badge badge-green" style="font-size:10px;padding:1px 7px;">${state.cloudMode === 'firebase' ? '雲端同步' : '禪意留白版'}</span></h1>
+              <p class="brand-sub">紙電雙軌立愿 ‧ 月度自由回報 ‧ 五星評比</p>
             </div>
           </div>
 
-          <nav class="nav-tabs" aria-label="功能視角切換">
+          <nav class="nav-tabs desktop-only" aria-label="功能視角切換">
             <button class="nav-tab ${state.view === 'pwa' ? 'active' : ''}" data-action="switch-view" data-view="pwa">📱 講師手機端 (PWA)</button>
             <button class="nav-tab ${state.view === 'paper' ? 'active' : ''}" data-action="switch-view" data-view="paper">📝 法會紙本代登</button>
             <button class="nav-tab ${state.view === 'print' ? 'active' : ''}" data-action="switch-view" data-view="print">🖨️ 母堂呈表列印</button>
@@ -78,12 +78,12 @@
           </nav>
 
           <div class="topbar-tools">
-            <a href="./pwa.html" class="btn btn-line" style="text-decoration:none;">📲 講師實作版</a>
+            <a href="./pwa.html" class="btn btn-primary" style="text-decoration:none;padding:6px 12px;font-size:12px;">📲 講師實作版</a>
             <label class="select-pill">
-              <span>檢視講師：</span>
+              <span>講師：</span>
               <select id="globalLecturerSelect">${options}</select>
             </label>
-            <button class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
+            <button class="btn btn-ghost ${state.elderMode ? 'active-elder' : ''}" style="padding:6px 11px;font-size:12px;" data-action="toggle-elder">🔍 ${state.elderMode ? '標準字' : '大字版'}</button>
           </div>
         </div>
       </header>
@@ -99,11 +99,11 @@
         for (let k = 1; k <= 2; k++) {
           rowsHtml += `
             <tr style="height:48px;">
-              ${k === 1 ? `<td rowspan="2" style="text-align:center;font-weight:700;background:#F5EFE6;">${g}</td>` : ''}
+              ${k === 1 ? `<td rowspan="2" style="text-align:center;font-weight:700;background:#FAF9F6;">${g}</td>` : ''}
               ${k === 1 ? `<td rowspan="2"></td>` : ''}
-              ${k === 1 ? `<td rowspan="2" style="text-align:center;color:#94a3b8;">☆☆☆☆☆<br/>( % )</td>` : ''}
+              ${k === 1 ? `<td rowspan="2" style="text-align:center;color:#8A867E;">☆☆☆☆☆<br/>( % )</td>` : ''}
               <td></td>
-              <td style="text-align:center;color:#94a3b8;">%</td>
+              <td style="text-align:center;color:#8A867E;">%</td>
               <td></td>
               <td></td>
               ${Array.from({ length: 12 }, () => `<td></td>`).join('')}
@@ -128,7 +128,7 @@
               else if (kr.type === 'MILESTONE') display = `S${raw}`;
               else if (kr.type === 'QUALITATIVE') display = `${raw}分`;
             }
-            const bg = m === state.activeMonth ? 'background:#fef3c7;font-weight:700;' : '';
+            const bg = m === state.activeMonth ? 'background:#FBF5E6;font-weight:700;color:#5F6F58;' : 'background:#FAF9F6;';
             return `<td style="text-align:center;${bg}">${esc(display)}</td>`;
           }).join('');
 
@@ -137,20 +137,20 @@
 
           rowsHtml += `
             <tr>
-              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="text-align:center;font-weight:700;background:#F2EAE0;">${gIdx + 1}</td>` : ''}
-              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="font-weight:700;background:#F5EFE6;min-width:130px;">${esc(goal.title)}</td>` : ''}
+              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="text-align:center;font-weight:700;background:#F0EDE6;">${gIdx + 1}</td>` : ''}
+              ${kIdx === 0 ? `<td rowspan="${krs.length}" style="font-weight:700;background:#FAF9F6;min-width:130px;">${esc(goal.title)}</td>` : ''}
               ${kIdx === 0 ? `
-                <td rowspan="${krs.length}" style="text-align:center;background:#F5EFE6;min-width:105px;">
-                  <div style="color:#d97706;font-weight:700;">${gStat.starText}</div>
+                <td rowspan="${krs.length}" style="text-align:center;background:#FAF9F6;min-width:105px;">
+                  <div style="color:#C9A24D;font-weight:700;">${gStat.starText}</div>
                   <div style="font-weight:800;">${gStat.stars.toFixed(1)}星 (${gStat.rate}%)</div>
-                  <div style="font-size:11px;color:#66564D;">${gStat.badge}</div>
+                  <div style="font-size:11px;color:#7A7770;">${gStat.badge}</div>
                 </td>
               ` : ''}
               <td style="min-width:140px;">
-                <div style="font-weight:700;">${esc(kr.title)}</div>
-                <div style="font-size:11px;color:#7D6C62;">[${typeLabel}${periodHint}]</div>
+                <div style="font-weight:600;">${esc(kr.title)}</div>
+                <div style="font-size:11px;color:#7A7770;">[${typeLabel}${periodHint}]</div>
               </td>
-              <td style="text-align:center;font-weight:800;">${krProg}%</td>
+              <td style="text-align:center;font-weight:800;color:#5F6F58;">${krProg}%</td>
               <td style="min-width:140px;">${esc(kr.action)}</td>
               <td style="min-width:140px;">${esc(kr.reason)}</td>
               ${monthCells}
@@ -164,7 +164,7 @@
       <div class="table-wrap">
         <div class="classic-banner">
           <span>核心精進愿景：${isBlankTemplate ? '＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿' : esc(lec.coreVision)}</span>
-          <span style="font-size:12px;font-weight:400;color:#fde68a;">
+          <span style="font-size:12px;font-weight:400;color:#EAE6DD;">
             ${isBlankTemplate ? '單位：＿＿＿＿＿＿　講師姓名：＿＿＿＿＿＿' : `單位：${esc(lec.unit)} ｜ 講師：${esc(lec.name)}`}
           </span>
         </div>
@@ -189,27 +189,23 @@
   }
 
   function renderKrControlHTML(goalId, kr) {
-    const meta = METRIC_META[kr.type] || METRIC_META.PERCENT;
     const progress = computeKrProgress(kr, 12);
     const mv = kr.monthlyValues || {};
     const monthVal = mv[state.activeMonth] !== undefined ? mv[state.activeMonth] : '';
     const refText = (kr.reflections && kr.reflections[state.activeMonth]) || '';
+    const isRefOpen = Boolean(state.openReflectionIds[kr.id]);
 
     let controlHtml = '';
     if (kr.type === 'PERCENT') {
       const val = monthVal !== '' ? Number(monthVal) : progress;
       controlHtml = `
-        <div class="row-between text-xs">
-          <strong>📅 ${state.activeMonth}月份進度百分比：</strong>
-          <strong style="color:var(--brand);font-size:15px;">${val}%</strong>
-        </div>
-        <input type="range" min="0" max="100" step="5" value="${val}"
-          data-action="range-kr" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
-        <div class="row-wrap">
-          ${[0, 25, 50, 75, 100].map((p) => `
-            <button type="button" class="btn ${val === p ? 'btn-primary' : 'btn-outline'}"
-              data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${p}">${p}%</button>
-          `).join('')}
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div class="row-between text-xs" style="color:var(--muted);">
+            <span>${state.activeMonth}月進度調整</span>
+            <strong style="color:var(--text);">${val}%</strong>
+          </div>
+          <input type="range" min="0" max="100" step="5" value="${val}"
+            data-action="range-kr" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
         </div>
       `;
     } else if (kr.type === 'COUNT') {
@@ -217,38 +213,27 @@
       const totalSum = Object.values(mv).reduce((a, b) => a + Number(b || 0), 0);
       controlHtml = `
         <div class="row-between">
-          <div class="text-xs">
-            <strong>📅 ${state.activeMonth}月份新增數（年度目標：${kr.targetValue} ${esc(kr.unitLabel)}）</strong><br/>
-            <span style="color:var(--muted);">全年累計：<strong>${totalSum} / ${kr.targetValue} ${esc(kr.unitLabel)}</strong>（達成率上限鎖定 100%）</span>
-          </div>
-          <div class="row-wrap">
-            <button type="button" class="btn btn-outline" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${Math.max(0, val - 1)}">－</button>
-            <span class="badge badge-slate" style="font-size:14px;padding:6px 12px;">${val} ${esc(kr.unitLabel)}</span>
-            <button type="button" class="btn btn-primary" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${val + 1}">＋</button>
+          <span class="text-xs" style="color:var(--muted);">${state.activeMonth}月新增 <span style="color:var(--moss-dark);">(累計 ${totalSum}/${kr.targetValue} ${esc(kr.unitLabel)})</span></span>
+          <div class="row-wrap" style="gap:6px;">
+            <button type="button" class="btn btn-outline" style="width:30px;height:30px;padding:0;justify-content:center;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${Math.max(0, val - 1)}">－</button>
+            <strong style="min-width:44px;text-align:center;font-size:13px;">${val} ${esc(kr.unitLabel)}</strong>
+            <button type="button" class="btn btn-primary" style="width:30px;height:30px;padding:0;justify-content:center;" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${val + 1}">＋</button>
           </div>
         </div>
       `;
     } else if (kr.type === 'PERIODIC') {
       const val = monthVal !== '' ? Number(monthVal) : -1;
-      const dur = Math.min(12, Math.max(3, Number(kr.durationMonths || kr.targetValue || 12)));
       controlHtml = `
-        <div class="row-between text-xs">
-          <strong>📅 ${state.activeMonth}月份週期打卡（設定完成期限：${dur} 個月）：</strong>
-          <select data-action="set-periodic-duration" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" style="width:auto;padding:4px 8px;font-size:12px;">
-            ${[3, 4, 5, 6, 9, 12].map((d) => `<option value="${d}" ${dur === d ? 'selected' : ''}>期限：${d} 個月</option>`).join('')}
-          </select>
-        </div>
-        <div class="row-wrap">
-          <button type="button" class="btn ${val === 100 ? 'btn-line' : 'btn-outline'}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="100">✅ 本月已達成 (100%)</button>
-          <button type="button" class="btn ${val === 50 ? 'btn-amber' : 'btn-outline'}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="50">⏳ 進行中 (50%)</button>
-          <button type="button" class="btn ${val === 0 ? 'btn-primary' : 'btn-outline'}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="0">❌ 未執行 (0%)</button>
+        <div class="periodic-pill-group">
+          <button type="button" class="periodic-pill-btn ${val === 100 ? 'active-done' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="100">✓ 已達成</button>
+          <button type="button" class="periodic-pill-btn ${val === 50 ? 'active-prog' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="50">⋯ 進行中</button>
+          <button type="button" class="periodic-pill-btn ${val === 0 ? 'active-miss' : ''}" data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="0">✕ 未執行</button>
         </div>
       `;
     } else if (kr.type === 'MILESTONE') {
       const steps = kr.milestones || ['階段 1：資料準備', '階段 2：初稿撰寫', '階段 3：演練修正', '階段 4：正式圓滿'];
       const doneCount = monthVal !== '' ? Number(monthVal) : Math.round((progress / 100) * steps.length);
       controlHtml = `
-        <div class="text-xs"><strong>📅 截至 ${state.activeMonth}月份已完成之階段里程碑：</strong></div>
         <div class="milestone-grid">
           ${steps.map((sName, idx) => {
             const stepNum = idx + 1;
@@ -257,8 +242,8 @@
             return `
               <button type="button" class="milestone-btn ${checked ? 'done' : ''}"
                 data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${nextVal}">
-                <span>${checked ? '☑' : '☐'}</span>
-                <span>${esc(sName)}</span>
+                <span>${checked ? '✓' : '○'}</span>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sName)}</span>
               </button>
             `;
           }).join('')}
@@ -267,57 +252,62 @@
     } else if (kr.type === 'QUALITATIVE') {
       const score = monthVal !== '' ? Number(monthVal) : Math.round((progress / 100) * 5);
       controlHtml = `
-        <div class="text-xs"><strong>📅 ${state.activeMonth}月份修辦自評（1～5 分自動換算）：</strong></div>
-        <div class="row-wrap">
-          ${[1, 2, 3, 4, 5].map((sc) => `
-            <button type="button" class="btn ${score === sc ? 'btn-primary' : 'btn-outline'}"
-              data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${sc}">★ ${sc} 分 (${sc * 20}%)</button>
-          `).join('')}
+        <div class="row-between">
+          <span class="text-xs" style="color:var(--muted);">${state.activeMonth}月自評</span>
+          <div class="row-wrap" style="gap:4px;">
+            ${[1, 2, 3, 4, 5].map((sc) => `
+              <button type="button" class="btn ${score === sc ? 'btn-dark' : 'btn-outline'}" style="width:30px;height:30px;padding:0;justify-content:center;font-size:12px;"
+                data-action="set-kr-val" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" data-val="${sc}">${sc}</button>
+            `).join('')}
+          </div>
         </div>
       `;
     }
 
     return `
-      <div class="kr-item">
-        <div class="row-between">
-          <div>
-            <div class="row-wrap">
-              <span class="badge ${meta.badgeClass}">${meta.icon} ${meta.label}</span>
-              <strong>${esc(kr.title)}</strong>
-            </div>
-            <div class="text-xs" style="color:var(--muted);margin-top:4px;">
-              <strong>實際做法：</strong>${esc(kr.action)}　｜　<strong>原因與考量：</strong>${esc(kr.reason)}
-            </div>
-          </div>
-          <div style="text-align:right;">
-            <span class="text-xs" style="color:var(--muted);display:block;">單項達成率</span>
-            <strong style="font-size:18px;color:var(--brand);">${progress}%</strong>
-          </div>
+      <div class="kr-zen-row">
+        <div class="row-between" style="gap:8px;">
+          <span style="font-weight:600;font-size:14px;color:var(--text);">${esc(kr.title)}</span>
+          <strong style="font-size:15px;color:var(--moss);flex-shrink:0;">${progress}%</strong>
         </div>
 
-        <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
+        ${controlHtml}
 
-        <div class="control-box">
-          ${controlHtml}
-          <div style="border-top:1px solid #E6DCD0;padding-top:8px;">
-            <label class="text-xs" style="font-weight:600;display:block;margin-bottom:4px;">💬 ${state.activeMonth}月份修辦心得回饋 / 成果紀錄：</label>
-            <div style="display:flex;gap:8px;">
-              <input type="text" value="${esc(refText)}" placeholder="輸入本月心得或成果說明..."
-                data-action="reflection-input" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
-              <button type="button" class="btn btn-outline" style="white-space:nowrap;"
-                data-action="voice-reflection" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}">🎙️ 語音輸入</button>
+        <div class="kr-footer-links">
+          <details>
+            <summary>做法與考量</summary>
+            <div class="kr-note-drawer">
+              <div><strong>做法：</strong>${esc(kr.action)}</div>
+              <div><strong>考量：</strong>${esc(kr.reason)}</div>
             </div>
-          </div>
+          </details>
+          <button type="button" class="kr-footer-link-btn" style="${refText ? 'color:#5F6F58;font-weight:600;' : ''}" data-action="toggle-reflection" data-kr="${esc(kr.id)}">
+            💬 ${refText ? '已寫心得' : '寫心得'}
+          </button>
         </div>
+
+        ${isRefOpen ? `
+          <div style="display:flex;gap:6px;padding-top:2px;">
+            <input type="text" value="${esc(refText)}" placeholder="輸入 ${state.activeMonth}月份修辦心得..."
+              data-action="reflection-input" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}" />
+            <button type="button" class="btn btn-outline" style="padding:6px 10px;flex-shrink:0;" data-action="voice-reflection" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}">🎙️</button>
+          </div>
+        ` : ''}
       </div>
     `;
   }
 
   function renderPwaView(lec) {
     const overall = computeLecturerStats(lec);
+    const goals = lec.goals || [];
+    if (state.activeGoalIndex >= goals.length) state.activeGoalIndex = 0;
+
+    const circumference = 263.89;
+    const dashOffset = circumference - (overall.rate / 100) * circumference;
+
     const monthPills = Array.from({ length: 12 }, (_, idx) => {
       const m = idx + 1;
-      const hasData = (lec.goals || []).some((g) => (g.krs || []).some((kr) => kr.monthlyValues && kr.monthlyValues[m] !== undefined));
+      const hasData = goals.some((g) => (g.krs || []).some((kr) => kr.monthlyValues && kr.monthlyValues[m] !== undefined));
       return `
         <button type="button" class="month-pill ${m === state.activeMonth ? 'active' : ''}" data-action="select-month" data-month="${m}">
           <span>${m}月</span>
@@ -326,31 +316,44 @@
       `;
     }).join('');
 
-    const goalCards = (lec.goals || [])
-      .map((goal, idx) => {
-        const gStat = computeGoalStats(goal);
-        return `
-          <div class="goal-card">
-            <div class="goal-header">
-              <div class="row-wrap">
-                <div class="goal-index">${idx + 1}</div>
-                <div>
-                  <div class="text-xs" style="color:#fcd34d;">愿力大目標 (Objective ${idx + 1})</div>
-                  <div style="font-weight:700;font-size:16px;">${esc(goal.title)}</div>
-                </div>
-              </div>
-              <div class="star-card" style="padding:8px 12px;min-width:170px;">
-                <div style="color:#fbbf24;font-weight:800;">${gStat.starText} <span style="color:#fff;">${gStat.stars.toFixed(1)}星</span></div>
-                <div class="text-xs" style="color:#84B39D;">${gStat.badge} ‧ ${gStat.rate}%</div>
-              </div>
+    let goalFocusHtml = '';
+    let goalTabsHtml = '';
+    if (goals.length === 0) {
+      goalFocusHtml = `<div class="zen-card" style="text-align:center;color:var(--muted);">尚未設定愿力目標，請點選「＋ 新增目標」。</div>`;
+    } else {
+      goalTabsHtml = goals
+        .map((g, idx) => {
+          const numLabel = String(idx + 1).padStart(2, '0');
+          return `
+            <button type="button" class="goal-seg-btn ${idx === state.activeGoalIndex ? 'active' : ''}" data-action="select-goal-tab" data-idx="${idx}">
+              <span>${numLabel}</span>
+              <span style="font-weight:400;max-width:115px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(g.title)}</span>
+            </button>
+          `;
+        })
+        .join('');
+
+      const focusedGoal = goals[state.activeGoalIndex];
+      const gStat = computeGoalStats(focusedGoal);
+      goalFocusHtml = `
+        <div class="goal-focus-card">
+          <div class="goal-focus-header">
+            <div>
+              <div style="font-size:11px;color:var(--muted);">目標 ${state.activeGoalIndex + 1} / ${goals.length}</div>
+              <div style="font-weight:700;font-size:16px;color:var(--text);">${esc(focusedGoal.title)}</div>
             </div>
-            <div class="kr-list">
-              ${(goal.krs || []).map((kr) => renderKrControlHTML(goal.id, kr)).join('')}
+            <div style="background:var(--bg);padding:5px 12px;border-radius:999px;font-size:12px;">
+              <span style="color:var(--gold);font-weight:700;">${gStat.starText} ${gStat.stars.toFixed(1)}</span>
+              <span style="color:var(--muted);margin:0 4px;">·</span>
+              <strong style="color:var(--moss-dark);">${gStat.rate}%</strong>
             </div>
           </div>
-        `;
-      })
-      .join('');
+          <div class="kr-zen-list">
+            ${(focusedGoal.krs || []).map((kr) => renderKrControlHTML(focusedGoal.id, kr)).join('')}
+          </div>
+        </div>
+      `;
+    }
 
     const extraBubbles = state.lineExtraMessages
       .map(
@@ -373,7 +376,7 @@
                 <div class="line-avatar" style="width:32px;height:32px;font-size:13px;">愿</div>
                 <div>
                   <div style="font-weight:700;font-size:14px;">講師愿力表官方帳號</div>
-                  <div style="font-size:11px;color:#94a3b8;">LINE Login × Messaging API (僅單人 Push)</div>
+                  <div style="font-size:11px;color:#A8A29E;">LINE Login × Messaging API (僅單人 Push)</div>
                 </div>
               </div>
               <span class="badge ${lec.lineBound ? 'badge-green' : 'badge-slate'}">${lec.lineBound ? '已綁定' : '紙本待認領'}</span>
@@ -384,119 +387,134 @@
                 <div class="line-avatar">愿</div>
                 <div class="line-bubble">
                   <strong>${esc(lec.name)} 講師吉祥 🙏</strong>
-                  <div>核心精進愿景：<span style="color:#3D6352;font-weight:700;">「${esc(lec.coreVision)}」</span></div>
+                  <div>核心精進愿景：<span style="color:var(--moss-dark);font-weight:700;">「${esc(lec.coreVision)}」</span></div>
                 </div>
               </div>
               <div class="line-bubble-row">
                 <div class="line-avatar">愿</div>
                 <div class="line-bubble">
-                  <div>目前年度總五星評比：<strong>★ ${overall.stars.toFixed(1)} 星 (${overall.rate}%)</strong></div>
-                  <div style="color:#7D6C62;margin-top:2px;">點選下方圖文選單可快速跳轉回報；本系統不主動群發推播，僅支援單人 Push 小卡。</div>
+                  <div>目前年度總五星評比：<strong style="color:var(--gold);">★ ${overall.stars.toFixed(1)} 星 (${overall.rate}%)</strong></div>
+                  <div style="color:var(--muted);margin-top:2px;">點選下方圖文選單可快速跳轉回報；本系統不主動群發推播，僅支援單人 Push 小卡。</div>
                 </div>
               </div>
               ${extraBubbles}
             </div>
 
-            <div style="padding:8px 12px;background:#F2EAE0;border-top:1px solid #E6DCD0;" class="row-between">
-              <span class="text-xs" style="font-weight:600;">單人 Push 互動：</span>
-              <div class="row-wrap">
-                <button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:11px;" data-action="push-summary">⭐ Push 我的星級小卡</button>
-              </div>
+            <div style="padding:8px 12px;background:var(--surface-soft);border-top:1px solid var(--border);" class="row-between">
+              <span class="text-xs" style="font-weight:600;color:var(--muted);">單人 Push 互動：</span>
+              <button type="button" class="btn btn-outline" style="padding:4px 10px;font-size:11px;" data-action="push-summary">⭐ Push 星級小卡</button>
             </div>
 
             <div class="line-rich-menu">
-              <button type="button" class="rich-btn primary" data-action="rich-overview">
-                <span>🌟</span><strong>我的愿力表</strong>
-              </button>
-              <button type="button" class="rich-btn green" data-action="rich-monthly">
-                <span>📅</span><strong>本月進度回報</strong>
-              </button>
-              <button type="button" class="rich-btn" data-action="open-add-modal">
-                <span>➕</span><strong>新增目標/小目標</strong>
-              </button>
-              <button type="button" class="rich-btn" data-action="switch-view" data-view="print">
-                <span>🖨️</span><strong>母堂呈表列印</strong>
-              </button>
+              <button type="button" class="rich-btn primary" data-action="rich-overview"><span>🌟</span><strong>我的愿力表</strong></button>
+              <button type="button" class="rich-btn green" data-action="rich-monthly"><span>📅</span><strong>本月進度回報</strong></button>
+              <button type="button" class="rich-btn" data-action="open-add-modal"><span>➕</span><strong>新增目標</strong></button>
+              <button type="button" class="rich-btn" data-action="switch-view" data-view="print"><span>🖨️</span><strong>母堂呈表</strong></button>
             </div>
           </aside>
 
-          <div class="card" style="text-align:center;">
+          <div class="zen-card" style="text-align:center;">
             <span class="badge badge-green">DEMO 體驗專用</span>
-            <h3 style="margin:8px 0 4px;font-size:15px;color:var(--brand);">📱 加入 LINE 官方帳號試用</h3>
+            <h3 style="margin:8px 0 4px;font-size:15px;color:var(--text);">📱 加入 LINE 官方帳號試用</h3>
             <p class="text-xs" style="color:var(--muted);margin:0 0 10px;">基礎忠恕講師愿力表服務（ID：<code>@533ennet</code>）</p>
-            <img src="./assets/line-oa-qr.png" alt="加入基礎忠恕講師愿力表服務 LINE 官方帳號 QR Code" style="width:170px;height:170px;border:1px solid var(--border-strong);border-radius:12px;padding:4px;background:#fff;" />
+            <img src="./assets/line-oa-qr.png" alt="加入基礎忠恕講師愿力表服務 LINE 官方帳號 QR Code" style="width:160px;height:160px;border:1px solid var(--border-strong);border-radius:14px;padding:4px;background:#fff;" />
             <div style="margin-top:10px;">
               <a href="https://line.me/R/ti/p/@533ennet" target="_blank" rel="noopener noreferrer" class="btn btn-line" style="text-decoration:none;justify-content:center;">🟢 直接開啟 LINE 加好友</a>
             </div>
           </div>
         </div>
 
-        <!-- Right: Lecturer PWA Mobile Simulator Frame -->
+        <!-- Right: Lecturer PWA Mobile Simulator Frame (Frameless Zen Layout) -->
         <div class="demo-phone-frame">
           <div class="demo-phone-notch">
-            <span>📱 講師手機端 PWA 模擬</span>
-            <span>420px 手機視窗</span>
+            <span>📱 講師手機端 PWA</span>
+            <span>禪意留白版</span>
           </div>
           <div class="demo-phone-screen">
-            <div class="vision-banner" style="padding:14px;">
-              <div style="width:100%;">
-                <div class="row-wrap" style="margin-bottom:6px;">
+            <!-- Vision Card with SVG Progress Ring -->
+            <div class="zen-vision-card" style="padding:16px;">
+              <div style="flex:1;min-width:0;">
+                <div class="row-wrap" style="gap:5px;margin-bottom:6px;">
                   <span class="badge badge-sky">${esc(lec.unit)}</span>
-                  <span class="badge ${lec.inputMode === 'digital' ? 'badge-green' : 'badge-amber'}">
-                    ${lec.inputMode === 'digital' ? '📱 電子立愿' : '📝 紙本立愿'}
-                  </span>
-                  <span class="badge badge-slate">${esc(lec.bindCode || lec.id)}</span>
+                  <span class="badge ${lec.inputMode === 'digital' ? 'badge-green' : 'badge-amber'}">${lec.inputMode === 'digital' ? '電子立愿' : '紙本建檔'}</span>
                 </div>
-                <h2 style="margin:0;font-size:19px;">${esc(lec.name)} <span style="font-size:13px;font-weight:400;color:#fde68a;">講師</span></h2>
-                <div style="margin-top:4px;font-size:13px;">
-                  <span style="color:#fde68a;">核心愿景：</span>
-                  <strong style="color:#fcd34d;">${esc(lec.coreVision)}</strong>
-                  <button type="button" class="btn btn-ghost" style="padding:2px 7px;font-size:11px;margin-left:4px;" data-action="edit-vision">✎</button>
+                <h2 style="margin:0;font-size:19px;">${esc(lec.name)} <span style="font-size:12px;font-weight:400;color:var(--muted);">講師</span></h2>
+                <div style="margin-top:4px;font-size:12px;">
+                  <span style="color:var(--muted);">2026 核心愿景：</span>
+                  <div style="font-weight:600;color:var(--text);display:flex;align-items:center;gap:4px;margin-top:2px;">
+                    <span>${esc(lec.coreVision)}</span>
+                    <button type="button" class="kr-footer-link-btn" style="background:var(--surface-warm);padding:2px 7px;border-radius:999px;" data-action="edit-vision">✎</button>
+                  </div>
+                </div>
+                <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
+                  <span style="color:var(--gold);font-weight:700;font-size:12px;">${overall.starText} ${overall.stars.toFixed(1)}</span>
+                  <span class="badge badge-green">${overall.badge}</span>
                 </div>
               </div>
-              <div class="star-card" style="padding:10px 12px;">
-                <div>
-                  <div class="text-xs" style="color:#fde68a;">年度總評比</div>
-                  <div class="stars-gold" style="font-size:17px;">${overall.starText} ${overall.stars.toFixed(1)}★</div>
-                </div>
-                <div style="text-align:right;">
-                  <span class="badge badge-amber">${overall.badge}</span>
-                  <div style="font-weight:800;font-size:13px;margin-top:3px;">${overall.rate}%</div>
+
+              <div class="zen-ring-wrap" style="width:78px;height:78px;">
+                <svg style="width:100%;height:100%;transform:rotate(-90deg);" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="42" fill="none" stroke="#EFECE6" stroke-width="8" />
+                  <circle cx="50" cy="50" r="42" fill="none" stroke="#7C8B74" stroke-width="8" stroke-linecap="round"
+                    stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset.toFixed(2)}" />
+                </svg>
+                <div class="zen-ring-text">
+                  <strong style="font-size:16px;color:var(--text);">${overall.rate}%</strong>
+                  <span style="font-size:9px;color:var(--muted);">總達成率</span>
                 </div>
               </div>
             </div>
 
-            <div class="card" style="padding:12px;">
-              <div class="row-between" style="margin-bottom:8px;">
-                <strong class="text-xs">🗓️ 選擇月份（1～12 月）</strong>
-                <div class="row-wrap">
-                  <span class="badge badge-green">${state.activeMonth} 月</span>
-                  <button type="button" class="btn btn-primary" style="padding:5px 10px;font-size:12px;" data-action="open-add-modal">＋ 新增目標</button>
+            <!-- Frameless Month Pills directly on #FAF9F6 -->
+            <div>
+              <div class="row-between" style="padding:0 4px;margin-bottom:6px;">
+                <span class="text-xs" style="color:var(--muted);font-weight:600;">月份進度</span>
+                <div class="row-wrap" style="gap:8px;">
+                  <span class="text-xs" style="color:var(--moss-dark);font-weight:700;">${state.activeMonth} 月</span>
+                  <button type="button" class="btn btn-outline" style="padding:3px 10px;font-size:11px;" data-action="open-add-modal">＋ 新增</button>
                 </div>
               </div>
-              <div class="month-grid" id="monthGrid">${monthPills}</div>
+              <div class="month-strip no-scrollbar" id="monthGrid">${monthPills}</div>
             </div>
 
-            <div id="goalsWrap" class="stack" style="gap:12px;">${goalCards}</div>
+            <!-- Frameless Segmented Goal Switcher directly on #FAF9F6 -->
+            ${goals.length ? `
+              <div>
+                <div class="text-xs" style="color:var(--muted);font-weight:600;padding:0 4px;margin-bottom:6px;">聚焦目標</div>
+                <div class="goal-seg-bar no-scrollbar">${goalTabsHtml}</div>
+              </div>
+            ` : ''}
+
+            <!-- Single Focused Goal -->
+            ${goalFocusHtml}
           </div>
         </div>
       </div>
 
-      <div class="card" style="margin-top:20px;">
-        <h3 style="margin:0 0 10px;font-size:15px;">📋 完整橫式愿力表即時預覽（對照原表格＋五星評比＋1～12月）</h3>
-        ${renderClassicTableHTML(lec, false)}
-      </div>
+      <!-- Collapsible Classic Table -->
+      <details class="zen-card" style="margin-top:20px;">
+        <summary style="cursor:pointer;list-style:none;" class="row-between">
+          <div>
+            <strong style="font-size:15px;">📋 展開完整橫式愿力表即時預覽（1～12 月總覽）</strong>
+            <div class="text-xs" style="color:var(--muted);">上方卡片調整任何月份進度，表格與五星評比會即時同步。</div>
+          </div>
+          <span class="badge badge-green" style="padding:5px 12px;">點擊展開 ▾</span>
+        </summary>
+        <div style="margin-top:14px;">
+          ${renderClassicTableHTML(lec, false)}
+        </div>
+      </details>
     `;
   }
 
   function renderPaperView() {
     return `
-      <div class="card stack">
+      <div class="zen-card stack">
         <div class="row-between" style="border-bottom:1px solid var(--border);padding-bottom:12px;">
           <div>
             <span class="badge badge-amber">法會 50% 年長紙本組解決方案（總管理員 / 單位負責人皆可代登）</span>
             <h2 style="margin:6px 0 2px;font-size:19px;">📝 法會現場「紙本愿力表」快速代登與綁定工作台</h2>
-            <p class="text-xs" style="margin:0;color:var(--muted);">收齊紙本呈表後，在此快速建檔並產生專屬綁定碼（供後續講師本人 LINE 認領或由單位負責人代為更新）。</p>
+            <p class="text-xs" style="margin:0;color:var(--muted);">收齊紙本呈表後，在此快速建檔並產生專屬綁定碼。</p>
           </div>
           <button type="button" class="btn btn-amber" data-action="fill-paper-sample">✨ 一鍵帶入手寫紙本範例</button>
         </div>
@@ -529,7 +547,7 @@
 
           <div class="form-grid-2">
             <div class="control-box">
-              <span class="badge badge-sky" style="align-self:flex-start;">關鍵成果 1（必填）</span>
+              <span class="badge badge-green" style="align-self:flex-start;">關鍵成果 1（必填）</span>
               <input id="paperKr1Title" type="text" required placeholder="小目標名稱" />
               <div class="form-grid-2">
                 <select id="paperKr1Type">
@@ -562,7 +580,7 @@
           </div>
 
           <div style="display:flex;justify-content:flex-end;">
-            <button type="submit" class="btn btn-line">💾 儲存紙本建檔並切換檢視</button>
+            <button type="submit" class="btn btn-primary">💾 儲存紙本建檔並切換檢視</button>
           </div>
         </form>
       </div>
@@ -573,7 +591,7 @@
     const overall = computeLecturerStats(lec);
     return `
       <div class="stack">
-        <div class="card row-between no-print">
+        <div class="zen-card row-between no-print">
           <div>
             <strong>🖨️ 法會母堂呈表專用排版（A4 橫式列印格式）</strong>
             <div class="text-xs" style="color:var(--muted);">可切換為「目前講師資料版」或「空白手寫紙本模板（供法會現場發放）」。</div>
@@ -581,14 +599,14 @@
           <div class="row-wrap">
             <button type="button" class="btn ${!state.printBlankMode ? 'btn-primary' : 'btn-outline'}" data-action="set-print-mode" data-blank="false">📄 目前講師資料版</button>
             <button type="button" class="btn ${state.printBlankMode ? 'btn-primary' : 'btn-outline'}" data-action="set-print-mode" data-blank="true">📝 空白手寫紙本模板</button>
-            <button type="button" class="btn btn-line" data-action="do-print">🖨️ 立即列印 / 存為 PDF</button>
+            <button type="button" class="btn btn-dark" data-action="do-print">🖨️ 立即列印 / 存為 PDF</button>
           </div>
         </div>
 
         <div class="print-sheet">
-          <div style="text-align:center;border-bottom:2px solid var(--brand);padding-bottom:12px;margin-bottom:14px;">
+          <div style="text-align:center;border-bottom:2px solid var(--moss);padding-bottom:12px;margin-bottom:14px;">
             <div style="font-size:12px;color:var(--muted);letter-spacing:2px;">2026 年度法會呈表專用</div>
-            <h1 style="margin:4px 0;font-size:22px;color:var(--brand);">講 師 精 進 愿 力 表（紙電雙軌呈表版）</h1>
+            <h1 style="margin:4px 0;font-size:22px;color:var(--text);">講 師 精 進 愿 力 表（紙電雙軌呈表版）</h1>
             <div class="row-wrap" style="justify-content:center;font-size:13px;gap:20px;">
               <span><strong>所屬單位：</strong>${state.printBlankMode ? '＿＿＿＿＿＿＿＿' : esc(lec.unit)}</span>
               <span><strong>立愿講師：</strong>${state.printBlankMode ? '＿＿＿＿＿＿＿＿' : esc(lec.name)}</span>
@@ -600,14 +618,14 @@
           ${renderClassicTableHTML(lec, state.printBlankMode)}
 
           <div class="print-footer-grid">
-            <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+            <div style="border:1px solid var(--border-strong);border-radius:10px;padding:10px;">
               <strong>📱 專屬綁定碼：${state.printBlankMode ? 'VOW-______' : esc(lec.bindCode || lec.id)}</strong>
               <div style="color:var(--muted);margin-top:4px;">法會呈表後，平時每月可透過講師愿力表 LINE 官方帳號自由更新進度與心得。</div>
             </div>
-            <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+            <div style="border:1px solid var(--border-strong);border-radius:10px;padding:10px;">
               <strong>點傳師 / 單位負責人慈悲勉勵：</strong>
             </div>
-            <div style="border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;justify-content:space-between;">
+            <div style="border:1px solid var(--border-strong);border-radius:10px;padding:10px;display:flex;flex-direction:column;justify-content:space-between;">
               <strong>立愿講師親筆簽名（呈上母堂）：</strong>
               <div style="text-align:right;color:var(--muted);">簽名：＿＿＿＿＿＿　2026 年 ＿ 月 ＿ 日</div>
             </div>
@@ -639,27 +657,32 @@
     const boundCount = list.filter((l) => l.lineBound).length;
 
     const itemsHtml = list.length === 0
-      ? `<div class="card" style="text-align:center;color:var(--muted);">沒有符合篩選條件的講師資料。</div>`
+      ? `<div class="zen-card" style="text-align:center;color:var(--muted);">沒有符合篩選條件的講師資料。</div>`
       : list
           .map((lec) => {
             const st = computeLecturerStats(lec);
+            const isOpen = Boolean(state.adminExpandedMap[lec.id]);
             return `
-              <div class="card stack" style="padding:0;overflow:hidden;">
-                <div style="background:#F2EAE0;padding:12px 16px;border-bottom:1px solid var(--border);" class="row-between">
-                  <div class="row-wrap">
-                    <span class="badge badge-sky">${esc(lec.unit)}</span>
-                    <strong style="font-size:16px;">${esc(lec.name)} 講師</strong>
-                    <span class="badge ${lec.inputMode === 'digital' ? 'badge-green' : 'badge-amber'}">${lec.inputMode === 'digital' ? '📱 電子自填' : '📝 紙本代登'}</span>
-                    <span style="color:#d97706;font-weight:800;">${st.starText} ${st.stars.toFixed(1)}星 (${st.rate}%｜${st.badge})</span>
+              <div style="border:1px solid var(--border);border-radius:18px;overflow:hidden;background:#fff;">
+                <div class="admin-lec-header" style="${isOpen ? 'border-bottom:1px solid var(--border);' : ''}" data-action="toggle-admin-row" data-id="${esc(lec.id)}">
+                  <div class="admin-lec-meta">
+                    <span class="badge badge-green" style="background:var(--moss);color:#fff;flex-shrink:0;">${esc(lec.unit)}</span>
+                    <strong style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(lec.name)} 講師</strong>
+                    <span class="badge ${lec.inputMode === 'digital' ? 'badge-green' : 'badge-amber'}" style="flex-shrink:0;">${lec.inputMode === 'digital' ? '電子自填' : '紙本代登'}</span>
+                    <span style="color:var(--gold);font-weight:700;font-size:13px;flex-shrink:0;">${st.starText} ${st.stars.toFixed(1)}</span>
+                    <span class="text-xs" style="color:var(--muted);flex-shrink:0;">(${st.rate}%｜${st.badge})</span>
                   </div>
-                  <div class="row-wrap">
-                    <button type="button" class="btn btn-outline" data-action="admin-push-user" data-id="${esc(lec.id)}">💬 單人 Push 提醒</button>
-                    <button type="button" class="btn btn-line" data-action="jump-pwa" data-id="${esc(lec.id)}">📱 檢視/代為更新</button>
+                  <div class="admin-lec-actions">
+                    <button type="button" class="btn btn-primary" style="padding:5px 11px;font-size:12px;" data-action="jump-pwa" data-id="${esc(lec.id)}">
+                      <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></svg>
+                      <span>檢視</span>
+                    </button>
+                    <span class="chevron-btn" title="${isOpen ? '收合' : '展開'}">
+                      <svg class="chevron-icon ${isOpen ? 'open' : ''}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+                    </span>
                   </div>
                 </div>
-                <div style="padding:12px;">
-                  ${renderClassicTableHTML(lec, false)}
-                </div>
+                ${isOpen ? `<div style="padding:12px;">${renderClassicTableHTML(lec, false)}</div>` : ''}
               </div>
             `;
           })
@@ -667,10 +690,10 @@
 
     return `
       <div class="stack">
-        <div class="card row-between">
+        <div class="zen-card row-between">
           <div class="row-wrap" style="gap:14px;">
             <div>
-              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:3px;">管理端分權角色 (RBAC)：</label>
+              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:3px;color:var(--muted);">管理端分權角色 (RBAC)：</label>
               <select id="adminRoleFilter">
                 <option value="ALL" ${state.adminRoleFilter === 'ALL' ? 'selected' : ''}>👑 總管理員（全道場單位）</option>
                 <option value="台北一區" ${state.adminRoleFilter === '台北一區' ? 'selected' : ''}>📍 單位負責人：台北一區</option>
@@ -680,7 +703,7 @@
               </select>
             </div>
             <div>
-              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:3px;">立愿方式：</label>
+              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:3px;color:var(--muted);">立愿方式：</label>
               <select id="adminModeFilter">
                 <option value="ALL" ${state.adminModeFilter === 'ALL' ? 'selected' : ''}>全部（電子＋紙本）</option>
                 <option value="digital" ${state.adminModeFilter === 'digital' ? 'selected' : ''}>📱 電子版自填</option>
@@ -688,7 +711,7 @@
               </select>
             </div>
             <div>
-              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:3px;">五星評比：</label>
+              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:3px;color:var(--muted);">五星評比：</label>
               <select id="adminStarFilter">
                 <option value="ALL" ${state.adminStarFilter === 'ALL' ? 'selected' : ''}>全部星級</option>
                 <option value="HIGH" ${state.adminStarFilter === 'HIGH' ? 'selected' : ''}>★ 3.5 星以上</option>
@@ -701,30 +724,65 @@
         </div>
 
         <div class="kpi-grid">
-          <div class="card">
+          <div class="zen-card">
             <div class="text-xs" style="color:var(--muted);">篩選單位立愿人數</div>
             <div class="kpi-num">${total} <span style="font-size:13px;font-weight:400;">位講師</span></div>
-            <div class="text-xs" style="color:#3D6352;">100% 完成母堂呈表建檔</div>
+            <div class="text-xs" style="color:var(--moss-dark);">100% 完成母堂呈表建檔</div>
           </div>
-          <div class="card">
+          <div class="zen-card">
             <div class="text-xs" style="color:var(--muted);">紙電雙軌比例</div>
             <div class="kpi-num" style="font-size:18px;margin:10px 0;">📱 ${digitalCount} 人 ／ 📝 ${paperCount} 人</div>
             <div class="text-xs" style="color:var(--muted);">電子自填 vs 年長紙本代登</div>
           </div>
-          <div class="card">
+          <div class="zen-card">
             <div class="text-xs" style="color:var(--muted);">單位平均五星評比</div>
-            <div class="kpi-num" style="color:#d97706;">★ ${avgStars} <span style="font-size:13px;font-weight:400;">/ 5.0</span></div>
+            <div class="kpi-num" style="color:var(--gold);">★ ${avgStars} <span style="font-size:13px;font-weight:400;color:var(--muted);">/ 5.0</span></div>
             <div class="text-xs" style="color:var(--muted);">平均達成率：${avgRate}%</div>
           </div>
-          <div class="card">
+          <div class="zen-card">
             <div class="text-xs" style="color:var(--muted);">LINE 綁定人數</div>
-            <div class="kpi-num" style="color:var(--line-green);">${boundCount} / ${total}</div>
+            <div class="kpi-num" style="color:var(--moss);">${boundCount} / ${total}</div>
             <div class="text-xs" style="color:var(--muted);">支援點對點單人 Push</div>
           </div>
         </div>
 
-        <div class="stack">${itemsHtml}</div>
+        <div class="zen-card stack">
+          <div class="row-between">
+            <div>
+              <h3 style="margin:0;font-size:16px;">📋 各單位講師愿力目標、五星評比與 1~12 月進度總覽</h3>
+              <p class="text-xs" style="margin:3px 0 0;color:var(--muted);">點擊任一講師列即可收合或展開完整 1~12 月進度明細表。</p>
+            </div>
+            <div class="row-wrap">
+              <button type="button" class="btn btn-outline" style="padding:5px 12px;font-size:12px;" data-action="expand-all-admin">▾ 全部展開</button>
+              <button type="button" class="btn btn-outline" style="padding:5px 12px;font-size:12px;" data-action="collapse-all-admin">▴ 全部收合</button>
+            </div>
+          </div>
+          <div class="stack" style="gap:10px;">${itemsHtml}</div>
+        </div>
       </div>
+    `;
+  }
+
+  function renderMobileBottomNav() {
+    return `
+      <nav class="bottom-nav no-print" aria-label="手機功能導覽">
+        <button type="button" class="bottom-nav-btn ${state.view === 'pwa' ? 'active' : ''}" data-action="switch-view" data-view="pwa">
+          <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1v-9.5z"/></svg>
+          <span>愿力表</span>
+        </button>
+        <button type="button" class="bottom-nav-btn ${state.view === 'paper' ? 'active' : ''}" data-action="switch-view" data-view="paper">
+          <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+          <span>紙本代登</span>
+        </button>
+        <button type="button" class="bottom-nav-btn ${state.view === 'print' ? 'active' : ''}" data-action="switch-view" data-view="print">
+          <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659"/></svg>
+          <span>呈表列印</span>
+        </button>
+        <button type="button" class="bottom-nav-btn ${state.view === 'admin' ? 'active' : ''}" data-action="switch-view" data-view="admin">
+          <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+          <span>管理總覽</span>
+        </button>
+      </nav>
     `;
   }
 
@@ -776,13 +834,13 @@
             </div>
 
             <div>
-              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">實際做法 *</label>
-              <input id="modalKrAction" type="text" required placeholder="例如：每週讀一篇＋寫看法、心得" />
+              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">實際做法（選填）</label>
+              <input id="modalKrAction" type="text" placeholder="例如：每週讀一篇＋寫看法、心得" />
             </div>
 
             <div>
-              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">原因與考量 *</label>
-              <input id="modalKrReason" type="text" required placeholder="例如：溫故知新，充實講道內涵" />
+              <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">原因與考量（選填）</label>
+              <input id="modalKrReason" type="text" placeholder="例如：溫故知新，充實講道內涵" />
             </div>
 
             <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid var(--border);">
@@ -807,6 +865,7 @@
     app.innerHTML = `
       ${renderTopbar(lec)}
       <main class="container">${mainHtml}</main>
+      ${renderMobileBottomNav()}
       ${renderAddModal(lec)}
     `;
     bindEvents();
@@ -871,6 +930,8 @@
     if (sel) {
       sel.onchange = (e) => {
         state.activeLecturerId = e.target.value;
+        state.activeGoalIndex = 0;
+        state.openReflectionIds = {};
         state.lineExtraMessages = [];
         render();
         showToast(`已切換檢視：${getActiveLecturer().name} 講師`);
@@ -887,7 +948,6 @@
       }
     });
 
-    // Range sliders & reflection inputs
     root.querySelectorAll('input[data-action="range-kr"]').forEach((inp) => {
       inp.onchange = (e) => {
         const val = Number(e.target.value);
@@ -895,16 +955,6 @@
           if (!kr.monthlyValues) kr.monthlyValues = {};
           kr.monthlyValues[state.activeMonth] = val;
         }, `已更新 ${state.activeMonth}月進度為 ${val}%`);
-      };
-    });
-
-    root.querySelectorAll('select[data-action="set-periodic-duration"]').forEach((s) => {
-      s.onchange = (e) => {
-        const dur = Math.min(12, Math.max(3, Number(e.target.value)));
-        mutateKr(s.dataset.goal, s.dataset.kr, (kr) => {
-          kr.durationMonths = dur;
-          kr.targetValue = dur;
-        }, `已將週期達成期限調整為 ${dur} 個月`);
       };
     });
 
@@ -918,7 +968,6 @@
       };
     });
 
-    // Paper entry form
     const paperForm = document.getElementById('paperEntryForm');
     if (paperForm) {
       paperForm.onsubmit = (e) => {
@@ -937,29 +986,30 @@
           action: document.getElementById('paperKr1Action').value.trim() || '依計畫每月執行',
           reason: document.getElementById('paperKr1Reason').value.trim() || '自我道學精進',
           type: kr1Type,
-          durationMonths: kr1Type === 'PERIODIC' ? 6 : undefined,
           targetValue: kr1Type === 'COUNT' ? 12 : (kr1Type === 'PERIODIC' ? 6 : 100),
           unitLabel: kr1Type === 'COUNT' ? '次' : '%',
           monthlyValues: { [state.activeMonth]: kr1Init },
           reflections: { [state.activeMonth]: '法會紙本立愿已由單位協助數位建檔。' }
         }];
+        if (kr1Type === 'PERIODIC') krs[0].durationMonths = 6;
 
         const kr2Title = document.getElementById('paperKr2Title').value.trim();
         if (kr2Title) {
           const kr2Type = document.getElementById('paperKr2Type').value;
           const kr2Init = Number(document.getElementById('paperKr2Init').value || 30);
-          krs.push({
+          const kr2 = {
             id: 'KR_' + Date.now() + '_2',
             title: kr2Title,
             action: document.getElementById('paperKr2Action').value.trim() || '每月定期執行',
             reason: document.getElementById('paperKr2Reason').value.trim() || '同修共辦成全',
             type: kr2Type,
-            durationMonths: kr2Type === 'PERIODIC' ? 6 : undefined,
             targetValue: kr2Type === 'COUNT' ? 12 : 100,
             unitLabel: kr2Type === 'COUNT' ? '次' : '%',
             monthlyValues: { [state.activeMonth]: kr2Init },
             reflections: {}
-          });
+          };
+          if (kr2Type === 'PERIODIC') kr2.durationMonths = 6;
+          krs.push(kr2);
         }
 
         const newId = 'L_' + Date.now();
@@ -977,13 +1027,13 @@
         };
         global.VowStore.saveLecturer(newLec);
         state.activeLecturerId = newId;
+        state.activeGoalIndex = 0;
         state.view = 'pwa';
         render();
         showToast(`已成功為「${name}」完成紙本代登！綁定碼：${newLec.bindCode}`);
       };
     }
 
-    // Add KR Modal form
     const modalGoalSel = document.getElementById('modalGoalSelect');
     const modalNewGoalInp = document.getElementById('modalNewGoalInput');
     const modalKrType = document.getElementById('modalKrType');
@@ -1023,27 +1073,34 @@
       addKrForm.onsubmit = (e) => {
         e.preventDefault();
         const lec = getActiveLecturer();
+        if (!Array.isArray(lec.goals)) lec.goals = [];
         const goalChoice = document.getElementById('modalGoalSelect').value;
         const type = document.getElementById('modalKrType').value;
         const rawTarget = Number(document.getElementById('modalKrTarget').value || 100);
         const newKr = {
           id: 'KR_' + Date.now(),
           title: document.getElementById('modalKrTitle').value.trim(),
-          action: document.getElementById('modalKrAction').value.trim(),
-          reason: document.getElementById('modalKrReason').value.trim(),
+          action: document.getElementById('modalKrAction').value.trim() || '依計畫持續精進',
+          reason: document.getElementById('modalKrReason').value.trim() || '自我道學成長',
           type,
-          durationMonths: type === 'PERIODIC' ? Math.min(12, Math.max(3, rawTarget)) : undefined,
           targetValue: type === 'PERIODIC' ? Math.min(12, Math.max(3, rawTarget)) : rawTarget,
           unitLabel: document.getElementById('modalKrUnit').value.trim() || '%',
           monthlyValues: { [state.activeMonth]: type === 'PERCENT' ? 20 : (type === 'PERIODIC' ? 100 : 1) },
           reflections: {}
         };
+        if (type === 'PERIODIC') newKr.durationMonths = newKr.targetValue;
+
         if (goalChoice === 'NEW') {
           const gTitle = document.getElementById('modalNewGoalInput').value.trim() || '新精進目標';
           lec.goals.push({ id: 'G_' + Date.now(), title: gTitle, krs: [newKr] });
+          state.activeGoalIndex = lec.goals.length - 1;
         } else {
-          const targetGoal = lec.goals.find((g) => g.id === goalChoice);
-          if (targetGoal) targetGoal.krs.push(newKr);
+          const idx = lec.goals.findIndex((item) => item.id === goalChoice);
+          if (idx >= 0) {
+            if (!Array.isArray(lec.goals[idx].krs)) lec.goals[idx].krs = [];
+            lec.goals[idx].krs.push(newKr);
+            state.activeGoalIndex = idx;
+          }
         }
         global.VowStore.saveLecturer(lec);
         render();
@@ -1051,7 +1108,6 @@
       };
     }
 
-    // Delegated click handler
     root.onclick = async (e) => {
       const btn = e.target.closest('[data-action]');
       if (!btn) return;
@@ -1065,10 +1121,15 @@
         document.body.classList.toggle('elder-mode', state.elderMode);
         render();
         showToast(state.elderMode ? '已切換為長輩友善大字體' : '已切換為標準字體');
-      } else if (action === 'line-login') {
-        if (!global.VowStore.startLineLogin()) showToast('尚未設定 LINE Channel ID');
       } else if (action === 'select-month') {
         state.activeMonth = Number(btn.dataset.month);
+        render();
+      } else if (action === 'select-goal-tab') {
+        state.activeGoalIndex = Number(btn.dataset.idx);
+        render();
+      } else if (action === 'toggle-reflection') {
+        const krId = btn.dataset.kr;
+        state.openReflectionIds[krId] = !state.openReflectionIds[krId];
         render();
       } else if (action === 'set-kr-val') {
         const val = Number(btn.dataset.val);
@@ -1099,7 +1160,7 @@
           mutateKr(btn.dataset.goal, btn.dataset.kr, (kr) => {
             if (!kr.reflections) kr.reflections = {};
             kr.reflections[state.activeMonth] = pick;
-          }, '已帶入語音心得範例（此瀏覽器不支援即時麥克風辨識）');
+          }, '已帶入語音心得範例');
         }
       } else if (action === 'edit-vision') {
         const lec = getActiveLecturer();
@@ -1150,18 +1211,25 @@
         render();
       } else if (action === 'do-print') {
         global.print();
+      } else if (action === 'toggle-admin-row') {
+        const id = btn.dataset.id;
+        state.adminExpandedMap[id] = !state.adminExpandedMap[id];
+        render();
+      } else if (action === 'expand-all-admin') {
+        getFilteredLecturers().forEach((l) => { state.adminExpandedMap[l.id] = true; });
+        render();
+        showToast('已展開全部講師進度明細');
+      } else if (action === 'collapse-all-admin') {
+        getFilteredLecturers().forEach((l) => { state.adminExpandedMap[l.id] = false; });
+        render();
+        showToast('已收合全部講師列表');
       } else if (action === 'jump-pwa') {
+        e.stopPropagation();
         state.activeLecturerId = btn.dataset.id;
+        state.activeGoalIndex = 0;
         state.view = 'pwa';
         render();
         showToast(`已切換至 ${getActiveLecturer().name} 講師視角`);
-      } else if (action === 'admin-push-user') {
-        const lec = getLecturers().find((l) => l.id === btn.dataset.id);
-        if (!lec) return;
-        const st = computeLecturerStats(lec);
-        const msg = `🙏 ${lec.name} 講師吉祥，邀請您於本月底前更新「講師愿力表」${state.activeMonth}月份進度（目前 ★${st.stars.toFixed(1)} 星）。`;
-        const res = await global.VowStore.sendSinglePush(lec.lineUid, msg);
-        showToast(res.ok ? `已單人 Push 提醒給 ${lec.name}` : `已模擬單人 Push 提醒給 ${lec.name}（尚未設定 Worker URL）`);
       } else if (action === 'export-csv') {
         exportFilteredCSV();
       }
