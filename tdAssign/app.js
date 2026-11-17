@@ -2558,7 +2558,7 @@
   function findByKey(root, key) {
     if (!key) return null;
     if (key[0] === '#') return document.getElementById(key.slice(1));
-    for (const el of root.querySelectorAll('button,select,input,textarea,a,summary')) if (ctlKey(el) === key) return el;
+    for (const el of root.querySelectorAll('button,select,input,textarea,a,summary,[role="button"][tabindex]')) if (ctlKey(el) === key) return el;
     return null;
   }
   function presSig(r) {
@@ -2601,7 +2601,8 @@
     const C = window.TDConsole;
     appEl.className = '';
     const ae = document.activeElement, focusKey = ae && appEl.contains(ae) ? ctlKey(ae) : '';
-    const draftVals = {}, detailsState = [];
+    const draftVals = {}, detailsState = [], scrollState = [];
+    const SCROLL_SEL = '.table-scroll-y, .table-wrap, .inspector, .sheet, .ws-nav, .sub-nav';
     if (!routeChanged && appEl.querySelectorAll) {
       for (const el of appEl.querySelectorAll('input[id], textarea[id], select[id]')) {
         if (el.type === 'checkbox' || el.type === 'radio' || (el.dataset && el.dataset.input)) continue;
@@ -2609,6 +2610,13 @@
         draftVals[el.id] = el.value;
       }
       for (const dt of appEl.querySelectorAll('details')) { const sm = dt.querySelector('summary'); detailsState.push([sm ? (sm.textContent || '').trim().slice(0, 40) : '', dt.open]); }
+      const seenScroll = {};
+      for (const el of appEl.querySelectorAll(SCROLL_SEL)) {
+        const k = (el.getAttribute('aria-label') || '') + '|' + el.className;
+        const idx = seenScroll[k] || 0;
+        seenScroll[k] = idx + 1;
+        if (el.scrollTop || el.scrollLeft) scrollState.push([k, idx, el.scrollTop, el.scrollLeft]);
+      }
     }
     let pos = null, posEnd = null;
     try { if (ae && typeof ae.selectionStart === 'number') { pos = ae.selectionStart; posEnd = ae.selectionEnd; } } catch (e) { }
@@ -2635,6 +2643,17 @@
     if (detailsState.length) {
       const dts = appEl.querySelectorAll('details');
       detailsState.forEach(([t, open], i) => { const dt = dts[i]; const sm = dt && dt.querySelector('summary'); if (dt && sm && (sm.textContent || '').trim().slice(0, 40) === t) dt.open = open; });
+    }
+    if (scrollState.length && appEl.querySelectorAll) {
+      const buckets = {};
+      for (const el of appEl.querySelectorAll(SCROLL_SEL)) {
+        const k = (el.getAttribute('aria-label') || '') + '|' + el.className;
+        (buckets[k] = buckets[k] || []).push(el);
+      }
+      for (const [k, idx, st, sl] of scrollState) {
+        const el = buckets[k] && buckets[k][idx];
+        if (el) { el.scrollTop = st; el.scrollLeft = sl; }
+      }
     }
     // UI-03：抽屜是模態對話框 — 背景 inert、開啟時焦點進抽屜、關閉後焦點回到觸發鈕
     const sheetEl = appEl.querySelector('.sheet');
