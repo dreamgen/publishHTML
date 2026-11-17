@@ -836,7 +836,7 @@
   function bringLastYearGroup(gk) {
     const gm = gmOf(gk); if (!gm || !need(can(gm.area, kindOfGroup(gk)))) return;
     const cur = new Set(E.getState().groups[gk] || []);
-    let ids = (BASE.defaultGroups[gk] || []).filter((id) => !cur.has(id) && M.pById[id]);
+    let ids = (BASE.defaultGroups[gk] || []).filter((id) => !cur.has(id) && M.pById[id] && !M.pById[id].off);
     let fromNote = '115 年名單';
     if (!ids.length && gm.cat === '禮節') {
       // 禮節隊在 BASE.defaultGroups 為空時，依 115 年禮節經驗與交錯均分規則建議帶入
@@ -890,14 +890,58 @@
   }
 
   /* B4 帶入去年 & 系統建議補滿 */
+  function jzLastYearRank(pool, s, cur) {
+    const isWd = s.cat === '忠恕平日';
+    const prevJz = BASE.prevJz || [];
+    const sameType = (j) => j.cat === s.cat;
+    const sameBucket = (j) => (isWd ? j.cat === '忠恕平日' : j.cat !== '忠恕平日');
+    // 若這格尚未排人，先挑出去年「同區且同類型（平日／週六／週日）」最近一次的整日班底作為合作組合基準
+    let anchor = null;
+    if (!cur.size && prevJz.length) {
+      const exactArea = prevJz.filter((j) => j.area === s.area && sameType(j));
+      const bucketArea = prevJz.filter((j) => j.area === s.area && sameBucket(j));
+      const cand = exactArea.length ? exactArea : bucketArea;
+      if (cand.length) anchor = cand[cand.length - 1];
+    }
+    const anchorSet = new Set(anchor ? anchor.pids : []);
+    return pool.filter((p) => {
+      const exactCnt = prevJz.filter((j) => sameType(j) && j.pids.includes(p.id)).length;
+      const holCnt = !isWd ? prevJz.filter((j) => j.cat !== '忠恕平日' && j.pids.includes(p.id)).length : 0;
+      const wd115 = p.wd115 || 0;
+      const hol115 = Math.max(0, (p.n115 || 0) - wd115);
+      return isWd ? (exactCnt > 0 || wd115 > 0) : (holCnt > 0 || hol115 > 0 || !!p.zr);
+    }).map((p) => {
+      const ev = evalInSlot(p, s);
+      if (ev.hard.length) return null;
+      const exactCnt = prevJz.filter((j) => sameType(j) && j.pids.includes(p.id)).length;
+      const holCnt = !isWd ? prevJz.filter((j) => j.cat !== '忠恕平日' && j.pids.includes(p.id)).length : 0;
+      let coop = 0;
+      if (cur.size) {
+        for (const j of prevJz) {
+          if (!j.pids.includes(p.id)) continue;
+          const shared = j.pids.filter((id) => cur.has(id)).length;
+          if (shared) coop += shared * (sameType(j) ? 10000 : sameBucket(j) ? 4000 : 1000);
+        }
+      } else if (anchorSet.has(p.id)) {
+        coop = 10000;
+      }
+      const typeScore = (exactCnt ? 2000 + exactCnt * 100 : (!isWd && holCnt ? 500 + holCnt * 50 : 0))
+        + (isWd ? (p.wd115 || 0) * 20 : Math.max(0, (p.n115 || 0) - (p.wd115 || 0)) * 20)
+        + (p.zr ? 300 : 0);
+      ev.lyScore = coop + typeScore + ev.score;
+      return ev;
+    }).filter(Boolean).sort((a, b) => b.lyScore - a.lyScore);
+  }
   function bringLastYearSlot(sid) {
     const s = M.byId[sid]; if (!s || !need(can(s.area, 'jz'))) return;
     if (s.cancel) return toast('這一格已取消，不能再排人');
     const cur = new Set(M.asg[sid].p), needN = E.slotNeed(M, s), left = Math.max(0, needN - cur.size);
     if (!left) return toast('這一格人數已達需求');
-    const local = E.poolFor(M, s, false).filter((p) => !cur.has(p.id) && (s.cat.startsWith('忠恕') ? (p.zr || p.n115 > 0) : p.n115 > 0));
-    const ranked = local.map((p) => evalInSlot(p, s)).filter((ev) => !ev.hard.length)
-      .sort((a, b) => ((b.p.zr ? 1 : 0) - (a.p.zr ? 1 : 0)) || (b.p.n115 || 0) - (a.p.n115 || 0) || b.score - a.score);
+    const pool = E.poolFor(M, s, false).filter((p) => !cur.has(p.id));
+    const ranked = s.cat.startsWith('忠恕')
+      ? jzLastYearRank(pool, s, cur)
+      : pool.filter((p) => p.n115 > 0).map((p) => evalInSlot(p, s)).filter((ev) => !ev.hard.length)
+          .sort((a, b) => (b.p.n115 || 0) - (a.p.n115 || 0) || b.score - a.score);
     const pick = ranked.slice(0, left);
     if (!pick.length) return toast('去年有經驗且無衝突的人都在裡面了，請改用「系統建議補滿」');
     const up = {}, label = slotName(s), pre = isPreFor(s.area);
