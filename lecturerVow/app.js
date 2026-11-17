@@ -281,9 +281,12 @@
               <div><strong>考量：</strong>${esc(kr.reason)}</div>
             </div>
           </details>
-          <button type="button" class="kr-footer-link-btn" style="${refText ? 'color:#5F6F58;font-weight:600;' : ''}" data-action="toggle-reflection" data-kr="${esc(kr.id)}">
-            💬 ${refText ? '已寫心得' : '寫心得'}
-          </button>
+          <div class="row-wrap" style="gap:10px;">
+            <button type="button" class="kr-footer-link-btn" style="${refText ? 'color:#5F6F58;font-weight:600;' : ''}" data-action="toggle-reflection" data-kr="${esc(kr.id)}">
+              💬 ${refText ? '已寫心得' : '寫心得'}
+            </button>
+            <button type="button" class="kr-footer-link-btn" style="color:#b91c1c;" data-action="delete-kr" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}">刪除</button>
+          </div>
         </div>
 
         ${isRefOpen ? `
@@ -342,10 +345,13 @@
               <div style="font-size:11px;color:var(--muted);">目標 ${state.activeGoalIndex + 1} / ${goals.length}</div>
               <div style="font-weight:700;font-size:16px;color:var(--text);">${esc(focusedGoal.title)}</div>
             </div>
-            <div style="background:var(--bg);padding:5px 12px;border-radius:999px;font-size:12px;">
-              <span style="color:var(--gold);font-weight:700;">${gStat.starText} ${gStat.stars.toFixed(1)}</span>
-              <span style="color:var(--muted);margin:0 4px;">·</span>
-              <strong style="color:var(--moss-dark);">${gStat.rate}%</strong>
+            <div class="row-wrap" style="gap:8px;">
+              <div style="background:var(--bg);padding:5px 12px;border-radius:999px;font-size:12px;">
+                <span style="color:var(--gold);font-weight:700;">${gStat.starText} ${gStat.stars.toFixed(1)}</span>
+                <span style="color:var(--muted);margin:0 4px;">·</span>
+                <strong style="color:var(--moss-dark);">${gStat.rate}%</strong>
+              </div>
+              <button type="button" class="kr-footer-link-btn" style="color:#b91c1c;" data-action="delete-goal" data-id="${esc(focusedGoal.id)}">刪除目標</button>
             </div>
           </div>
           <div class="kr-zen-list">
@@ -580,7 +586,7 @@
           </div>
 
           <div style="display:flex;justify-content:flex-end;">
-            <button type="submit" class="btn btn-primary">💾 儲存紙本建檔並切換檢視</button>
+            <button type="submit" class="btn btn-primary">💾 儲存建檔</button>
           </div>
         </form>
       </div>
@@ -599,7 +605,7 @@
           <div class="row-wrap">
             <button type="button" class="btn ${!state.printBlankMode ? 'btn-primary' : 'btn-outline'}" data-action="set-print-mode" data-blank="false">📄 目前講師資料版</button>
             <button type="button" class="btn ${state.printBlankMode ? 'btn-primary' : 'btn-outline'}" data-action="set-print-mode" data-blank="true">📝 空白手寫紙本模板</button>
-            <button type="button" class="btn btn-dark" data-action="do-print">🖨️ 立即列印 / 存為 PDF</button>
+            <button type="button" class="btn btn-dark" data-action="do-print">🖨️ 列印 / PDF</button>
           </div>
         </div>
 
@@ -720,7 +726,7 @@
               </select>
             </div>
           </div>
-          <button type="button" class="btn btn-primary" data-action="export-csv">📥 匯出所選單位報表 (CSV/Excel)</button>
+          <button type="button" class="btn btn-primary" data-action="export-csv">📥 匯出報表</button>
         </div>
 
         <div class="kpi-grid">
@@ -1102,9 +1108,10 @@
             state.activeGoalIndex = idx;
           }
         }
-        global.VowStore.saveLecturer(lec);
+        document.getElementById('addModal').classList.add('hidden');
         render();
         showToast(`已新增小目標「${newKr.title}」並自動納入五星評比`);
+        global.VowStore.saveLecturer(lec);
       };
     }
 
@@ -1127,6 +1134,39 @@
       } else if (action === 'select-goal-tab') {
         state.activeGoalIndex = Number(btn.dataset.idx);
         render();
+      } else if (action === 'delete-goal') {
+        e.stopPropagation();
+        const lec = getActiveLecturer();
+        if (!lec || !Array.isArray(lec.goals)) return;
+        const gId = btn.dataset.id;
+        const target = lec.goals.find((g) => g.id === gId);
+        if (!target) return;
+        if (!global.confirm(`確定要刪除目標「${target.title}」嗎？`)) return;
+        lec.goals = lec.goals.filter((g) => g.id !== gId);
+        if (state.activeGoalIndex >= lec.goals.length) {
+          state.activeGoalIndex = Math.max(0, lec.goals.length - 1);
+        }
+        render();
+        showToast('已刪除目標');
+        global.VowStore.saveLecturer(lec);
+      } else if (action === 'delete-kr') {
+        const lec = getActiveLecturer();
+        if (!lec || !Array.isArray(lec.goals)) return;
+        const goal = lec.goals.find((g) => g.id === btn.dataset.goal);
+        if (!goal || !Array.isArray(goal.krs)) return;
+        const kr = goal.krs.find((k) => k.id === btn.dataset.kr);
+        if (!kr) return;
+        if (!global.confirm(`確定要刪除小目標「${kr.title}」嗎？`)) return;
+        goal.krs = goal.krs.filter((k) => k.id !== btn.dataset.kr);
+        if (goal.krs.length === 0) {
+          lec.goals = lec.goals.filter((g) => g.id !== goal.id);
+          if (state.activeGoalIndex >= lec.goals.length) {
+            state.activeGoalIndex = Math.max(0, lec.goals.length - 1);
+          }
+        }
+        render();
+        showToast('已刪除小目標');
+        global.VowStore.saveLecturer(lec);
       } else if (action === 'toggle-reflection') {
         const krId = btn.dataset.kr;
         state.openReflectionIds[krId] = !state.openReflectionIds[krId];

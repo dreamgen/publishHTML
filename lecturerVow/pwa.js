@@ -101,7 +101,7 @@
 
               ${hasLineLogin && !state.cloudUid ? `
                 <button type="button" class="btn btn-line" style="justify-content:center;padding:12px;" data-action="line-login">
-                  🟢 使用 LINE 帳號登入並自動綁定
+                  🟢 LINE 登入
                 </button>
               ` : ''}
 
@@ -132,7 +132,7 @@
                   <label class="text-xs" style="font-weight:700;display:block;margin-bottom:4px;">2026 年度核心精進愿景 *</label>
                   <input id="selfVision" type="text" required placeholder="例如：讓自己的道學更精進" />
                 </div>
-                <button type="submit" class="btn btn-dark" style="justify-content:center;padding:12px;">建立並進入我的愿力表 ➔</button>
+                <button type="submit" class="btn btn-dark" style="justify-content:center;padding:12px;">建立愿力表</button>
               </form>
             </div>
           </div>
@@ -233,9 +233,12 @@
               <div><strong>考量：</strong>${esc(kr.reason)}</div>
             </div>
           </details>
-          <button type="button" class="kr-footer-link-btn" style="${refText ? 'color:#5F6F58;font-weight:600;' : ''}" data-action="toggle-reflection" data-kr="${esc(kr.id)}">
-            💬 ${refText ? '已寫心得' : '寫心得'}
-          </button>
+          <div class="row-wrap" style="gap:10px;">
+            <button type="button" class="kr-footer-link-btn" style="${refText ? 'color:#5F6F58;font-weight:600;' : ''}" data-action="toggle-reflection" data-kr="${esc(kr.id)}">
+              💬 ${refText ? '已寫心得' : '寫心得'}
+            </button>
+            <button type="button" class="kr-footer-link-btn" style="color:#b91c1c;" data-action="delete-kr" data-goal="${esc(goalId)}" data-kr="${esc(kr.id)}">刪除</button>
+          </div>
         </div>
 
         ${isRefOpen ? `
@@ -264,9 +267,10 @@
                 <div style="font-weight:700;font-size:15px;margin-top:6px;">${esc(g.title)}</div>
                 <div class="text-xs" style="color:var(--muted);margin-top:2px;">包含 ${(g.krs || []).length} 個關鍵成果 ‧ 點擊聚焦填報 ➔</div>
               </div>
-              <div style="text-align:right;flex-shrink:0;">
+              <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                 <div style="color:var(--gold);font-weight:800;">${st.starText}</div>
                 <div class="text-xs" style="font-weight:700;color:var(--moss-dark);">${st.stars.toFixed(1)}星 (${st.rate}%)</div>
+                <button type="button" class="kr-footer-link-btn" style="color:#b91c1c;" data-action="delete-goal" data-id="${esc(g.id)}">刪除</button>
               </div>
             </div>
           </div>
@@ -310,14 +314,14 @@
 
       <div class="row-between">
         <strong style="font-size:15px;">我的愿力大目標 (${(lec.goals || []).length})</strong>
-        <button type="button" class="btn btn-primary" data-action="go-tab" data-tab="new">＋ 新增目標 / 小目標</button>
+        <button type="button" class="btn btn-primary" data-action="go-tab" data-tab="new">＋ 新增</button>
       </div>
 
-      ${goalsList ? `<div class="pwa-overview-grid">${goalsList}</div>` : `<div class="zen-card text-xs" style="color:var(--muted);text-align:center;">尚未建立愿力目標，請點選「＋ 新增目標」開始填寫！</div>`}
+      ${goalsList ? `<div class="pwa-overview-grid">${goalsList}</div>` : `<div class="zen-card text-xs" style="color:var(--muted);text-align:center;">尚未建立愿力目標，請點選「＋ 新增」開始填寫！</div>`}
 
       <div class="zen-card row-between">
         <span class="text-xs" style="color:var(--muted);">需要切換或重新綁定講師身分？</span>
-        <button type="button" class="btn btn-outline" data-action="switch-identity">切換 / 重設身分</button>
+        <button type="button" class="btn btn-outline" data-action="switch-identity">切換身分</button>
       </div>
     `;
   }
@@ -328,7 +332,7 @@
       return `
         <div class="zen-card stack" style="text-align:center;">
           <p class="text-sm" style="margin:0;">您尚未建立任何愿力目標與關鍵成果。</p>
-          <button type="button" class="btn btn-primary" style="justify-content:center;" data-action="go-tab" data-tab="new">＋ 立即新增第一個目標</button>
+          <button type="button" class="btn btn-primary" style="justify-content:center;" data-action="go-tab" data-tab="new">＋ 新增目標</button>
         </div>
       `;
     }
@@ -389,10 +393,13 @@
                 <div style="font-size:11px;color:var(--muted);">目標 ${state.activeGoalIndex + 1} / ${goals.length}</div>
                 <div style="font-weight:700;font-size:17px;color:var(--text);">${esc(curGoal.title)}</div>
               </div>
-              <div style="background:var(--bg);padding:5px 12px;border-radius:999px;font-size:12px;">
-                <span style="color:var(--gold);font-weight:700;">${gStat.starText} ${gStat.stars.toFixed(1)}</span>
-                <span style="color:var(--muted);margin:0 4px;">·</span>
-                <strong style="color:var(--moss-dark);">${gStat.rate}%</strong>
+              <div class="row-wrap" style="gap:8px;">
+                <div style="background:var(--bg);padding:5px 12px;border-radius:999px;font-size:12px;">
+                  <span style="color:var(--gold);font-weight:700;">${gStat.starText} ${gStat.stars.toFixed(1)}</span>
+                  <span style="color:var(--muted);margin:0 4px;">·</span>
+                  <strong style="color:var(--moss-dark);">${gStat.rate}%</strong>
+                </div>
+                <button type="button" class="kr-footer-link-btn" style="color:#b91c1c;" data-action="delete-goal" data-id="${esc(curGoal.id)}">刪除目標</button>
               </div>
             </div>
             <div class="kr-zen-list">
@@ -458,7 +465,7 @@
             <input id="mKrReason" type="text" placeholder="例如：從已有的文本開始練習" />
           </div>
 
-          <button type="submit" class="btn btn-primary" style="justify-content:center;padding:12px;">確認新增並切換至該目標填報</button>
+          <button type="submit" class="btn btn-primary" style="justify-content:center;padding:12px;">確認新增</button>
         </form>
       </div>
     `;
@@ -725,10 +732,11 @@
             state.activeGoalIndex = lec.goals.length - 1;
           }
         }
-        await global.VowStore.saveLecturer(lec);
         state.tab = 'monthly';
         render();
+        global.scrollTo({ top: 0, behavior: 'smooth' });
         showToast(`已新增「${newKr.title}」`);
+        global.VowStore.saveLecturer(lec);
       };
     }
 
@@ -779,6 +787,39 @@
         state.activeGoalIndex = Number(btn.dataset.idx);
         state.tab = 'monthly';
         render();
+      } else if (action === 'delete-goal') {
+        e.stopPropagation();
+        const lec = getMyLecturer();
+        if (!lec || !Array.isArray(lec.goals)) return;
+        const gId = btn.dataset.id;
+        const target = lec.goals.find((g) => g.id === gId);
+        if (!target) return;
+        if (!global.confirm(`確定要刪除目標「${target.title}」嗎？`)) return;
+        lec.goals = lec.goals.filter((g) => g.id !== gId);
+        if (state.activeGoalIndex >= lec.goals.length) {
+          state.activeGoalIndex = Math.max(0, lec.goals.length - 1);
+        }
+        render();
+        showToast('已刪除目標');
+        global.VowStore.saveLecturer(lec);
+      } else if (action === 'delete-kr') {
+        const lec = getMyLecturer();
+        if (!lec || !Array.isArray(lec.goals)) return;
+        const goal = lec.goals.find((g) => g.id === btn.dataset.goal);
+        if (!goal || !Array.isArray(goal.krs)) return;
+        const kr = goal.krs.find((k) => k.id === btn.dataset.kr);
+        if (!kr) return;
+        if (!global.confirm(`確定要刪除小目標「${kr.title}」嗎？`)) return;
+        goal.krs = goal.krs.filter((k) => k.id !== btn.dataset.kr);
+        if (goal.krs.length === 0) {
+          lec.goals = lec.goals.filter((g) => g.id !== goal.id);
+          if (state.activeGoalIndex >= lec.goals.length) {
+            state.activeGoalIndex = Math.max(0, lec.goals.length - 1);
+          }
+        }
+        render();
+        showToast('已刪除小目標');
+        global.VowStore.saveLecturer(lec);
       } else if (action === 'select-month') {
         state.activeMonth = Number(btn.dataset.month);
         render();
