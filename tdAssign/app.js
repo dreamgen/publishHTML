@@ -30,7 +30,7 @@
 
   const UI = {
     filter: '全部', q: '', out: false, outArea: '', outQ: '', showAll: false,
-    person: null, acctOpen: false, lyPick: null, apptQ: '', bindQ: '', famQ: '', toast: '',
+    person: null, acctOpen: false, lyPick: null, newPerOpen: false, apptQ: '', bindQ: '', famQ: '', toast: '',
     b6Mode: '', b1NomOpen: false, b1ShowCook: false,
     b3Mode: 'group', b3CalYm: '', b3FocusId: '',
     pAddOptOpen: false, a6RemindOpen: false, a6PickAreaOpen: false
@@ -797,14 +797,76 @@
     toast(dup ? `「${p.n}」已被其他帳號綁定，已送出申請，待 ${p.a} 區長確認` : okNow ? `已綁定為 ${p.n}（${p.a}）` : `已送出「${p.n}」綁定申請，待 ${p.a} 區長確認`);
   }
   // 新名冊編號：8 位數亂數（不與 data.js 1–377 衝突，兩人同時申請也不會撞號；寫入前再檢查一次）
-  function newPersonId() {
-    const used = (id) => !!(M.pById[id] || (D().addedPeople || {})[id]);
-    for (let i = 0; i < 20; i++) {
+  function newPersonId(extraUsed) {
+    const used = (id) => !!(M.pById[id] || (D().addedPeople || {})[id] || (extraUsed && extraUsed.has(id)));
+    for (let i = 0; i < 40; i++) {
       const r = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 4294967296);
       const id = 10000000 + (r % 89999999);
-      if (!used(id)) return id;
+      if (!used(id)) { if (extraUsed) extraUsed.add(id); return id; }
     }
     return 0;
+  }
+  function createRosterPersonFromFinder(d) {
+    const owner = d.kind === 'groups' ? gmOf(d.key) : d.kind === 'assign' ? M.byId[d.key] : null;
+    if (!owner) return;
+    const permKind = d.kind === 'groups' ? kindOfGroup(d.key) : 'jz';
+    if (!need(can(owner.area, permKind))) return;
+    if (d.join === '1' && d.kind === 'assign' && owner.cancel) return toast('這一格已取消，不能再排人');
+    const rawNames = ($('#fNewPerName') && $('#fNewPerName').value) || '';
+    const names = splitQueryTerms(rawNames).map((s) => s.slice(0, 20)).filter(Boolean);
+    if (!names.length) return toast('請輸入姓名');
+    const targetAreaRaw = ($('#fNewPerArea') && $('#fNewPerArea').value) || owner.area;
+    const targetArea = E.PERSON_AREAS.includes(targetAreaRaw) ? targetAreaRaw : '瑞芳';
+    const sxRaw = ($('#fNewPerSx') && $('#fNewPerSx').value) || '';
+    const sx = sxRaw === '乾' || sxRaw === '坤' ? sxRaw : '';
+    const note = String((($('#fNewPerNote') && $('#fNewPerNote').value) || '排班人員新增名冊')).trim().slice(0, 60) || '排班人員新增名冊';
+    const uid = me().uid, pre = isPreFor(owner.area), join = d.join === '1';
+    const up = {}, joinPaths = [], usedIds = new Set();
+    let created = 0, joined = 0, skipped = 0;
+    const curIds = finderCtx ? finderCtx.inIds : new Set();
+    for (const nm of names) {
+      const existing = M.people.find((p) => p.n === nm && p.a === targetArea && !p.off);
+      if (existing) {
+        if (join && !curIds.has(existing.id)) {
+          const pth = `${d.kind}/${d.key}/${existing.id}`;
+          up[pth] = stamp(pre ? { pre: true } : null);
+          joinPaths.push(pth);
+          joined++;
+        } else {
+          skipped++;
+        }
+        continue;
+      }
+      const newId = newPersonId(usedIds);
+      if (!newId) return toast('無法產生名冊編號，請稍後再試');
+      up[`addedPeople/${newId}`] = {
+        id: newId, n: nm, a: targetArea, sx,
+        src: 'N', note, status: 'ok', by: uid, at: Date.now()
+      };
+      created++;
+      if (join) {
+        const pth = `${d.kind}/${d.key}/${newId}`;
+        up[pth] = stamp(pre ? { pre: true } : null);
+        joinPaths.push(pth);
+        joined++;
+      }
+    }
+    if (!created && !joined) return toast(skipped ? '名冊已有同名人員且已在此名單內' : '沒有可新增的人員');
+    const lbl = d.label || (d.kind === 'groups' ? owner.name : slotName(owner));
+    const logMsg = created
+      ? `${lbl} 新增名冊 ${created} 人${joined ? `並${pre ? '預排' : '加入'} ${joined} 人` : ''}`
+      : `${lbl} ${pre ? '預排' : '加入'} ${joined} 人`;
+    const undo = joinPaths.length ? mkUndo(up, joinPaths) : undefined;
+    if ($('#fNewPerName')) $('#fNewPerName').value = '';
+    if ($('#fNewPerNote')) $('#fNewPerNote').value = '';
+    if (join) { if (UI.out) UI.outQ = ''; else UI.q = ''; }
+    UI.newPerOpen = false;
+    store.update(Object.assign(up, logOp(owner.area, logMsg, undo), join ? touchArea(owner.area) : null));
+    const parts = [];
+    if (created) parts.push(`已新增名冊 ${created} 人`);
+    if (joined) parts.push(`${pre ? '預排' : '加入'} ${joined} 人`);
+    if (skipped) parts.push(`${skipped} 人已在名單`);
+    toast(parts.join('，'));
   }
   function applyNewPerson(name, area, sx, note) {
     if (!me()) return toast('請先登入');
@@ -1904,14 +1966,39 @@
     if (UI.out && !UI.outArea) UI.outArea = others[0];
     finderCtx = { area, inIds, kind, key, label, evalFn, canEdit, localPool };
     const { pool, hint } = computeFinderState(finderCtx);
+    const defArea = UI.out ? UI.outArea : (E.PERSON_AREAS.includes(area) ? area : '瑞芳');
+    const qTerms = splitQueryTerms(UI.out ? UI.outQ : UI.q);
+    const poolNames = pool.map((p) => p.n);
+    const inNames = [...inIds].map((id) => (M.pById[id] || {}).n || '').filter(Boolean);
+    const missTerms = qTerms.filter((t) => !poolNames.some((n) => n.includes(t)) && !inNames.some((n) => n.includes(t)));
+    const prefillNames = missTerms.join('、');
+    const newPerForm = canEdit && UI.newPerOpen ? `<div class="outbox" style="margin-top:8px">
+      <div class="row-h"><b>新增名冊人員</b><button type="button" class="btn sm" data-act="toggle-new-per">取消</button></div>
+      <label>姓名（可分隔貼上多人）<input id="fNewPerName" type="text" value="${esc(prefillNames)}" placeholder="例如：王小明、李小華"></label>
+      <div class="grid2">
+        <label>區域<select id="fNewPerArea">${E.PERSON_AREAS.map((a) => `<option value="${esc(a)}" ${a === defArea ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></label>
+        <label>性別<select id="fNewPerSx"><option value="">未填</option><option value="乾">乾</option><option value="坤">坤</option></select></label>
+      </div>
+      <label>備註（選填）<input id="fNewPerNote" type="text" maxlength="60" placeholder="例如：新進志工"></label>
+      <div class="act-bar2">
+        <button type="button" class="btn pri sm" data-act="create-roster-person" data-join="1" data-kind="${kind}" data-key="${key}" data-area="${area}" data-label="${esc(label)}">新增並${isPreFor(area) ? '預排' : '加入'}</button>
+        <button type="button" class="btn sm" data-act="create-roster-person" data-join="0" data-kind="${kind}" data-key="${key}" data-area="${area}" data-label="${esc(label)}">僅新增至名冊</button>
+      </div>
+    </div>` : '';
+    const actBtns = canEdit
+      ? `<div class="act-bar2" style="margin-top:6px">
+          ${AREAS.includes(area) ? `<button type="button" class="btn" data-act="out" data-v="${UI.out ? '0' : '1'}">${UI.out ? '回本區人員' : '找非本區人員'}</button>` : ''}
+          <button type="button" class="btn ${UI.newPerOpen ? 'pri-out' : ''}" data-act="toggle-new-per">${UI.newPerOpen ? '收合新增人員' : '＋ 新增人員'}</button>
+        </div>`
+      : (AREAS.includes(area) ? `<button class="btn wide" data-act="out" data-v="${UI.out ? '0' : '1'}">${UI.out ? '回本區人員' : '找非本區人員'}</button>` : '');
     const ctl = UI.out
       ? `<div class="outbox"><div class="grid2"><label>區域<select id="outArea" data-act-change="outArea">${others.map((a) => `<option ${a === UI.outArea ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
           <label>姓名（至少一個字）<input id="outQ" type="search" value="${esc(UI.outQ)}" data-input="outQ" placeholder="可用頓號、逗號或空白分隔多人"></label></div>
-          <button class="btn wide" data-act="out" data-v="0">回本區人員</button></div>`
+          ${actBtns}</div>`
       : `<label>找人（${AREAS.includes(area) ? '本區' : '全部'}）<input id="q" type="search" value="${esc(UI.q)}" data-input="q" placeholder="輸入姓名（可用頓號、逗號或空白分隔多人）"></label>
-         ${AREAS.includes(area) ? `<button class="btn wide" data-act="out" data-v="1">找非本區人員</button>` : ''}`;
+         ${actBtns}`;
     return `<section class="finder"><div class="sec-h"><h2>${UI.out ? '非本區人員 · ' + esc(UI.outArea) : '可以加入的人'}</h2><span class="muted small">${UI.out ? '輸入後才列出' : '依合適程度'}</span></div>
-      ${ctl}<div id="finderHint" class="muted small">${hint}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit)}</div>
+      ${ctl}${newPerForm}<div id="finderHint" class="muted small">${hint}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit)}</div>
       <div class="muted small">規則不允許的人仍可排入，但會標成違規，交給總召確認。</div></section>`;
   }
 
@@ -2745,7 +2832,7 @@
     const routeChanged = key !== lastRoute;
     if (routeChanged) {
       UI.q = ''; UI.out = false; UI.outQ = ''; UI.showAll = false; UI.filter = '全部';
-      UI.apptQ = ''; UI.b6Mode = ''; UI.b1NomOpen = false; UI.pAddOptOpen = false;
+      UI.apptQ = ''; UI.b6Mode = ''; UI.b1NomOpen = false; UI.pAddOptOpen = false; UI.newPerOpen = false;
       UI.b3CalYm = ''; UI.b3FocusId = '';
       finderCtx = null; apptArea = '';
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
@@ -2880,6 +2967,8 @@
     }
     else if (a === 'more') { UI.showAll = true; render(); }
     else if (a === 'out') { UI.out = d.v === '1'; UI.showAll = false; render(); const el = document.getElementById(UI.out ? 'outQ' : 'q'); if (el) el.focus(); }
+    else if (a === 'toggle-new-per') { UI.newPerOpen = !UI.newPerOpen; render(); if (UI.newPerOpen) { const el = $('#fNewPerName'); if (el) el.focus(); } }
+    else if (a === 'create-roster-person') createRosterPersonFromFinder(d);
     else if (a === 'person') { if (!lastSheet) sheetTrigger = ctlKey(t); UI.person = +d.pid; render(); }
     else if (a === 'close-person') { UI.person = null; render(); }
     else if (a === 'add' || a === 'rm') {
