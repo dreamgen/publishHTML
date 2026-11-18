@@ -12,7 +12,7 @@
  * - 快取只在安裝時寫入；導覽請求的回應不寫入快取，避免把新版 HTML 混進舊版快取。
  * - 排班資料走 Firebase（或本機 localStorage），不經過 SW。
  */
-const SW_VERSION = 'v13';
+const SW_VERSION = 'v14';
 const CACHE_PREFIX = 'tdAssign-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
 const NAV_TIMEOUT_MS = 3000;
@@ -20,14 +20,14 @@ const NAV_TIMEOUT_MS = 3000;
 const ASSETS = [
   './',
   './index.html',
-  './styles.css?v=13',
-  './config.js?v=13',
-  './data.js?v=13',
-  './engine.js?v=13',
-  './store.js?v=13',
-  './console.js?v=13',
-  './app.js?v=13',
-  './manifest.webmanifest?v=13',
+  './styles.css?v=14',
+  './config.js?v=14',
+  './data.js?v=14',
+  './engine.js?v=14',
+  './store.js?v=14',
+  './console.js?v=14',
+  './app.js?v=14',
+  './manifest.webmanifest?v=14',
   './icons/tdAssign.svg',
   './icons/tdAssign-192.png',
   './icons/tdAssign-512.png',

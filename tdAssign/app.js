@@ -1846,24 +1846,48 @@
       ${r && r.pre ? `<div class="prebox"><span class="small">必須由區長確認或重排</span>${lead ? `<div class="acts"><button class="btn sm pri" data-act="pre-ok" data-kind="${kind}" data-key="${key}" data-pid="${p.id}" data-area="${area}" data-label="${esc(label)}">確認</button><button class="btn sm" data-act="rm" data-kind="${kind}" data-key="${key}" data-pid="${p.id}" data-area="${area}" data-label="${esc(label)}">重排（移出）</button></div>` : ''}</div>` : ''}
     </div>`;
   }
+  function splitQueryTerms(raw) {
+    const seen = new Set(), out = [];
+    for (const s of String(raw || '').split(/[\s,，、;；/／|｜・·\n\r\t]+/)) {
+      const t = s.trim();
+      if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+    }
+    return out;
+  }
+  const matchNameTerms = (name, terms) => !terms.length || terms.some((t) => String(name || '').includes(t));
   function candList(kind, key, area, label, pool, evalFn, canEdit) {
+    const terms = splitQueryTerms(UI.out ? UI.outQ : UI.q);
     const evs = pool.map(evalFn).sort((a, b) => (a.hard.length - b.hard.length) || b.score - a.score);
-    const L = UI.showAll ? evs : evs.slice(0, 12);
-    return L.map((ev) => {
+    const L = (UI.showAll || terms.length > 1) ? evs : evs.slice(0, 12);
+    const batchBtn = (terms.length > 1 && canEdit && evs.length > 1)
+      ? `<button type="button" class="btn wide pri" style="margin-bottom:8px" data-act="add-batch" data-kind="${kind}" data-key="${key}" data-area="${area}" data-label="${esc(label)}">一次${isPreFor(area) ? '預排' : '加入'}全部符合（${evs.length} 人）</button>`
+      : '';
+    return batchBtn + (L.map((ev) => {
       const p = ev.p, why = ev.hard[0] || ev.soft[0];
       return `<div class="cand"><div><button class="link" data-act="person" data-pid="${p.id}">${esc(p.n)}</button> <span class="muted small">${esc(p.a)}${roleOf(p) ? ' · ' + esc(roleOf(p)) : ''}${p.src === 'N' ? ' · 還沒服務過' : ''}</span>
         <div class="small ${ev.hard.length ? 't-bad' : ev.soft.length ? 't-warn' : 'muted'}">${why ? esc(why.msg) + (ev.hard.length ? '（排入會標成違規）' : '') : `加入後全年 ${ev.occN} 次`}${ev.lyNote ? ` · <span class="t-ok">${esc(ev.lyNote)}</span>` : ''}${ev.mates && ev.mates.length ? ` · 常和 ${esc(ev.mates.slice(0, 2).join('、'))} 同組` : ''}</div></div>
         ${canEdit ? `<button class="btn sm ${ev.hard.length ? '' : 'pri'}" data-act="add" data-kind="${kind}" data-key="${key}" data-pid="${p.id}" data-area="${area}" data-label="${esc(label)}">${isAdmin() && !(memberOf(area) && memberOf(area).status === 'ok') && AREAS.includes(area) ? '預排' : '加入'}</button>` : ''}</div>`;
-    }).join('') + (evs.length > L.length ? `<button class="btn wide" data-act="more">顯示全部 ${evs.length} 人</button>` : '') || '<div class="empty">沒有符合的人</div>';
+    }).join('') + (evs.length > L.length ? `<button class="btn wide" data-act="more">顯示全部 ${evs.length} 人</button>` : '') || '<div class="empty">沒有符合的人</div>');
   }
   function computeFinderState(ctx) {
     const q = UI.out ? UI.outQ : UI.q;
+    const terms = splitQueryTerms(q);
     let pool, hint = '';
     if (UI.out) {
-      pool = q.length >= 1 ? M.people.filter((p) => p.a === UI.outArea && !p.off && !ctx.inIds.has(p.id) && p.n.includes(q)) : [];
-      hint = q.length < 1 ? '請選區域並輸入至少一個字。' : pool.length ? `找到 ${pool.length} 位。排入後對方的區也會看到這一筆。` : '這一區找不到符合的人。';
+      pool = terms.length >= 1 ? M.people.filter((p) => p.a === UI.outArea && !p.off && !ctx.inIds.has(p.id) && matchNameTerms(p.n, terms)) : [];
+      hint = terms.length < 1 ? '請選區域並輸入至少一個字。' : pool.length ? `找到 ${pool.length} 位。排入後對方的區也會看到這一筆。` : '這一區找不到符合的人。';
     } else {
-      pool = ctx.localPool.filter((p) => !ctx.inIds.has(p.id) && (!q || p.n.includes(q)));
+      pool = ctx.localPool.filter((p) => !ctx.inIds.has(p.id) && matchNameTerms(p.n, terms));
+    }
+    if (terms.length > 1) {
+      const poolNames = pool.map((p) => p.n);
+      const inNames = [...ctx.inIds].map((id) => (M.pById[id] || {}).n || '').filter(Boolean);
+      const already = terms.filter((t) => !poolNames.some((n) => n.includes(t)) && inNames.some((n) => n.includes(t)));
+      const miss = terms.filter((t) => !poolNames.some((n) => n.includes(t)) && !inNames.some((n) => n.includes(t)));
+      hint = `輸入 ${terms.length} 筆，找到 ${pool.length} 位可加入`
+        + (already.length ? `；已在名單：${already.join('、')}` : '')
+        + (miss.length ? `；找不到：${miss.join('、')}` : '')
+        + (UI.out && pool.length ? '。排入後對方的區也會看到這一筆。' : '。');
     }
     return { pool, hint };
   }
@@ -1882,9 +1906,9 @@
     const { pool, hint } = computeFinderState(finderCtx);
     const ctl = UI.out
       ? `<div class="outbox"><div class="grid2"><label>區域<select id="outArea" data-act-change="outArea">${others.map((a) => `<option ${a === UI.outArea ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
-          <label>姓名（至少一個字）<input id="outQ" type="search" value="${esc(UI.outQ)}" data-input="outQ" placeholder="例如：李"></label></div>
+          <label>姓名（至少一個字）<input id="outQ" type="search" value="${esc(UI.outQ)}" data-input="outQ" placeholder="可用頓號、逗號或空白分隔多人"></label></div>
           <button class="btn wide" data-act="out" data-v="0">回本區人員</button></div>`
-      : `<label>找人（${AREAS.includes(area) ? '本區' : '全部'}）<input id="q" type="search" value="${esc(UI.q)}" data-input="q" placeholder="輸入姓名"></label>
+      : `<label>找人（${AREAS.includes(area) ? '本區' : '全部'}）<input id="q" type="search" value="${esc(UI.q)}" data-input="q" placeholder="輸入姓名（可用頓號、逗號或空白分隔多人）"></label>
          ${AREAS.includes(area) ? `<button class="btn wide" data-act="out" data-v="1">找非本區人員</button>` : ''}`;
     return `<section class="finder"><div class="sec-h"><h2>${UI.out ? '非本區人員 · ' + esc(UI.outArea) : '可以加入的人'}</h2><span class="muted small">${UI.out ? '輸入後才列出' : '依合適程度'}</span></div>
       ${ctl}<div id="finderHint" class="muted small">${hint}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit)}</div>
@@ -2864,6 +2888,21 @@
       if (!owner || !(+d.pid > 0) || !M.pById[+d.pid] && a === 'add') return;
       if (!need(can(owner.area, d.kind === 'groups' ? kindOfGroup(d.key) : 'jz'))) return;
       if (a === 'add') addPerson(d.kind, d.key, +d.pid, owner.area, d.label); else removePerson(d.kind, d.key, +d.pid, owner.area, d.label);
+    }
+    else if (a === 'add-batch') {
+      const owner = d.kind === 'groups' ? gmOf(d.key) : d.kind === 'assign' ? M.byId[d.key] : null;
+      if (!owner || !finderCtx) return;
+      if (d.kind === 'assign' && owner.cancel) return toast('這一格已取消，不能再排人');
+      if (!need(can(owner.area, d.kind === 'groups' ? kindOfGroup(d.key) : 'jz'))) return;
+      const list = computeFinderState(finderCtx).pool.filter((p) => p && M.pById[p.id] && !finderCtx.inIds.has(p.id));
+      if (!list.length) return toast('沒有可加入的人員');
+      const pre = isPreFor(owner.area);
+      const up = {};
+      for (const p of list) up[`${d.kind}/${d.key}/${p.id}`] = stamp(pre ? { pre: true } : null);
+      const lbl = d.label || (d.kind === 'groups' ? owner.name : slotName(owner));
+      if (UI.out) UI.outQ = ''; else UI.q = '';
+      store.update(Object.assign(up, logOp(owner.area, `${lbl} 批次${pre ? '預排' : '加入'} ${list.length} 人`, mkUndo(up)), touchArea(owner.area)));
+      toast(pre ? `已批次預排 ${list.length} 人，等 ${owner.area} 區長確認` : `已批次加入 ${list.length} 人`);
     }
     else if (a === 'pre-ok') { const s0 = d.kind === 'groups' ? gmOf(d.key) : M.byId[d.key]; if (s0 && (d.kind === 'groups' || d.kind === 'assign')) confirmPre(d.kind, d.key, +d.pid, s0.area, d.label); }
     else if (a === 'pre-all-ok') {
