@@ -407,7 +407,8 @@
     const activePeople = M.people.filter((p) => p.a === area && !p.off);
     const aSlots = M.slots.filter((s) => !s.cancel && s.area === area);
     let totalDemand = 0;
-    for (const s of aSlots) totalDemand += E.slotNeed(M, s) * (s.share || 1);
+    // 聯合勤務（基新隊等）每一格的 need 已是本區分到的人數，不再乘 share（與 E.areaLoad 一致）
+    for (const s of aSlots) totalDemand += E.slotNeed(M, s);
     const avgLoad = activePeople.length ? totalDemand / activePeople.length : 0;
 
     const envSrvSlots = aSlots.filter((s) => s.cat === '環境整理' || s.cat === '服務');
@@ -657,6 +658,17 @@
       if (df !== 0) areaDiffs.push({ area: a, diff: df });
     }
 
+    // 各區負擔變化（人均需求、假日／平日次），協調時說明負擔怎麼移動
+    const loadDiffs = [];
+    try {
+      const L0 = E.areaLoad(M), L2 = E.areaLoad(m2);
+      for (const a of WORK_AREAS) {
+        const o0 = L0.rows[a], o2 = L2.rows[a];
+        if (!o0 || !o2 || (o0.need === o2.need && o0.hol === o2.hol && o0.wk === o2.wk)) continue;
+        loadDiffs.push({ area: a, perCap0: o0.perCap, perCap2: o2.perCap, ratio0: o0.ratio, ratio2: o2.ratio, hol0: o0.hol, hol2: o2.hol, wk0: o0.wk, wk2: o2.wk });
+      }
+    } catch (e) { /* 只影響說明列 */ }
+
     // 受影響的已排人數與鎖定狀況
     let assignedHit = 0, lockedSrcs = [];
     const checkIds = uniq((prop.slotIds || []).concat(Object.keys(opt.changes || {})));
@@ -670,7 +682,7 @@
     return {
       baseConflicts, nextConflicts,
       addedViols, addedNotices,
-      areaDiffs,
+      areaDiffs, loadDiffs,
       lockedText: opt.lockNote || (lockedSrcs.length ? `原為「${lockedSrcs[0]}」，採用時將解除鎖定` : '不需更動已鎖定行事曆'),
       assignedHit,
       peopleText: (assignedHit ? `影響已排 ${assignedHit} 人次，需確認或通知` : '尚未排到個人') + (opt.affectedPeopleNote && !(assignedHit && /尚未排到個人/.test(opt.affectedPeopleNote)) ? `（${opt.affectedPeopleNote}）` : ''),
@@ -2329,6 +2341,18 @@
       }).join('')}
     </div></div>`;
 
+    // 各區負擔：協調換區、支援請求時的說明依據（與 A2 年度總表同一套算法）
+    const TC = window.TDConsole;
+    let loadHtml = '';
+    if (TC && TC.renderAreaLoad) {
+      const cctx = consoleCtx();
+      const L = E.areaLoad(M);
+      loadHtml = `<section class="card load-card">
+        <div class="row-h"><h2 style="margin:0">各區負擔（協調參考）</h2><a class="btn sm" href="#/a2">到年度總表看分類次數</a></div>
+        ${TC.renderAreaLoad(cctx, { L, compact: true })}
+        <div class="small muted">${TC.loadNoteHtml(L)}</div>
+      </section>`;
+    }
     const coord = Object.entries(D().coord || {}).sort((a, b) => b[1].at - a[1].at).filter(([, c]) => c.st !== 'done');
     const crossList = ISS.filter(isClash);
     const shortSubmitted = rows.filter((x) => x.S.status === 'submitted' && x.S.short > 0);
@@ -2371,6 +2395,7 @@
         </div>
       </div>
       ${pickAreaBox}${remindBox}${orphanHtml}${flowHtml}${tbl}
+      ${loadHtml}
       <div class="split-grid">
         <div class="split-main">
           <section class="card">
@@ -2669,6 +2694,16 @@
       { k: '新增違規', vals: sims.map((x) => ({ t: x.sim.addedViols.length ? x.sim.addedViols.map((v) => v.msg).slice(0, 2).join('；') : '無', c: x.sim.addedViols.length ? 't-bad' : '' })) },
       { k: '新增注意', vals: sims.map((x) => ({ t: x.sim.addedNotices.length ? `＋${x.sim.addedNotices.length} 則` : '無', c: x.sim.addedNotices.length ? 't-warn' : '' })) },
       { k: '各區場次變化', vals: sims.map((x) => ({ t: x.sim.areaDiffs.length ? x.sim.areaDiffs.map((d) => `${d.area} ${d.diff > 0 ? '＋' + d.diff : d.diff}`).join('、') : '不變', c: '' })) },
+      { k: '各區負擔（人均需求）', vals: sims.map((x) => {
+        const L = x.sim.loadDiffs || [];
+        const f = (n) => (n == null ? '—' : n.toFixed(2));
+        const n1 = (n) => (Number.isInteger(n) ? n : n.toFixed(1));
+        const hw = (d) => [d.hol0 !== d.hol2 ? `假日 ${n1(d.hol0)}→${n1(d.hol2)}` : '', d.wk0 !== d.wk2 ? `平日 ${n1(d.wk0)}→${n1(d.wk2)}` : ''].filter(Boolean).join('、');
+        const t = L.length ? L.map((d) => (d.perCap0 != null && d.perCap0 !== d.perCap2
+          ? `${d.area} ${f(d.perCap0)}→${f(d.perCap2)}（比 ${f(d.ratio0)}→${f(d.ratio2)}）`
+          : `${d.area} ${hw(d) || '不變'}`)).join('；') : '不變';
+        return { t, c: L.some((d) => d.ratio2 != null && d.ratio2 >= 1.25 && d.ratio2 > d.ratio0) ? 't-warn' : '' };
+      }) },
       { k: '受影響的人', vals: sims.map((x) => ({ t: x.sim.peopleText, c: '' })) },
       { k: '外部已定案', vals: sims.map((x) => ({ t: x.sim.lockedText, c: x.sim.lockedText.includes('解除') ? 't-warn' : '' })) },
       { k: '需要誰同意', vals: sims.map((x) => ({ t: x.sim.needReplyText, c: '' })) }

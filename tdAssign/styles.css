@@ -391,6 +391,35 @@ a[class^="c-"], a.small, .row-t > a { display: inline-flex; align-items: center;
 .matrix-slot.on, .chip-slot.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
 
 /* A3 人員列表與 12 月時間軸 */
+/* 各區負擔統計（A2 年度總表、改派參考、A6 協調） */
+.load-card { gap: 10px; }
+.load-table { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.load-table.compact { min-width: 0; }
+.load-table th, .load-table td { padding: 8px 9px; border-bottom: 1px solid var(--sunk); text-align: left; white-space: nowrap; vertical-align: middle; }
+.load-table th { background: var(--sunk); font-size: 12px; font-weight: 700; color: var(--muted); }
+.load-table .r { text-align: right; }
+.load-table th.hi, .load-table td.hi { background: var(--accent-soft); color: var(--accent-ink); }
+.load-table tbody tr { cursor: pointer; }
+.load-table tbody tr:hover td { background: color-mix(in srgb, var(--sunk) 60%, transparent); }
+.load-table tbody tr.hi td { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.load-table tbody tr.on td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+.load-table tfoot td { font-weight: 700; color: var(--muted); border-top: 1px solid var(--line); border-bottom: 0; }
+.load-table.shift tbody tr { cursor: default; }
+.load-table.shift td { white-space: normal; padding: 6px 6px; font-size: 13px; }
+.load-lo { color: var(--info); }
+.shift-ref { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.shift-list { display: flex; flex-direction: column; gap: 6px; }
+.shift-row { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; gap: 3px; }
+.shift-row.cur { background: var(--sunk); border-color: transparent; }
+.shift-row.best { border-color: var(--ok); }
+.shift-h { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.shift-h .sp { flex: 1; }
+.shift-h .btn.sm { min-height: 36px; }
+.shift-d { color: var(--muted); line-height: 1.6; }
+.shift-d b { color: var(--ink, inherit); }
+html.large-mode .load-table { font-size: 16px; }
+html.large-mode .load-table th { font-size: 14px; }
+@media print { .load-table tbody tr { cursor: default; } }
 .a3-table { min-width: 740px; }
 .a3-grid { display: grid; grid-template-columns: 1.1fr 64px 1.1fr 86px 86px 1.2fr 1fr; gap: 10px 12px; padding: 11px 16px; border-top: 1px solid var(--sunk); align-items: center; font-size: 14px; cursor: pointer; transition: background-color 0.12s ease; }
 .a3-grid.hd { background: var(--sunk); border-top: 0; font-size: 12px; font-weight: 700; color: var(--muted); cursor: default; position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--line); }

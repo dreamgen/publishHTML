@@ -736,6 +736,66 @@ window.TDEngine = function (BASE) {
     return added;
   }
 
+  /* ---------- 各區負擔統計（年度總表、改派試算、協調說明共用） ----------
+   * 次數依 share 計（聯合勤務各算 0.5）；需求人次用各格自己的 need（聯合格已各自分配人數，不再乘 share）。
+   * 人均需求＝需求人次／該區可排人數（不含不再排班）；負擔比＝人均需求／六區平均（1.00＝和平均一樣）。 */
+  function areaLoad(M, opt) {
+    opt = opt || {};
+    const rows = {};
+    for (const a of ALL_WORK_AREAS) {
+      rows[a] = { area: a, cook: 0, srv: 0, lj: 0, wash: 0, jzW: 0, jzS: 0, jzU: 0, ex: 0, traffic: 0,
+        hol: 0, wk: 0, leave: 0, need: 0, got: 0, slots: 0, people: 0, perCap: null, ratio: null };
+    }
+    for (const s of M.slots) {
+      if (s.cancel || !s.area || !rows[s.area]) continue;
+      if (opt.filter && !opt.filter(s)) continue;
+      const o = rows[s.area], sh = +s.share || 1;
+      if (isCookSlot(s)) o.cook += sh;
+      else if (s.cat === '環境整理' || s.cat === '服務') o.srv += sh;
+      else if (s.cat === '禮節') o.lj += sh;
+      else if (s.cat === '洗碗') o.wash += sh;
+      else if (s.cat === '忠恕平日') o.jzW += sh;
+      else if (s.cat === '忠恕週六') o.jzS += sh;
+      else if (s.cat === '忠恕週日') o.jzU += sh;
+      else if (s.cat === '大典前晚' || s.cat === '協辦') o.ex += sh;
+      else if (s.cat === '交通') o.traffic += sh;
+      if (s.weekday) { o.wk += sh; o.leave += s.wdays * sh; } else o.hol += sh;
+      o.need += slotNeed(M, s);
+      o.got += ((M.asg[s.id] || {}).p || []).length;
+      o.slots += sh;
+    }
+    for (const p of M.people) if (!p.off && rows[p.a]) rows[p.a].people++;
+    let totNeed = 0, totPeople = 0;
+    for (const a of AREAS) { totNeed += rows[a].need; totPeople += rows[a].people; }
+    const avg = totPeople ? totNeed / totPeople : 0;
+    for (const a of AREAS) {
+      const o = rows[a];
+      o.perCap = o.people ? o.need / o.people : null;
+      o.ratio = o.perCap != null && avg ? o.perCap / avg : null;
+    }
+    return { rows, avg, totNeed, totPeople };
+  }
+
+  /** 某一格由 from 改派到 to 後，兩區的負擔變化（不重建模型，直接加減） */
+  function areaLoadShift(L, s, M, to) {
+    const from = s.area, n = slotNeed(M, s), sh = +s.share || 1;
+    const one = (a, sign) => {
+      const o = L.rows[a];
+      if (!o) return null;
+      const need2 = o.need + sign * n;
+      const per2 = o.people ? need2 / o.people : null;
+      return {
+        area: a, need: o.need, need2,
+        perCap: o.perCap, perCap2: per2,
+        ratio: o.ratio, ratio2: per2 != null && L.avg ? per2 / L.avg : null,
+        hol: o.hol, hol2: o.hol + (s.weekday ? 0 : sign * sh),
+        wk: o.wk, wk2: o.wk + (s.weekday ? sign * sh : 0),
+        leave: o.leave, leave2: o.leave + sign * s.wdays * sh
+      };
+    };
+    return { from: from === to ? null : one(from, -1), to: one(to, from === to ? 0 : 1) };
+  }
+
   st = freshState();
   return {
     setState(s) { st = s; }, getState() { return st; },
@@ -744,7 +804,8 @@ window.TDEngine = function (BASE) {
     resolveSlotGroupKey, defaultGroupForAreaCat, groupOptionsForSlot, buildModel,
     isCookSlot, isCookPerson, isHeadCook, jobClass, canLead, needsLead, slotNeed, capOf, occasions,
     personIssues, areaIssues, slotIssues, issueKey, normAckKey, allIssues,
-    evalCandidate, poolFor, rankCandidates, assignToModel, autoSchedule
+    evalCandidate, poolFor, rankCandidates, assignToModel, autoSchedule,
+    areaLoad, areaLoadShift
   };
 };
 if (typeof module !== 'undefined') module.exports = window.TDEngine;

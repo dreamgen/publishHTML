@@ -35,7 +35,10 @@
       addOpen: false,
       showAllStaff: false,
       showAllCands: false,
-      crossCands: false
+      crossCands: false,
+      loadOpen: true,
+      loadScope: 'year',
+      note: null
     },
     a3: {
       q: '',
@@ -1290,6 +1293,236 @@
     return res;
   }
 
+
+  /* ================================================================
+   * 各區負擔統計（年度總表、改派試算、協調說明共用）
+   * ================================================================ */
+
+  const LOAD_COLS = [
+    ['cook', '廚務'], ['srv', '服/整'], ['lj', '禮節'], ['wash', '洗碗'],
+    ['jzW', '忠恕平'], ['jzS', '忠恕六'], ['jzU', '忠恕日'], ['ex', '前晚協辦'], ['traffic', '交通']
+  ];
+  const LOAD_LABEL = { cook: '廚務', srv: '服務／環境整理', lj: '禮節', wash: '洗碗', jzW: '忠恕平日', jzS: '忠恕週六', jzU: '忠恕週日', ex: '前晚／協辦', traffic: '交通' };
+
+  function loadKeyOf(E, s) {
+    if (E.isCookSlot(s)) return 'cook';
+    if (s.cat === '環境整理' || s.cat === '服務') return 'srv';
+    if (s.cat === '禮節') return 'lj';
+    if (s.cat === '洗碗') return 'wash';
+    if (s.cat === '忠恕平日') return 'jzW';
+    if (s.cat === '忠恕週六') return 'jzS';
+    if (s.cat === '忠恕週日') return 'jzU';
+    if (s.cat === '大典前晚' || s.cat === '協辦') return 'ex';
+    if (s.cat === '交通') return 'traffic';
+    return '';
+  }
+  const fmtN = (n) => (n == null ? '—' : Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toFixed(1));
+  const fmt2 = (n) => (n == null ? '—' : n.toFixed(2));
+  function ratioCls(r) {
+    if (r == null) return 'muted';
+    if (r >= 1.25) return 't-bad';
+    if (r >= 1.1) return 't-warn';
+    if (r <= 0.85) return 'load-lo';
+    return '';
+  }
+
+  /** 各區未處理問題數：區層級違規／注意，以及其他（個人、勤務格） */
+  function areaIssueCounts(ctx) {
+    const out = {};
+    for (const c of ctx.ISS || []) {
+      if (c.accepted || !c.area) continue;
+      for (const a of String(c.area).split('、')) {
+        const o = out[a] = out[a] || { av: 0, an: 0, pv: 0, pn: 0 };
+        if (c.scope === '區') { if (c.lvl === '違規') o.av++; else o.an++; } else if (c.lvl === '違規') o.pv++; else o.pn++;
+      }
+    }
+    return out;
+  }
+
+  function a2LoadData(ctx) {
+    const { E, M } = ctx;
+    const useMonth = CUI.a2.loadScope === 'month' && CUI.a2.month;
+    return E.areaLoad(M, useMonth ? { filter: (s) => slotMonthMatch(s, CUI.a2.month) } : null);
+  }
+
+  /**
+   * 各區負擔表
+   * opts.compact：協調頁用的精簡欄位；opts.hiKey：強調某一類欄位；opts.hiAreas：強調的區
+   */
+  function renderAreaLoad(ctx, opts) {
+    opts = opts || {};
+    const { E, esc, tag } = ctx;
+    const L = opts.L || a2LoadData(ctx);
+    const iss = areaIssueCounts(ctx);
+    const hiAreas = opts.hiAreas || [];
+    const list = E.ALL_WORK_AREAS.filter((a) => L.rows[a].slots || L.rows[a].people);
+    const cols = opts.compact ? [] : LOAD_COLS.filter(([k]) => list.some((a) => L.rows[a][k]));
+    const sum = { need: 0, got: 0, hol: 0, wk: 0, leave: 0, people: 0 };
+    cols.forEach(([k]) => { sum[k] = 0; });
+    for (const a of E.AREAS) for (const k in sum) sum[k] += L.rows[a][k] || 0;
+
+    const issCell = (a) => {
+      const o = iss[a];
+      if (!o) return '';
+      const t = `區層級 違規 ${o.av}、注意 ${o.an}；個人與勤務格 違規 ${o.pv}、注意 ${o.pn}`;
+      return `<span title="${esc(t)}">${o.av ? tag('bad', '違規 ' + o.av) : ''}${o.an ? ' ' + tag('wn', '注意 ' + o.an) : ''}${!o.av && !o.an && (o.pv || o.pn) ? `<span class="small muted">個人 ${o.pv + o.pn}</span>` : ''}</span>`;
+    };
+    const head = `<tr><th>區</th>${cols.map(([k, n]) => `<th class="r ${k === opts.hiKey ? 'hi' : ''}">${n}</th>`).join('')}
+      <th class="r">假日次</th><th class="r">平日次</th><th class="r">請假天</th><th class="r">已排／需要</th><th class="r">可排人數</th><th class="r">人均需求</th><th class="r">負擔比</th><th>問題</th></tr>`;
+    const body = list.map((a) => {
+      const o = L.rows[a];
+      const six = E.AREAS.includes(a);
+      const pct = o.need ? Math.round(o.got / o.need * 100) : 0;
+      const cls = [hiAreas.includes(a) ? 'hi' : '', CUI.a2.area === a && !opts.compact ? 'on' : ''].join(' ');
+      return `<tr class="${cls}" data-act="a2-load-area" data-area="${esc(a)}" tabindex="0" role="button" aria-label="篩選 ${esc(a)} 的勤務">
+        <td><b class="${six ? 'c-' + esc(a) : ''}">${esc(a)}</b></td>
+        ${cols.map(([k]) => `<td class="r num ${k === opts.hiKey ? 'hi' : ''}">${fmtN(o[k])}</td>`).join('')}
+        <td class="r num"><b>${fmtN(o.hol)}</b></td>
+        <td class="r num ${o.wk ? 't-warn' : 'muted'}">${fmtN(o.wk)}</td>
+        <td class="r num">${fmtN(o.leave)}</td>
+        <td class="r num"><span class="${o.got < o.need ? '' : 't-ok'}">${o.got}／${o.need}</span> <span class="small muted">${pct}%</span></td>
+        <td class="r num">${six ? o.people : '—'}</td>
+        <td class="r num"><b>${fmt2(o.perCap)}</b></td>
+        <td class="r num ${ratioCls(o.ratio)}"><b>${fmt2(o.ratio)}</b></td>
+        <td>${issCell(a)}</td>
+      </tr>`;
+    }).join('');
+    const foot = `<tr class="tot"><td>六區合計</td>${cols.map(([k]) => `<td class="r num">${fmtN(sum[k])}</td>`).join('')}
+      <td class="r num">${fmtN(sum.hol)}</td><td class="r num">${fmtN(sum.wk)}</td><td class="r num">${fmtN(sum.leave)}</td>
+      <td class="r num">${sum.got}／${sum.need}</td><td class="r num">${sum.people}</td><td class="r num">${fmt2(L.avg)}</td><td class="r num">1.00</td><td></td></tr>`;
+    return tw('各區負擔統計', `<table class="load-table${opts.compact ? ' compact' : ''}"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>`);
+  }
+
+  function loadNoteHtml(L) {
+    return `次數依場次計，聯合勤務（基新隊、新莊＋基隆洗碗、基隆＋新莊前晚）各算 0.5；請假天＝落在平日（不含國定假日）的天數。
+      人均需求＝需求人次 ÷ 該區可排人數（不含不再排班）；負擔比＝人均需求 ÷ 六區平均 ${fmt2(L.avg)}，1.00 為平均，
+      <span class="t-warn">1.10 以上</span>、<span class="t-bad">1.25 以上</span>偏重，<span class="load-lo">0.85 以下</span>偏輕。點選任一列可篩選該區勤務。`;
+  }
+
+  function renderA2LoadSection(ctx, selSlot) {
+    const { E } = ctx;
+    if (!CUI.a2.loadOpen) return '';
+    const L = a2LoadData(ctx);
+    const hiKey = selSlot ? loadKeyOf(E, selSlot) : '';
+    const scopeTxt = CUI.a2.loadScope === 'month' && CUI.a2.month ? `${CUI.a2.month === '117' ? '117 年 1–2 月' : CUI.a2.month + ' 月'}` : '全年';
+    return `<section class="card load-card">
+      <div class="row-h">
+        <h2 style="margin:0">各區負擔統計（${scopeTxt}）</h2>
+        <div class="acts">
+          ${CUI.a2.month ? `<div class="acts" role="group" aria-label="統計範圍">
+            <button type="button" class="btn sm ${CUI.a2.loadScope !== 'month' ? 'pri' : ''}" data-act="a2-load-scope" data-v="year">全年</button>
+            <button type="button" class="btn sm ${CUI.a2.loadScope === 'month' ? 'pri' : ''}" data-act="a2-load-scope" data-v="month">只算 ${CUI.a2.month === '117' ? '117' : CUI.a2.month + ' 月'}</button>
+          </div>` : ''}
+          ${CUI.a2.area ? `<button type="button" class="btn sm" data-act="a2-load-area" data-area="">清除區篩選</button>` : ''}
+          <button type="button" class="btn sm" data-act="a2-load-toggle">收合</button>
+        </div>
+      </div>
+      ${renderAreaLoad(ctx, { L, hiKey, hiAreas: selSlot ? [selSlot.area] : [] })}
+      <div class="small muted">${loadNoteHtml(L)}${selSlot && hiKey ? ` 目前選取的勤務屬「${LOAD_LABEL[hiKey]}」，已標示該欄。` : ''}</div>
+    </section>`;
+  }
+
+  /**
+   * 某一格在 from、to 兩區之間移動前後的負擔（L 為目前狀態：這一格目前在 s.area）
+   * 回傳 { A: 移出區, B: 承接區 }，各含 0（移動前）與 1（移動後）的值
+   */
+  function shiftPair(ctx, L, s, from, to) {
+    const { E, M } = ctx;
+    const key = loadKeyOf(E, s), sh = +s.share || 1;
+    const side = (a, o0, o1, dc) => ({
+      area: a,
+      perCap0: o0.perCap, perCap1: o1.perCap, ratio0: o0.ratio, ratio1: o1.ratio,
+      hol0: o0.hol, hol1: o1.hol, wk0: o0.wk, wk1: o1.wk, leave0: o0.leave, leave1: o1.leave, dc
+    });
+    let A, B;
+    if (s.area === from) {
+      const r = E.areaLoadShift(L, s, M, to);
+      const f = r.from, t = r.to;
+      A = side(from, f, { perCap: f.perCap2, ratio: f.ratio2, hol: f.hol2, wk: f.wk2, leave: f.leave2 }, -sh);
+      B = side(to, t, { perCap: t.perCap2, ratio: t.ratio2, hol: t.hol2, wk: t.wk2, leave: t.leave2 }, sh);
+      A.cnt0 = (L.rows[from] || {})[key] || 0; A.cnt1 = A.cnt0 - sh;
+      B.cnt0 = (L.rows[to] || {})[key] || 0; B.cnt1 = B.cnt0 + sh;
+    } else {
+      // 已改派：目前在 to；往回推算移動前（在 from）的值
+      const r = E.areaLoadShift(L, s, M, from);
+      const cur = r.from, back = r.to; // cur＝to 區（扣掉這格＝移動前），back＝from 區（加回這格＝移動前）
+      A = side(from, { perCap: back.perCap2, ratio: back.ratio2, hol: back.hol2, wk: back.wk2, leave: back.leave2 }, back, -sh);
+      B = side(to, { perCap: cur.perCap2, ratio: cur.ratio2, hol: cur.hol2, wk: cur.wk2, leave: cur.leave2 }, cur, sh);
+      A.cnt1 = (L.rows[from] || {})[key] || 0; A.cnt0 = A.cnt1 + sh;
+      B.cnt1 = (L.rows[to] || {})[key] || 0; B.cnt0 = B.cnt1 - sh;
+    }
+    return { A, B, key };
+  }
+
+  /** 協調用的改派說明文字（可貼 LINE 或提案原因） */
+  function buildShiftNote(ctx, s, from, to, dv, dn) {
+    const { E, M, BASE } = ctx;
+    const L = E.areaLoad(M);
+    const { A, B, key } = shiftPair(ctx, L, s, from, to);
+    const act = ((BASE.days || {})[s.d] || {}).act || s.label || '';
+    const done = s.area === to;
+    const arrow = (x, y, f) => `${f(x)}→${f(y)}`;
+    const lines = [];
+    lines.push(`【改派說明】${ctx.dLabel(s)} ${act ? act + ' ' : ''}${s.cat}${s.grp ? '（' + s.grp + '）' : ''}`);
+    lines.push(done ? `已由 ${from} 改派為 ${to}` : `擬由 ${from} 改派 ${to}`);
+    lines.push(`・${LOAD_LABEL[key] || s.cat}次數：${from} ${arrow(A.cnt0, A.cnt1, fmtN)}、${to} ${arrow(B.cnt0, B.cnt1, fmtN)}`);
+    const per = [A, B].filter((x) => x.perCap0 != null);
+    if (per.length) {
+      lines.push(`・人均需求（六區平均 ${fmt2(L.avg)}）：${per.map((x) => `${x.area} ${arrow(x.perCap0, x.perCap1, fmt2)}`).join('、')}`);
+      lines.push(`・負擔比：${per.map((x) => `${x.area} ${arrow(x.ratio0, x.ratio1, fmt2)}`).join('、')}`);
+    }
+    lines.push(s.weekday
+      ? `・${to} 平日次 ${arrow(B.wk0, B.wk1, fmtN)}，這一格需請假 ${s.wdays} 天`
+      : `・${to} 假日次 ${arrow(B.hol0, B.hol1, fmtN)}（這一格不需請假）`);
+    if (dv != null) lines.push(`・規則試算：區層級${fmtDelta(dv, '違規')}、${fmtDelta(dn, '注意')}`);
+    return lines.join('\n');
+  }
+
+  /** 檢視器：改派參考（各候選區目前負擔、改派後變化、規則試算） */
+  function renderAreaShiftTable(ctx, s, areaDelta) {
+    const { E, M, esc } = ctx;
+    const opts = Object.keys(areaDelta);
+    if (opts.length < 2) return '';
+    const L = E.areaLoad(M);
+    const key = loadKeyOf(E, s);
+    const base = baseSlotOf(ctx, s.id);
+    const baseArea = base ? base.area : s.area;
+    const cands = opts.filter((a) => a !== s.area).map((a) => {
+      const p = shiftPair(ctx, L, s, s.area, a);
+      const d = areaDelta[a] || { dv: 0, dn: 0 };
+      return { a, p, d, sortKey: [d.dv, d.dn, p.B.ratio1 == null ? 9 : p.B.ratio1] };
+    }).sort((x, y) => x.sortKey[0] - y.sortKey[0] || x.sortKey[1] - y.sortKey[1] || x.sortKey[2] - y.sortKey[2]);
+    const best = cands[0];
+    const curO = L.rows[s.area] || {};
+    const fromAfter = best ? best.p.A : null;
+    const dTxt = (d) => `<span class="${d.dv > 0 ? 't-bad' : d.dv < 0 ? 't-ok' : 'muted'}">${fmtDelta(d.dv, '違規')}</span> · <span class="${d.dn > 0 ? 't-warn' : d.dn < 0 ? 't-ok' : 'muted'}">${fmtDelta(d.dn, '注意')}</span>`;
+    const canCopy = !isPub(ctx);
+    const kLabel = esc(LOAD_LABEL[key] || s.cat);
+    const areaB = (a) => `<b class="${E.AREAS.includes(a) ? 'c-' + esc(a) : ''}">${esc(a)}</b>`;
+    const noteBtn = (from, to, label) => (canCopy ? `<button type="button" class="btn sm" data-act="a2-copy-note" data-sid="${esc(s.id)}" data-from="${esc(from)}" data-to="${esc(to)}">${label || '說明'}</button>` : '');
+    const curRow = `<div class="shift-row cur">
+      <div class="shift-h">${areaB(s.area)} <span class="small muted">目前負責${s.area !== baseArea ? `（原 ${esc(baseArea)}）` : ''}</span><span class="sp"></span>${s.area !== baseArea ? noteBtn(baseArea, s.area) : ''}</div>
+      <div class="shift-d small num">${kLabel} ${fmtN(curO[key])} · 假日 ${fmtN(curO.hol)} · 平日 ${fmtN(curO.wk)} · 人均 ${fmt2(curO.perCap)}${fromAfter && fromAfter.perCap1 != null ? `（移出後 ${fmt2(fromAfter.perCap1)}）` : ''} · 比 <b class="${ratioCls(curO.ratio)}">${fmt2(curO.ratio)}</b></div>
+    </div>`;
+    const rows = cands.map((c) => {
+      const B = c.p.B;
+      return `<div class="shift-row${c === best ? ' best' : ''}">
+        <div class="shift-h">${areaB(c.a)}${c === best ? ' ' + ctx.tag('ok', '建議') : ''}<span class="sp"></span><span class="small">${dTxt(c.d)}</span>${noteBtn(s.area, c.a)}</div>
+        <div class="shift-d small num">${kLabel} ${fmtN(B.cnt0)}→<b>${fmtN(B.cnt1)}</b> · ${s.weekday ? `平日 ${fmtN(B.wk0)}→<b>${fmtN(B.wk1)}</b>（請假 ${s.wdays} 天）` : `假日 ${fmtN(B.hol0)}→<b>${fmtN(B.hol1)}</b>`}${B.perCap0 == null ? '' : ` · 人均 ${fmt2(B.perCap0)}→<b>${fmt2(B.perCap1)}</b> · 比 <span class="${ratioCls(B.ratio0)}">${fmt2(B.ratio0)}</span>→<b class="${ratioCls(B.ratio1)}">${fmt2(B.ratio1)}</b>`}</div>
+      </div>`;
+    }).join('');
+    const note = CUI.a2.note && CUI.a2.note.sid === s.id ? CUI.a2.note : null;
+    return `<div class="shift-ref">
+      <div class="row-h"><b>改派參考：各區負擔</b><span class="small muted">六區平均人均 ${fmt2(L.avg)}</span></div>
+      <div class="shift-list">${curRow}${rows}</div>
+      <div class="small muted">「建議」依序比較：區層級違規最少、注意最少、改派後負擔比最低。按「說明」產生可貼到 LINE 或提案的協調說明。</div>
+      ${note ? `<label class="small">協調說明（已複製，可再修改）<textarea id="a2NoteTxt" rows="7" readonly style="font-size:13px">${esc(note.text)}</textarea></label>
+        <div class="acts"><button type="button" class="btn sm" data-act="a2-copy-note-again">再複製一次</button>
+        ${ctx.me() ? `<a class="btn sm blue-out" href="#/p/new?area=${encodeURIComponent(E.AREAS.includes(note.from) ? note.from : '')}&slot=${encodeURIComponent(s.id)}&type=換區">用這段開提案</a>` : ''}
+        <button type="button" class="btn sm" data-act="a2-note-close">關閉</button></div>` : ''}
+    </div>`;
+  }
+
   function baseSlotOf(ctx, id) {
     return (ctx.BASE.slots || []).find((x) => x.id === id) || ((ctx.E.getState().extra || {})[id]) || null;
   }
@@ -1516,6 +1749,7 @@
           </select>
         </label>` : ''}
         <div class="small muted">每個選項顯示改派後增減的區層級違規與注意。${M.R.p.weekdayOnlyAreas ? `${esc(M.R.p.weekdayOnlyAreas)}只排平日。` : ''}</div>
+        ${renderAreaShiftTable(ctx, s, areaDelta)}
       </div>
 
       ${slotIss.length ? `<div style="display:flex;flex-direction:column;gap:4px">
@@ -1635,12 +1869,14 @@
           </select>
           <input id="a2Q" type="search" data-input="a2Q" value="${esc(CUI.a2.q)}" placeholder="搜尋活動、勤務或姓名" aria-label="搜尋總表" style="min-height:44px;border-radius:8px;border:1px solid var(--line);padding:0 12px;background:var(--surface)">
           <label class="ck" style="padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)"><input id="a2OnlyChk" type="checkbox" data-act-change="a2-only" ${CUI.a2.only ? 'checked' : ''}> 只看有問題</label>
+          <button type="button" class="btn ${CUI.a2.loadOpen ? 'pri-out' : ''}" data-act="a2-load-toggle" aria-pressed="${CUI.a2.loadOpen ? 'true' : 'false'}">各區統計</button>
           <button type="button" class="btn" data-act="a2-mode">${CUI.a2.mode === 'matrix' ? '切換為列表' : '切換為矩陣'}</button>
           <button type="button" class="btn pri" data-act="a2-add-toggle" ${ctx.isAdmin() && !isPub(ctx) ? '' : 'disabled'}>＋ 新增勤務</button>
         </div>
       </div>
 
       ${addForm}
+      ${renderA2LoadSection(ctx, selSlot)}
 
       <div class="split-grid">
         <div class="split-main" id="a2List">${renderA2List(ctx, filtered, bySlot, selId)}</div>
@@ -2842,6 +3078,36 @@
     if (act === 'a2-month') { CUI.a2.month = d.v; ctx.render(); return true; }
     if (act === 'a2-mode') { CUI.a2.mode = CUI.a2.mode === 'matrix' ? 'list' : 'matrix'; ctx.render(); return true; }
     if (act === 'a2-add-toggle') { CUI.a2.addOpen = !CUI.a2.addOpen; ctx.render(); return true; }
+    if (act === 'a2-load-toggle') { CUI.a2.loadOpen = !CUI.a2.loadOpen; ctx.render(); return true; }
+    if (act === 'a2-load-scope') { CUI.a2.loadScope = d.v === 'month' ? 'month' : 'year'; ctx.render(); return true; }
+    if (act === 'a2-load-area') {
+      CUI.a2.area = CUI.a2.area === d.area ? '' : (d.area || '');
+      CUI.a2.selId = '';
+      if (typeof location !== 'undefined' && !/^#\/a2/.test(location.hash)) { location.hash = '#/a2'; return true; }
+      ctx.render();
+      return true;
+    }
+    if (act === 'a2-copy-note') {
+      const s = M.byId[d.sid];
+      if (!s) return true;
+      let dv = null, dn = null;
+      try {
+        const delta = computeAreaDelta(ctx, s.id);
+        if (s.area === d.from && delta[d.to]) { dv = delta[d.to].dv; dn = delta[d.to].dn; }
+        else if (s.area === d.to && delta[d.from]) { dv = -delta[d.from].dv; dn = -delta[d.from].dn; }
+      } catch (e) { /* 試算失敗時只省略規則行 */ }
+      const text = buildShiftNote(ctx, s, d.from, d.to, dv, dn);
+      CUI.a2.note = { sid: s.id, from: d.from, to: d.to, text };
+      if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(text).then(() => ctx.toast('已複製協調說明'), () => ctx.toast('無法自動複製，請從文字框複製'));
+      ctx.render();
+      return true;
+    }
+    if (act === 'a2-copy-note-again') {
+      const t = CUI.a2.note && CUI.a2.note.text;
+      if (t && typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(t).then(() => ctx.toast('已複製協調說明'), () => {});
+      return true;
+    }
+    if (act === 'a2-note-close') { CUI.a2.note = null; ctx.render(); return true; }
     if (act === 'a2-sel') { CUI.a2.selId = d.sid; CUI.a2.showAllStaff = false; CUI.a2.showAllCands = false; ctx.render(); scrollToInspector(); return true; }
     if (act === 'a2-back-list') { scrollToList('a2List'); return true; }
     if (act === 'a3-back-list') { scrollToList('a3List'); return true; }
@@ -3264,7 +3530,14 @@
         nextEd.area = newArea;
         nextEd.grp = E.defaultGroupForAreaCat(newArea, s.cat) || '';
       }
-      store.update(Object.assign({ ['edits/' + s.id]: Object.keys(nextEd).length ? nextEd : null }, ctx.logOp(newArea, `${ctx.slotName(s)} 改派負責區：${s.area} → ${newArea}`)));
+      // 改派紀錄附上兩區的人均需求變化，協調時可直接看出負擔怎麼移動
+      let loadTxt = '';
+      try {
+        const sh = E.areaLoadShift(E.areaLoad(M), s, M, newArea);
+        const seg = [sh.from, sh.to].filter((x) => x && x.perCap != null).map((x) => `${x.area} ${x.perCap.toFixed(2)}→${x.perCap2.toFixed(2)}`);
+        if (seg.length) loadTxt = `（人均需求 ${seg.join('、')}）`;
+      } catch (e) { /* 只影響紀錄文字 */ }
+      store.update(Object.assign({ ['edits/' + s.id]: Object.keys(nextEd).length ? nextEd : null }, ctx.logOp(newArea, `${ctx.slotName(s)} 改派負責區：${s.area} → ${newArea}${loadTxt}`)));
       ctx.toast(`已改派為 ${newArea}`);
       return true;
     }
@@ -3471,6 +3744,8 @@
     handleSearchInput,
     fmtPrintName,
     computeAreaDelta,
+    renderAreaLoad,
+    loadNoteHtml,
     simulateRulesDelta,
     QRGen,
     fmtLunar,
