@@ -1847,7 +1847,7 @@
             <div class="muted small">${esc(sub)}${s.loc ? ` · ${esc(s.loc)}` : ''}</div>
             <div class="row-t">${tag('no', s.cat)}${statusTags}${pTag}${tag('no', own)}${pNote}${ed.length ? `<span class="muted small">${esc(ed.map((u) => u.name).join('、'))} 正在編輯</span>` : ''}</div></a>`;
         }).join('');
-        return `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">${esc(rocYmLabel(ym))}</span><span class="num muted">${list.length} 場</span></summary><div class="b3-sec-body"><section class="list">${rows}</section></div></details>`;
+        return `<details class="b3-sec" data-sec="${esc('ym-' + ym)}" open><summary class="b3-sec-sum"><span class="b3-sec-title">${esc(rocYmLabel(ym))}</span><span class="num muted">${list.length} 場</span></summary><div class="b3-sec-body"><section class="list">${rows}</section></div></details>`;
       }).join('') || '<div class="empty">沒有符合的勤務</div>';
     } else {
       const gRows = S.groups.filter((g) => keep(g, kindOfGroup(g.gm.id))).map((g) => {
@@ -1881,9 +1881,9 @@
         .sort((a, b) => a.s.d.localeCompare(b.s.d) || a.s.id.localeCompare(b.s.id))
         .map(datedRowHtml).join('');
 
-      mainHtml = `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">1. 有組別（固定組員）</span><span class="num muted">排好 ${S.gDone}／${S.groups.length} 組</span></summary><div class="b3-sec-body"><div class="muted small">改組員，全年每一場自動帶入。不能只改某一天。</div><section class="list">${gRows || '<div class="empty">沒有符合的組別</div>'}</section><div class="muted small">哪一區、哪一天、哪一組由總召排定並鎖住，要換日或換區請用提案。標「預排」的人是總召或調度台先排的，必須由區長確認或重排。</div></div></details>`
-        + `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">2. 忠恕輪值（平日／週六／週日）</span><span class="num muted">排滿 ${jzDone}／${jzAll.length} 格</span></summary><div class="b3-sec-body"><section class="list">${jzRows || '<div class="empty">沒有符合的忠恕輪值</div>'}</section></div></details>`
-        + `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">3. 其它無組別（依日期排）</span><span class="num muted">排滿 ${othDone}／${othAll.length} 格</span></summary><div class="b3-sec-body"><section class="list">${othRows || '<div class="empty">沒有符合的其它勤務</div>'}</section></div></details>`;
+      mainHtml = `<details class="b3-sec" data-sec="groups" open><summary class="b3-sec-sum"><span class="b3-sec-title">1. 有組別（固定組員）</span><span class="num muted">排好 ${S.gDone}／${S.groups.length} 組</span></summary><div class="b3-sec-body"><div class="muted small">改組員，全年每一場自動帶入。不能只改某一天。</div><section class="list">${gRows || '<div class="empty">沒有符合的組別</div>'}</section><div class="muted small">哪一區、哪一天、哪一組由總召排定並鎖住，要換日或換區請用提案。標「預排」的人是總召或調度台先排的，必須由區長確認或重排。</div></div></details>`
+        + `<details class="b3-sec" data-sec="jz" open><summary class="b3-sec-sum"><span class="b3-sec-title">2. 忠恕輪值（平日／週六／週日）</span><span class="num muted">排滿 ${jzDone}／${jzAll.length} 格</span></summary><div class="b3-sec-body"><section class="list">${jzRows || '<div class="empty">沒有符合的忠恕輪值</div>'}</section></div></details>`
+        + `<details class="b3-sec" data-sec="oth" open><summary class="b3-sec-sum"><span class="b3-sec-title">3. 其它無組別（依日期排）</span><span class="num muted">排滿 ${othDone}／${othAll.length} 格</span></summary><div class="b3-sec-body"><section class="list">${othRows || '<div class="empty">沒有符合的其它勤務</div>'}</section></div></details>`;
     }
 
     const m = memberOf(area);
@@ -1957,12 +1957,16 @@
     return out;
   }
   const matchNameTerms = (name, terms) => !terms.length || terms.some((t) => String(name || '').includes(t));
-  function candList(kind, key, area, label, pool, evalFn, canEdit) {
+  function candList(kind, key, area, label, pool, evalFn, canEdit, plan) {
     const terms = splitQueryTerms(UI.out ? UI.outQ : UI.q);
     const evs = pool.map(evalFn).sort((a, b) => (a.hard.length - b.hard.length) || b.score - a.score);
     const L = (UI.showAll || terms.length > 1) ? evs : evs.slice(0, 12);
-    const batchBtn = (terms.length > 1 && canEdit && evs.length > 1)
-      ? `<button type="button" class="btn wide pri" style="margin-bottom:8px" data-act="add-batch" data-kind="${kind}" data-key="${key}" data-area="${area}" data-label="${esc(label)}">一次${isPreFor(area) ? '預排' : '加入'}全部符合（${evs.length} 人）</button>`
+    // 多人批次：只加入「與名冊姓名完全相符」的人（部分相符、同名多人、找不到者不加入，列在提示下方）
+    const activePlan = (terms.length > 1 && canEdit) ? (plan || (finderCtx ? batchPlan(finderCtx) : null)) : null;
+    const evById = activePlan ? new Map(evs.map((ev) => [ev.p.id, ev])) : null;
+    const planHard = activePlan ? activePlan.add.filter((p) => { const ev = evById.get(p.id); return ev ? ev.hard.length > 0 : false; }).length : 0;
+    const batchBtn = (activePlan && activePlan.add.length)
+      ? `<button type="button" class="btn wide pri" style="margin-bottom:8px" data-act="add-batch" data-kind="${kind}" data-key="${key}" data-area="${area}" data-label="${esc(label)}">一次${isPreFor(area) ? '預排' : '加入'}完全相符的 ${activePlan.add.length} 人${planHard ? `（其中 ${planHard} 人有違規）` : ''}</button>`
       : '';
     return batchBtn + (L.map((ev) => {
       const p = ev.p, why = ev.hard[0] || ev.soft[0];
@@ -1970,6 +1974,39 @@
         <div class="small ${ev.hard.length ? 't-bad' : ev.soft.length ? 't-warn' : 'muted'}">${why ? esc(why.msg) + (ev.hard.length ? '（排入會標成違規）' : '') : `加入後全年 ${ev.occN} 次`}${ev.lyNote ? ` · <span class="t-ok">${esc(ev.lyNote)}</span>` : ''}${ev.mates && ev.mates.length ? ` · 常和 ${esc(ev.mates.slice(0, 2).join('、'))} 同組` : ''}</div></div>
         ${canEdit ? `<button class="btn sm ${ev.hard.length ? '' : 'pri'}" data-act="add" data-kind="${kind}" data-key="${key}" data-pid="${p.id}" data-area="${area}" data-label="${esc(label)}">${isAdmin() && !(memberOf(area) && memberOf(area).status === 'ok') && AREAS.includes(area) ? '預排' : '加入'}</button>` : ''}</div>`;
     }).join('') + (evs.length > L.length ? `<button class="btn wide" data-act="more">顯示全部 ${evs.length} 人</button>` : '') || '<div class="empty">沒有符合的人</div>');
+  }
+  // 批次計畫：每個輸入詞必須與名冊姓名完全相符且唯一才加入
+  function batchPlan(ctx) {
+    const terms = splitQueryTerms(UI.out ? UI.outQ : UI.q);
+    const uni = UI.out ? M.people.filter((p) => p.a === UI.outArea && !p.off) : ctx.localPool;
+    const add = [], already = [], rejects = [], seen = new Set();
+    const nameList = (L) => L.slice(0, 6).map((p) => p.n).join('、') + (L.length > 6 ? `…等 ${L.length} 人` : '');
+    for (const t of terms) {
+      const inUni = uni.filter((p) => !p.off && p.n === t);
+      if (inUni.length > 1) {
+        rejects.push({ term: t, reason: `同名 ${inUni.length} 人（${inUni.map((p) => p.a).join('、')}），無法確定` });
+        continue;
+      }
+      if (inUni.length === 1) {
+        const p = inUni[0];
+        if (ctx.inIds.has(p.id)) { already.push(t); continue; }
+        if (!seen.has(p.id)) { seen.add(p.id); add.push(p); }
+        continue;
+      }
+      const all = M.people.filter((p) => !p.off && p.n === t);
+      if (all.length >= 1) {
+        if (all.some((p) => ctx.inIds.has(p.id))) { already.push(t); continue; }
+        rejects.push({ term: t, reason: `不在${UI.out ? UI.outArea : '本區'}（名冊上是 ${all.map((p) => p.a).join('、')}）` });
+        continue;
+      }
+      const part = uni.filter((p) => p.n.includes(t));
+      rejects.push({ term: t, reason: part.length ? `部分相符：${nameList(part)}` : '找不到' });
+    }
+    return { terms, add, already, rejects };
+  }
+  function rejectsHtml(plan) {
+    if (!plan || !plan.rejects.length) return '';
+    return `<div class="muted small"><strong>未加入（需與名冊姓名完全相符）：</strong></div>` + plan.rejects.map((r) => `<div class="small t-warn">「${esc(r.term)}」${esc(r.reason)}</div>`).join('');
   }
   function computeFinderState(ctx) {
     const q = UI.out ? UI.outQ : UI.q;
@@ -1981,31 +2018,31 @@
     } else {
       pool = ctx.localPool.filter((p) => !ctx.inIds.has(p.id) && matchNameTerms(p.n, terms));
     }
+    let plan = null;
     if (terms.length > 1) {
-      const poolNames = pool.map((p) => p.n);
-      const inNames = [...ctx.inIds].map((id) => (M.pById[id] || {}).n || '').filter(Boolean);
-      const already = terms.filter((t) => !poolNames.some((n) => n.includes(t)) && inNames.some((n) => n.includes(t)));
-      const miss = terms.filter((t) => !poolNames.some((n) => n.includes(t)) && !inNames.some((n) => n.includes(t)));
-      hint = `輸入 ${terms.length} 筆，找到 ${pool.length} 位可加入`
-        + (already.length ? `；已在名單：${already.join('、')}` : '')
-        + (miss.length ? `；找不到：${miss.join('、')}` : '')
-        + (UI.out && pool.length ? '。排入後對方的區也會看到這一筆。' : '。');
+      plan = batchPlan(ctx);
+      hint = `輸入 ${terms.length} 筆，完全相符可批次加入 ${plan.add.length} 位`
+        + (plan.already.length ? `；已在名單：${plan.already.join('、')}` : '')
+        + (plan.rejects.length ? `；${plan.rejects.length} 筆未加入（需與名冊姓名完全相符，見下）` : '')
+        + (UI.out && plan.add.length ? '。排入後對方的區也會看到這一筆。' : '。');
     }
-    return { pool, hint };
+    return { pool, hint, plan };
   }
   function updateFinderDom() {
     if (!finderCtx) return;
     const candsEl = document.getElementById('cands'), hintEl = document.getElementById('finderHint');
     if (!candsEl) return;
-    const { pool, hint } = computeFinderState(finderCtx);
+    const { pool, hint, plan } = computeFinderState(finderCtx);
     if (hintEl) hintEl.textContent = hint;
-    candsEl.innerHTML = candList(finderCtx.kind, finderCtx.key, finderCtx.area, finderCtx.label, pool, finderCtx.evalFn, finderCtx.canEdit);
+    const rjEl = document.getElementById('finderRejects');
+    if (rjEl) rjEl.innerHTML = rejectsHtml(plan);
+    candsEl.innerHTML = candList(finderCtx.kind, finderCtx.key, finderCtx.area, finderCtx.label, pool, finderCtx.evalFn, finderCtx.canEdit, plan);
   }
   function finder(area, inIds, kind, key, label, evalFn, canEdit, localPool) {
     const others = AREAS.filter((a) => a !== area);
     if (UI.out && !UI.outArea) UI.outArea = others[0];
     finderCtx = { area, inIds, kind, key, label, evalFn, canEdit, localPool };
-    const { pool, hint } = computeFinderState(finderCtx);
+    const { pool, hint, plan } = computeFinderState(finderCtx);
     const defArea = UI.out ? UI.outArea : (E.PERSON_AREAS.includes(area) ? area : '瑞芳');
     const qTerms = splitQueryTerms(UI.out ? UI.outQ : UI.q);
     const poolNames = pool.map((p) => p.n);
@@ -2038,7 +2075,7 @@
       : `<label>找人（${AREAS.includes(area) ? '本區' : '全部'}）<input id="q" type="search" value="${esc(UI.q)}" data-input="q" placeholder="輸入姓名（可用頓號、逗號或空白分隔多人）"></label>
          ${actBtns}`;
     return `<section class="finder"><div class="sec-h"><h2>${UI.out ? '非本區人員 · ' + esc(UI.outArea) : '可以加入的人'}</h2><span class="muted small">${UI.out ? '輸入後才列出' : '依合適程度'}</span></div>
-      ${ctl}${newPerForm}<div id="finderHint" class="muted small">${hint}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit)}</div>
+      ${ctl}${newPerForm}<div id="finderHint" class="muted small">${esc(hint)}</div><div id="finderRejects" aria-live="polite">${rejectsHtml(plan)}</div><div id="cands">${candList(kind, key, area, label, pool, evalFn, canEdit, plan)}</div>
       <div class="muted small">規則不允許的人仍可排入，但會標成違規，交給總召確認。</div></section>`;
   }
 
@@ -2828,7 +2865,10 @@
   function ctlKey(el) {
     if (!el || !el.tagName) return '';
     if (el.id) return '#' + el.id;
-    if (el.tagName === 'SUMMARY') return 'sum:' + (el.textContent || '').trim().slice(0, 40);
+    if (el.tagName === 'SUMMARY') {
+      const pd = el.parentElement, sec = pd && pd.dataset && pd.dataset.sec;
+      return sec ? 'sec:' + sec : 'sum:' + (el.textContent || '').trim().slice(0, 40);
+    }
     const ds = el.dataset || {}, ks = Object.keys(ds).sort();
     if (!ks.length) return el.tagName === 'A' && el.getAttribute('href') ? 'a:' + el.getAttribute('href') : '';
     return el.tagName + ':' + ks.map((k) => k + '=' + ds[k]).join('&');
@@ -2873,7 +2913,7 @@
     if (routeChanged) {
       UI.q = ''; UI.out = false; UI.outQ = ''; UI.showAll = false; UI.filter = '全部';
       UI.apptQ = ''; UI.b6Mode = ''; UI.b1NomOpen = false; UI.pAddOptOpen = false; UI.newPerOpen = false;
-      UI.b3CalYm = ''; UI.b3FocusId = '';
+      UI.b3CalYm = ''; UI.b3FocusId = ''; UI.lyPick = null;
       finderCtx = null; apptArea = '';
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
     }
@@ -2888,7 +2928,7 @@
         if (el.dataset && el.dataset.actChange && el !== ae) continue;
         draftVals[el.id] = el.value;
       }
-      for (const dt of appEl.querySelectorAll('details')) { const sm = dt.querySelector('summary'); detailsState.push([sm ? (sm.textContent || '').trim().slice(0, 40) : '', dt.open]); }
+      for (const dt of appEl.querySelectorAll('details')) { const sm = dt.querySelector('summary'); detailsState.push([sm ? (sm.textContent || '').trim().slice(0, 40) : '', dt.open, (dt.dataset && dt.dataset.sec) || '']); }
       const seenScroll = {};
       for (const el of appEl.querySelectorAll(SCROLL_SEL)) {
         const k = (el.getAttribute('aria-label') || '') + '|' + el.className;
@@ -2921,7 +2961,14 @@
     }
     if (detailsState.length) {
       const dts = appEl.querySelectorAll('details');
-      detailsState.forEach(([t, open], i) => { const dt = dts[i]; const sm = dt && dt.querySelector('summary'); if (dt && sm && (sm.textContent || '').trim().slice(0, 40) === t) dt.open = open; });
+      // 有 data-sec 的區段（B3）以穩定的區段代號還原；其餘仍以順序＋摘要文字比對
+      const bySec = {};
+      for (const dt of dts) if (dt.dataset && dt.dataset.sec) bySec[dt.dataset.sec] = dt;
+      detailsState.forEach(([t, open, sec], i) => {
+        if (sec) { if (bySec[sec]) bySec[sec].open = open; return; }
+        const dt = dts[i]; const sm = dt && dt.querySelector('summary');
+        if (dt && !(dt.dataset && dt.dataset.sec) && sm && (sm.textContent || '').trim().slice(0, 40) === t) dt.open = open;
+      });
     }
     if (scrollState.length && appEl.querySelectorAll) {
       const buckets = {};
@@ -3023,15 +3070,19 @@
       if (!owner || !finderCtx) return;
       if (d.kind === 'assign' && owner.cancel) return toast('這一格已取消，不能再排人');
       if (!need(can(owner.area, d.kind === 'groups' ? kindOfGroup(d.key) : 'jz'))) return;
-      const list = computeFinderState(finderCtx).pool.filter((p) => p && M.pById[p.id] && !finderCtx.inIds.has(p.id));
-      if (!list.length) return toast('沒有可加入的人員');
+      const plan = batchPlan(finderCtx);
+      const list = plan.add.filter((p) => p && M.pById[p.id] && !finderCtx.inIds.has(p.id));
+      if (!list.length) return toast(plan.rejects.length ? '沒有完全相符的人可加入（請看下方說明）' : '沒有可加入的人員');
+      if (list.length > 100) return toast('一次最多批次加入 100 人，請分批');
       const pre = isPreFor(owner.area);
+      const hardN = list.filter((p) => { try { return finderCtx.evalFn(p).hard.length > 0; } catch (e) { return false; } }).length;
       const up = {};
       for (const p of list) up[`${d.kind}/${d.key}/${p.id}`] = stamp(pre ? { pre: true } : null);
       const lbl = d.label || (d.kind === 'groups' ? owner.name : slotName(owner));
-      if (UI.out) UI.outQ = ''; else UI.q = '';
-      store.update(Object.assign(up, logOp(owner.area, `${lbl} 批次${pre ? '預排' : '加入'} ${list.length} 人`, mkUndo(up)), touchArea(owner.area)));
-      toast(pre ? `已批次預排 ${list.length} 人，等 ${owner.area} 區長確認` : `已批次加入 ${list.length} 人`);
+      const rejN = plan.rejects.length;
+      if (UI.out) UI.outQ = plan.rejects.map((r) => r.term).join('、'); else UI.q = plan.rejects.map((r) => r.term).join('、'); // 沒加入的詞留在搜尋框
+      store.update(Object.assign(up, logOp(owner.area, `${lbl} 批次${pre ? '預排' : '加入'} ${list.length} 人（完全相符${hardN ? `，含違規 ${hardN} 人` : ''}${rejN ? `；未加入 ${rejN} 筆` : ''}）`, mkUndo(up)), touchArea(owner.area)));
+      toast((pre ? `已批次預排 ${list.length} 人，等 ${owner.area} 區長確認` : `已批次加入 ${list.length} 人`) + (hardN ? `（${hardN} 人有違規，已標示）` : '') + (rejN ? `；${rejN} 筆未加入，留在搜尋框` : ''));
     }
     else if (a === 'pre-ok') { const s0 = d.kind === 'groups' ? gmOf(d.key) : M.byId[d.key]; if (s0 && (d.kind === 'groups' || d.kind === 'assign')) confirmPre(d.kind, d.key, +d.pid, s0.area, d.label); }
     else if (a === 'pre-all-ok') {
