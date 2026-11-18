@@ -600,6 +600,22 @@ a[class^="c-"], a.small, .row-t > a { display: inline-flex; align-items: center;
 .chip.sm { min-height: 36px; padding: 0 11px; border-radius: 18px; font-size: 13px; }
 .b3-cal-month-title { margin: 4px 0 6px; font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.35; }
 .b3-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.b3-cal-all-grid { display: grid; grid-template-columns: 52px repeat(5, minmax(0, 1fr)); gap: 4px; align-items: stretch; }
+.b3-cal-mcell {
+  font-family: var(--f-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid var(--sunk);
+  border-radius: 8px;
+  padding: 4px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
 .b3-cal-hd { font-size: 12px; font-weight: 700; color: var(--muted); text-align: center; padding: 2px 0; }
 .b3-cal-day {
   min-height: 46px;

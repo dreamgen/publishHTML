@@ -1701,6 +1701,12 @@
   function rocYmLabel(ym) {
     return (+ym.slice(0, 4) - 1911) + ' 年 ' + (+ym.slice(5, 7)) + ' 月';
   }
+  function sundayOfDateStr(dStr) {
+    const y = +dStr.slice(0, 4), m = +dStr.slice(5, 7), d = +dStr.slice(8, 10);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const sun = new Date(dt.getTime() - dt.getUTCDay() * 86400000);
+    return `${sun.getUTCFullYear()}-${String(sun.getUTCMonth() + 1).padStart(2, '0')}-${String(sun.getUTCDate()).padStart(2, '0')}`;
+  }
 
   function b3Calendar(area, S, keep) {
     const calSlots = [];
@@ -1717,27 +1723,61 @@
       + (yms.length ? `<button type="button" class="chip sm ${curYm === 'all' ? 'on' : ''}" data-act="b3-cal-ym" data-v="all">全部月份</button>` : '');
 
     const prioSlot = (s) => s.groupKey ? 0 : (s.cat.startsWith('忠恕') ? 1 : 2);
-    const byDate = {};
-    for (const s of calSlots) (byDate[s.d] = byDate[s.d] || []).push(s);
-    for (const d in byDate) byDate[d].sort((a, b) => prioSlot(a) - prioSlot(b) || a.id.localeCompare(b.id));
+    const calCellHtml = (num, slots, withWd) => {
+      const dots = slots.map((s) => {
+        const dtLab = `${E.fmtD(s.d)}${withWd ? `（${E.WD[s.wd]}）` : ''}`;
+        const tip = `${dtLab} ${s.cat}${s.groupKey && gmOf(s.groupKey) ? ' · ' + gmOf(s.groupKey).name : ''}`;
+        return `<button type="button" class="b3-dot ${b3DotCls(s)}" data-act="b3-cal-dot" data-sid="${esc(s.id)}" data-gk="${esc(s.groupKey || '')}" title="${esc(tip)}" aria-label="${esc(dtLab + ' ' + s.cat)}"></button>`;
+      }).join('');
+      const dayAttr = slots.length ? ` data-act="b3-cal-dot" data-sid="${esc(slots[0].id)}" data-gk="${esc(slots[0].groupKey || '')}"` : '';
+      return `<div class="b3-cal-day${slots.length ? ' has-work' : ''}"${dayAttr}><span class="b3-day-num">${num}</span><div class="b3-dots">${dots}</div></div>`;
+    };
 
-    const showYms = curYm === 'all' ? yms : (curYm ? [curYm] : []);
-    const hdHtml = ['日', '一', '二', '三', '四', '五', '六'].map((w) => `<div class="b3-cal-hd">${w}</div>`).join('');
-    const gridsHtml = showYms.map((ym) => {
-      const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+    let gridsHtml = '';
+    if (curYm === 'all') {
+      const bySun = {};
+      for (const s of calSlots) {
+        const sunStr = sundayOfDateStr(s.d);
+        (bySun[sunStr] = bySun[sunStr] || []).push(s);
+      }
+      for (const d in bySun) bySun[d].sort((a, b) => prioSlot(a) - prioSlot(b) || a.d.localeCompare(b.d) || a.id.localeCompare(b.id));
+      const allYms = [...new Set([...yms, ...Object.keys(bySun).map((d) => d.slice(0, 7))])].sort();
+      if (allYms.length) {
+        const hdAll = ['月份', '1', '2', '3', '4', '5'].map((w) => `<div class="b3-cal-hd">${w}</div>`).join('');
+        const rows = allYms.map((ym) => {
+          const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+          const firstWd = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+          const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+          const firstSun = 1 + ((7 - firstWd) % 7);
+          const cells = [`<div class="b3-cal-mcell">${y - 1911}/${m}</div>`];
+          for (let w = 0; w < 5; w++) {
+            const sunDay = firstSun + w * 7;
+            if (sunDay > daysInMonth) cells.push('<div class="b3-cal-day empty"></div>');
+            else {
+              const sunStr = `${ym}-${String(sunDay).padStart(2, '0')}`;
+              cells.push(calCellHtml(sunDay, bySun[sunStr] || [], true));
+            }
+          }
+          return cells.join('');
+        }).join('');
+        gridsHtml = `<div class="b3-cal-all-grid">${hdAll}${rows}</div>`;
+      }
+    } else if (curYm) {
+      const byDate = {};
+      for (const s of calSlots) (byDate[s.d] = byDate[s.d] || []).push(s);
+      for (const d in byDate) byDate[d].sort((a, b) => prioSlot(a) - prioSlot(b) || a.id.localeCompare(b.id));
+      const hdHtml = ['日', '一', '二', '三', '四', '五', '六'].map((w) => `<div class="b3-cal-hd">${w}</div>`).join('');
+      const y = +curYm.slice(0, 4), m = +curYm.slice(5, 7);
       const firstWd = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
       const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
       const cells = [];
       for (let i = 0; i < firstWd; i++) cells.push('<div class="b3-cal-day empty"></div>');
       for (let day = 1; day <= daysInMonth; day++) {
-        const dStr = `${ym}-${String(day).padStart(2, '0')}`;
-        const daySlots = byDate[dStr] || [];
-        const dots = daySlots.map((s) => `<button type="button" class="b3-dot ${b3DotCls(s)}" data-act="b3-cal-dot" data-sid="${esc(s.id)}" data-gk="${esc(s.groupKey || '')}" title="${esc(E.fmtD(s.d) + ' ' + s.cat + (s.groupKey && gmOf(s.groupKey) ? ' · ' + gmOf(s.groupKey).name : ''))}" aria-label="${esc(E.fmtD(s.d) + ' ' + s.cat)}"></button>`).join('');
-        const dayAttr = daySlots.length ? ` data-act="b3-cal-dot" data-sid="${esc(daySlots[0].id)}" data-gk="${esc(daySlots[0].groupKey || '')}"` : '';
-        cells.push(`<div class="b3-cal-day${daySlots.length ? ' has-work' : ''}"${dayAttr}><span class="b3-day-num">${day}</span><div class="b3-dots">${dots}</div></div>`);
+        const dStr = `${curYm}-${String(day).padStart(2, '0')}`;
+        cells.push(calCellHtml(day, byDate[dStr] || [], false));
       }
-      return `<div class="b3-cal-month-title">${esc(rocYmLabel(ym))}</div><div class="b3-cal-grid">${hdHtml}${cells.join('')}</div>`;
-    }).join('');
+      gridsHtml = `<div class="b3-cal-month-title">${esc(rocYmLabel(curYm))}</div><div class="b3-cal-grid">${hdHtml}${cells.join('')}</div>`;
+    }
 
     return `<section class="card b3-cal-card">
       <div class="sec-h"><h2>排班月曆</h2><span class="muted small">共 ${calSlots.length} 場 · 點圓點定位</span></div>
