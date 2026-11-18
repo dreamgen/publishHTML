@@ -32,6 +32,7 @@
     filter: '全部', q: '', out: false, outArea: '', outQ: '', showAll: false,
     person: null, acctOpen: false, lyPick: null, apptQ: '', bindQ: '', famQ: '', toast: '',
     b6Mode: '', b1NomOpen: false, b1ShowCook: false,
+    b3Mode: 'group', b3CalYm: '', b3FocusId: '',
     pAddOptOpen: false, a6RemindOpen: false, a6PickAreaOpen: false
   };
 
@@ -1615,6 +1616,75 @@
     return out.length ? `<section class="card rembox"><h2>提醒事項</h2>${out.join('')}</section>` : '';
   }
 
+  const B3_DOT_LEGEND = [
+    ['b3-dot-k', '廚務'],
+    ['b3-dot-srv', '服務／環境'],
+    ['b3-dot-lj', '禮節'],
+    ['b3-dot-jzwd', '忠恕平日'],
+    ['b3-dot-jzhol', '忠恕假日'],
+    ['b3-dot-wash', '洗碗'],
+    ['b3-dot-other', '其它勤務']
+  ];
+  const B3_JZ_ORDER = { '忠恕平日': 1, '忠恕週六': 2, '忠恕週日': 3 };
+
+  function b3DotCls(s) {
+    if (s.cat === '廚務' || s.cat === '會館輪廚') return 'b3-dot-k';
+    if (s.cat === '環境整理' || s.cat === '服務') return 'b3-dot-srv';
+    if (s.cat === '禮節') return 'b3-dot-lj';
+    if (s.cat === '忠恕平日') return 'b3-dot-jzwd';
+    if (s.cat === '忠恕週六' || s.cat === '忠恕週日') return 'b3-dot-jzhol';
+    if (s.cat === '洗碗') return 'b3-dot-wash';
+    return 'b3-dot-other';
+  }
+  function rocYmLabel(ym) {
+    return (+ym.slice(0, 4) - 1911) + ' 年 ' + (+ym.slice(5, 7)) + ' 月';
+  }
+
+  function b3Calendar(area, S, keep) {
+    const calSlots = [];
+    for (const g of S.groups) if (keep(g, kindOfGroup(g.gm.id))) calSlots.push(...groupSlots(g.gm.id));
+    for (const x of S.dated) if (keep(x, 'jz')) calSlots.push(x.s);
+
+    const presentCls = new Set(calSlots.map(b3DotCls));
+    const legendHtml = B3_DOT_LEGEND.filter(([cls]) => presentCls.has(cls))
+      .map(([cls, lab]) => `<span class="b3-legend-item"><span class="b3-dot ${cls}"></span>${esc(lab)}</span>`).join('');
+
+    const yms = [...new Set(calSlots.map((s) => s.d.slice(0, 7)))].sort();
+    const curYm = (UI.b3CalYm === 'all' || yms.includes(UI.b3CalYm)) ? UI.b3CalYm : (yms[0] || '');
+    const monthBtns = yms.map((ym) => `<button type="button" class="chip sm ${curYm === ym ? 'on' : ''}" data-act="b3-cal-ym" data-v="${ym}">${(+ym.slice(0, 4) - 1911)}/${+ym.slice(5, 7)}</button>`).join('')
+      + (yms.length ? `<button type="button" class="chip sm ${curYm === 'all' ? 'on' : ''}" data-act="b3-cal-ym" data-v="all">全部月份</button>` : '');
+
+    const prioSlot = (s) => s.groupKey ? 0 : (s.cat.startsWith('忠恕') ? 1 : 2);
+    const byDate = {};
+    for (const s of calSlots) (byDate[s.d] = byDate[s.d] || []).push(s);
+    for (const d in byDate) byDate[d].sort((a, b) => prioSlot(a) - prioSlot(b) || a.id.localeCompare(b.id));
+
+    const showYms = curYm === 'all' ? yms : (curYm ? [curYm] : []);
+    const hdHtml = ['日', '一', '二', '三', '四', '五', '六'].map((w) => `<div class="b3-cal-hd">${w}</div>`).join('');
+    const gridsHtml = showYms.map((ym) => {
+      const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+      const firstWd = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+      const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const cells = [];
+      for (let i = 0; i < firstWd; i++) cells.push('<div class="b3-cal-day empty"></div>');
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dStr = `${ym}-${String(day).padStart(2, '0')}`;
+        const daySlots = byDate[dStr] || [];
+        const dots = daySlots.map((s) => `<button type="button" class="b3-dot ${b3DotCls(s)}" data-act="b3-cal-dot" data-sid="${esc(s.id)}" data-gk="${esc(s.groupKey || '')}" title="${esc(E.fmtD(s.d) + ' ' + s.cat + (s.groupKey && gmOf(s.groupKey) ? ' · ' + gmOf(s.groupKey).name : ''))}" aria-label="${esc(E.fmtD(s.d) + ' ' + s.cat)}"></button>`).join('');
+        const dayAttr = daySlots.length ? ` data-act="b3-cal-dot" data-sid="${esc(daySlots[0].id)}" data-gk="${esc(daySlots[0].groupKey || '')}"` : '';
+        cells.push(`<div class="b3-cal-day${daySlots.length ? ' has-work' : ''}"${dayAttr}><span class="b3-day-num">${day}</span><div class="b3-dots">${dots}</div></div>`);
+      }
+      return `<div class="b3-cal-month-title">${esc(rocYmLabel(ym))}</div><div class="b3-cal-grid">${hdHtml}${cells.join('')}</div>`;
+    }).join('');
+
+    return `<section class="card b3-cal-card">
+      <div class="sec-h"><h2>排班月曆</h2><span class="muted small">共 ${calSlots.length} 場 · 點圓點定位</span></div>
+      ${legendHtml ? `<div class="b3-legend">${legendHtml}</div>` : ''}
+      ${monthBtns ? `<div class="b3-cal-months">${monthBtns}</div>` : ''}
+      ${gridsHtml || '<div class="empty">沒有符合的排班場次</div>'}
+    </section>`;
+  }
+
   function vArea(area) {
     if (!(D().meta || {}).seeded) return vHome();
     const S = areaStats(area), [cls, lab] = ST_LABEL[S.status];
@@ -1626,32 +1696,93 @@
     const chips = ['全部', '還沒排好', '我負責的', '有問題'].map((t) => `<button class="chip ${UI.filter === t ? 'on' : ''}" data-act="filter" data-v="${t}">${t}</button>`).join('');
     const st = (x, short) => (x.pre ? tag('pre', `預排 ${x.pre}`) : '') + (x.clash ? tag('bad', `撞到 ${x.clash}`) : '') + (short ? tag('bad', short) : '') + (x.done ? tag('ok', '排好') : '') + (x.iss.v - x.clash > 0 ? tag('wn', `違規 ${x.iss.v - x.clash}`) : '') + (x.iss.n ? tag('no', `注意 ${x.iss.n}`) : '');
 
-    const gRows = S.groups.filter((g) => keep(g, kindOfGroup(g.gm.id))).map((g) => {
-      const slots = groupSlots(g.gm.id), ed = present(area, 'g/' + g.gm.id).filter((u) => !me() || u.uid !== me().uid);
-      const own = ownerOfGroup(g.gm);
-      const mem = (E.getState().groups[g.gm.id] || []).map((id) => M.pById[id]).filter(Boolean);
-      let subDesc = `全年 ${slots.length} 場`;
-      if (g.gm.cat === '廚務') {
-        const mc = mem.filter((p) => /主廚/.test(p.cr || '')).length, dc = mem.filter((p) => !/主廚/.test(p.cr || '') && /大廚/.test(p.cr || '')).length;
-        subDesc = `主廚 ${mc}、大廚 ${dc}、二廚 ${Math.max(0, mem.length - mc - dc)} · 全年 ${slots.length} 場`;
-      } else if (g.gm.cat === '禮節') {
-        subDesc = `${g.lead ? '組長 ' + g.lead.n + ' · ' : ''}6 崗位已排 ${g.postCnt}／6 · 全年 ${slots.length} 場`;
-      } else {
-        subDesc = `${g.lead ? '小組長 ' + g.lead.n + ' · ' : ''}全年 ${slots.length} 場${g.gm.need ? ` · 每場需要 ${g.gm.need} 人` : ''}`;
-      }
-      return `<a class="row" href="#/g/${g.gm.id}"><div class="row-h"><b>${esc(g.gm.name)}</b><span class="num">${g.gm.cat === '禮節' ? `${g.postCnt}／6 崗位 · ` : ''}${g.n} 人</span></div>
-        <div class="muted small">${esc(subDesc)}</div>
-        <div class="row-t">${st(g, g.n < (g.gm.need || 1) ? '人數不足' : '')}${tag('no', own)}${ed.length ? `<span class="muted small">${esc(ed.map((u) => u.name).join('、'))} 正在編輯</span>` : ''}</div></a>`;
-    }).join('');
-
-    const dRows = S.dated.filter((x) => keep(x, 'jz')).map((x) => {
+    const datedRowHtml = (x) => {
       const ed = present(area, 's/' + x.s.id).filter((u) => !me() || u.uid !== me().uid);
       const own = ownerOfSlot(x.s), hasProp = x.props && x.props.length;
       const pTag = hasProp ? tag('bad', '提案中') : '';
       const pNote = hasProp ? `<span class="muted small">${esc(x.props[0].id)} ${esc(x.props[0].title)}</span>` : '';
-      return `<a class="row" href="#/s/${x.s.id}"><div class="row-h"><b>${esc(slotName(x.s))}</b><span class="num ${x.n < x.need ? 't-bad' : ''}">${x.n}／${x.need}</span></div>
-        <div class="row-t">${st(x, x.n < x.need ? (x.n ? `缺 ${x.need - x.n}` : '還沒排') : '')}${pTag}${tag('no', own)}${pNote}${ed.length ? `<span class="muted small">${esc(ed.map((u) => u.name).join('、'))} 正在編輯</span>` : ''}</div></a>`;
-    }).join('');
+      const id = 'b3-slot-' + x.s.id;
+      return `<a id="${esc(id)}" class="row ${UI.b3FocusId === id ? 'b3-focus-pulse' : ''}" href="#/s/${esc(x.s.id)}"><div class="row-h"><b>${esc(slotName(x.s))}</b><span class="num ${x.n < x.need ? 't-bad' : ''}">${x.n}／${x.need}</span></div>
+        <div class="row-t">${tag('no', x.s.cat)}${st(x, x.n < x.need ? (x.n ? `缺 ${x.need - x.n}` : '還沒排') : '')}${pTag}${tag('no', own)}${pNote}${ed.length ? `<span class="muted small">${esc(ed.map((u) => u.name).join('、'))} 正在編輯</span>` : ''}</div></a>`;
+    };
+
+    let mainHtml = '';
+    if (UI.b3Mode === 'date') {
+      const entries = [];
+      for (const g of S.groups) {
+        if (!keep(g, kindOfGroup(g.gm.id))) continue;
+        for (const s of groupSlots(g.gm.id)) entries.push({ d: s.d, s, g, isGroup: true, href: '#/g/' + g.gm.id });
+      }
+      for (const x of S.dated) {
+        if (!keep(x, 'jz')) continue;
+        entries.push({ d: x.s.d, s: x.s, x, isGroup: false, href: '#/s/' + x.s.id });
+      }
+      const prio = (it) => it.isGroup ? 0 : (it.s.cat.startsWith('忠恕') ? 1 : 2);
+      entries.sort((a, b) => a.d.localeCompare(b.d) || prio(a) - prio(b) || a.s.id.localeCompare(b.s.id));
+
+      const byYm = new Map();
+      for (const it of entries) {
+        const ym = it.d.slice(0, 7);
+        if (!byYm.has(ym)) byYm.set(ym, []);
+        byYm.get(ym).push(it);
+      }
+      mainHtml = [...byYm.entries()].map(([ym, list]) => {
+        const rows = list.map((it) => {
+          const s = it.s, id = 'b3-date-' + s.id;
+          const got = (M.asg[s.id] && M.asg[s.id].p ? M.asg[s.id].p.length : 0);
+          const need = E.slotNeed(M, s);
+          const ed = present(area, it.isGroup ? ('g/' + it.g.gm.id) : ('s/' + s.id)).filter((u) => !me() || u.uid !== me().uid);
+          const own = it.isGroup ? ownerOfGroup(it.g.gm) : ownerOfSlot(s);
+          const props = it.isGroup ? (slotProps[s.id] || []) : (it.x.props || []);
+          const hasProp = props.length > 0;
+          const pTag = hasProp ? tag('bad', '提案中') : '';
+          const pNote = hasProp ? `<span class="muted small">${esc(props[0].id)} ${esc(props[0].title)}</span>` : '';
+          const statusTags = st(it.isGroup ? it.g : it.x, got < need ? (got ? `缺 ${need - got}` : '還沒排') : '');
+          const dateStr = `${E.fmtD(s.d)}（${E.WD[s.wd]}）${s.e && s.e !== s.d ? '–' + E.fmtD(s.e) : ''}`;
+          const actLabel = s.label && s.label !== s.cat ? s.label : s.cat;
+          const sub = it.isGroup ? `組別：${it.g.gm.name}` : `依日期排 · ${s.cat}`;
+          return `<a id="${esc(id)}" class="row ${UI.b3FocusId === id ? 'b3-focus-pulse' : ''}" href="${esc(it.href)}"><div class="row-h"><b>${esc(dateStr)} · ${esc(actLabel)}</b><span class="num ${got < need ? 't-bad' : ''}">${got}／${need}</span></div>
+            <div class="muted small">${esc(sub)}${s.loc ? ` · ${esc(s.loc)}` : ''}</div>
+            <div class="row-t">${tag('no', s.cat)}${statusTags}${pTag}${tag('no', own)}${pNote}${ed.length ? `<span class="muted small">${esc(ed.map((u) => u.name).join('、'))} 正在編輯</span>` : ''}</div></a>`;
+        }).join('');
+        return `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">${esc(rocYmLabel(ym))}</span><span class="num muted">${list.length} 場</span></summary><div class="b3-sec-body"><section class="list">${rows}</section></div></details>`;
+      }).join('') || '<div class="empty">沒有符合的勤務</div>';
+    } else {
+      const gRows = S.groups.filter((g) => keep(g, kindOfGroup(g.gm.id))).map((g) => {
+        const slots = groupSlots(g.gm.id), ed = present(area, 'g/' + g.gm.id).filter((u) => !me() || u.uid !== me().uid);
+        const own = ownerOfGroup(g.gm);
+        const mem = (E.getState().groups[g.gm.id] || []).map((id) => M.pById[id]).filter(Boolean);
+        let subDesc = `全年 ${slots.length} 場`;
+        if (g.gm.cat === '廚務') {
+          const mc = mem.filter((p) => /主廚/.test(p.cr || '')).length, dc = mem.filter((p) => !/主廚/.test(p.cr || '') && /大廚/.test(p.cr || '')).length;
+          subDesc = `主廚 ${mc}、大廚 ${dc}、二廚 ${Math.max(0, mem.length - mc - dc)} · 全年 ${slots.length} 場`;
+        } else if (g.gm.cat === '禮節') {
+          subDesc = `${g.lead ? '組長 ' + g.lead.n + ' · ' : ''}6 崗位已排 ${g.postCnt}／6 · 全年 ${slots.length} 場`;
+        } else {
+          subDesc = `${g.lead ? '小組長 ' + g.lead.n + ' · ' : ''}全年 ${slots.length} 場${g.gm.need ? ` · 每場需要 ${g.gm.need} 人` : ''}`;
+        }
+        const id = 'b3-grp-' + g.gm.id;
+        return `<a id="${esc(id)}" class="row ${UI.b3FocusId === id ? 'b3-focus-pulse' : ''}" href="#/g/${esc(g.gm.id)}"><div class="row-h"><b>${esc(g.gm.name)}</b><span class="num">${g.gm.cat === '禮節' ? `${g.postCnt}／6 崗位 · ` : ''}${g.n} 人</span></div>
+          <div class="muted small">${esc(subDesc)}</div>
+          <div class="row-t">${st(g, g.n < (g.gm.need || 1) ? '人數不足' : '')}${tag('no', own)}${ed.length ? `<span class="muted small">${esc(ed.map((u) => u.name).join('、'))} 正在編輯</span>` : ''}</div></a>`;
+      }).join('');
+
+      const jzAll = S.dated.filter((x) => x.s.cat.startsWith('忠恕'));
+      const jzDone = jzAll.filter((x) => x.done).length;
+      const jzRows = jzAll.filter((x) => keep(x, 'jz'))
+        .sort((a, b) => (B3_JZ_ORDER[a.s.cat] || 9) - (B3_JZ_ORDER[b.s.cat] || 9) || a.s.d.localeCompare(b.s.d) || a.s.id.localeCompare(b.s.id))
+        .map(datedRowHtml).join('');
+
+      const othAll = S.dated.filter((x) => !x.s.cat.startsWith('忠恕'));
+      const othDone = othAll.filter((x) => x.done).length;
+      const othRows = othAll.filter((x) => keep(x, 'jz'))
+        .sort((a, b) => a.s.d.localeCompare(b.s.d) || a.s.id.localeCompare(b.s.id))
+        .map(datedRowHtml).join('');
+
+      mainHtml = `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">1. 有組別（固定組員）</span><span class="num muted">排好 ${S.gDone}／${S.groups.length} 組</span></summary><div class="b3-sec-body"><div class="muted small">改組員，全年每一場自動帶入。不能只改某一天。</div><section class="list">${gRows || '<div class="empty">沒有符合的組別</div>'}</section><div class="muted small">哪一區、哪一天、哪一組由總召排定並鎖住，要換日或換區請用提案。標「預排」的人是總召或調度台先排的，必須由區長確認或重排。</div></div></details>`
+        + `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">2. 忠恕輪值（平日／週六／週日）</span><span class="num muted">排滿 ${jzDone}／${jzAll.length} 格</span></summary><div class="b3-sec-body"><section class="list">${jzRows || '<div class="empty">沒有符合的忠恕輪值</div>'}</section></div></details>`
+        + `<details class="b3-sec" open><summary class="b3-sec-sum"><span class="b3-sec-title">3. 其它無組別（依日期排）</span><span class="num muted">排滿 ${othDone}／${othAll.length} 格</span></summary><div class="b3-sec-body"><section class="list">${othRows || '<div class="empty">沒有符合的其它勤務</div>'}</section></div></details>`;
+    }
 
     const m = memberOf(area);
     const join = me() && !isAdmin() && AREAS.includes(area) && !m ? `<button class="btn wide" data-act="join" data-area="${area}">申請成為 ${area} 的排班人員</button>` : m && m.status === 'pending' ? `<div class="card muted">已申請成為排班人員，等區長或調度台同意。</div>` : '';
@@ -1669,18 +1800,14 @@
       </div>
       ${here.length ? `<div class="pres">${avatars(here)}<span class="muted small">${here.length} 人正在作業 · 改動即時同步</span></div>` : ''}
       ${join}
-      <div class="chips">${chips}</div>
+      <div class="b3-toolbar"><div class="chips">${chips}</div><div class="seg" role="group" aria-label="檢視模式"><button type="button" class="${UI.b3Mode !== 'date' ? 'on' : ''}" data-act="b3-mode" data-v="group">組別模式</button><button type="button" class="${UI.b3Mode === 'date' ? 'on' : ''}" data-act="b3-mode" data-v="date">日期模式</button></div></div>
       <div class="split-grid">
         <div class="split-main">
-          <div class="sec-h"><h2>組別</h2><span class="num muted">排好 ${S.gDone}／${S.groups.length} 組</span></div>
-          <div class="muted small">改組員，全年每一場自動帶入。不能只改某一天。</div>
-          <section class="list">${gRows || '<div class="empty">沒有符合的組別</div>'}</section>
-          <div class="muted small">哪一區、哪一天、哪一組由總召排定並鎖住，要換日或換區請用提案。標「預排」的人是總召或調度台先排的，必須由區長確認或重排。</div>
+          ${mainHtml}
         </div>
         <aside class="split-side b3-side">
           ${reminders(area, S)}
-          <div class="sec-h"><h2>依日期排（沒有組別）</h2><span class="num muted">排滿 ${S.dDone}／${S.dated.length} 格</span></div>
-          <section class="list">${dRows || '<div class="empty">沒有符合的勤務</div>'}</section>
+          ${b3Calendar(area, S, keep)}
         </aside>
       </div>
     </main>`;
@@ -2595,6 +2722,7 @@
     if (routeChanged) {
       UI.q = ''; UI.out = false; UI.outQ = ''; UI.showAll = false; UI.filter = '全部';
       UI.apptQ = ''; UI.b6Mode = ''; UI.b1NomOpen = false; UI.pAddOptOpen = false;
+      UI.b3CalYm = ''; UI.b3FocusId = '';
       finderCtx = null; apptArea = '';
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
     }
@@ -2708,7 +2836,24 @@
     else if (a === 'add-fam') toggleFamily(+d.pid, true);
     else if (a === 'rm-fam') toggleFamily(+d.pid, false);
     else if (a === 'approve-bind') approveBind(d.uid, d.ok === '1');
-    else if (a === 'filter') { UI.filter = d.v; render(); }
+    else if (a === 'filter') { UI.filter = d.v; UI.b3FocusId = ''; render(); }
+    else if (a === 'b3-mode') { UI.b3Mode = d.v === 'date' ? 'date' : 'group'; UI.b3FocusId = ''; render(); }
+    else if (a === 'b3-cal-ym') { UI.b3CalYm = d.v || ''; UI.b3FocusId = ''; render(); }
+    else if (a === 'b3-cal-dot') {
+      const targetId = UI.b3Mode === 'date' ? ('b3-date-' + d.sid) : (d.gk ? ('b3-grp-' + d.gk) : ('b3-slot-' + d.sid));
+      UI.b3FocusId = targetId;
+      for (const prev of document.querySelectorAll('.b3-focus-pulse')) if (prev.id !== targetId) prev.classList.remove('b3-focus-pulse');
+      const el = document.getElementById(targetId);
+      if (el) {
+        const dt = el.closest('details');
+        if (dt && !dt.open) dt.open = true;
+        el.classList.remove('b3-focus-pulse');
+        void el.offsetWidth;
+        el.classList.add('b3-focus-pulse');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        try { el.focus({ preventScroll: true }); } catch (e) { }
+      }
+    }
     else if (a === 'more') { UI.showAll = true; render(); }
     else if (a === 'out') { UI.out = d.v === '1'; UI.showAll = false; render(); const el = document.getElementById(UI.out ? 'outQ' : 'q'); if (el) el.focus(); }
     else if (a === 'person') { if (!lastSheet) sheetTrigger = ctlKey(t); UI.person = +d.pid; render(); }

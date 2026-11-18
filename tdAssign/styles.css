@@ -504,6 +504,156 @@ a[class^="c-"], a.small, .row-t > a { display: inline-flex; align-items: center;
 }
 .qr-box svg { width: 88px; height: 88px; flex: none; display: block; }
 
+/* ---------------- B3 區內排人：工具列、摺疊分區、焦點脈衝與月曆 ---------------- */
+.b3-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.b3-toolbar .chips { margin: 0; min-width: 0; }
+.b3-toolbar .seg { flex: none; max-width: 100%; }
+.b3-toolbar .seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+.b3-toolbar .seg button:hover:not(.on) { background: var(--sunk); color: var(--ink); }
+.b3-toolbar .seg button.on { background: var(--accent); color: #fff; font-weight: 700; }
+.b3-toolbar .seg button.on:hover { background: var(--accent-ink); color: var(--on-accent-hover); }
+
+.b3-sec { display: flex; flex-direction: column; min-width: 0; background: transparent; }
+.b3-sec-sum {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  min-height: 44px;
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  border-radius: 8px;
+  border-bottom: 1px solid var(--line);
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+  user-select: none;
+}
+.b3-sec-sum::-webkit-details-marker { display: none; }
+.b3-sec-sum::marker { display: none; content: ''; }
+.b3-sec-sum::before {
+  content: '▸';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex: none;
+  font-size: 14px;
+  color: var(--muted);
+  transition: color 0.14s ease;
+}
+.b3-sec[open] > .b3-sec-sum::before { content: '▾'; color: var(--accent-ink); }
+.b3-sec-sum:hover { background: var(--sunk); }
+.b3-sec-title { flex: 1 1 auto; min-width: 0; line-height: 1.35; }
+.b3-sec-sum .num { flex: none; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.b3-sec-body { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; min-width: 0; }
+
+@keyframes b3Pulse {
+  0% {
+    background-color: color-mix(in srgb, var(--accent) 26%, var(--surface));
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 42%, transparent), var(--shadow-sm);
+  }
+  55% {
+    background-color: var(--accent-soft);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent), var(--shadow-sm);
+  }
+  100% {
+    background-color: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent), var(--shadow-sm);
+  }
+}
+.row.b3-focus-pulse,
+.b3-focus-pulse {
+  border-color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent), var(--shadow-sm);
+  scroll-margin-top: 132px;
+  animation: b3Pulse 1.6s ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row.b3-focus-pulse,
+  .b3-focus-pulse { animation: none; }
+}
+
+.b3-cal-card { padding: 14px 16px; gap: 12px; }
+.b3-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.b3-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.b3-cal-months { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip.sm { min-height: 36px; padding: 0 11px; border-radius: 18px; font-size: 13px; }
+.b3-cal-month-title { margin: 4px 0 6px; font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.35; }
+.b3-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.b3-cal-hd { font-size: 12px; font-weight: 700; color: var(--muted); text-align: center; padding: 2px 0; }
+.b3-cal-day {
+  min-height: 46px;
+  min-width: 0;
+  border: 1px solid var(--sunk);
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  background: var(--surface);
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+.b3-cal-day.empty { background: transparent; border-color: transparent; }
+.b3-cal-day.has-work { cursor: pointer; background: var(--sunk); border-color: var(--line); }
+.b3-cal-day.has-work:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 45%, var(--sunk)); }
+.b3-day-num { font-family: var(--f-num); font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600; line-height: 1.2; color: var(--muted); }
+.b3-cal-day.has-work .b3-day-num { color: var(--ink); font-weight: 700; }
+.b3-dots { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; max-width: 100%; }
+.b3-dot {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: inline-block;
+  flex: none;
+  transition: transform 0.12s ease;
+}
+button.b3-dot::after { content: ''; position: absolute; inset: -2px; }
+.b3-dot:hover { transform: scale(1.3); }
+.b3-dot:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.b3-legend-item .b3-dot,
+.b3-legend-item .b3-dot:hover { cursor: default; transform: none; }
+.b3-dot-k { background: #d96b27; }
+.b3-dot-srv { background: #2563eb; }
+.b3-dot-lj { background: #7c3aed; }
+.b3-dot-jzwd { background: #d97706; }
+.b3-dot-jzhol { background: #0f766e; }
+.b3-dot-wash { background: #0891b2; }
+.b3-dot-other { background: #be185d; }
+@media (prefers-color-scheme: dark) {
+  .b3-dot-k { background: #ef8341; }
+  .b3-dot-srv { background: #60a5fa; }
+  .b3-dot-lj { background: #a78bfa; }
+  .b3-dot-jzwd { background: #fbbf24; }
+  .b3-dot-jzhol { background: #2dd4bf; }
+  .b3-dot-wash { background: #38bdf8; }
+  .b3-dot-other { background: #f472b6; }
+}
+
 /* ---------------- 行動裝置防溢位與響應式收斂 ---------------- */
 @media (max-width: 768px) {
   .ws-top { padding: 8px 12px; gap: 6px 10px; }
@@ -516,6 +666,11 @@ a[class^="c-"], a.small, .row-t > a { display: inline-flex; align-items: center;
   .overview-hero h1 { font-size: 24px; }
   .print-book { padding: 16px 14px; }
   .print-watermark { font-size: 32px; }
+  .b3-toolbar { gap: 8px; }
+  .b3-cal-card { padding: 12px; gap: 10px; }
+  .b3-cal-grid { gap: 3px; }
+  .b3-cal-day { min-height: 44px; padding: 3px 4px; }
+  .b3-dots { gap: 3px; }
 }
 @media (max-width: 520px) {
   .grid2, .login-cmp, .hub-grid { grid-template-columns: minmax(0, 1fr); }
@@ -523,6 +678,7 @@ a[class^="c-"], a.small, .row-t > a { display: inline-flex; align-items: center;
   .tl-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
   .top { padding: 8px 12px; }
   .sync { display: none; }
+  .b3-toolbar .seg { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ---------------- 年長者大字無障礙模式 (html.large-mode) ---------------- */
@@ -572,6 +728,18 @@ html.large-mode .a5-grid,
 html.large-mode .case-grid { font-size: 17px; }
 html.large-mode .tl-cell { min-height: 46px; font-size: 15px; }
 html.large-mode .tl-m { font-size: 13.5px; }
+html.large-mode .b3-toolbar .seg button { min-height: 48px; font-size: 17px; padding: 6px 16px; }
+html.large-mode .b3-sec-sum { font-size: 20px; min-height: 50px; padding: 10px 6px; }
+html.large-mode .b3-sec-sum .num { font-size: 15.5px; }
+html.large-mode .b3-legend { font-size: 14.5px; gap: 8px 14px; }
+html.large-mode .chip.sm { min-height: 44px; padding: 4px 13px; font-size: 16px; border-radius: 22px; }
+html.large-mode .b3-cal-month-title { font-size: 18px; }
+html.large-mode .b3-cal-hd { font-size: 14px; }
+html.large-mode .b3-cal-day { min-height: 54px; padding: 5px; }
+html.large-mode .b3-day-num { font-size: 14.5px; }
+html.large-mode .b3-dot { width: 13px; height: 13px; }
+html.large-mode .row.b3-focus-pulse,
+html.large-mode .b3-focus-pulse { scroll-margin-top: 152px; }
 html.large-mode #toast { font-size: 18px; padding: 12px 18px; }
 @media (min-width: 960px) {
   html.large-mode .inspector { top: 128px; max-height: calc(100vh - 144px); }
@@ -586,6 +754,7 @@ html.large-mode #toast { font-size: 18px; padding: 12px 18px; }
   html.large-mode .act-bar2 { grid-template-columns: 1fr; }
   html.large-mode .sync { display: none; }
   html.large-mode .tl-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  html.large-mode .b3-cal-day { padding: 4px; }
 }
 
 /* ---------------- 印刷樣式 (@media print) ---------------- */
@@ -597,7 +766,7 @@ html.large-mode #toast { font-size: 18px; padding: 12px 18px; }
   .print-book td.col-area, .print-book th.col-area { white-space: nowrap; }
   #app { max-width: none !important; margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
   .wide-main, main { padding: 0 !important; gap: 10px !important; }
-  .ws-header, .top, .bnav, .sub-nav, .ws-nav, .no-print, .btn, .acts, .tabs-pill, .chips, .sheet-bg, .sheet, #toast, .errbar, .page-head .acts {
+  .ws-header, .top, .bnav, .sub-nav, .ws-nav, .no-print, .btn, .acts, .tabs-pill, .chips, .b3-toolbar, .b3-cal-months, .sheet-bg, .sheet, #toast, .errbar, .page-head .acts {
     display: none !important;
   }
   .card, .table-wrap, .plan-card, .kpi-card {
