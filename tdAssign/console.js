@@ -525,11 +525,12 @@
       ${unseededBanner(ctx)}
       <section class="page-head">
         <div>
-          <div class="muted small">116 年度 · 版本 ${esc(draftVer())} · 共用資料骨幹</div>
+          <div class="muted small">00 系統指南與 18 情境對照 · 116 年度 · 版本 ${esc(draftVer())}</div>
           <h1>一份資料，三個工作台，一整年的排班</h1>
           <p class="muted" style="margin:6px 0 0;max-width:820px">年度控制台產生初版，各區討論平台把調整談定，運行調度讓排好的班每一次都有人到。三者共用同一份勤務格、人員主檔與規則，任何變更只改一次。</p>
         </div>
         <div class="acts">
+          <a class="btn" href="#/">← 回我的專屬首頁</a>
           <a class="btn pri" href="#/a1">進入年度控制台 (A1)</a>
           <a class="btn blue-out" href="#/b1/${esc(curArea)}">前往${esc(curArea)}討論 (B1)</a>
         </div>

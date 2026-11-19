@@ -723,7 +723,7 @@ button.b3-dot::after { content: ''; position: absolute; inset: -2px; }
   .tl-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
   .top { padding: 8px 12px; }
   .sync { display: none; }
-  .b3-toolbar .seg { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .b3-toolbar .seg { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* ---------------- 年長者大字無障礙模式 (html.large-mode) ---------------- */
@@ -850,3 +850,128 @@ html.large-mode #toast { font-size: 18px; padding: 12px 18px; }
 /* 抽屜開啟時鎖住背景捲動；抽屜本身取得焦點時不顯示外框（內部按鈕仍有焦點樣式） */
 body.sheet-open { overflow: hidden; }
 .sheet:focus { outline: none; }
+
+/* ---------------- V2 全角色入口與 APP 直覺體驗元件 ---------------- */
+.bnav.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bnav.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.bnav.cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ws-nav a, .bnav a { gap: 4px; }
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-family: var(--f-num);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--bad);
+  color: var(--on-fill);
+  flex: none;
+}
+.nav-badge.pre { background: var(--pre); }
+.nav-badge.ok { background: var(--ok); }
+
+.cmd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+}
+.cmd-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-decoration: none;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.cmd-card:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(20, 30, 25, 0.08); }
+.cmd-card.cmd-ok { border-top-color: var(--ok); }
+.cmd-card.cmd-info { border-top-color: var(--info); }
+.cmd-card.cmd-bad { border-top-color: var(--bad); }
+.cmd-card.cmd-warn { border-top-color: var(--warn); }
+.cmd-k { font-size: 13px; font-weight: 700; color: var(--muted); }
+.cmd-v { font-family: var(--f-num); font-size: 28px; font-weight: 700; line-height: 1.2; }
+.cmd-s { font-size: 12.5px; color: var(--muted); }
+
+.scope-banner {
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-left: 5px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.fam-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.hero-duty {
+  background: linear-gradient(135deg, var(--accent-soft), var(--surface) 75%);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-left: 5px solid var(--accent);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow-sm);
+}
+.hero-date { font-size: 26px; font-weight: 700; line-height: 1.2; color: var(--ink); }
+.hero-title { font-family: var(--f-disp); font-size: 20px; font-weight: 700; color: var(--accent-ink); }
+
+.row.row-st-bad { border-left: 4px solid var(--bad); }
+.row.row-st-pre { border-left: 4px solid var(--pre); }
+.row.row-st-wn { border-left: 4px solid var(--warn); }
+.row.row-st-ok { border-left: 4px solid var(--ok); }
+
+.btn-line { background: #06c755; border-color: #06c755; color: #ffffff; }
+.btn-line:hover:not(:disabled) { background: #05a847; border-color: #05a847; color: #ffffff; }
+
+.phase-preview {
+  background: color-mix(in srgb, var(--info-soft) 55%, var(--surface));
+  border: 1.5px dashed color-mix(in srgb, var(--info) 55%, transparent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.undo-strip {
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+html.large-mode .hero-date { font-size: 30px; }
+html.large-mode .hero-title { font-size: 24px; }
+html.large-mode .cmd-v { font-size: 32px; }
+html.large-mode .nav-badge { font-size: 13px; min-width: 22px; height: 22px; }
+
+@media print {
+  .phase-preview, .undo-strip, .fam-pills { display: none !important; }
+}
