@@ -11,7 +11,7 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const getPath = window.TDStore.getPath;
   // 資料庫鍵的白名單格式（讀進來的鍵一律過濾，避免被拿來做屬性注入）
-  const RE_PID = /^[0-9]{1,9}$/, RE_SID = /^[A-Za-z0-9_]{1,24}$/, RE_EXID = /^EX_[A-Za-z0-9_]{1,20}$/, RE_PROPID = /^[A-Za-z0-9_]{1,24}$/, RE_ACK = /^[A-Za-z0-9_~\-]{1,200}$/, RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const RE_PID = /^[0-9]{1,9}$/, RE_SID = /^[A-Za-z0-9_]{1,24}$/, RE_EXID = /^EX_[A-Za-z0-9_]{1,20}$/, RE_PROPID = /^[A-Za-z0-9_]{1,24}$/, RE_ACK = /^[A-Za-z0-9_~\-]{1,200}$/, RE_DATE = /^\d{4}-\d{2}-\d{2}$/, RE_UID = /^[A-Za-z0-9:_-]{1,128}$/;
   // 取出某節點底下「鍵為純數字人員編號、值為物件」的紀錄（髒資料的鍵或值一律略過）
   const pidRecs = (node) => Object.keys(node && typeof node === 'object' ? node : {}).filter((k) => /^\d+$/.test(k) && RE_PID.test(k) && node[k] && typeof node[k] === 'object').map((k) => [k, node[k]]);
   const BASE_MAX_ID = BASE.people.reduce((mx, p) => Math.max(mx, +p.id || 0), 0);
@@ -34,7 +34,8 @@
     b6Mode: '', b1NomOpen: false, b1ShowCook: false,
     b3Mode: 'group', b3CalYm: '', b3FocusId: '',
     pAddOptOpen: false, a6RemindOpen: false, a6PickAreaOpen: false,
-    viewAs: '', guestQ: '', myFamPid: 0, r1RemindOpen: false
+    viewAs: '', guestQ: '', myFamPid: 0, r1RemindOpen: false,
+    sysQ: '', sysRoleFilter: 'all', sysAddUidOpen: false, sysLogAll: false
   };
 
   /* ---------------- 設定與狀態工具 ---------------- */
@@ -80,7 +81,7 @@
   /* ---------------- 由雲端資料算出排班模型 ---------------- */
   let M = null, ISS = [], bySlot = {}, byPid = {}, slotProps = {};
   // #20：模型只在「會影響排班模型的資料」變動時重算（presence、log 等變動不重算）
-  const MODEL_KEYS = ['rules', 'groups', 'assign', 'edits', 'extra', 'addedPeople', 'pov', 'acks', 'proposals', 'admins', 'sched'];
+  const MODEL_KEYS = ['rules', 'groups', 'assign', 'edits', 'extra', 'addedPeople', 'pov', 'acks', 'proposals', 'sysadmins', 'admins', 'sched'];
   let lastModelSig = null;
   function dataSigs() {
     const d = D(), parts = {};
@@ -205,7 +206,10 @@
     return { p: M.pById[+u.pid] || null, status: u.bindStatus || 'ok', rec: u };
   }
   const boundOk = (bp) => !!(bp && bp.p && bp.status === 'ok');
-  const isAdmin = () => !!(me() && (D().admins || {})[me().uid]);
+  const isSysAdmin = () => !!(me() && (D().sysadmins || {})[me().uid]);
+  const isCoordAdmin = () => !!(me() && (D().admins || {})[me().uid]);
+  const isAdmin = () => isSysAdmin() || isCoordAdmin();
+  const safeDomUid = (u) => String(u || '').replace(/[^A-Za-z0-9-]/g, (c) => '_' + c.codePointAt(0).toString(16) + '_');
   const memberOf = (area, uid) => ((D().members || {})[area] || {})[uid || (me() && me().uid)];
   const isLead = (area) => { const m = memberOf(area); return !!(m && m.status === 'ok' && m.role === 'lead'); };
   function can(area, kind) {
@@ -309,7 +313,8 @@
     const schedAreas = me() ? myAreas() : [];
     const hasPersonal = !!(me() && (boundOk(bp) || (bp && bp.p && bp.status === 'pending') || famCnt > 0));
     let role = 'guest';
-    if (isAdmin()) role = 'admin';
+    if (isSysAdmin()) role = 'sysadmin';
+    else if (isAdmin()) role = 'admin';
     else if (leadAreas.length) role = 'lead';
     else if (schedAreas.length) role = 'sched';
     else if (hasPersonal) role = 'member';
@@ -321,19 +326,28 @@
       schedAreas,
       bp,
       famCnt,
-      hasPersonal
+      hasPersonal,
+      isSysAdmin: isSysAdmin(),
+      isCoordAdmin: isCoordAdmin()
     };
   }
   function activeRole() {
     const dr = detectRole();
-    if (UI.viewAs === 'my' && me() && ['admin', 'lead', 'sched'].includes(dr.role)) return 'member';
+    if (UI.viewAs === 'my' && me() && ['sysadmin', 'admin', 'lead', 'sched'].includes(dr.role)) return 'member';
+    if (UI.viewAs === 'admin' && me() && dr.role === 'sysadmin') return 'admin';
     return dr.role;
   }
   function roleBadges(area) {
     const d = D();
     const seeded = !!(d.meta || {}).seeded;
+    let allPendMem = 0;
+    for (const wa of WORK_AREAS) {
+      allPendMem += Object.values((d.members || {})[wa] || {}).filter((m) => m && m.status === 'pending').length;
+    }
+    const allPendBind = Object.values(d.users || {}).filter((u) => u && u.bindStatus === 'pending').length;
+    const sysTotal = allPendMem + allPendBind;
     if (!seeded || !M) {
-      return { submitted: 0, openProps: 0, clashes: 0, openCoord: 0, orphanBinds: 0, afterAreas: 0, a6Total: 0, pre: 0, approvals: 0, needVoteProps: 0, leadClashes: 0, myTodo: 0 };
+      return { submitted: 0, openProps: 0, clashes: 0, openCoord: 0, orphanBinds: 0, afterAreas: 0, a6Total: 0, pre: 0, approvals: 0, needVoteProps: 0, leadClashes: 0, myTodo: 0, allPendMem, allPendBind, sysTotal };
     }
     const a = WORK_AREAS.includes(area) ? area : defaultArea();
     let submitted = 0, afterAreas = 0;
@@ -365,7 +379,8 @@
       + S.dated.filter((x) => isMineItem(a, 'jz') && !x.done).length;
     return {
       submitted, openProps, clashes, openCoord, orphanBinds, afterAreas, a6Total,
-      pre: S.pre, approvals, needVoteProps, leadClashes: S.clash, myTodo
+      pre: S.pre, approvals, needVoteProps, leadClashes: S.clash, myTodo,
+      allPendMem, allPendBind, sysTotal
     };
   }
   function renderGuestHits() {
@@ -1467,13 +1482,13 @@
     const label = u ? (boundOk(bp) ? `${u.name}（${bp.p.n}）` : u.name || '我') : '';
     const sync = (store.mode === 'local' ? '本機試用' : !store.online ? `離線${store.pending ? ' · ' + store.pending + ' 筆待同步' : ''}` : store.pending ? `同步中 ${store.pending}` : '已同步')
       + (store.foreignPending ? ` · 另有 ${store.foreignPending} 筆其他帳號未送出` : '');
-    const viewToggle = u && ['admin', 'lead', 'sched'].includes(dr.role)
+    const viewToggle = u && ['sysadmin', 'admin', 'lead', 'sched'].includes(dr.role)
       ? (UI.viewAs === 'my'
-        ? `<button type="button" class="btn sm pri-out" data-act="switch-view" data-v="">回工作台 ⇄</button>`
+        ? `<button type="button" class="btn sm pri-out" data-act="switch-view" data-v="">${dr.role === 'sysadmin' ? '回系統台 ⇄' : '回工作台 ⇄'}</button>`
         : `<button type="button" class="btn sm" data-act="switch-view" data-v="my" title="切換為一般道親個人班表視角">我的班表 ⇄</button>`)
       : '';
     return `<div class="top-r"><span class="sync ${store.online ? '' : 'off'}">${esc(sync)}</span>
-      <a class="btn sm ghost" href="#/overview" title="系統總覽與 18 情境對照">? 指南</a>
+      <a class="btn sm ghost" href="#/overview" title="系統總覽與 19 情境對照">? 指南</a>
       ${largeModeBtn()}
       ${viewToggle}
       ${u ? `<button class="btn sm" data-act="open-acct">${esc(label)}</button>` : `<a class="btn sm pri" href="#/login">登入 / 綁定</a>`}</div>`;
@@ -1501,21 +1516,65 @@
     const isMy = wsKey === 'my';
     const isLookup = wsKey === 'lookup';
     const isLogin = wsKey === 'login';
+    const isSys = wsKey === 'sys';
+    const isAdminHome = wsKey === 'admin-home';
 
     let navs = '';
     let subs = '';
 
-    if (role === 'admin') {
+    if (role === 'sysadmin') {
       const inA23 = isA && (subKey === 'a2' || subKey === 'a3');
       const inA145 = isA && ['a1', 'a4', 'a5'].includes(subKey);
       const inRev = isA && subKey === 'review';
       navs = [
-        navItem(wsKey === 'home', '#/', '指揮中心'),
+        navItem(wsKey === 'home' || isSys, '#/', '系統與權限', badgeHtml(bd.sysTotal, 'pre')),
+        navItem(isAdminHome, '#/admin', '總召指揮'),
+        navItem(inRev, '#/review', '進度協調', badgeHtml(bd.a6Total)),
+        navItem(inA23, '#/a2', '總表與人員'),
+        navItem(inA145, '#/a1', '規則定版'),
+        navItem(isBOrArea || isP, `#/a/${a}`, '各區作業')
+      ].join('');
+
+      if (inA23) {
+        subs = [
+          navItem(subKey === 'a2', '#/a2', '年度總表 (A2)'),
+          navItem(subKey === 'a3', '#/a3', '人員狀態 (A3)')
+        ].join('');
+      } else if (inA145) {
+        subs = [
+          navItem(subKey === 'a1', '#/a1', '建置與初版 (A1)'),
+          navItem(subKey === 'a4', '#/a4', '規則與試算 (A4)'),
+          navItem(subKey === 'a5', '#/a5', '定版與匯出 (A5)')
+        ].join('');
+      } else if (isBOrArea || isP) {
+        subs = [
+          navItem(subKey === 'b1', `#/b1/${a}`, '區長首頁 (B1)'),
+          navItem(subKey === 'b3' || subKey === 'a', `#/a/${a}`, '本區排人 (B3)'),
+          navItem(subKey === 't' || subKey === 'b5', `#/t/${a}`, '分工與送出 (B5)'),
+          navItem(isP, '#/p', '提案與試算 (B2)')
+        ].join('');
+      } else if (isOv) {
+        subs = [
+          navItem(true, '#/overview', '系統指南 (00)'),
+          navItem(false, '#/sys', '帳號權限 (R0)'),
+          navItem(false, '#/a1', '建置初版 (A1)'),
+          navItem(false, '#/a2', '年度總表 (A2)'),
+          navItem(false, '#/review', '跨區協調 (A6)'),
+          navItem(false, '#/a5', '定版匯出 (A5)')
+        ].join('');
+      }
+    } else if (role === 'admin') {
+      const inA23 = isA && (subKey === 'a2' || subKey === 'a3');
+      const inA145 = isA && ['a1', 'a4', 'a5'].includes(subKey);
+      const inRev = isA && subKey === 'review';
+      navs = [
+        navItem(wsKey === 'home' || isAdminHome, '#/', '指揮中心'),
         navItem(inA23, '#/a2', '總表與人員'),
         navItem(inRev, '#/review', '進度協調', badgeHtml(bd.a6Total)),
         navItem(isP, '#/p', '提案決議', badgeHtml(bd.openProps, 'pre')),
         navItem(inA145, '#/a1', '規則定版'),
-        navItem(isBOrArea, `#/a/${a}`, '各區作業')
+        navItem(isBOrArea, `#/a/${a}`, '各區作業'),
+        navItem(isSys, '#/sys', '帳號權限', badgeHtml(bd.sysTotal, 'pre'))
       ].join('');
 
       if (inA23) {
@@ -1615,6 +1674,15 @@
     const isHome = !r || !r.v;
     const isPubBrowse = r && ['lookup', 'a', 'g', 's', 'b1', 'p', 'overview'].includes(r.v);
 
+    if (role === 'sysadmin') {
+      return `<nav class="bnav cols-5 no-print" aria-label="行動版快捷導覽">
+        ${it('#/', isHome || (r && r.v === 'sys'), '權限', badgeHtml(bd.sysTotal))}
+        ${it('#/admin', r && r.v === 'admin', '指揮')}
+        ${it('#/review', r && r.v === 'review', '進度', badgeHtml(bd.a6Total))}
+        ${it('#/a2', r && (r.v === 'a2' || r.v === 'a3'), '總表')}
+        ${it('#/a5', r && ['a1', 'a4', 'a5'].includes(r.v), '定版')}
+      </nav>`;
+    }
     if (role === 'admin') {
       return `<nav class="bnav cols-5 no-print" aria-label="行動版快捷導覽">
         ${it('#/', isHome, '指揮')}
@@ -1724,7 +1792,7 @@
       ${unsubmitted.length ? `<button type="button" class="btn sm pri" data-act="copy-remind" data-text="${esc(`【天達堂 116 排班提醒】請 ${unsubmitted.join('、')} 區長完成本區排人後，於「分工與送出」點擊送出給總召確認。`)}">複製 LINE 群組催繳訊息</button>` : ''}
     </section>` : '';
 
-    return `${wsHeader('home', '', curArea)}<main class="wide-main">
+    return `${wsHeader(route().v === 'admin' ? 'admin-home' : 'home', '', curArea)}<main class="wide-main">
       ${seedNoticeHtml()}
       <div class="page-head">
         <div>
@@ -1783,6 +1851,7 @@
               <a class="btn sm" href="#/a3">A3 人員狀態</a>
               <a class="btn sm" href="#/a4">A4 規則試算</a>
               <a class="btn sm" href="#/a5">A5 印刷定版</a>
+              <a class="btn sm blue-out" href="#/sys">帳號與權限管理</a>
               <a class="btn sm" href="#/overview">00 系統指南</a>
             </div>
           </section>
@@ -2169,6 +2238,7 @@
           <h2>本機試用模式：快速切換各角色入口</h2>
           <div class="muted small">選一個身分立即體驗 V2 分角色首頁（資料只存在這台裝置）。</div>
           <div class="list">
+            ${opt({ uid: 'local-sysadmin', name: '系統管理員（試用）', sysadmin: true }, 'R0 系統管理員（推薦）', '帳號與權限管理中心 (#/sys)、指定總召／區長／排班人員、綁定與系統設定')}
             ${opt({ uid: 'local-admin', name: '總召（試用）', admin: true }, 'R1 排班總召／調度台', '年度指揮中心、A1–A6 控制台、跨區協調、預排與定版')}
             ${AREAS.map((a) => opt({ uid: 'local-lead-' + a, name: a + '區長（試用）', leadOf: a }, `R2 ${a} 區長`, '合併首頁與 B1、預排確認、本區排人 B3、提案表態 B2、送出 B5')).join('')}
             ${sampleP ? opt({ uid: 'local-bound-' + sampleP.id, name: sampleP.n, pid: sampleP.id, area: sampleP.a }, `R4 已綁定道親：${sampleP.n}（${sampleP.a}）`, '我的服務首頁、下一場倒數與代管家人') : ''}
@@ -2266,6 +2336,7 @@
   function vHome() {
     const role = activeRole();
     const dr = detectRole();
+    if (role === 'sysadmin') return vSysAdmin();
     if (role === 'admin') return vHomeAdmin();
     if (role === 'lead') return vHomeLead(dr.primaryArea);
     if (role === 'sched') return vHomeSched(dr.primaryArea);
@@ -2337,7 +2408,8 @@
       const sampleP = M.people.find((p) => p.a === '瑞芳' && p.n) || M.people[0];
       const opt = (who, t, d) => `<button class="row" data-act="local-in" data-who='${esc(JSON.stringify(who))}'><b>${esc(t)}</b><div class="muted small">${esc(d)}</div></button>`;
       mainHtml += `<section class="card"><b>本機試用模式</b><div class="muted">選一個身分試用，資料只存在這台裝置；開兩個分頁選不同身分，可模擬多人同時排。</div></section>
-        <section class="list">${opt({ uid: 'local-admin', name: '總召（試用）', admin: true }, '總召、調度台', '看各區進度、協調、預排、決議套用提案、指定排班人員')}
+        <section class="list">${opt({ uid: 'local-sysadmin', name: '系統管理員（試用）', sysadmin: true }, 'R0 系統管理員', '帳號與權限管理中心 (#/sys)、指定總召／區長／排班人員與系統設定')}
+        ${opt({ uid: 'local-admin', name: '總召（試用）', admin: true }, '總召、調度台', '看各區進度、協調、預排、決議套用提案、指定排班人員')}
         ${AREAS.map((a) => opt({ uid: 'local-lead-' + a, name: a + '區長（試用）', leadOf: a }, a + ' 區長', '區長首頁、排本區的人、提案表態、指定排班人員、確認預排、送出')).join('')}
         ${sampleP ? opt({ uid: 'local-bound-' + sampleP.id, name: sampleP.n, pid: sampleP.id, area: sampleP.a }, `已綁定道親：${sampleP.n}（${sampleP.a}）`, '直接體驗 M8 已綁定名冊姓名狀態') : ''}
         ${opt({ uid: 'local-u1', name: '道親甲（試用）' }, '一般道親（未綁定）', '登入後搜尋名冊姓名綁定「這是我」或申請成為排班人員')}</section>`;
@@ -2374,9 +2446,19 @@
   function accountSheet() {
     if (!me()) return '';
     const isLg = typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('large-mode');
+    const roleTags = [];
+    if (isSysAdmin()) roleTags.push('系統管理員');
+    if (isCoordAdmin()) roleTags.push('排班總召');
+    for (const a of WORK_AREAS) {
+      const m = memberOf(a);
+      if (m && m.status === 'ok') roleTags.push(a + (m.role === 'lead' ? '區長' : '排班'));
+    }
+    if (!roleTags.length) roleTags.push('一般道親');
     return `<div class="sheet-bg" data-act="close-acct"></div><aside class="sheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="帳號與姓名綁定">
-      <div class="mem-h"><h2>${esc(me().name || '我')}</h2><span class="muted small">${esc(me().provider || '')}${isAdmin() ? ' · 總召/調度台' : ''}</span>
+      <div class="mem-h"><h2>${esc(me().name || '我')}</h2><span class="muted small">${esc(me().provider || '')} · ${esc(roleTags.join('／'))}</span>
         <button class="btn sm" data-act="close-acct">關閉</button></div>
+      <div class="sys-uid"><code>UID: ${esc(me().uid)}</code><button type="button" class="link" data-act="copy-text" data-text="${esc(me().uid)}">複製 UID</button></div>
+      ${isAdmin() ? `<div class="bind-hit"><div><b>帳號與權限管理</b><div class="muted small">集中指派總召、區長、排班人員與審核綁定</div></div><a class="btn sm pri-out" href="#/sys" data-act="close-acct">前往帳號與權限管理 →</a></div>` : ''}
       <div class="bind-hit">
         <div><b>字級與閱讀模式</b><div class="muted small">${isLg ? '目前已開啟大字版，介面文字與按鈕已放大' : '目前為標準字級，可切換大字版方便閱讀'}</div></div>
         <button type="button" class="btn sm ${isLg ? 'pri' : 'pri-out'}" data-act="toggle-large">${isLg ? '切回標準字' : '開啟大字版'}</button>
@@ -2384,6 +2466,385 @@
       ${bindSectionHtml()}
       <button class="btn wide bad-out" data-act="signout">登出</button>
     </aside>`;
+  }
+
+  /* ---------------- 畫面：R0 系統管理與帳號權限中心 ---------------- */
+  function collectAllAccounts() {
+    const d = D();
+    const uids = new Set();
+    for (const src of [d.users, d.sysadmins, d.admins, d.leads, d.sched]) {
+      for (const uid in src || {}) if (RE_UID.test(uid)) uids.add(uid);
+    }
+    for (const a of WORK_AREAS) {
+      for (const uid in (d.members || {})[a] || {}) if (RE_UID.test(uid)) uids.add(uid);
+    }
+    const list = [];
+    for (const uid of uids) {
+      const uRec = (d.users || {})[uid] || null;
+      const isSys = !!(d.sysadmins || {})[uid];
+      const isCoord = !!(d.admins || {})[uid];
+      const memberships = [];
+      for (const a of WORK_AREAS) {
+        const m = ((d.members || {})[a] || {})[uid];
+        if (m && typeof m === 'object') {
+          memberships.push({
+            area: a,
+            role: m.role === 'lead' ? 'lead' : 'sched',
+            status: m.status === 'pending' ? 'pending' : 'ok',
+            scope: m.scope || null,
+            by: m.by || '',
+            at: m.at || 0,
+            name: m.name || ''
+          });
+        }
+      }
+      const pid = uRec && uRec.pid ? +uRec.pid : 0;
+      const bp = pid && M ? (M.pById[pid] || null) : null;
+      const ap = pid ? ((d.addedPeople || {})[pid] || null) : null;
+      const bindStatus = uRec && uRec.bindStatus ? uRec.bindStatus : (pid ? 'ok' : '');
+      const bindArea = (uRec && uRec.bindArea) || (bp && bp.a) || (ap && ap.a) || '';
+      const memName = (memberships.find((m) => m.name) || {}).name || '';
+      const name = (uRec && uRec.name) || memName || (bp && bp.n) || (ap && ap.n) || '（未登入／預授權）';
+      const provider = (uRec && uRec.provider)
+        || (uid.startsWith('local-') ? 'local' : uid.startsWith('line:') ? 'line' : uid.startsWith('google') ? 'google' : (uRec ? '已登入' : '預先授權'));
+      const isLeadAny = memberships.some((m) => m.status === 'ok' && m.role === 'lead');
+      const isSchedAny = memberships.some((m) => m.status === 'ok' && m.role === 'sched');
+      const hasPending = memberships.some((m) => m.status === 'pending') || bindStatus === 'pending';
+      const rank = hasPending ? 0 : isSys ? 1 : isCoord ? 2 : isLeadAny ? 3 : isSchedAny ? 4 : bindStatus === 'ok' ? 5 : 6;
+      list.push({
+        uid, name, provider, uRec, pid, bp, ap, bindStatus, bindArea,
+        isSys, isCoord, memberships, isLeadAny, isSchedAny, hasPending, rank
+      });
+    }
+    list.sort((a, b) => (a.rank - b.rank) || a.name.localeCompare(b.name, 'zh-TW') || a.uid.localeCompare(b.uid));
+    return list;
+  }
+
+  function renderSysUserList() {
+    if (!isAdmin()) return '';
+    const all = collectAllAccounts();
+    const f = UI.sysRoleFilter || 'all';
+    const q = String(UI.sysQ || '').trim().toLowerCase();
+    const filtered = all.filter((a) => {
+      if (f === 'sysadmin' && !a.isSys) return false;
+      if (f === 'admin' && !a.isCoord) return false;
+      if (f === 'lead' && !a.isLeadAny) return false;
+      if (f === 'sched' && !a.isSchedAny) return false;
+      if (f === 'pending' && !a.hasPending) return false;
+      if (f === 'unbound' && (a.isSys || a.isCoord || a.isLeadAny || a.isSchedAny || a.bindStatus === 'ok')) return false;
+      if (!q) return true;
+      const hay = [
+        a.name, a.uid, a.bp ? a.bp.n : '', a.ap ? a.ap.n : '', a.bindArea,
+        a.isSys ? '系統管理員 sysadmin' : '',
+        a.isCoord ? '總召 調度台 admin' : '',
+        a.memberships.map((m) => `${m.area}${m.role === 'lead' ? '區長' : '排班'}${m.status === 'pending' ? '申請中' : ''}`).join(' ')
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+    if (!filtered.length) return '<div class="empty">沒有符合條件的帳號。</div>';
+
+    const provLabel = { google: 'Google', line: 'LINE', local: '本機試用' };
+    const sysOk = isSysAdmin();
+
+    return filtered.map((a) => {
+      const du = safeDomUid(a.uid);
+      const isMe = me() && a.uid === me().uid;
+      const pName = a.bp ? `${a.bp.n}（${a.bp.a}）` : (a.ap ? `${a.ap.n}（${a.ap.a}·新名冊）` : (a.pid ? `#${a.pid}` : ''));
+
+      const roleBadgesHtml = [
+        a.isSys ? `<span class="tag sys">R0 系統管理員</span>` : '',
+        a.isCoord ? tag('pre', 'R1 排班總召') : '',
+        ...a.memberships.map((m) => tag(
+          m.status === 'pending' ? 'wn' : (m.role === 'lead' ? 'ok' : 'pl'),
+          `${m.area}·${m.status === 'pending' ? '申請排班' : (m.role === 'lead' ? '區長' : '排班')}`
+        )),
+        (!a.isSys && !a.isCoord && !a.memberships.length)
+          ? tag(a.bindStatus === 'ok' ? 'no' : 'wn', a.bindStatus === 'ok' ? '一般道親' : (a.bindStatus === 'pending' ? '綁定待審' : '未綁定'))
+          : ''
+      ].filter(Boolean).join('');
+
+      let bindHtml = '<div class="muted small">尚未綁定名冊姓名（可由本人至 M8 綁定，不影響預先指派排班權限）</div>';
+      if (a.bindStatus === 'pending') {
+        bindHtml = `<div class="acts">${tag('wn', '申請綁定')} <b>${esc(pName)}</b>
+          <button type="button" class="btn sm pri" data-act="approve-bind" data-uid="${esc(a.uid)}" data-ok="1">同意綁定</button>
+          <button type="button" class="btn sm" data-act="approve-bind" data-uid="${esc(a.uid)}" data-ok="0">退回</button></div>`;
+      } else if (a.bindStatus === 'ok' && a.pid) {
+        bindHtml = `<div class="acts">${tag('ok', '已綁定名冊')} <b>${esc(pName)}</b>
+          ${a.bp ? `<button type="button" class="link" data-act="person" data-pid="${a.pid}">看班表</button>` : ''}
+          <button type="button" class="link" data-act="sys-unbind" data-uid="${esc(a.uid)}">解除綁定</button></div>`;
+      } else if (a.bindStatus === 'rejected' || a.pid) {
+        bindHtml = `<div class="acts">${tag('bad', '綁定已退回')} <span>${esc(pName)}</span>
+          <button type="button" class="link" data-act="sys-unbind" data-uid="${esc(a.uid)}">清除綁定紀錄</button></div>`;
+      }
+
+      const globalHtml = sysOk
+        ? `<div class="sys-global-bar">
+            <span class="small muted" style="font-weight:700">系統最高角色：</span>
+            <button type="button" class="btn sm ${a.isSys ? 'pri' : ''}" data-act="sys-toggle-sysadmin" data-uid="${esc(a.uid)}" data-on="${a.isSys ? '0' : '1'}" ${isMe && a.isSys ? 'disabled title="無法取消自己的系統管理員身分"' : ''}>
+              ${a.isSys ? (isMe ? 'R0 系統管理員 ✓（本人鎖定）' : 'R0 系統管理員 ✓（撤銷）') : '＋ 設為系統管理員'}
+            </button>
+            <button type="button" class="btn sm ${a.isCoord ? 'blue' : ''}" data-act="sys-toggle-admin" data-uid="${esc(a.uid)}" data-on="${a.isCoord ? '0' : '1'}">
+              ${a.isCoord ? 'R1 排班總召 ✓（撤銷）' : '＋ 設為排班總召／調度台'}
+            </button>
+          </div>`
+        : `<div class="sys-global-bar"><span class="small muted">全域階層：<b>${a.isSys ? 'R0 系統管理員' : a.isCoord ? 'R1 排班總召／調度台' : '無全域總召權限'}</b>（僅 R0 系統管理員可異動）</span></div>`;
+
+      const areaRowsHtml = a.memberships.map((m) => {
+        const scText = m.role === 'lead'
+          ? '本區全部可排 · 可指定排班人員與送出'
+          : (m.scope ? (KINDS.filter(([k]) => m.scope[k]).map(([, t]) => t).join('、') || '尚未勾選任何項目') : '本區全部項目皆可排');
+        const scopeDetails = m.status === 'ok' && m.role === 'sched'
+          ? `<details style="margin-top:4px"><summary>調整排班分工範圍（${esc(scText)}）</summary>
+              <div class="grid2" style="padding-top:6px">${KINDS.map(([k, t]) => `<label class="ck"><input type="checkbox" data-act-change="scope" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}" data-k="${k}" ${!m.scope || m.scope[k] ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</div>
+              <div class="muted small">全部勾選＝全部可排。</div></details>`
+          : `<div class="muted small">${esc(scText)}${m.by ? ` · ${esc(m.by)} 指定` : ''}</div>`;
+        const btns = m.status === 'pending'
+          ? `<button type="button" class="btn sm pri" data-act="approve" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}">同意</button>
+             <button type="button" class="btn sm" data-act="unmember" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}">拒絕</button>`
+          : m.role === 'sched'
+            ? `<button type="button" class="btn sm" data-act="sys-set-area-role" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}" data-role="lead">升為區長</button>
+               <button type="button" class="btn sm" data-act="unmember" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}">移除</button>`
+            : `<button type="button" class="btn sm" data-act="sys-set-area-role" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}" data-role="sched">降為排班</button>
+               <button type="button" class="btn sm" data-act="unmember" data-area="${esc(m.area)}" data-uid="${esc(a.uid)}">取消區長</button>`;
+        return `<div class="sys-area-row">
+          <div class="row-h">
+            <div class="row-t"><b class="c-${esc(m.area)}">${esc(m.area)}</b>${tag(m.status === 'pending' ? 'wn' : (m.role === 'lead' ? 'ok' : 'pl'), m.status === 'pending' ? '申請排班中' : (m.role === 'lead' ? '區長' : '排班人員'))}</div>
+            <div class="acts">${btns}</div>
+          </div>
+          ${scopeDetails}
+        </div>`;
+      }).join('');
+
+      const availAreas = WORK_AREAS.filter((wa) => !a.memberships.some((m) => m.area === wa));
+      const addAreaBox = `<details class="sys-add-area"><summary>＋ 指派新區域／單位角色</summary>
+        ${availAreas.length
+          ? `<div class="sys-add-row">
+              <select id="sysArea-${du}" aria-label="選擇區域">${availAreas.map((wa) => `<option value="${esc(wa)}">${esc(wa)}</option>`).join('')}</select>
+              <select id="sysRole-${du}" aria-label="選擇角色"><option value="sched">排班人員（可細設分工）</option><option value="lead">區長（全權限＋送出）</option></select>
+              <button type="button" class="btn sm pri" data-act="sys-add-area-role" data-uid="${esc(a.uid)}">指派</button>
+            </div>`
+          : '<div class="muted small" style="padding-top:6px">此帳號已具備全部 10 個區域／單位權限。</div>'}
+      </details>`;
+
+      return `<article class="card sys-user-card ${a.hasPending ? 'row-st-wn' : a.isSys ? 'row-st-ok' : a.isCoord ? 'row-st-pre' : ''}">
+        <div class="sys-user-top">
+          <div class="row-t"><b>${esc(a.name)}</b>${isMe ? tag('ok', '本人') : ''}${tag('no', provLabel[a.provider] || a.provider)}</div>
+          <div class="row-t">${roleBadgesHtml}</div>
+        </div>
+        <div class="sys-uid"><code>UID: ${esc(a.uid)}</code><button type="button" class="link" data-act="copy-text" data-text="${esc(a.uid)}">複製 UID</button></div>
+        ${bindHtml}
+        ${globalHtml}
+        <div class="sys-area-list">
+          ${areaRowsHtml || '<div class="muted small">目前沒有區域排班角色（可於下方為他指派負責區域）。</div>'}
+          ${addAreaBox}
+        </div>
+      </article>`;
+    }).join('');
+  }
+
+  function vSysAdmin() {
+    const curArea = defaultArea();
+    const isHomeRoute = !route().v;
+    const hdrKey = (isSysAdmin() && isHomeRoute) ? 'home' : 'sys';
+
+    if (!isAdmin()) {
+      const dr = detectRole();
+      const myU = me();
+      return `${wsHeader('sys', 'sys', curArea)}<main class="wide-main">
+        <div class="page-head">
+          <div>
+            <div class="muted small">R0 系統管理員與帳號權限說明</div>
+            <h1>帳號與權限管理</h1>
+          </div>
+          <div class="acts"><a class="btn" href="#/">← 回我的首頁</a>${myU ? `<a class="btn pri-out" href="#/login">姓名綁定 (M8)</a>` : `<a class="btn pri" href="#/login">登入系統</a>`}</div>
+        </div>
+        <div class="split-grid">
+          <div class="split-main">
+            <section class="card warnbox">
+              <h2>需要「系統管理員」或「排班總召」權限才能設定全堂帳號</h2>
+              <p class="muted" style="margin:0">若您剛被任命為系統管理員或排班總召，請將下方您的帳號 UID 提供給現任系統管理員（或於 Firebase 主控台加入 <code>td116/sysadmins</code> / <code>td116/admins</code>）。</p>
+              ${myU ? `<div class="sys-uid" style="margin-top:6px"><code>您的 UID: ${esc(myU.uid)}</code><button type="button" class="btn sm pri" data-act="copy-text" data-text="${esc(myU.uid)}">複製我的 UID</button></div>`
+                : `<div><a class="btn pri" href="#/login">先登入 Google 或 LINE 帳號</a></div>`}
+              ${dr.leadAreas.length ? `<div style="margin-top:6px"><a class="btn sm blue-out" href="#/t/${esc(dr.leadAreas[0])}">您是 ${esc(dr.leadAreas[0])} 區長：前往本區分工與送出 (B5) →</a></div>` : ''}
+            </section>
+          </div>
+          <aside class="split-side">
+            <section class="card">
+              <h2>6 層角色權限階層</h2>
+              <div class="kv-row"><b>R0 系統管理員</b><span class="muted">全站最高權限：指定／撤銷總召、管理所有帳號與綁定、系統安全設定。</span></div>
+              <div class="kv-row"><b>R1 排班總召</b><span class="muted">A1–A6 年度控制台、管理各區區長與排班人員、跨區協調與定版。</span></div>
+              <div class="kv-row"><b>R2 各區區長</b><span class="muted">管理本區排班人員 (B5)、確認預排、表態提案與送出名單。</span></div>
+              <div class="kv-row"><b>R3 排班人員</b><span class="muted">依區長指定分工範圍於 B3–B6 協助排班。</span></div>
+              <div class="kv-row"><b>R4 / R5 道親訪客</b><span class="muted">免登入查班；登入並綁定姓名 (M8) 後檢視個人與代管家人班表。</span></div>
+            </section>
+          </aside>
+        </div>
+      </main>`;
+    }
+
+    const all = collectAllAccounts();
+    const bd = roleBadges(curArea);
+    const sysCnt = all.filter((a) => a.isSys).length;
+    const coordCnt = all.filter((a) => a.isCoord).length;
+    const leadAreaCnt = AREAS.filter((ar) => Object.values((D().members || {})[ar] || {}).some((m) => m && m.status === 'ok' && m.role === 'lead')).length;
+    const schedUids = new Set(all.filter((a) => a.isLeadAny || a.isSchedAny).map((a) => a.uid));
+    const sysOk = isSysAdmin();
+    const syncUp = adminSyncMap();
+
+    const pendMemItems = [];
+    for (const wa of WORK_AREAS) {
+      for (const [uid, m] of Object.entries((D().members || {})[wa] || {})) {
+        if (m && m.status === 'pending') pendMemItems.push({ area: wa, uid, m });
+      }
+    }
+    const pendBindItems = Object.entries(D().users || {}).filter(([, u]) => u && u.bindStatus === 'pending');
+
+    const logs = Object.entries(D().log || {})
+      .filter(([, l]) => l && (l.area === '系統權限' || /管理員|總召|區長|排班人員|綁定|授權|預授權|同步安全/.test(l.msg || '')))
+      .sort((a, b) => (b[1].at || 0) - (a[1].at || 0))
+      .slice(0, UI.sysLogAll ? 60 : 8);
+
+    const bootstrapNotice = store.mode === 'firebase' && Object.keys(D().sysadmins || {}).length === 0
+      ? `<section class="card warnbox">
+          <b>雲端模式尚未建立「系統管理員 (sysadmins)」節點</b>
+          <div class="muted small">若要啟用 R0 系統管理員線上指派總召功能，請至 Firebase Realtime Database 新增 <code>td116/sysadmins/${esc(me().uid)}</code> 值為 <code>true</code>，並確認已發布新版 <code>database.rules.json</code>。</div>
+          <div class="acts"><button type="button" class="btn sm pri" data-act="copy-text" data-text="${esc(me().uid)}">複製我的 UID (${esc(me().uid.slice(0, 12))}…)</button></div>
+        </section>`
+      : '';
+
+    const localSeedBanner = store.mode === 'local' && all.length < 3
+      ? `<section class="scope-banner">
+          <div><b>本機試用尚未建立多個示範帳號</b><div class="small muted">可一鍵帶入總召、區長、排班幹部與待審道親範例帳號，立即測試權限設定流程。</div></div>
+          <button type="button" class="btn sm pri" data-act="sys-seed-demo-users">帶入試用帳號範例</button>
+        </section>`
+      : '';
+
+    const grantBox = sysOk && UI.sysAddUidOpen
+      ? `<section class="card" style="border-left:4px solid var(--accent)">
+          <div class="row-h"><h2>以 UID 預先授權帳號</h2><button type="button" class="btn sm" data-act="sys-toggle-grant">收合</button></div>
+          <div class="muted small">若幹部還沒登入過，可請他先開啟系統登入一次，或直接輸入對方提供的 Firebase / LINE UID 預先指派角色。</div>
+          <div class="grid2">
+            <label>帳號 UID（必填）<input id="sysGrantUid" type="text" placeholder="例：line:U123... 或 Firebase UID"></label>
+            <label>顯示名稱（選填）<input id="sysGrantName" type="text" placeholder="例：陳師兄"></label>
+          </div>
+          <div class="grid2">
+            <label>預設角色<select id="sysGrantRole">
+              <option value="lead">各區區長（需選單位）</option>
+              <option value="sched">排班人員（需選單位）</option>
+              <option value="admin">R1 排班總召／調度台</option>
+              <option value="sysadmin">R0 系統管理員</option>
+            </select></label>
+            <label>所屬區域／單位（指派區長／排班時使用）<select id="sysGrantArea">${WORK_AREAS.map((wa) => `<option value="${esc(wa)}">${esc(wa)}</option>`).join('')}</select></label>
+          </div>
+          <div class="acts"><button type="button" class="btn pri" data-act="sys-grant-uid">確認寫入授權</button></div>
+        </section>`
+      : '';
+
+    const pendingQueue = (pendMemItems.length || pendBindItems.length)
+      ? `<section class="card warnbox">
+          <div class="row-h"><h2>全堂待審核申請（${pendMemItems.length + pendBindItems.length}）</h2><span class="muted small">排班人員 ${pendMemItems.length} · 姓名綁定 ${pendBindItems.length}</span></div>
+          <div class="list">
+            ${pendMemItems.map(({ area: pa, uid, m }) => `<div class="bind-hit">
+              <div><b class="c-${esc(pa)}">${esc(pa)}</b> <b>${esc(m.name)}</b> <span class="muted small">申請成為排班人員</span></div>
+              <div class="acts"><button type="button" class="btn sm pri" data-act="approve" data-area="${esc(pa)}" data-uid="${esc(uid)}">同意</button>
+                <button type="button" class="btn sm" data-act="unmember" data-area="${esc(pa)}" data-uid="${esc(uid)}">拒絕</button></div>
+            </div>`).join('')}
+            ${pendBindItems.map(([uid, u]) => {
+              const p0 = M && M.pById[+u.pid];
+              const ap0 = (D().addedPeople || {})[u.pid];
+              return `<div class="bind-hit">
+                <div><b>${esc(u.name || uid)}</b> <span class="muted small">申請綁定「${esc(p0 ? p0.n : (ap0 ? ap0.n : u.pid))}」（${esc(u.bindArea || '未分類')}）</span></div>
+                <div class="acts"><button type="button" class="btn sm pri" data-act="approve-bind" data-uid="${esc(uid)}" data-ok="1">同意</button>
+                  <button type="button" class="btn sm" data-act="approve-bind" data-uid="${esc(uid)}" data-ok="0">不同意</button></div>
+              </div>`;
+            }).join('')}
+          </div>
+        </section>`
+      : '';
+
+    const filters = [
+      ['all', `全部帳號 (${all.length})`],
+      ['sysadmin', `系統管理員 (${sysCnt})`],
+      ['admin', `排班總召 (${coordCnt})`],
+      ['lead', `區長 (${all.filter((a) => a.isLeadAny).length})`],
+      ['sched', `排班人員 (${all.filter((a) => a.isSchedAny).length})`],
+      ['pending', `待審申請 (${all.filter((a) => a.hasPending).length})`],
+      ['unbound', `一般／未指派 (${all.filter((a) => !a.isSys && !a.isCoord && !a.isLeadAny && !a.isSchedAny && a.bindStatus !== 'ok').length})`]
+    ];
+    const filterChips = `<div class="chips" role="group" aria-label="依角色篩選帳號">${filters.map(([k, lab]) =>
+      `<button type="button" class="chip sm ${(UI.sysRoleFilter || 'all') === k ? 'on' : ''}" data-act="sys-filter" data-v="${k}">${esc(lab)}</button>`).join('')}</div>`;
+
+    const isAuto = autoApproveBind();
+    const myU = me();
+
+    return `${wsHeader(hdrKey, 'sys', curArea)}<main class="wide-main">
+      ${seedNoticeHtml()}
+      ${bootstrapNotice}
+      <div class="page-head">
+        <div>
+          <div class="muted small">${sysOk ? 'R0 系統管理員' : 'R1 排班總召（僅區域權限可異動）'} · 帳號與權限治理中心</div>
+          <h1>帳號與權限管理</h1>
+          <p class="muted" style="margin:4px 0 0">${sysOk ? '集中指派或撤銷排班總召、各區區長、排班人員分工範圍，並管理姓名綁定審核與系統安全開關。' : '目前以排班總召身分進入，可集中管理各區區長、排班人員與姓名綁定；「系統管理員」與「總召」階層僅限 R0 系統管理員異動。'}</p>
+        </div>
+        <div class="acts">
+          ${sysOk ? `<button type="button" class="btn pri" data-act="sys-toggle-grant">＋ 以 UID 預先授權</button>` : ''}
+          <a class="btn blue-out" href="#/admin">前往總召指揮中心 →</a>
+          <a class="btn" href="#/review">各區進度 (A6)</a>
+        </div>
+      </div>
+
+      ${localSeedBanner}
+
+      <section class="cmd-grid" aria-label="帳號與權限統計">
+        <div class="cmd-card"><div class="cmd-k">已登錄／授權帳號</div><div class="cmd-v">${all.length} <span class="small muted">人</span></div><div class="cmd-s">已綁定名冊 ${all.filter((a) => a.bindStatus === 'ok').length} 人</div></div>
+        <div class="cmd-card cmd-info"><div class="cmd-k">系統管理員 ／ 總召</div><div class="cmd-v">${sysCnt} <span class="small muted">/ ${coordCnt}</span></div><div class="cmd-s">管理權限階層</div></div>
+        <div class="cmd-card cmd-ok"><div class="cmd-k">六區區長涵蓋 ／ 排班幹部</div><div class="cmd-v">${leadAreaCnt}<span class="small muted">／6 區</span></div><div class="cmd-s">有效排班權限共 ${schedUids.size} 人</div></div>
+        <div class="cmd-card ${bd.sysTotal ? 'cmd-warn' : ''}"><div class="cmd-k">全堂待審申請</div><div class="cmd-v">${bd.sysTotal} <span class="small muted">筆</span></div><div class="cmd-s">排班申請 ${bd.allPendMem} · 綁定 ${bd.allPendBind}</div></div>
+      </section>
+
+      ${grantBox}
+      ${pendingQueue}
+
+      <div class="split-grid">
+        <div class="split-main">
+          <section class="card">
+            <div class="row-h"><h2>所有帳號與權限設定</h2><span class="muted small">對方至少需登入系統一次才會出現在下方列表</span></div>
+            <label>搜尋帳號姓名、綁定姓名、UID 或區域<input id="sysUserQ" type="search" value="${esc(UI.sysQ)}" data-input="sysQ" placeholder="輸入姓名、UID、瑞芳、區長…"></label>
+            ${filterChips}
+            <div id="sysUserList" class="list">${renderSysUserList()}</div>
+          </section>
+        </div>
+
+        <aside class="split-side">
+          <section class="card">
+            <h2>系統安全與全域開關</h2>
+            <div class="kv"><span>目前連線模式</span><b>${store.mode === 'firebase' ? 'Firebase 雲端協作' : '本機試用 (localStorage)'}</b></div>
+            <div class="kv"><span>我的帳號身分</span><b>${sysOk ? 'R0 系統管理員' : 'R1 排班總召'}</b></div>
+            ${myU ? `<div class="sys-uid"><code>${esc(myU.uid)}</code><button type="button" class="link" data-act="copy-text" data-text="${esc(myU.uid)}">複製 UID</button></div>` : ''}
+            <hr style="border:0;border-top:1px solid var(--line);margin:4px 0">
+            <div class="muted small">M8 姓名綁定審核：<b>${isAuto ? '測試期（立即生效）' : '正式審核（需區長確認）'}</b></div>
+            <button type="button" class="btn sm ${isAuto ? 'warn-out' : 'pri-out'}" data-act="toggle-auto-bind">${isAuto ? '改為正式審核' : '改為測試期立即生效'}</button>
+            <div class="muted small" style="margin-top:4px">安全規則對照索引（acl / leads / config）：<b>${syncUp ? `有 ${Object.keys(syncUp).length} 項待同步` : '已為最新 ✓'}</b></div>
+            <button type="button" class="btn sm" data-act="sys-sync-acl">${syncUp ? `立即同步安全索引 (${Object.keys(syncUp).length})` : '檢查並重新同步安全索引'}</button>
+          </section>
+
+          <section class="card">
+            <h2>6 層角色權限對照</h2>
+            <div class="kv-row"><b>R0 系統管理員</b><span class="muted">唯一可新增／撤銷 R1 排班總召、以 UID 預授權與維護系統開關。</span></div>
+            <div class="kv-row"><b>R1 排班總召</b><span class="muted">可操作 A1–A6、跨區協調、指定各區區長與排班人員、鎖版定版。</span></div>
+            <div class="kv-row"><b>R2 區長</b><span class="muted">指定與審查本區排班人員 (B5)、確認總召預排、提案表態與送出。</span></div>
+            <div class="kv-row"><b>R3 排班人員</b><span class="muted">依所勾選 6 項分工（忠恕／廚務／服務／禮節／交通／狀態）協助排人。</span></div>
+            <div class="kv-row"><b>R4／R5 道親</b><span class="muted">檢視個人班表、代管家人與公開查詢；無法更動排班或權限。</span></div>
+          </section>
+
+          <section class="card">
+            <div class="row-h"><h2>近期權限異動紀錄</h2><span class="muted small">${logs.length} 筆</span></div>
+            ${logs.map(([, l]) => `<div class="logrow"><span class="num small">${ago(l.at)}</span> <b>${esc(l.name)}</b> <span class="muted small">[${esc(l.area || '系統')}]</span> ${esc(l.msg)}</div>`).join('') || '<div class="empty">尚無權限異動紀錄</div>'}
+            ${logs.length >= 8 && !UI.sysLogAll ? `<button type="button" class="btn wide" data-act="sys-log-more">顯示更多異動紀錄</button>` : ''}
+          </section>
+        </aside>
+      </div>
+    </main>`;
   }
 
   /* ---------------- 畫面：B3 本區要排的人 ---------------- */
@@ -3024,7 +3485,7 @@
         <div class="split-main">
           <div class="muted">一開始只有區長是排班人員。其他人要由區長或調度台指定後才能排。</div>
           ${bindPendHtml}
-          <section class="card members"><h2>本區排班人員</h2>${mems.map(row).join('') || '<div class="empty">還沒有排班人員。請調度台指定區長。</div>'}</section>
+          <section class="card members"><div class="row-h"><h2>本區排班人員</h2>${isAdmin() ? `<a class="btn sm" href="#/sys">全堂帳號權限 →</a>` : ''}</div>${mems.map(row).join('') || '<div class="empty">還沒有排班人員。請調度台指定區長。</div>'}</section>
           ${appoint}
           <section class="card"><h2>最近的改動</h2>${logs.map(([id, l]) => `<div class="logrow"><span class="num small">${ago(l.at)}</span> <b>${esc(l.name)}</b> ${esc(l.msg)}${canUndo(l) ? ` <button class="link" data-act="undo" data-id="${esc(id)}">復原</button>` : l.undone ? ' <span class="muted small">已復原</span>' : ''}</div>`).join('') || '<div class="empty">還沒有改動</div>'}
             ${logs.length >= 8 && !UI.showAll ? `<button class="btn wide" data-act="more">看更多</button>` : ''}</section>
@@ -3125,6 +3586,7 @@
       <div class="page-head">
         <div><h1>各區排人進度，以及需要協調的事</h1><p class="muted" style="margin:4px 0 0">人由各區自己排。這裡看各區排到哪裡，並處理只有跨區才看得出來的衝突。</p></div>
         <div class="acts">
+          <a class="btn" href="#/sys">帳號與權限管理</a>
           <button class="btn" data-act="toggle-a6-pick">指定各區排班人員</button>
           <button class="btn" data-act="toggle-a6-remind">提醒還沒送出的區</button>
           <a class="btn pri" href="#/p">前往提案試算</a>
@@ -3606,7 +4068,7 @@
       store, E, BASE,
       get M() { return M; },
       get ISS() { return ISS; },
-      D, me, isAdmin, isLead, can, memberOf, myAreas, defaultArea,
+      D, me, isSysAdmin, isCoordAdmin, isAdmin, isLead, can, memberOf, myAreas, defaultArea,
       draftVer, nextDraftVer,
       wsHeader, topbar, accountBtn, tag, esc, ago, dLabel, slotName, roleOf, cnt, isClash,
       toast, need, logOp, touchArea, stamp, addPerson, removePerson, confirmPre,
@@ -3618,7 +4080,7 @@
   // 給 console.js 與後續階段使用的共用介面（同一組函式，與 consoleCtx() 相同來源）
   window.TDApp = {
     esc, isPreFor, canConfirmPre, confirmPre, logOp, mkUndo, isPublished, canPath, canUndo, normUndo, normAcks,
-    kindOfGroup, isAdmin, isLead, can, memberOf, autoApproveBind, adminSyncMap, sameVal, afterCount,
+    kindOfGroup, isSysAdmin, isCoordAdmin, isAdmin, isLead, can, memberOf, autoApproveBind, adminSyncMap, sameVal, afterCount,
     ctx: () => consoleCtx()
   };
 
@@ -3684,8 +4146,9 @@
     if (routeChanged) {
       UI.q = ''; UI.out = false; UI.outQ = ''; UI.showAll = false; UI.filter = '全部';
       UI.apptQ = ''; UI.b6Mode = ''; UI.b1NomOpen = false; UI.pAddOptOpen = false; UI.newPerOpen = false;
-      UI.b3CalYm = ''; UI.b3FocusId = ''; UI.lyPick = null; UI.r1RemindOpen = false;
+      UI.b3CalYm = ''; UI.b3FocusId = ''; UI.lyPick = null; UI.r1RemindOpen = false; UI.acctOpen = false;
       if (r.v !== '' && r.v !== 'lookup') UI.guestQ = '';
+      if (r.v !== '' && r.v !== 'sys') { UI.sysQ = ''; UI.sysAddUidOpen = false; UI.sysLogAll = false; }
       finderCtx = null; apptArea = '';
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
     }
@@ -3715,6 +4178,8 @@
     let html;
     if (C && Array.isArray(C.ROUTES) && C.ROUTES.includes(r.v)) html = C.renderRoute(r.v, r.arg, consoleCtx());
     else if (r.v === 'login' || r.v === 'bind') html = vLogin();
+    else if (r.v === 'sys') html = vSysAdmin();
+    else if (r.v === 'admin') html = isAdmin() ? vHomeAdmin() : vSysAdmin();
     else if (r.v === 'my') html = vMyService(r.arg);
     else if (r.v === 'lookup') html = vPublicLookup();
     else if (r.v === 'a' && WORK_AREAS.includes(r.pathArg)) html = vArea(r.pathArg);
@@ -3783,6 +4248,29 @@
     beat(memberOf(area) || isAdmin() ? area : '', where);
   }
 
+  function assignAreaMember(area, uid, role, confirmMsg) {
+    if (!WORK_AREAS.includes(area) || (role !== 'lead' && role !== 'sched') || !RE_UID.test(uid || '')) return false;
+    const oldM = memberOf(area, uid);
+    const needBoss = role === 'lead' || (oldM && oldM.role === 'lead');
+    if (!need(needBoss ? isAdmin() : (isLead(area) || isAdmin()))) return false;
+    const u = (D().users || {})[uid];
+    const nm = String((u && u.name) || (oldM && oldM.name) || '預授權帳號').slice(0, 40);
+    if (confirmMsg && !confirm(confirmMsg.replace('{name}', nm))) return false;
+    const nextM = { name: nm, role, status: 'ok', by: String(me().name || '').slice(0, 40), at: Date.now() };
+    if (role === 'sched' && oldM && oldM.scope && typeof oldM.scope === 'object') {
+      const sc = Object.fromEntries(KINDS.filter(([k]) => oldM.scope[k] === true).map(([k]) => [k, true]));
+      if (Object.keys(sc).length && !KINDS.every(([k]) => sc[k])) nextM.scope = sc;
+    }
+    const up = { [`members/${area}/${uid}`]: nextM, ['sched/' + uid]: true };
+    if (role === 'lead') up['leads/' + uid] = true;
+    else if (oldM && oldM.role === 'lead') {
+      const stillLead = WORK_AREAS.some((x) => x !== area && memberOf(x, uid) && memberOf(x, uid).status === 'ok' && memberOf(x, uid).role === 'lead');
+      if (!stillLead) up['leads/' + uid] = null;
+    }
+    store.update(Object.assign(up, logOp(area, `指定 ${nm} 為${role === 'lead' ? '區長' : '排班人員'}`)));
+    return true;
+  }
+
   /* ---------------- 事件 ---------------- */
   document.addEventListener('click', (ev) => {
     const t = ev.target.closest('[data-act]'); if (!t) return;
@@ -3793,6 +4281,131 @@
       UI.viewAs = d.v === 'my' ? 'my' : '';
       if (!UI.viewAs && route().v === 'my') location.hash = '#/';
       else render();
+      return;
+    }
+    if (a === 'copy-text') {
+      const txt = String(d.text || '');
+      if (txt && navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
+      toast('已複製到剪貼簿');
+      return;
+    }
+    if (a === 'sys-filter') { UI.sysRoleFilter = d.v || 'all'; render(); return; }
+    if (a === 'sys-toggle-grant') { if (need(isSysAdmin(), '僅系統管理員可使用以 UID 預授權')) { UI.sysAddUidOpen = !UI.sysAddUidOpen; render(); } return; }
+    if (a === 'sys-log-more') { UI.sysLogAll = true; render(); return; }
+    if (a === 'sys-sync-acl') {
+      if (!need(isAdmin(), '只有總召或系統管理員可同步索引')) return;
+      const up = adminSyncMap();
+      if (!up) { toast('安全對照索引（acl / leads / config）已為最新'); return; }
+      store.update(Object.assign(up, logOp('系統權限', `手動同步安全規則索引（${Object.keys(up).length} 項）`)));
+      toast(`已同步 ${Object.keys(up).length} 項安全規則索引`);
+      return;
+    }
+    if (a === 'sys-toggle-sysadmin') {
+      if (!need(isSysAdmin(), '只有系統管理員可指派或撤銷系統管理員')) return;
+      if (!RE_UID.test(d.uid || '')) return toast('帳號 UID 格式不合法');
+      const enable = d.on === '1';
+      if (!enable && d.uid === me().uid) return toast('為了避免權限鎖死，不能取消自己的系統管理員身分');
+      const uRec = (D().users || {})[d.uid];
+      const nm = String((uRec && uRec.name) || d.uid).slice(0, 40);
+      if (!confirm(enable ? `指定「${nm}」為系統管理員？對方將可管理所有總召、帳號與系統設定。` : `確定撤銷「${nm}」的系統管理員身分？`)) return;
+      store.update(Object.assign({ ['sysadmins/' + d.uid]: enable ? true : null }, logOp('系統權限', `${enable ? '指定' : '撤銷'} ${nm} 系統管理員權限`)));
+      toast(enable ? `已指定 ${nm} 為系統管理員` : `已撤銷 ${nm} 的系統管理員權限`);
+      return;
+    }
+    if (a === 'sys-toggle-admin') {
+      if (!need(isSysAdmin(), '只有系統管理員可指派或撤銷排班總召')) return;
+      if (!RE_UID.test(d.uid || '')) return toast('帳號 UID 格式不合法');
+      const enable = d.on === '1';
+      const uRec = (D().users || {})[d.uid];
+      const nm = String((uRec && uRec.name) || d.uid).slice(0, 40);
+      if (!confirm(enable ? `指定「${nm}」為排班總召／調度台？` : `確定撤銷「${nm}」的排班總召身分？`)) return;
+      store.update(Object.assign({ ['admins/' + d.uid]: enable ? true : null }, logOp('系統權限', `${enable ? '指定' : '撤銷'} ${nm} 排班總召權限`)));
+      toast(enable ? `已指定 ${nm} 為排班總召` : `已撤銷 ${nm} 的排班總召權限`);
+      return;
+    }
+    if (a === 'sys-set-area-role') {
+      if (assignAreaMember(d.area, d.uid, d.role, `確定將「{name}」在 ${d.area} 設為${d.role === 'lead' ? '區長' : '排班人員'}？`)) {
+        toast(`已將 ${d.area} 角色設為${d.role === 'lead' ? '區長' : '排班人員'}`);
+      }
+      return;
+    }
+    if (a === 'sys-add-area-role') {
+      const du = safeDomUid(d.uid);
+      const areaEl = document.getElementById('sysArea-' + du);
+      const roleEl = document.getElementById('sysRole-' + du);
+      const areaVal = areaEl && areaEl.value;
+      const roleVal = roleEl && roleEl.value;
+      if (assignAreaMember(areaVal, d.uid, roleVal)) toast(`已指派 ${areaVal} ${roleVal === 'lead' ? '區長' : '排班人員'}`);
+      return;
+    }
+    if (a === 'sys-grant-uid') {
+      if (!need(isSysAdmin(), '只有系統管理員可使用 UID 預先授權')) return;
+      const uid = String(($('#sysGrantUid') && $('#sysGrantUid').value) || '').trim();
+      if (!RE_UID.test(uid)) return toast('UID 格式不正確（僅限英數、:、_、-，1–128 字元）');
+      const nm = String(($('#sysGrantName') && $('#sysGrantName').value) || '').trim().slice(0, 40);
+      const role = ($('#sysGrantRole') && $('#sysGrantRole').value) || 'sched';
+      const area = ($('#sysGrantArea') && $('#sysGrantArea').value) || WORK_AREAS[0];
+      const up = {};
+      if (nm && !((D().users || {})[uid] && (D().users || {})[uid].name)) up[`users/${uid}/name`] = nm;
+      const disp = nm || ((D().users || {})[uid] && (D().users || {})[uid].name) || '預授權帳號';
+      let msg = '';
+      if (role === 'sysadmin') {
+        up['sysadmins/' + uid] = true;
+        msg = `以 UID 預授權 ${disp} 為系統管理員`;
+      } else if (role === 'admin') {
+        up['admins/' + uid] = true;
+        msg = `以 UID 預授權 ${disp} 為排班總召`;
+      } else if ((role === 'lead' || role === 'sched') && WORK_AREAS.includes(area)) {
+        up[`members/${area}/${uid}`] = { name: String(disp).slice(0, 40), role, status: 'ok', by: String(me().name || '').slice(0, 40), at: Date.now() };
+        up['sched/' + uid] = true;
+        if (role === 'lead') up['leads/' + uid] = true;
+        msg = `以 UID 預授權 ${disp} 為 ${area}${role === 'lead' ? '區長' : '排班人員'}`;
+      } else {
+        return toast('角色或區域參數不正確');
+      }
+      store.update(Object.assign(up, logOp('系統權限', msg)));
+      if ($('#sysGrantUid')) $('#sysGrantUid').value = '';
+      if ($('#sysGrantName')) $('#sysGrantName').value = '';
+      UI.sysAddUidOpen = false;
+      toast('已完成預授權：' + disp);
+      return;
+    }
+    if (a === 'sys-unbind') {
+      if (!need(isAdmin(), '只有總召或系統管理員可解除綁定') || !RE_UID.test(d.uid || '')) return;
+      const uRec = (D().users || {})[d.uid];
+      if (!uRec) return;
+      if (!confirm(`確定解除「${uRec.name || d.uid}」的名冊姓名綁定紀錄？解除後對方可重新綁定正確姓名。`)) return;
+      const up = {
+        [`users/${d.uid}/pid`]: null,
+        [`users/${d.uid}/bindArea`]: null,
+        [`users/${d.uid}/bindStatus`]: null,
+        [`users/${d.uid}/bindAt`]: null,
+        [`users/${d.uid}/bindOkBy`]: null,
+        [`users/${d.uid}/bindOkAt`]: null
+      };
+      store.update(Object.assign(up, logOp('系統權限', `解除 ${uRec.name || d.uid} 的名冊姓名綁定`)));
+      toast('已解除綁定');
+      return;
+    }
+    if (a === 'sys-seed-demo-users') {
+      if (store.mode !== 'local' || !need(isAdmin())) return;
+      const now = Date.now();
+      const sp = M && (M.people.find((p) => p.a === '瑞芳' && p.n) || M.people[0]);
+      const up = {
+        'users/local-admin': { name: '陳總召（試用）', provider: 'local' },
+        'admins/local-admin': true,
+        'users/local-lead-瑞芳': { name: '林區長（試用）', provider: 'local' },
+        'members/瑞芳/local-lead-瑞芳': { name: '林區長（試用）', role: 'lead', status: 'ok', by: '試用範例', at: now },
+        'sched/local-lead-瑞芳': true,
+        'leads/local-lead-瑞芳': true,
+        'users/local-sched-demo': { name: '張禮節（試用）', provider: 'local' },
+        'members/瑞芳/local-sched-demo': { name: '張禮節（試用）', role: 'sched', status: 'ok', scope: { lj: true }, by: '試用範例', at: now },
+        'sched/local-sched-demo': true,
+        'users/local-u1': Object.assign({ name: '道親甲（試用）', provider: 'local' }, sp ? { pid: +sp.id, bindStatus: 'pending', bindArea: sp.a, bindAt: now } : {}),
+        'members/松山/local-u1': { name: '道親甲（試用）', role: 'sched', status: 'pending', at: now }
+      };
+      store.update(Object.assign(up, logOp('系統權限', '載入本機試用帳號與權限範例')));
+      toast('已帶入 4 組試用示範帳號');
       return;
     }
     if (a === 'pick-my-pid') { UI.myFamPid = +d.pid || 0; render(); return; }
@@ -3982,16 +4595,9 @@
       store.update(Object.assign({ [`members/${d.area}/${d.uid}`]: nm, ['sched/' + d.uid]: true }, logOp(d.area, `同意 ${nm.name} 成為排班人員`)));
     }
     else if (a === 'appoint') {
-      if (!WORK_AREAS.includes(d.area) || (d.role !== 'lead' && d.role !== 'sched')) return;
-      if (!need(d.role === 'lead' ? isAdmin() : isLead(d.area) || isAdmin())) return;
-      const u = (D().users || {})[d.uid];
-      if (!u) return toast('找不到這個帳號，請對方先登入一次');
-      const nm = String(u.name || '未命名').slice(0, 40);
-      if (!confirm(`指定 ${nm} 為 ${d.area} 的${d.role === 'lead' ? '區長' : '排班人員'}？`)) return;
-      const up = { [`members/${d.area}/${d.uid}`]: { name: nm, role: d.role, status: 'ok', by: String(me().name || '').slice(0, 40), at: Date.now() }, ['sched/' + d.uid]: true };
-      if (d.role === 'lead') up['leads/' + d.uid] = true;
-      store.update(Object.assign(up, logOp(d.area, `指定 ${nm} 為${d.role === 'lead' ? '區長' : '排班人員'}`)));
-      UI.apptQ = ''; toast('已指定');
+      if (assignAreaMember(d.area, d.uid, d.role, `指定 {name} 為 ${d.area} 的${d.role === 'lead' ? '區長' : '排班人員'}？`)) {
+        UI.apptQ = ''; toast('已指定');
+      }
     }
     else if (a === 'unmember') {
       const m = memberOf(d.area, d.uid); if (!m || !need(m.role === 'lead' ? isAdmin() : isLead(d.area) || isAdmin())) return;
@@ -4035,6 +4641,7 @@
     else if (k === 'bindQ') { const el = document.getElementById('bindHits'); if (el) el.innerHTML = renderBindHits(); }
     else if (k === 'famQ') { const el = document.getElementById('famHits'); if (el) el.innerHTML = renderFamHits(); }
     else if (k === 'guestQ') { const el = document.getElementById('guestHits'); if (el) el.innerHTML = renderGuestHits(); }
+    else if (k === 'sysQ') { const el = document.getElementById('sysUserList'); if (el) el.innerHTML = renderSysUserList(); }
   }
 
   document.addEventListener('compositionstart', () => {
@@ -4163,6 +4770,7 @@
     bringLastYearGroup, autoAssignRitualPosts, moveGroupMember,
     bringLastYearSlot, autoFillSlot, adoptProposalOption, revertProposal,
     consoleCtx, isLargeMode, toggleLargeMode,
-    detectRole, activeRole, roleBadges
+    detectRole, activeRole, roleBadges,
+    isSysAdmin, isCoordAdmin, isAdmin, collectAllAccounts
   };
 })();

@@ -3,34 +3,34 @@
     "td116": {
       "meta": {
         ".read": true,
-        ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()"
+        ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())"
       },
       "rules": {
         ".read": true,
-        ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()"
+        ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())"
       },
       "config": {
         ".read": true,
-        ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()",
+        ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())",
         "autoApproveBind": {
           ".validate": "newData.isBoolean()"
         }
       },
       "acl": {
         ".read": true,
-        ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()"
+        ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())"
       },
       "leads": {
         ".read": "auth != null",
         "$uid": {
-          ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()",
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())",
           ".validate": "newData.val() === true"
         }
       },
       "edits": {
         ".read": true,
         "$sid": {
-          ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()",
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())",
           ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24)",
           "area": {
             ".validate": "newData.isString() && newData.val().length <= 10"
@@ -55,14 +55,14 @@
       "extra": {
         ".read": true,
         "$sid": {
-          ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()",
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())",
           ".validate": "($sid.beginsWith('EX_') && $sid.matches(/^EX_[A-Za-z0-9_]+$/) && $sid.length <= 23) && newData.child('id').val() === $sid && newData.child('d').isString() && newData.child('area').isString() && newData.child('area').val().length <= 10"
         }
       },
       "acks": {
         ".read": true,
         "$key": {
-          ".write": "auth != null && root.child('td116/admins/' + auth.uid).exists()",
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())",
           ".validate": "($key.matches(/^[A-Za-z0-9_~-]+$/) && $key.length >= 1 && $key.length <= 200) && newData.hasChildren(['st','at']) && newData.child('st').isString() && newData.child('st').val().length <= 20",
           "by": {
             ".validate": "newData.isString() && newData.val().length <= 40"
@@ -85,7 +85,7 @@
         ".read": true,
         "$gk": {
           "$pid": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope/' + root.child('td116/acl/g/' + $gk + '/k').val()).val() === true))) && (data.child('pre').val() !== true || !newData.exists() || newData.child('pre').val() === true || (root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('role').val() === 'lead') || (root.child('td116/admins/' + auth.uid).exists() && (root.child('td116/acl/g/' + $gk + '/a').val() !== '松山' && root.child('td116/acl/g/' + $gk + '/a').val() !== '三重' && root.child('td116/acl/g/' + $gk + '/a').val() !== '瑞芳' && root.child('td116/acl/g/' + $gk + '/a').val() !== '內湖' && root.child('td116/acl/g/' + $gk + '/a').val() !== '基隆' && root.child('td116/acl/g/' + $gk + '/a').val() !== '新莊')))",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope/' + root.child('td116/acl/g/' + $gk + '/k').val()).val() === true))) && (data.child('pre').val() !== true || !newData.exists() || newData.child('pre').val() === true || (root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('role').val() === 'lead') || ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) && (root.child('td116/acl/g/' + $gk + '/a').val() !== '松山' && root.child('td116/acl/g/' + $gk + '/a').val() !== '三重' && root.child('td116/acl/g/' + $gk + '/a').val() !== '瑞芳' && root.child('td116/acl/g/' + $gk + '/a').val() !== '內湖' && root.child('td116/acl/g/' + $gk + '/a').val() !== '基隆' && root.child('td116/acl/g/' + $gk + '/a').val() !== '新莊')))",
             ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9) && newData.hasChildren(['by','at']) && newData.child('by').isString() && newData.child('by').val().length <= 128 && newData.child('at').isNumber()",
             "by": {
               ".validate": "newData.isString()"
@@ -118,7 +118,7 @@
         ".read": true,
         "$sid": {
           "$pid": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('scope/' + 'jz').val() === true))) && (data.child('pre').val() !== true || !newData.exists() || newData.child('pre').val() === true || (root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('role').val() === 'lead') || (root.child('td116/admins/' + auth.uid).exists() && (root.child('td116/acl/s/' + $sid + '/a').val() !== '松山' && root.child('td116/acl/s/' + $sid + '/a').val() !== '三重' && root.child('td116/acl/s/' + $sid + '/a').val() !== '瑞芳' && root.child('td116/acl/s/' + $sid + '/a').val() !== '內湖' && root.child('td116/acl/s/' + $sid + '/a').val() !== '基隆' && root.child('td116/acl/s/' + $sid + '/a').val() !== '新莊')))",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('scope/' + 'jz').val() === true))) && (data.child('pre').val() !== true || !newData.exists() || newData.child('pre').val() === true || (root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + root.child('td116/acl/s/' + $sid + '/a').val() + '/' + auth.uid).child('role').val() === 'lead') || ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) && (root.child('td116/acl/s/' + $sid + '/a').val() !== '松山' && root.child('td116/acl/s/' + $sid + '/a').val() !== '三重' && root.child('td116/acl/s/' + $sid + '/a').val() !== '瑞芳' && root.child('td116/acl/s/' + $sid + '/a').val() !== '內湖' && root.child('td116/acl/s/' + $sid + '/a').val() !== '基隆' && root.child('td116/acl/s/' + $sid + '/a').val() !== '新莊')))",
             ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9) && newData.hasChildren(['by','at']) && newData.child('by').isString() && newData.child('by').val().length <= 128 && newData.child('at').isNumber()",
             "by": {
               ".validate": "newData.isString()"
@@ -150,7 +150,7 @@
       "groupMeta": {
         ".read": true,
         "$gk": {
-          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope/' + root.child('td116/acl/g/' + $gk + '/k').val()).val() === true)))",
+          ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + root.child('td116/acl/g/' + $gk + '/a').val() + '/' + auth.uid).child('scope/' + root.child('td116/acl/g/' + $gk + '/k').val()).val() === true)))",
           "leadPid": {
             ".validate": "newData.isNumber()"
           },
@@ -167,15 +167,15 @@
       "areas": {
         ".read": true,
         "$area": {
-          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || ((root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead') && newData.child('status').val() !== 'confirmed' && data.child('status').val() !== 'confirmed'))",
+          ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || ((root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead') && newData.child('status').val() !== 'confirmed' && data.child('status').val() !== 'confirmed'))",
           ".validate": "$area.length <= 10 && (!newData.child('status').exists() || newData.child('status').val() === 'editing' || newData.child('status').val() === 'submitted' || newData.child('status').val() === 'confirmed')",
           "after": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok')",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok')",
             ".validate": "newData.isNumber() && newData.val() >= 0"
           },
           "changes": {
             "$cid": {
-              ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok')",
+              ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok')",
               ".validate": "($cid.matches(/^[A-Za-z0-9_]+$/) && $cid.length >= 1 && $cid.length <= 24) && newData.child('at').isNumber() && (!newData.child('by').exists() || (newData.child('by').isString() && newData.child('by').val().length <= 40)) && !newData.child('x').exists()"
             }
           },
@@ -197,7 +197,7 @@
         ".read": true,
         "$area": {
           "$uid": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || ((root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead') && data.child('role').val() !== 'lead' && (!newData.exists() || newData.child('role').val() === 'sched')) || (auth.uid === $uid && !data.exists() && newData.child('status').val() === 'pending' && newData.child('role').val() === 'sched'))",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || ((root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead') && data.child('role').val() !== 'lead' && (!newData.exists() || newData.child('role').val() === 'sched')) || (auth.uid === $uid && !data.exists() && newData.child('status').val() === 'pending' && newData.child('role').val() === 'sched'))",
             ".validate": "$area.length <= 10 && ($uid.matches(/^[A-Za-z0-9:_-]+$/) && $uid.length >= 1 && $uid.length <= 128) && newData.hasChildren(['name','role','status']) && (newData.child('role').val() === 'lead' || newData.child('role').val() === 'sched') && (newData.child('status').val() === 'ok' || newData.child('status').val() === 'pending')",
             "name": {
               ".validate": "newData.isString() && newData.val().length <= 40"
@@ -215,7 +215,7 @@
               ".validate": "newData.isNumber()"
             },
             "scope": {
-              ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))",
+              ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))",
               "$k": {
                 ".validate": "newData.isBoolean() && ($k === 'jz' || $k === 'k' || $k === 'srv' || $k === 'lj' || $k === 'tr' || $k === 'pov')"
               }
@@ -226,14 +226,24 @@
           }
         }
       },
+      "sysadmins": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && root.child('td116/sysadmins/' + auth.uid).exists() && ($uid !== auth.uid || newData.exists())",
+          ".validate": "($uid.matches(/^[A-Za-z0-9:_-]+$/) && $uid.length >= 1 && $uid.length <= 128) && newData.val() === true"
+        }
+      },
       "admins": {
         ".read": "auth != null",
-        ".write": false
+        "$uid": {
+          ".write": "auth != null && root.child('td116/sysadmins/' + auth.uid).exists()",
+          ".validate": "($uid.matches(/^[A-Za-z0-9:_-]+$/) && $uid.length >= 1 && $uid.length <= 128) && newData.val() === true"
+        }
       },
       "sched": {
         ".read": "auth != null",
         "$uid": {
-          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/leads/' + auth.uid).exists())",
+          ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || root.child('td116/leads/' + auth.uid).exists())",
           ".validate": "newData.val() === true"
         }
       },
@@ -242,7 +252,7 @@
         "$uid": {
           ".validate": "($uid.matches(/^[A-Za-z0-9:_-]+$/) && $uid.length >= 1 && $uid.length <= 128)",
           "name": {
-            ".write": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && (auth.uid === $uid || root.child('td116/sysadmins/' + auth.uid).exists())",
             ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40"
           },
           "provider": {
@@ -250,15 +260,15 @@
             ".validate": "newData.val() === 'google' || newData.val() === 'line'"
           },
           "pid": {
-            ".write": "auth != null && auth.uid === $uid && (!data.exists() || newData.val() === data.val() || newData.parent().child('bindStatus').val() === 'pending' || root.child('td116/config/autoApproveBind').val() === true)",
+            ".write": "auth != null && ((auth.uid === $uid && (!data.exists() || newData.val() === data.val() || newData.parent().child('bindStatus').val() === 'pending' || root.child('td116/config/autoApproveBind').val() === true)) || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()))",
             ".validate": "newData.isNumber() && newData.val() > 0"
           },
           "bindArea": {
-            ".write": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && (auth.uid === $uid || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()))",
             ".validate": "newData.isString() && (newData.val() === root.child('td116/acl/p/' + newData.parent().child('pid').val()).val() || newData.val() === newData.parent().parent().parent().child('addedPeople/' + newData.parent().child('pid').val() + '/a').val())"
           },
           "bindAt": {
-            ".write": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && (auth.uid === $uid || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()))",
             ".validate": "newData.isNumber()"
           },
           "family": {
@@ -268,15 +278,15 @@
             }
           },
           "bindStatus": {
-            ".write": "auth != null && ((auth.uid === $uid && (newData.val() === 'pending' || (newData.val() === 'ok' && (root.child('td116/config/autoApproveBind').val() === true || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead'))))) || root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead'))",
+            ".write": "auth != null && ((auth.uid === $uid && (newData.val() === 'pending' || (newData.val() === 'ok' && (root.child('td116/config/autoApproveBind').val() === true || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead'))))) || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead'))",
             ".validate": "newData.val() === 'ok' || newData.val() === 'pending' || newData.val() === 'rejected'"
           },
           "bindOkBy": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead') || (auth.uid === $uid && (!newData.exists() || root.child('td116/config/autoApproveBind').val() === true)))",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead') || (auth.uid === $uid && (!newData.exists() || root.child('td116/config/autoApproveBind').val() === true)))",
             ".validate": "newData.isString() && newData.val().length <= 40"
           },
           "bindOkAt": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead') || (auth.uid === $uid && !newData.exists()))",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.parent().child('bindArea').val() + '/' + auth.uid).child('role').val() === 'lead') || (auth.uid === $uid && !newData.exists()))",
             ".validate": "newData.isNumber()"
           },
           "$other": {
@@ -287,7 +297,7 @@
       "addedPeople": {
         ".read": true,
         "$pid": {
-          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (!data.exists() && newData.child('by').val() === auth.uid && (root.child('td116/sched/' + auth.uid).exists() || newData.child('status').val() === 'pending' || root.child('td116/config/autoApproveBind').val() === true || (root.child('td116/members/' + newData.child('a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.child('a').val() + '/' + auth.uid).child('role').val() === 'lead'))) || ((root.child('td116/members/' + data.child('a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + data.child('a').val() + '/' + auth.uid).child('role').val() === 'lead') && newData.child('a').val() === data.child('a').val()))",
+          ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (!data.exists() && newData.child('by').val() === auth.uid && (root.child('td116/sched/' + auth.uid).exists() || newData.child('status').val() === 'pending' || root.child('td116/config/autoApproveBind').val() === true || (root.child('td116/members/' + newData.child('a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + newData.child('a').val() + '/' + auth.uid).child('role').val() === 'lead'))) || ((root.child('td116/members/' + data.child('a').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + data.child('a').val() + '/' + auth.uid).child('role').val() === 'lead') && newData.child('a').val() === data.child('a').val()))",
           ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 3 && $pid.length <= 9) && newData.hasChildren(['n','a']) && newData.child('n').isString() && newData.child('n').val().length >= 1 && newData.child('n').val().length <= 20 && newData.child('a').isString() && newData.child('a').val().length <= 10 && (!newData.child('status').exists() || newData.child('status').val() === 'ok' || newData.child('status').val() === 'pending' || newData.child('status').val() === 'rejected')",
           "id": {
             ".validate": "newData.isNumber()"
@@ -347,26 +357,26 @@
         }
       },
       "pov": {
-        ".read": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+        ".read": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || root.child('td116/sched/' + auth.uid).exists())",
         "$pid": {
-          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + (root.child('td116/acl/p/' + $pid).exists() ? root.child('td116/acl/p/' + $pid).val() : root.child('td116/addedPeople/' + $pid + '/a').val()) + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + (root.child('td116/acl/p/' + $pid).exists() ? root.child('td116/acl/p/' + $pid).val() : root.child('td116/addedPeople/' + $pid + '/a').val()) + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + (root.child('td116/acl/p/' + $pid).exists() ? root.child('td116/acl/p/' + $pid).val() : root.child('td116/addedPeople/' + $pid + '/a').val()) + '/' + auth.uid).child('scope/' + 'pov').val() === true)))",
+          ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + (root.child('td116/acl/p/' + $pid).exists() ? root.child('td116/acl/p/' + $pid).val() : root.child('td116/addedPeople/' + $pid + '/a').val()) + '/' + auth.uid).child('status').val() === 'ok' && (!root.child('td116/members/' + (root.child('td116/acl/p/' + $pid).exists() ? root.child('td116/acl/p/' + $pid).val() : root.child('td116/addedPeople/' + $pid + '/a').val()) + '/' + auth.uid).child('scope').exists() || root.child('td116/members/' + (root.child('td116/acl/p/' + $pid).exists() ? root.child('td116/acl/p/' + $pid).val() : root.child('td116/addedPeople/' + $pid + '/a').val()) + '/' + auth.uid).child('scope/' + 'pov').val() === true)))",
           ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9)"
         }
       },
       "coord": {
         ".read": true,
         "$id": {
-          ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid && newData.child('st').val() === 'open') || root.child('td116/admins/' + auth.uid).exists())",
+          ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid && newData.child('st').val() === 'open') || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()))",
           ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.hasChildren(['area','uid','at','st','msg','pid']) && newData.child('pid').isNumber() && newData.child('area').isString() && newData.child('area').val().length <= 10 && newData.child('msg').isString() && newData.child('msg').val().length <= 300 && (!newData.child('label').exists() || (newData.child('label').isString() && newData.child('label').val().length <= 120)) && (!newData.child('name').exists() || (newData.child('name').isString() && newData.child('name').val().length <= 40)) && (newData.child('st').val() === 'open' || newData.child('st').val() === 'done')"
         }
       },
       "proposals": {
         ".read": true,
         "$id": {
-          ".write": "auth != null && ((!data.exists() && newData.child('byUid').val() === auth.uid && newData.child('status').val() === 'waiting' && (!newData.child('chosen').exists() && !newData.child('resolvedBy').exists() && !newData.child('resolvedAt').exists() && !newData.child('prevVer').exists() && !newData.child('resolvedVer').exists() && !newData.child('prevEdits').exists() && !newData.child('prevExtra').exists() && !newData.child('appliedEdits').exists() && !newData.child('appliedExtra').exists() && (!newData.child('step').exists() || newData.child('step').val() === 3))) || root.child('td116/admins/' + auth.uid).exists())",
+          ".write": "auth != null && ((!data.exists() && newData.child('byUid').val() === auth.uid && newData.child('status').val() === 'waiting' && (!newData.child('chosen').exists() && !newData.child('resolvedBy').exists() && !newData.child('resolvedAt').exists() && !newData.child('prevVer').exists() && !newData.child('resolvedVer').exists() && !newData.child('prevEdits').exists() && !newData.child('prevExtra').exists() && !newData.child('appliedEdits').exists() && !newData.child('appliedExtra').exists() && (!newData.child('step').exists() || newData.child('step').val() === 3))) || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()))",
           ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.child('id').val() === $id && newData.child('title').isString() && newData.child('title').val().length <= 120",
           "options": {
-            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || data.parent().child('byUid').val() === auth.uid || (root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('role').val() === 'lead'))",
+            ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || data.parent().child('byUid').val() === auth.uid || (root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('role').val() === 'lead'))",
             "$i": {
               ".validate": "($i.matches(/^[0-9]+$/) && $i.length >= 1 && $i.length <= 2) && newData.child('id').isString() && newData.child('id').val().matches(/^[A-Z]$/) && newData.child('label').isString() && newData.child('label').val().length <= 80"
             }
@@ -379,8 +389,8 @@
           },
           "votes": {
             "$area": {
-              ".write": "auth != null && (($area === '排班總召' && root.child('td116/admins/' + auth.uid).exists()) || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))",
-              ".validate": "newData.child('st').isString() && newData.child('st').val().length <= 20 && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))"
+              ".write": "auth != null && (($area === '排班總召' && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())) || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))",
+              ".validate": "newData.child('st').isString() && newData.child('st').val().length <= 20 && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))"
             }
           }
         }
@@ -388,7 +398,7 @@
       "nominations": {
         ".read": true,
         "$area": {
-          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))",
+          ".write": "auth != null && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + $area + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + $area + '/' + auth.uid).child('role').val() === 'lead'))",
           ".validate": "newData.child('leads').isString() && newData.child('leads').val().length <= 500 && newData.child('cooks').isString() && newData.child('cooks').val().length <= 500"
         }
       },
@@ -400,7 +410,7 @@
         ".read": true,
         "$id": {
           ".write": "auth != null && !data.exists() && newData.child('uid').val() === auth.uid",
-          ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.hasChildren(['uid','name','at','area','msg']) && newData.child('at').isNumber() && newData.child('msg').isString() && newData.child('msg').val().length <= 300 && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('area').isString() && newData.child('area').val().length <= 12 && (!newData.child('undo').exists() || root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+          ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.hasChildren(['uid','name','at','area','msg']) && newData.child('at').isNumber() && newData.child('msg').isString() && newData.child('msg').val().length <= 300 && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('area').isString() && newData.child('area').val().length <= 12 && (!newData.child('undo').exists() || (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || root.child('td116/sched/' + auth.uid).exists())",
           "undo": {
             "$i": {
               ".validate": "($i.matches(/^[0-9]{1,2}$/) || $i.matches(/^[0-4][0-9][0-9]$/)) && newData.child('p').isString()",
@@ -459,7 +469,7 @@
             }
           },
           "undone": {
-            ".write": "auth != null && !data.exists() && (root.child('td116/admins/' + auth.uid).exists() || (root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('role').val() === 'lead') || (root.child('td116/sched/' + auth.uid).exists() && data.parent().child('uid').val() === auth.uid))",
+            ".write": "auth != null && !data.exists() && ((root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists()) || (root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('status').val() === 'ok' && root.child('td116/members/' + data.parent().child('area').val() + '/' + auth.uid).child('role').val() === 'lead') || (root.child('td116/sched/' + auth.uid).exists() && data.parent().child('uid').val() === auth.uid))",
             ".validate": "newData.isString() && newData.val().length <= 40"
           }
         }

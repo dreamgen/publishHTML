@@ -29,9 +29,9 @@
 (function () {
   'use strict';
   const CFG = window.TD_CONFIG || {};
-  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'admins', 'sched', 'leads', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'rules', 'log', 'presence', 'acl', 'config'];
+  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'sysadmins', 'admins', 'sched', 'leads', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'rules', 'log', 'presence', 'acl', 'config'];
   // 只有登入且有權限才讀得到的節點：讀取被拒或登出時要清掉，也不寫進本機快取（P-01）
-  const PRIVATE = new Set(['pov', 'users', 'admins', 'sched', 'leads']);
+  const PRIVATE = new Set(['pov', 'users', 'sysadmins', 'admins', 'sched', 'leads']);
   const NO_CACHE = ['pov', 'users'];
   const BAD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
   const ILLEGAL = /[.#$\[\]\/]/; // RTDB 鍵不允許的字元（路徑分段後的單一鍵）
@@ -205,8 +205,9 @@
         uObj.bindAt = Date.now();
       }
       const up = { ['users/' + who.uid]: uObj };
+      if (who.sysadmin) up['sysadmins/' + who.uid] = true;
       if (who.admin) up['admins/' + who.uid] = true;
-      if (who.leadOf) { up['members/' + who.leadOf + '/' + who.uid] = { name: who.name, role: 'lead', status: 'ok', by: '本機試用' }; up['sched/' + who.uid] = true; }
+      if (who.leadOf) { up['members/' + who.leadOf + '/' + who.uid] = { name: who.name, role: 'lead', status: 'ok', by: '本機試用' }; up['sched/' + who.uid] = true; up['leads/' + who.uid] = true; }
       await s.update(up);
     };
     s.signOut = async () => { s.user = null; sessionStorage.removeItem(WHO); s.emit(); };
@@ -318,7 +319,7 @@
           }
         } else {
           s.user = null;
-          dropPrivate(['pov', 'users', 'admins', 'sched', 'leads']);
+          dropPrivate(['pov', 'users', 'sysadmins', 'admins', 'sched', 'leads']);
         }
         s.authReady = true;
         count();
