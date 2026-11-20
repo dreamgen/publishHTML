@@ -29,10 +29,10 @@
 (function () {
   'use strict';
   const CFG = window.TD_CONFIG || {};
-  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'sysadmins', 'admins', 'sched', 'leads', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'rules', 'log', 'presence', 'acl', 'config'];
+  const TOP = ['meta', 'groups', 'groupMeta', 'assign', 'edits', 'extra', 'areas', 'members', 'sysadmins', 'admins', 'sched', 'leads', 'users', 'addedPeople', 'pov', 'acks', 'coord', 'proposals', 'nominations', 'supportReq', 'rules', 'log', 'presence', 'acl', 'config', 'rsvp', 'rsvpNote', 'checkin', 'feedback', 'carpool', 'changes', 'review', 'dispatch', 'slotNotes', 'bulletins'];
   // 只有登入且有權限才讀得到的節點：讀取被拒或登出時要清掉，也不寫進本機快取（P-01）
-  const PRIVATE = new Set(['pov', 'users', 'sysadmins', 'admins', 'sched', 'leads']);
-  const NO_CACHE = ['pov', 'users'];
+  const PRIVATE = new Set(['pov', 'users', 'sysadmins', 'admins', 'sched', 'leads', 'rsvpNote']);
+  const NO_CACHE = ['pov', 'users', 'rsvpNote'];
   const BAD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
   const ILLEGAL = /[.#$\[\]\/]/; // RTDB 鍵不允許的字元（路徑分段後的單一鍵）
 
@@ -319,7 +319,7 @@
           }
         } else {
           s.user = null;
-          dropPrivate(['pov', 'users', 'sysadmins', 'admins', 'sched', 'leads']);
+          dropPrivate(['pov', 'users', 'sysadmins', 'admins', 'sched', 'leads', 'rsvpNote']);
         }
         s.authReady = true;
         count();

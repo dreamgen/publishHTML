@@ -480,7 +480,7 @@
       { n: '04', when: '10 月底', t: '各區調整提案', d: '各區檢視負擔，換日、換區或請求支援先試算影響。', where: 'B1–B2 討論平台', href: '#/b1/' + curArea, cls: '' },
       { n: '05', when: '11 月上旬', t: '區內排人', d: '各區手機排組員與依日期勤務、確認預排、分工送出。', where: 'B3–B6 手機排人', href: '#/a/' + curArea, cls: '' },
       { n: '06', when: '11 月中旬', t: '協調與定版', d: '總召處理跨區碰撞與接受例外，鎖版匯出服務手冊。', where: 'A6 協調 · A5 定版', href: '#/a5', cls: '' },
-      { n: '07', when: '116 年全年', t: '運行與調度', d: '定版後追蹤異動夾頁、請假代班與年度檢討回饋。', where: 'A5 異動 · M8 帳號', href: pub ? '#/a5' : '#/review', cls: '' }
+      { n: '07', when: '116 年全年', t: '運行與調度', d: '當日出勤確認、請假代班、共乘點名與檢討回饋。', where: 'C1 調度 · M1–M11', href: '#/c1', cls: '' }
     ];
 
     const cases = [
@@ -521,6 +521,7 @@
       ['規則參數庫', 'rules（A1–A11 區規則、P1–P12 人格規則、8×8 同日兼職矩陣與自動排人權重）。'],
       ['協作與例外', 'proposals（多方案試算與表態）＋ coord（區請總召協調）＋ acks（接受例外）。'],
       ['帳號與權限主檔', 'sysadmins（系統管理員）＋ admins（總召／調度台）＋ members／leads／sched（各區排班與分工授權）。'],
+      ['運行與現場回饋', 'rsvp / rsvpNote（會到與請假原因）＋ checkin（點名）＋ feedback（回饋）＋ carpool（共乘）＋ changes / review / bulletins。'],
       ['版本與紀錄', 'meta（草案版號、定版鎖定 116 定版 v1.0）＋ log（可單筆復原的操作紀錄）。']
     ];
 
@@ -593,15 +594,16 @@
         <div class="wb-card c card">
           <div class="small" style="font-weight:700;color:var(--warn)">C · 調度窗口、各區幹部、志工</div>
           <h2>排班運行調度台與個人查詢</h2>
-          <p class="muted" style="margin:0">定版後每天看的畫面：定版鎖定、異動夾頁追蹤、志工本人與代管家人班表查詢。（C1–C3 運行調度台將於後續階段啟用）</p>
+          <p class="muted" style="margin:0">定版後每天使用的即時調度與志工現場端：14 天出勤確認、請假找代班、共乘接送、當日點名與年度檢討閉環。</p>
           <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
-            <li><a href="#/a5">定版鎖定與異動追蹤夾頁表 (A5)</a></li>
-            <li><a href="#/login">第一次登入姓名綁定與代管家人 (M8)</a></li>
-            <li><a href="#/">各區排班總入口與即時協作進度</a></li>
+            <li><a href="#/c1">C1 運行調度台 · C2 需求變更 · C3 回饋檢討</a></li>
+            <li><a href="#/m4">M4 本週服務</a> · <a href="#/m6">M6 四合一查詢</a> · <a href="#/m7">M7 公告指南</a></li>
+            <li><a href="#/my">M1 我的服務 · M2 無法出席 · M9 我的交通</a></li>
+            <li><a href="#/m3">M3 當日點名與回饋 · M10 車輛安排 · M11 我開的車</a></li>
           </ul>
           <div class="acts" style="margin-top:auto">
-            <a class="btn warn" href="#/login">帳號與綁定 (M8)</a>
-            <a class="btn warn-out" href="#/a5">查看定版 (A5)</a>
+            <a class="btn warn" href="#/c1">運行調度台 (C1)</a>
+            <a class="btn warn-out" href="#/m4">本週服務 (M4)</a>
           </div>
         </div>
       </section>

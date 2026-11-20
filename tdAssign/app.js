@@ -1513,11 +1513,16 @@
     const isBOrArea = wsKey === 'B' || wsKey === 'area';
     const isP = wsKey === 'P' || subKey === 'b2' || subKey === 'p';
     const isOv = wsKey === 'overview' || wsKey === '00';
-    const isMy = wsKey === 'my';
-    const isLookup = wsKey === 'lookup';
+    const isMy = wsKey === 'my' || ['m1', 'm2', 'm9'].includes(subKey);
+    const isLookup = wsKey === 'lookup' || subKey === 'm6';
     const isLogin = wsKey === 'login';
     const isSys = wsKey === 'sys';
     const isAdminHome = wsKey === 'admin-home';
+    const isRun = wsKey === 'R' && !['m1', 'm2', 'm6', 'm9'].includes(subKey);
+    const isM4 = subKey === 'm4';
+    const isM7 = subKey === 'm7';
+    const RT = window.TDRuntime;
+    const rtSum = RT && RT.getRuntimeSummary && M ? RT.getRuntimeSummary(consoleCtx()) : { alertCount: 0, changeCount: 0 };
 
     let navs = '';
     let subs = '';
@@ -1532,7 +1537,8 @@
         navItem(inRev, '#/review', '進度協調', badgeHtml(bd.a6Total)),
         navItem(inA23, '#/a2', '總表與人員'),
         navItem(inA145, '#/a1', '規則定版'),
-        navItem(isBOrArea || isP, `#/a/${a}`, '各區作業')
+        navItem(isBOrArea || isP, `#/a/${a}`, '各區作業'),
+        navItem(isRun, '#/c1', '運行調度', badgeHtml(rtSum.alertCount))
       ].join('');
 
       if (inA23) {
@@ -1552,6 +1558,14 @@
           navItem(subKey === 'b3' || subKey === 'a', `#/a/${a}`, '本區排人 (B3)'),
           navItem(subKey === 't' || subKey === 'b5', `#/t/${a}`, '分工與送出 (B5)'),
           navItem(isP, '#/p', '提案與試算 (B2)')
+        ].join('');
+      } else if (isRun) {
+        subs = [
+          navItem(subKey === 'c1', '#/c1', '調度台 (C1)'),
+          navItem(subKey === 'c2', '#/c2', '需求變更 (C2)'),
+          navItem(subKey === 'c3', '#/c3', '回饋檢討 (C3)'),
+          navItem(isM4, '#/m4', '本週服務 (M4)'),
+          navItem(isM7, '#/m7', '公告指南 (M7)')
         ].join('');
       } else if (isOv) {
         subs = [
@@ -1574,6 +1588,7 @@
         navItem(isP, '#/p', '提案決議', badgeHtml(bd.openProps, 'pre')),
         navItem(inA145, '#/a1', '規則定版'),
         navItem(isBOrArea, `#/a/${a}`, '各區作業'),
+        navItem(isRun, '#/c1', '運行調度', badgeHtml(rtSum.alertCount)),
         navItem(isSys, '#/sys', '帳號權限', badgeHtml(bd.sysTotal, 'pre'))
       ].join('');
 
@@ -1595,6 +1610,14 @@
           navItem(subKey === 't' || subKey === 'b5', `#/t/${a}`, '分工與送出 (B5)'),
           navItem(isP, '#/p', '提案與試算 (B2)')
         ].join('');
+      } else if (isRun) {
+        subs = [
+          navItem(subKey === 'c1', '#/c1', '調度台 (C1)'),
+          navItem(subKey === 'c2', '#/c2', '需求變更 (C2)'),
+          navItem(subKey === 'c3', '#/c3', '回饋檢討 (C3)'),
+          navItem(isM4, '#/m4', '本週服務 (M4)'),
+          navItem(isM7, '#/m7', '公告指南 (M7)')
+        ].join('');
       } else if (isOv) {
         subs = [
           navItem(true, '#/overview', '系統指南 (00)'),
@@ -1612,6 +1635,7 @@
         navItem(inB3, `#/a/${a}`, '本區排人'),
         navItem(isP, '#/p', '提案試算', badgeHtml(bd.needVoteProps, 'pre')),
         navItem(inB5, `#/t/${a}`, '分工與送出', badgeHtml(bd.approvals)),
+        navItem(isRun, '#/m3', '運行帶隊'),
         navItem(isMy, '#/my', '我的班表')
       ].join('');
 
@@ -1622,26 +1646,46 @@
           navItem(subKey === 't' || subKey === 'b5', `#/t/${a}`, '分工與送出 (B5)'),
           navItem(isP, '#/p', '提案與試算 (B2)')
         ].join('');
+      } else if (isRun) {
+        subs = [
+          navItem(subKey === 'm3', '#/m3', '當日點名 (M3)'),
+          navItem(subKey === 'm10', '#/m10', '車輛安排 (M10)'),
+          navItem(isM4, '#/m4', '本週服務 (M4)'),
+          navItem(isLookup, '#/m6', '查詢 (M6)'),
+          navItem(isM7, '#/m7', '公告指南 (M7)')
+        ].join('');
       }
     } else if (role === 'sched') {
       navs = [
         navItem(wsKey === 'home', '#/', '負責任務', badgeHtml(bd.myTodo)),
         navItem(isBOrArea, `#/a/${a}`, '本區排人'),
         navItem(isP, '#/p', '提案討論'),
+        navItem(isRun, '#/m3', '運行帶隊'),
         navItem(isMy, '#/my', '我的班表')
       ].join('');
+      if (isRun) {
+        subs = [
+          navItem(subKey === 'm3', '#/m3', '當日點名 (M3)'),
+          navItem(subKey === 'm10', '#/m10', '車輛安排 (M10)'),
+          navItem(isM4, '#/m4', '本週服務 (M4)'),
+          navItem(isLookup, '#/m6', '查詢 (M6)'),
+          navItem(isM7, '#/m7', '公告指南 (M7)')
+        ].join('');
+      }
     } else if (role === 'member' || role === 'unbound') {
       navs = [
         navItem(wsKey === 'home' || isMy, '#/', '我的班表'),
-        navItem(isLookup || isBOrArea || isP, '#/lookup', '全堂查詢'),
-        navItem(isOv, '#/overview', '系統指南'),
+        navItem(isM4, '#/m4', '本週服務'),
+        navItem(isLookup || isBOrArea || isP, '#/m6', '全堂查詢'),
+        navItem(isM7, '#/m7', '公告指南'),
         navItem(isLogin, '#/login', '帳號與綁定')
       ].join('');
     } else {
       navs = [
         navItem(wsKey === 'home', '#/', '查班首頁'),
-        navItem(isLookup || isBOrArea || isP, '#/lookup', '全堂查詢'),
-        navItem(isOv, '#/overview', '系統指南'),
+        navItem(isM4, '#/m4', '本週服務'),
+        navItem(isLookup || isBOrArea || isP, '#/m6', '全堂查詢'),
+        navItem(isM7, '#/m7', '公告指南'),
         navItem(isLogin, '#/login', '登入 / 綁定')
       ].join('');
     }
@@ -1672,15 +1716,17 @@
     const bd = roleBadges(a);
     const it = (href, active, t, badge) => `<a href="${href}" class="${active ? 'on' : ''}"><span>${t}</span>${badge || ''}</a>`;
     const isHome = !r || !r.v;
-    const isPubBrowse = r && ['lookup', 'a', 'g', 's', 'b1', 'p', 'overview'].includes(r.v);
+    const isPubBrowse = r && ['lookup', 'm6', 'a', 'g', 's', 'b1', 'p', 'overview'].includes(r.v);
+    const RT = window.TDRuntime;
+    const rtSum = RT && RT.getRuntimeSummary && M ? RT.getRuntimeSummary(consoleCtx()) : { alertCount: 0 };
 
     if (role === 'sysadmin') {
       return `<nav class="bnav cols-5 no-print" aria-label="行動版快捷導覽">
         ${it('#/', isHome || (r && r.v === 'sys'), '權限', badgeHtml(bd.sysTotal))}
         ${it('#/admin', r && r.v === 'admin', '指揮')}
+        ${it('#/c1', r && ['c1', 'c2', 'c3'].includes(r.v), '調度', badgeHtml(rtSum.alertCount))}
         ${it('#/review', r && r.v === 'review', '進度', badgeHtml(bd.a6Total))}
         ${it('#/a2', r && (r.v === 'a2' || r.v === 'a3'), '總表')}
-        ${it('#/a5', r && ['a1', 'a4', 'a5'].includes(r.v), '定版')}
       </nav>`;
     }
     if (role === 'admin') {
@@ -1688,7 +1734,7 @@
         ${it('#/', isHome, '指揮')}
         ${it('#/review', r && r.v === 'review', '進度', badgeHtml(bd.a6Total))}
         ${it('#/p', r && r.v === 'p', '提案', badgeHtml(bd.openProps, 'pre'))}
-        ${it('#/a2', r && (r.v === 'a2' || r.v === 'a3'), '總表')}
+        ${it('#/c1', r && ['c1', 'c2', 'c3'].includes(r.v), '調度', badgeHtml(rtSum.alertCount))}
         ${it('#/a5', r && ['a1', 'a4', 'a5'].includes(r.v), '定版')}
       </nav>`;
     }
@@ -1697,31 +1743,30 @@
         ${it('#/', isHome || (r && r.v === 'b1'), '本區')}
         ${it('#/a/' + a, r && ['a', 'g', 's'].includes(r.v), '排人')}
         ${it('#/p', r && r.v === 'p', '提案', badgeHtml(bd.needVoteProps, 'pre'))}
-        ${it('#/t/' + a, r && r.v === 't', '送出', badgeHtml(bd.approvals))}
-        ${it('#/my', r && r.v === 'my', '我的')}
+        ${it('#/m3', r && ['m3', 'm10'].includes(r.v), '帶隊')}
+        ${it('#/my', r && ['my', 'm1', 'm2', 'm9', 'm11'].includes(r.v), '我的')}
       </nav>`;
     }
     if (role === 'sched') {
       return `<nav class="bnav cols-4 no-print" aria-label="行動版快捷導覽">
         ${it('#/', isHome, '任務', badgeHtml(bd.myTodo))}
-        ${it('#/a/' + a, r && ['a', 'g', 's', 't', 'b1'].includes(r.v), '月曆')}
+        ${it('#/m3', r && ['m3', 'm10'].includes(r.v), '帶隊')}
         ${it('#/p', r && r.v === 'p', '提案')}
-        ${it('#/my', r && r.v === 'my', '我的')}
+        ${it('#/my', r && ['my', 'm1', 'm2', 'm9', 'm11'].includes(r.v), '我的')}
       </nav>`;
     }
     if (role === 'member' || role === 'unbound') {
-      const famCnt = Object.keys((myUserRec() || {}).family || {}).length;
-      const onFam = r && r.v === 'my' && String(r.arg || '').includes('tab=fam');
       return `<nav class="bnav cols-4 no-print" aria-label="行動版快捷導覽">
-        ${it('#/', (isHome || (r && r.v === 'my')) && !onFam, '我的班表')}
-        ${it('#/my?tab=fam', onFam, '家人', badgeHtml(famCnt, 'ok'))}
-        ${it('#/lookup', isPubBrowse, '全堂查詢')}
-        ${it('#/login', r && (r.v === 'login' || r.v === 'bind'), '帳號')}
+        ${it('#/', isHome || (r && ['my', 'm1', 'm2', 'm9', 'm11'].includes(r.v)), '我的班表')}
+        ${it('#/m4', r && (r.v === 'm4' || r.v === 'm5'), '本週')}
+        ${it('#/m6', isPubBrowse, '查詢')}
+        ${it('#/m7', r && r.v === 'm7', '指南')}
       </nav>`;
     }
-    return `<nav class="bnav cols-3 no-print" aria-label="行動版快捷導覽">
-      ${it('#/', isHome, '查班')}
-      ${it('#/lookup', isPubBrowse, '公開查詢')}
+    return `<nav class="bnav cols-4 no-print" aria-label="行動版快捷導覽">
+      ${it('#/m4', r && (r.v === 'm4' || r.v === 'm5'), '本週')}
+      ${it('#/m6', isPubBrowse, '查詢')}
+      ${it('#/m7', r && r.v === 'm7', '指南')}
       ${it('#/login', r && (r.v === 'login' || r.v === 'bind'), '登入')}
     </nav>`;
   }
@@ -1855,9 +1900,18 @@
               <a class="btn sm" href="#/overview">00 系統指南</a>
             </div>
           </section>
-          <section class="phase-preview">
-            <div class="row-h"><b>階段四藍圖預留：運行調度台</b>${tag('pl', '定版後啟用')}</div>
-            <div class="muted small">定版鎖定為 116 定版 v1.0 後，總召指揮中心將同步銜接 <b>C1 當日調度台</b>、<b>C2 臨時請假代班</b> 與 <b>C3 年度檢討</b>。</div>
+          <section class="card" style="border-left:4px solid var(--accent)">
+            <div class="row-h"><b>運行調度台 (C1–C3)</b>${tag('ok', '已啟用')}</div>
+            ${(() => {
+              const RT = window.TDRuntime;
+              const sum = RT && RT.getRuntimeSummary && M ? RT.getRuntimeSummary(consoleCtx()) : { alertCount: 0, changeCount: 0, fbCount: 0 };
+              return `<div class="muted small">14 天內待處理調度 <b>${sum.alertCount}</b> 件 · 變更清單 <b>${sum.changeCount}</b> 筆 · 回饋 <b>${sum.fbCount}</b> 筆</div>`;
+            })()}
+            <div class="acts">
+              <a class="btn sm pri" href="#/c1">C1 調度台</a>
+              <a class="btn sm" href="#/c2">C2 需求變更</a>
+              <a class="btn sm" href="#/c3">C3 回饋檢討</a>
+            </div>
           </section>
         </aside>
       </div>
@@ -2058,9 +2112,13 @@
             <div class="muted small">排人時支援直接從 LINE 貼上多人姓名批次加入，若有撞期紅框可一鍵通知總召協調。</div>
             <a class="btn sm" href="#/t/${a}">查看分工與送出狀態 (B5)</a>
           </section>
-          <section class="phase-preview">
-            <div class="row-h"><b>階段五模組預告</b>${tag('pl', '定版後開啟')}</div>
-            <div class="muted small">年度定版後，本任務牆將原地開啟 <b>M3 當日帶隊點名與回饋</b> 及 <b>M10 車輛安排</b>。</div>
+          <section class="card" style="border-left:4px solid var(--accent)">
+            <div class="row-h"><b>當日帶隊與交通工具 (M3／M10)</b>${tag('ok', '已啟用')}</div>
+            <div class="muted small">現場一鍵點名、一分鐘服務後回饋，與管理組員共乘車次安排。</div>
+            <div class="acts">
+              <a class="btn sm pri-out" href="#/m3">M3 當日點名與回饋</a>
+              <a class="btn sm blue-out" href="#/m10">M10 車輛安排</a>
+            </div>
           </section>
         </aside>
       </div>
@@ -2104,7 +2162,16 @@
     }
 
     const p = curOpt.p;
-    const slots = (M ? (M.personSlots[p.id] || []) : []).slice().sort((a, b) => a.ds - b.ds);
+    const RT = window.TDRuntime;
+    const slots = (M ? (M.personSlots[p.id] || []) : []).slice();
+    const seenSid = new Set(slots.map((s) => s.id));
+    for (const [sid, m] of Object.entries(D().rsvp || {})) {
+      if (!seenSid.has(sid) && m && m[p.id] && m[p.id].st === 'sub' && M && M.byId[sid] && !M.byId[sid].cancel) {
+        slots.push(M.byId[sid]);
+        seenSid.add(sid);
+      }
+    }
+    slots.sort((a, b) => a.ds - b.ds);
     const occ = E.occasions(slots).length;
     const nowDt = new Date();
     const todayStr = `${nowDt.getFullYear()}-${String(nowDt.getMonth() + 1).padStart(2, '0')}-${String(nowDt.getDate()).padStart(2, '0')}`;
@@ -2131,13 +2198,13 @@
       <div class="hero-date num">${(+nextSlot.d.slice(0, 4) - 1911)}／${E.fmtD(nextSlot.d)}（${WD[nextSlot.wd]}）</div>
       <div class="hero-title">${esc(nextSlot.label || nextSlot.cat)}${nextSlot.loc ? ` · ${esc(nextSlot.loc)}` : ''}</div>
       <div class="muted small">同場夥伴 ${(M.asg[nextSlot.id] && M.asg[nextSlot.id].p.length) || 0} 人 · ${esc(p.n)} 116 年共 ${occ} 次（${slots.length} 場）</div>
-      <div class="phase-preview" style="margin-top:6px">
-        <div class="small muted">定版後可於此直接操作：<b>出席回覆／無法出席 (M2)</b> · <b>這場怎麼去搭車資訊 (M9)</b></div>
-      </div>
+      ${RT && RT.renderM1Hero ? RT.renderM1Hero(p, nextSlot, consoleCtx()) : ''}
     </section>` : `<section class="hero-duty">
       <h2>${esc(p.n)}（${esc(p.a)}）目前尚未排入 116 年場次</h2>
-      <div class="muted small">各區仍在排班中，定版後若您有安排勤務將自動顯示於此。</div>
+      <div class="muted small">各區仍在排班中，排定或有需要您支援時將自動顯示於此。</div>
     </section>`;
+
+    const m1ExtraHtml = RT && RT.renderM1Footer ? RT.renderM1Footer(p, consoleCtx()) : '';
 
     const byYm = new Map();
     for (const s of slots) {
@@ -2147,8 +2214,8 @@
     }
     const timelineHtml = [...byYm.entries()].map(([ym, list]) => `<div class="mem">
       <div class="small muted" style="font-weight:700">${esc(rocYmLabel(ym))}</div>
-      ${list.map((s) => `<a class="row" href="${s.groupKey ? '#/g/' + esc(s.groupKey) : '#/s/' + esc(s.id)}">
-        <div class="row-h"><b>${esc(dLabel(s))}${esc(s.label || s.cat)}</b>${tag('no', s.area)}</div>
+      ${list.map((s) => `<a class="row" href="#/m5/${esc(s.id)}">
+        <div class="row-h"><b>${esc(dLabel(s))}${esc(s.label || s.cat)}</b><div class="row-t">${tag('no', s.area)}${RT && RT.renderM1SlotBadge ? RT.renderM1SlotBadge(p, s, consoleCtx()) : ''}</div></div>
         <div class="muted small">${esc(s.cat)}${s.groupKey && gmOf(s.groupKey) ? ' · ' + esc(gmOf(s.groupKey).name) : ''}${s.loc ? ' · ' + esc(s.loc) : ''}</div>
       </a>`).join('')}
     </div>`).join('') || '<div class="empty">尚無已排定場次</div>';
@@ -2159,14 +2226,15 @@
           <button type="button" class="btn sm pri-out" data-act="join" data-area="${esc(p.a)}">申請成為排班人員</button></div></section>`
       : (myMemberRec && myMemberRec.status === 'pending' ? `<section class="card warnbox"><div class="small">已送出成為 <b>${esc(p.a)}</b> 區排班人員之申請，正待區長同意。</div></section>` : '');
 
-    return `${wsHeader('my', 'my', curArea)}<main class="wide-main">
+    return `${wsHeader('my', 'm1', curArea)}<main class="wide-main">
       <div class="page-head">
         <div>
-          <div class="muted small">R4 道親與家人專屬視角 · ${esc(draftVer())}</div>
+          <div class="muted small">R4 / M1 我的服務與家人視角 · ${esc(draftVer())}</div>
           <h1>平安，${esc(p.n)}</h1>
         </div>
         <div class="acts">
-          <a class="btn sm" href="#/lookup">全堂查詢</a>
+          <a class="btn sm" href="#/m4">本週服務 (M4)</a>
+          <a class="btn sm" href="#/m6">全堂查詢 (M6)</a>
           <button type="button" class="btn sm" data-act="open-acct">綁定與家人 (M8)</button>
         </div>
       </div>
@@ -2175,9 +2243,10 @@
         <div class="split-main">
           ${onFamTab ? `<section class="card" style="border-left:4px solid var(--ok)">
             <div class="row-h"><h2>代管家人清單（${fam.length} 位）</h2><button type="button" class="btn sm pri" data-act="open-acct">新增或管理家人</button></div>
-            <div class="muted small">點上方姓名膠囊即可切換查看長輩或家人的全年班表，代為提醒集合時間與地點。</div>
+            <div class="muted small">點上方姓名膠囊即可切換查看長輩或家人的全年班表，代為回覆出席與安排交通。</div>
           </section>` : ''}
           ${heroCard}
+          ${m1ExtraHtml}
           <section class="card">
             <div class="row-h"><h2>${esc(p.n)} 的 116 年全年服務時間軸</h2><span class="num small muted">共 ${occ} 次 / ${slots.length} 場</span></div>
             ${timelineHtml}
@@ -2192,9 +2261,14 @@
             <div class="kv"><span>綁定狀態</span>${curOpt.pending ? tag('wn', '待區長確認') : tag('ok', '已生效')}</div>
             <button type="button" class="btn wide" data-act="person" data-pid="${+p.id}">開啟個人班表詳情抽屜</button>
           </section>
-          <section class="phase-preview">
-            <div class="row-h"><b>階段五服務預告</b>${tag('pl', '定版後開啟')}</div>
-            <div class="muted small">正式定版後可直接使用 <b>M1 我的服務確認</b>、<b>M2 線上請假</b> 與 <b>M9 搭車共乘查詢</b>。</div>
+          <section class="card">
+            <h2>志工常用工具與指南</h2>
+            <div class="acts">
+              <a class="btn sm" href="#/m4">M4 本週服務</a>
+              <a class="btn sm" href="#/m6">M6 四合一查詢</a>
+              <a class="btn sm" href="#/m7">M7 公告與指南</a>
+              ${WORK_AREAS.includes(p.a) ? `<button type="button" class="btn sm" data-act="coord" data-area="${esc(p.a)}" data-pid="${+p.id}" data-label="不方便月份回報" data-msg="${esc(p.n)} 回報有不方便排班之月份，請協助於 A3 設定">告知不方便的月份</button>` : ''}
+            </div>
           </section>
         </aside>
       </div>
@@ -2278,12 +2352,11 @@
           <section class="card">
             <h2>公開瀏覽捷徑</h2>
             <div class="acts">
-              <a class="btn sm pri-out" href="#/lookup">查各區組別名單 (${WORK_AREAS.length} 單位)</a>
+              <a class="btn sm pri" href="#/m4">M4 本週服務快覽</a>
+              <a class="btn sm pri-out" href="#/m6">M6 四合一全堂查詢 (${WORK_AREAS.length} 單位)</a>
+              <a class="btn sm" href="#/m7">M7 公告與服務指南</a>
               <a class="btn sm" href="#/overview">116 年度系統指南 (00)</a>
               ${seeded ? `<a class="btn sm" href="#/a/${curArea}">看 ${esc(curArea)} 排班明細</a>` : ''}
-            </div>
-            <div class="phase-preview" style="margin-top:4px">
-              <div class="small muted"><b>階段五預告：</b>定版後將於公開首頁提供 <b>M4 本週服務快覽</b> 與 <b>M7 公告服務指南</b>。</div>
             </div>
           </section>
         </div>
@@ -4069,10 +4142,12 @@
       get M() { return M; },
       get ISS() { return ISS; },
       D, me, isSysAdmin, isCoordAdmin, isAdmin, isLead, can, memberOf, myAreas, defaultArea,
+      myUserRec, myBoundPerson, boundOk, gmOf, groupLead, groupSlots, slotIssuesOf, propList,
+      AREAS, WORK_AREAS, WD, RE_PID, RE_SID, RE_UID, route, ST_LABEL,
       draftVer, nextDraftVer,
       wsHeader, topbar, accountBtn, tag, esc, ago, dLabel, slotName, roleOf, cnt, isClash,
       toast, need, logOp, touchArea, stamp, addPerson, removePerson, confirmPre,
-      evalInSlot, evalInGroup, areaStats, areaMetrics, allAreaLoadRank, render,
+      evalInSlot, evalSlotCand, evalInGroup, areaStats, areaMetrics, allAreaLoadRank, render,
       // 階段 1 共用工具
       isPreFor, canConfirmPre, isPublished, mkUndo, canPath, kindOfGroup, normAcks, autoApproveBind, afterCount
     };
@@ -4153,6 +4228,7 @@
       lastRoute = key; window.scrollTo(0, 0); onEnter(r);
     }
     const C = window.TDConsole;
+    const RT = window.TDRuntime;
     appEl.className = '';
     const ae = document.activeElement, focusKey = ae && appEl.contains(ae) ? ctlKey(ae) : '';
     const draftVals = {}, detailsState = [], scrollState = [];
@@ -4180,8 +4256,9 @@
     else if (r.v === 'login' || r.v === 'bind') html = vLogin();
     else if (r.v === 'sys') html = vSysAdmin();
     else if (r.v === 'admin') html = isAdmin() ? vHomeAdmin() : vSysAdmin();
-    else if (r.v === 'my') html = vMyService(r.arg);
-    else if (r.v === 'lookup') html = vPublicLookup();
+    else if (r.v === 'my' || r.v === 'm1') html = vMyService(r.arg);
+    else if (RT && Array.isArray(RT.ROUTES) && RT.ROUTES.includes(r.v)) html = RT.renderRoute(r.v, r.arg, consoleCtx());
+    else if (r.v === 'lookup') html = RT ? RT.renderRoute('m6', r.arg, consoleCtx()) : vPublicLookup();
     else if (r.v === 'a' && WORK_AREAS.includes(r.pathArg)) html = vArea(r.pathArg);
     else if (r.v === 'b1') html = vAreaLead(r.pathArg);
     else if (r.v === 'p') html = vProposal(r.arg);
@@ -4276,6 +4353,7 @@
     const t = ev.target.closest('[data-act]'); if (!t) return;
     const a = t.dataset.act, d = t.dataset;
     if (window.TDConsole && typeof window.TDConsole.handleClick === 'function' && window.TDConsole.handleClick(a, d, ev, consoleCtx())) return;
+    if (window.TDRuntime && typeof window.TDRuntime.handleClick === 'function' && window.TDRuntime.handleClick(a, d, ev, consoleCtx())) return;
     if (a === 'toggle-large') { toggleLargeMode(); return; }
     if (a === 'switch-view') {
       UI.viewAs = d.v === 'my' ? 'my' : '';
@@ -4636,6 +4714,7 @@
 
   function updateSearchDom(k, val) {
     if (window.TDConsole && typeof window.TDConsole.handleSearchInput === 'function' && window.TDConsole.handleSearchInput(k, val, consoleCtx())) return;
+    if (window.TDRuntime && typeof window.TDRuntime.handleSearchInput === 'function' && window.TDRuntime.handleSearchInput(k, val, consoleCtx())) return;
     if (k === 'q' || k === 'outQ') updateFinderDom();
     else if (k === 'apptQ') { const el = document.getElementById('appt'); if (el && apptArea) el.innerHTML = renderApptHits(apptArea); }
     else if (k === 'bindQ') { const el = document.getElementById('bindHits'); if (el) el.innerHTML = renderBindHits(); }
@@ -4680,6 +4759,7 @@
     const t = ev.target, a = t.dataset && t.dataset.actChange; if (!a) return;
     const d = t.dataset;
     if (window.TDConsole && typeof window.TDConsole.handleChange === 'function' && window.TDConsole.handleChange(a, t, d, ev, consoleCtx())) return;
+    if (window.TDRuntime && typeof window.TDRuntime.handleChange === 'function' && window.TDRuntime.handleChange(a, t, d, ev, consoleCtx())) return;
     if (a === 'outArea') { UI.outArea = t.value; render(); }
     else if (a === 'a-area') { location.hash = '#/a/' + t.value; }
     else if (a === 'b1-area') { location.hash = '#/b1/' + t.value; }

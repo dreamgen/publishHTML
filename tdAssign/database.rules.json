@@ -482,6 +482,152 @@
             ".validate": "$area.length <= 10 && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('at').isNumber() && (!newData.child('where').exists() || (newData.child('where').isString() && newData.child('where').val().length <= 40))"
           }
         }
+      },
+      "rsvp": {
+        ".read": true,
+        "$sid": {
+          ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24)",
+          "$pid": {
+            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists() || (root.child('td116/users/' + auth.uid + '/bindStatus').val() !== 'rejected' && root.child('td116/users/' + auth.uid + '/pid').exists() && ('' + root.child('td116/users/' + auth.uid + '/pid').val()) === $pid) || root.child('td116/users/' + auth.uid + '/family/' + $pid).exists())",
+            ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9) && newData.hasChildren(['st','at']) && (newData.child('st').val() === 'ok' || newData.child('st').val() === 'no' || newData.child('st').val() === 'sub')",
+            "st": { ".validate": "newData.isString()" },
+            "subPid": { ".validate": "newData.isNumber()" },
+            "subName": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "origPid": { ".validate": "newData.isNumber()" },
+            "origName": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "by": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "uid": { ".validate": "newData.isString() && newData.val().length <= 128" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      },
+      "rsvpNote": {
+        ".read": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+        "$sid": {
+          ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24)",
+          "$pid": {
+            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists() || (root.child('td116/users/' + auth.uid + '/bindStatus').val() !== 'rejected' && root.child('td116/users/' + auth.uid + '/pid').exists() && ('' + root.child('td116/users/' + auth.uid + '/pid').val()) === $pid) || root.child('td116/users/' + auth.uid + '/family/' + $pid).exists())",
+            ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9) && newData.hasChildren(['uid','at'])",
+            "reason": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "note": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "uid": { ".validate": "newData.isString() && newData.val().length <= 128" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      },
+      "checkin": {
+        ".read": true,
+        "$sid": {
+          ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24)",
+          "$pid": {
+            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+            ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9) && newData.child('here').isBoolean() && newData.child('at').isNumber()",
+            "here": { ".validate": "newData.isBoolean()" },
+            "subOf": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "by": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "uid": { ".validate": "newData.isString() && newData.val().length <= 128" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      },
+      "feedback": {
+        ".read": true,
+        "$sid": {
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+          ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24) && newData.child('at').isNumber()",
+          "headcount": { ".validate": "newData.val() === '不足' || newData.val() === '剛好' || newData.val() === '太多'" },
+          "transport": { ".validate": "newData.val() === '順利' || newData.val() === '臨時安排' || newData.val() === '有人沒車'" },
+          "workload": { ".validate": "newData.val() === '偏輕' || newData.val() === '剛好' || newData.val() === '偏重'" },
+          "note": { ".validate": "newData.isString() && newData.val().length <= 500" },
+          "hereCnt": { ".validate": "newData.isNumber()" },
+          "totalCnt": { ".validate": "newData.isNumber()" },
+          "area": { ".validate": "newData.isString() && newData.val().length <= 10" },
+          "cat": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "d": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "by": { ".validate": "newData.isString() && newData.val().length <= 40" },
+          "uid": { ".validate": "newData.isString() && newData.val().length <= 128" },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      },
+      "carpool": {
+        ".read": true,
+        "$sid": {
+          ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24)",
+          "mode": {
+            ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+            ".validate": "newData.val() === 'app' || newData.val() === 'offline'"
+          },
+          "cars": {
+            "$cid": {
+              ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists() || (data.exists() ? data.child('driverUid').val() === auth.uid : newData.child('driverUid').val() === auth.uid))",
+              ".validate": "($cid.matches(/^[A-Za-z0-9_]+$/) && $cid.length >= 1 && $cid.length <= 32) && newData.hasChildren(['driverName','kind','seats','at'])",
+              "driverName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" },
+              "driverPid": { ".validate": "newData.isNumber()" },
+              "driverUid": { ".validate": "newData.isString() && newData.val().length <= 128" },
+              "kind": { ".validate": "newData.val() === '自己開車' || newData.val() === '已有人載' || newData.val() === '臨時司機'" },
+              "seats": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 12" },
+              "pickup": { ".validate": "newData.isString() && newData.val().length <= 80" },
+              "status": { ".validate": "newData.isString() && newData.val().length <= 60" },
+              "cancelled": { ".validate": "newData.isBoolean()" },
+              "temp": { ".validate": "newData.isBoolean()" },
+              "at": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          },
+          "riders": {
+            "$pid": {
+              ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists() || (root.child('td116/users/' + auth.uid + '/bindStatus').val() !== 'rejected' && root.child('td116/users/' + auth.uid + '/pid').exists() && ('' + root.child('td116/users/' + auth.uid + '/pid').val()) === $pid) || root.child('td116/users/' + auth.uid + '/family/' + $pid).exists() || (newData.child('carId').exists() && root.child('td116/carpool/' + $sid + '/cars/' + newData.child('carId').val() + '/driverUid').val() === auth.uid) || (data.child('carId').exists() && root.child('td116/carpool/' + $sid + '/cars/' + data.child('carId').val() + '/driverUid').val() === auth.uid))",
+              ".validate": "($pid.matches(/^[0-9]+$/) && $pid.length >= 1 && $pid.length <= 9) && newData.hasChildren(['mode','at']) && (newData.child('mode').val() === 'bus' || newData.child('mode').val() === 'ride_self' || newData.child('mode').val() === 'drive' || newData.child('mode').val() === 'carpool' || newData.child('mode').val() === 'need_help')",
+              "mode": { ".validate": "newData.isString()" },
+              "carId": { ".validate": "newData.isString() && newData.val().length <= 32" },
+              "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'ok'" },
+              "from": { ".validate": "newData.isString() && newData.val().length <= 60" },
+              "by": { ".validate": "newData.isString() && newData.val().length <= 40" },
+              "uid": { ".validate": "newData.isString() && newData.val().length <= 128" },
+              "at": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          }
+        }
+      },
+      "changes": {
+        ".read": true,
+        "$id": {
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || (!data.exists() && root.child('td116/sched/' + auth.uid).exists()))",
+          ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.child('id').val() === $id && newData.child('title').isString() && newData.child('title').val().length <= 120 && newData.child('kind').isString() && newData.child('kind').val().length <= 20 && newData.child('status').isString() && newData.child('status').val().length <= 20"
+        }
+      },
+      "review": {
+        ".read": true,
+        ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())"
+      },
+      "dispatch": {
+        ".read": true,
+        "$id": {
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+          ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.child('title').isString() && newData.child('title').val().length <= 120 && newData.child('action').isString() && newData.child('action').val().length <= 200 && (newData.child('st').val() === 'open' || newData.child('st').val() === 'done') && newData.child('at').isNumber()"
+        }
+      },
+      "slotNotes": {
+        ".read": true,
+        "$sid": {
+          ".validate": "($sid.matches(/^[A-Za-z0-9_]+$/) && $sid.length >= 1 && $sid.length <= 24)",
+          "$nid": {
+            ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid) || root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists())",
+            ".validate": "($nid.matches(/^[A-Za-z0-9_]+$/) && $nid.length >= 1 && $nid.length <= 24) && newData.child('text').isString() && newData.child('text').val().length >= 1 && newData.child('text').val().length <= 500 && newData.child('who').isString() && newData.child('who').val().length <= 40 && newData.child('at').isNumber()"
+          }
+        }
+      },
+      "bulletins": {
+        ".read": true,
+        "$id": {
+          ".write": "auth != null && (root.child('td116/admins/' + auth.uid).exists() || root.child('td116/sysadmins/' + auth.uid).exists() || root.child('td116/sched/' + auth.uid).exists())",
+          ".validate": "($id.matches(/^[A-Za-z0-9_]+$/) && $id.length >= 1 && $id.length <= 24) && newData.hasChildren(['tab','title','at']) && (newData.child('tab').val() === '公告' || newData.child('tab').val() === '指南') && newData.child('title').isString() && newData.child('title').val().length >= 1 && newData.child('title').val().length <= 120 && (!newData.child('body').exists() || (newData.child('body').isString() && newData.child('body').val().length <= 2000)) && (!newData.child('cat').exists() || (newData.child('cat').isString() && newData.child('cat').val().length <= 20))"
+        }
       }
     }
   }

@@ -1053,6 +1053,106 @@ html.large-mode .sys-add-area summary { font-size: 17px; min-height: 46px; }
   .tag.sys { background: #1c5a4d; color: #e9f9f3; border-color: #49b399; }
 }
 
+/* ---------------- 階段四～五：運行調度與志工現場元件 ---------------- */
+.rt-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--sunk);
+  width: 100%;
+}
+.rt-b-ok { background: var(--ok); display: block; }
+.rt-b-wn { background: var(--warn); display: block; }
+.rt-b-bd { background: var(--bad); display: block; }
+
+.rt-alert { gap: 10px; }
+.rt-step-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+  gap: 8px;
+}
+.rt-plan {
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rt-plan .btn { margin-top: auto; align-self: flex-start; }
+
+.rt-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.rt-checkin-row {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+.rt-checkin-row:hover { border-color: var(--accent); background: var(--sunk); }
+.rt-checkin-row.here {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface));
+}
+
+.rt-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--sunk);
+  border-radius: 10px;
+}
+
+.rt-car-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rt-bulletin-pin {
+  background: color-mix(in srgb, var(--accent-soft) 75%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-left: 5px solid var(--accent);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.row.row-sel,
+button.row.row-sel {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+html.large-mode .rt-checkin-row { min-height: 60px; font-size: 18px; }
+html.large-mode .rt-step { font-size: 17px; }
+
 @media print {
-  .phase-preview, .undo-strip, .fam-pills, .sys-global-bar, .sys-add-area { display: none !important; }
+  .phase-preview, .undo-strip, .fam-pills, .sys-global-bar, .sys-add-area, .rt-step-grid { display: none !important; }
 }
