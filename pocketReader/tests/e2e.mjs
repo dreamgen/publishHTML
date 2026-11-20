@@ -413,6 +413,62 @@ async function run() {
     assert.ok(shareCheck.qrW > 0);
     console.log('PASS  Share publish, QR render & subscribe flow:', shareCheck.shareCode);
 
+    // 7. Mobile back-button navigation: overlay -> reader -> home -> exit prompt -> stay in app
+    await cdp.eval(`await new Promise(r => setTimeout(r, 200));`);
+    const backNavCheck = await cdp.eval(`
+      // Open modal from home and go back
+      document.getElementById('btnOpenAdd').click();
+      await new Promise(r => setTimeout(r, 80));
+      const modalOpened = !document.getElementById('addModal').hidden;
+      history.back();
+      await new Promise(r => setTimeout(r, 120));
+      const modalClosedByBack = document.getElementById('addModal').hidden && !document.getElementById('libraryView').hidden;
+
+      // Open a book -> open TOC drawer -> Back closes TOC -> Back returns to home -> Back shows exit prompt -> Stay restores home
+      document.querySelector('.book-card [data-book-action="open"]').click();
+      for (let i = 0; i < 20; i++) {
+        if (!document.getElementById('readerView').hidden) break;
+        await new Promise(r => setTimeout(r, 80));
+      }
+      const inReader = !document.getElementById('readerView').hidden && history.state?.prNav === 'reader';
+
+      document.getElementById('btnToggleToc').click();
+      await new Promise(r => setTimeout(r, 80));
+      const tocOpened = !document.getElementById('tocDrawer').hidden && history.state?.prNav === 'overlay';
+
+      history.back();
+      await new Promise(r => setTimeout(r, 150));
+      const backClosedToc = document.getElementById('tocDrawer').hidden && !document.getElementById('readerView').hidden && history.state?.prNav === 'reader';
+
+      history.back();
+      await new Promise(r => setTimeout(r, 150));
+      const backReturnedHome = document.getElementById('readerView').hidden && !document.getElementById('libraryView').hidden && history.state?.prNav === 'home';
+
+      history.back();
+      await new Promise(r => setTimeout(r, 150));
+      const backClearedSearch = document.getElementById('librarySearchInput').value === '' && document.getElementById('searchResultsPanel').hidden && history.state?.prNav === 'home';
+
+      history.back();
+      await new Promise(r => setTimeout(r, 150));
+      const exitPromptShown = !document.getElementById('exitPromptBar').hidden && history.state?.prNav === 'exit-guard';
+
+      document.getElementById('btnStayInApp').click();
+      await new Promise(r => setTimeout(r, 80));
+      const stayRestoredHome = document.getElementById('exitPromptBar').hidden && history.state?.prNav === 'home';
+
+      return { modalOpened, modalClosedByBack, inReader, tocOpened, backClosedToc, backReturnedHome, backClearedSearch, exitPromptShown, stayRestoredHome };
+    `);
+    assert.equal(backNavCheck.modalOpened, true);
+    assert.equal(backNavCheck.modalClosedByBack, true);
+    assert.equal(backNavCheck.inReader, true);
+    assert.equal(backNavCheck.tocOpened, true);
+    assert.equal(backNavCheck.backClosedToc, true);
+    assert.equal(backNavCheck.backReturnedHome, true);
+    assert.equal(backNavCheck.backClearedSearch, true);
+    assert.equal(backNavCheck.exitPromptShown, true);
+    assert.equal(backNavCheck.stayRestoredHome, true);
+    console.log('PASS  Back navigation (overlay -> reader -> home -> clear search -> exit prompt -> stay)');
+
     assert.equal(consoleErrors.length, 0, `Unexpected console errors: ${consoleErrors.join(' | ')}`);
     assert.equal(failedRequests.length, 0, `Unexpected HTTP >=400 requests: ${failedRequests.join(' | ')}`);
     console.log('PASS  Zero console errors & zero failed same-origin requests');

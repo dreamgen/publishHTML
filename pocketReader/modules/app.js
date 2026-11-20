@@ -162,14 +162,99 @@ async function ensureQRious() {
   return window.QRious;
 }
 
-function openModal(id) {
-  const el = $(id);
-  if (el) el.hidden = false;
+const MODAL_IDS = ['addModal', 'editModal', 'ocrModal', 'shareModal', 'syncModal', 'paraActionModal'];
+const OVERLAY_PANEL_IDS = ['tocDrawer', 'appearancePanel', 'readerMoreMenu', 'inBookSearchBar'];
+
+let navReady = false;
+let exitPromptArmed = false;
+let exitPromptTimer = null;
+
+function getNavBaseUrl() {
+  return location.pathname + location.search;
 }
 
-function closeModal(id) {
+function hasAnyOverlayOpen() {
+  return [...MODAL_IDS, ...OVERLAY_PANEL_IDS].some((id) => {
+    const el = $(id);
+    return el && !el.hidden;
+  });
+}
+
+function closeAllOverlaysDom({ abortOcr = true } = {}) {
+  for (const id of MODAL_IDS) {
+    const el = $(id);
+    if (el) el.hidden = true;
+  }
+  for (const id of OVERLAY_PANEL_IDS) {
+    const el = $(id);
+    if (el) el.hidden = true;
+  }
+  if ($('inBookSearchInput')?.value) {
+    $('inBookSearchInput').value = '';
+    readerCtrl?.searchInBook?.('');
+  }
+  if (abortOcr && state.ocrAbortCtrl) {
+    state.ocrAbortCtrl.abort();
+  }
+}
+
+function disarmExitPrompt({ restoreHome = true } = {}) {
+  clearTimeout(exitPromptTimer);
+  exitPromptTimer = null;
+  if (!exitPromptArmed && $('exitPromptBar')?.hidden) {
+    if (restoreHome && navReady && history.state?.prNav === 'exit-guard') {
+      history.pushState({ prNav: 'home' }, '', getNavBaseUrl());
+    }
+    return;
+  }
+  exitPromptArmed = false;
+  const bar = $('exitPromptBar');
+  if (bar) bar.hidden = true;
+  if (restoreHome && navReady && history.state?.prNav === 'exit-guard') {
+    history.pushState({ prNav: 'home' }, '', getNavBaseUrl());
+  }
+}
+
+function armExitPrompt() {
+  clearTimeout(exitPromptTimer);
+  exitPromptArmed = true;
+  const bar = $('exitPromptBar');
+  if (bar) bar.hidden = false;
+  exitPromptTimer = setTimeout(() => {
+    disarmExitPrompt({ restoreHome: true });
+  }, 3000);
+}
+
+function pushOverlayHistory() {
+  if (!navReady) return;
+  disarmExitPrompt({ restoreHome: true });
+  const cur = history.state?.prNav;
+  if (cur === 'exit-guard') {
+    history.pushState({ prNav: 'home' }, '', getNavBaseUrl());
+  }
+  if (history.state?.prNav !== 'overlay') {
+    history.pushState({ prNav: 'overlay' }, '', getNavBaseUrl());
+  }
+}
+
+function syncHistoryAfterOverlayClose() {
+  if (!navReady) return;
+  if (!hasAnyOverlayOpen() && history.state?.prNav === 'overlay') {
+    history.back();
+  }
+}
+
+function openModal(id) {
+  const el = $(id);
+  if (!el) return;
+  el.hidden = false;
+  pushOverlayHistory();
+}
+
+function closeModal(id, { syncHistory = true } = {}) {
   const el = $(id);
   if (el) el.hidden = true;
+  if (syncHistory) syncHistoryAfterOverlayClose();
 }
 
 function insertClozeAtSelection(textarea) {
@@ -422,6 +507,21 @@ async function openBookInReader(bookId, { chapterIndex = null, paraIndex = null,
     return;
   }
 
+  closeAllOverlaysDom({ abortOcr: false });
+  disarmExitPrompt({ restoreHome: true });
+
+  if (navReady) {
+    const cur = history.state?.prNav;
+    if (cur === 'overlay' || cur === 'reader') {
+      history.replaceState({ prNav: 'reader', bookId }, '', getNavBaseUrl());
+    } else if (cur === 'home') {
+      history.pushState({ prNav: 'reader', bookId }, '', getNavBaseUrl());
+    } else {
+      history.replaceState({ prNav: 'home' }, '', getNavBaseUrl());
+      history.pushState({ prNav: 'reader', bookId }, '', getNavBaseUrl());
+    }
+  }
+
   $('libraryView').hidden = true;
   $('readerView').hidden = false;
   $('readerView').classList.remove('is-immersive');
@@ -443,16 +543,25 @@ async function openBookInReader(bookId, { chapterIndex = null, paraIndex = null,
   renderClozeTermsChips();
 }
 
-function exitReader() {
+function exitReaderDom() {
   ttsCtrl?.stop();
   readerCtrl?.persistReadingPosition();
   readerCtrl?.closePdfDocument();
+  closeAllOverlaysDom({ abortOcr: true });
   $('readerView').hidden = true;
   $('libraryView').hidden = false;
-  $('appearancePanel').hidden = true;
-  $('readerMoreMenu').hidden = true;
-  $('tocDrawer').hidden = true;
   reloadLibrary();
+}
+
+function exitReader() {
+  const cur = history.state?.prNav;
+  exitReaderDom();
+  if (!navReady) return;
+  if (cur === 'overlay') {
+    history.go(-2);
+  } else if (cur === 'reader') {
+    history.back();
+  }
 }
 
 function syncAppearanceControlsToPrefs() {
@@ -703,11 +812,11 @@ async function handleFileImportList(fileList) {
       </div>
     `;
     $('btnPromptOcrNow')?.addEventListener('click', () => {
-      closeModal('addModal');
+      closeModal('addModal', { syncHistory: false });
       openOcrModalForBook(scannedCandidate.book.id, scannedCandidate.buffer);
     });
     $('btnPromptOpenPdfNow')?.addEventListener('click', () => {
-      closeModal('addModal');
+      closeModal('addModal', { syncHistory: false });
       openBookInReader(scannedCandidate.book.id);
     });
     return;
@@ -717,7 +826,7 @@ async function handleFileImportList(fileList) {
     statusBox.innerHTML = `已成功匯入 ${imported} 份文件到「${escapeHtml(category)}」。`;
     toast(`已匯入 ${imported} 份文件`, 'ok');
     if (files.length === 1 && lastBook) {
-      closeModal('addModal');
+      closeModal('addModal', { syncHistory: false });
       openBookInReader(lastBook.id);
     }
   }
@@ -773,7 +882,7 @@ async function startOcrProcess() {
       book.readingState = { ...(book.readingState || {}), viewMode: 'text', chapterIndex: 0, paraIndex: 0, updatedAt: now };
       await putBook(book);
       await reloadLibrary();
-      closeModal('ocrModal');
+      closeModal('ocrModal', { syncHistory: false });
       toast(
         res.cancelled
           ? `已取消，保留前 ${res.recognizedPages} 頁 OCR 文字`
@@ -1064,7 +1173,7 @@ async function handleIncomingHash() {
 
   if (hash.startsWith('#sub=')) {
     const shareId = extractShareId(hash);
-    history.replaceState(null, '', location.pathname + location.search);
+    history.replaceState(history.state, '', getNavBaseUrl());
     if (shareId) {
       openModal('addModal');
       document.querySelector('#addTabs [data-tab="subscribe"]')?.click();
@@ -1074,7 +1183,7 @@ async function handleIncomingHash() {
   } else if (hash.startsWith('#sync=')) {
     const raw = decodeURIComponent(hash.slice(6));
     const params = new URLSearchParams(raw);
-    history.replaceState(null, '', location.pathname + location.search);
+    history.replaceState(history.state, '', getNavBaseUrl());
     const worker = params.get('worker') || '';
     const code = params.get('code') || '';
     const pass = params.get('pass') || '';
@@ -1096,7 +1205,7 @@ async function handleIncomingHash() {
 async function checkShareInbox() {
   const params = new URLSearchParams(location.search);
   if (!params.has('share-inbox')) return;
-  history.replaceState(null, '', location.pathname + location.hash);
+  history.replaceState(history.state, '', location.pathname + location.hash);
 
   try {
     const cache = await caches.open('pocketReader-share-inbox');
@@ -1163,13 +1272,17 @@ function setupLaunchQueue() {
 
 // ── Event Wiring ──────────────────────────────────────────────────────────────
 function bindAllEvents() {
+  $('btnStayInApp')?.addEventListener('click', () => disarmExitPrompt({ restoreHome: true }));
+
   // Library search
   $('librarySearchInput').addEventListener('input', (e) => {
+    disarmExitPrompt({ restoreHome: true });
     state.searchQuery = e.target.value;
     $('btnClearSearch').hidden = !state.searchQuery;
     renderSearchResults();
   });
   $('btnClearSearch').addEventListener('click', () => {
+    disarmExitPrompt({ restoreHome: true });
     state.searchQuery = '';
     $('librarySearchInput').value = '';
     $('btnClearSearch').hidden = true;
@@ -1195,11 +1308,13 @@ function bindAllEvents() {
   $('categoryChips').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-cat]');
     if (!btn) return;
+    disarmExitPrompt({ restoreHome: true });
     state.activeCategory = btn.dataset.cat;
     renderCategoryChips();
     renderBookList();
   });
   $('sortSelect').addEventListener('change', (e) => {
+    disarmExitPrompt({ restoreHome: true });
     state.sortMode = e.target.value;
     renderBookList();
   });
@@ -1212,6 +1327,7 @@ function bindAllEvents() {
     const actEl = e.target.closest('[data-book-action]');
     const card = e.target.closest('[data-book-id]');
     if (!actEl || !card) return;
+    disarmExitPrompt({ restoreHome: true });
     const bookId = card.dataset.bookId;
     const action = actEl.dataset.bookAction;
 
@@ -1241,7 +1357,10 @@ function bindAllEvents() {
   // Topbar Buttons
   $('btnOpenAdd').addEventListener('click', () => openModal('addModal'));
   $('btnOpenSync').addEventListener('click', () => openSyncModal('cloud'));
-  $('btnQuickSync').addEventListener('click', () => executeCloudSync());
+  $('btnQuickSync').addEventListener('click', () => {
+    disarmExitPrompt({ restoreHome: true });
+    executeCloudSync();
+  });
 
   // Close modal buttons & backdrop
   document.addEventListener('click', (e) => {
@@ -1251,7 +1370,7 @@ function bindAllEvents() {
       return;
     }
     if (e.target.classList.contains('modal-backdrop') && e.target.id !== 'ocrModal') {
-      e.target.hidden = true;
+      closeModal(e.target.id);
     }
   });
 
@@ -1292,7 +1411,7 @@ function bindAllEvents() {
     });
     await putBook(book);
     e.target.reset();
-    closeModal('addModal');
+    closeModal('addModal', { syncHistory: false });
     await reloadLibrary();
     toast('已存入隨身書庫', 'ok');
     openBookInReader(book.id);
@@ -1356,7 +1475,7 @@ function bindAllEvents() {
       contentUpdatedAt: now,
     });
     await putBook(book);
-    closeModal('addModal');
+    closeModal('addModal', { syncHistory: false });
     $('webPreviewBox').hidden = true;
     $('webUrlInput').value = '';
     await reloadLibrary();
@@ -1716,10 +1835,14 @@ function bindAllEvents() {
 
   $('btnToggleAppearance').addEventListener('click', () => {
     $('readerMoreMenu').hidden = true;
-    $('appearancePanel').hidden = !$('appearancePanel').hidden;
+    const willOpen = $('appearancePanel').hidden;
+    $('appearancePanel').hidden = !willOpen;
+    if (willOpen) pushOverlayHistory();
+    else syncHistoryAfterOverlayClose();
   });
   $('btnCloseAppearance').addEventListener('click', () => {
     $('appearancePanel').hidden = true;
+    syncHistoryAfterOverlayClose();
   });
 
   $('btnToggleVertical').addEventListener('click', () => {
@@ -1848,13 +1971,20 @@ function bindAllEvents() {
 
   // In-book search
   $('btnToggleSearch').addEventListener('click', () => {
-    $('inBookSearchBar').hidden = !$('inBookSearchBar').hidden;
-    if (!$('inBookSearchBar').hidden) $('inBookSearchInput').focus();
+    const willOpen = $('inBookSearchBar').hidden;
+    $('inBookSearchBar').hidden = !willOpen;
+    if (willOpen) {
+      $('inBookSearchInput').focus();
+      pushOverlayHistory();
+    } else {
+      syncHistoryAfterOverlayClose();
+    }
   });
   $('btnCloseInBookSearch').addEventListener('click', () => {
     $('inBookSearchBar').hidden = true;
     $('inBookSearchInput').value = '';
     readerCtrl.searchInBook('');
+    syncHistoryAfterOverlayClose();
   });
   $('inBookSearchInput').addEventListener('input', (e) => {
     const res = readerCtrl.searchInBook(e.target.value);
@@ -1888,25 +2018,34 @@ function bindAllEvents() {
 
   // TOC Drawer
   $('btnToggleToc').addEventListener('click', () => {
+    $('appearancePanel').hidden = true;
+    $('readerMoreMenu').hidden = true;
     renderTocDrawer('chapters');
     $('tocDrawer').hidden = false;
+    pushOverlayHistory();
   });
-  $('btnCloseToc').addEventListener('click', () => ($('tocDrawer').hidden = true));
+  $('btnCloseToc').addEventListener('click', () => {
+    $('tocDrawer').hidden = true;
+    syncHistoryAfterOverlayClose();
+  });
   $('tocDrawer').addEventListener('click', async (e) => {
     if (e.target.closest('[data-close-drawer]')) {
       $('tocDrawer').hidden = true;
+      syncHistoryAfterOverlayClose();
       return;
     }
     const chBtn = e.target.closest('[data-toc-ch]');
     if (chBtn) {
       readerCtrl.goChapter(Number(chBtn.dataset.tocCh));
       $('tocDrawer').hidden = true;
+      syncHistoryAfterOverlayClose();
       return;
     }
     const bmBtn = e.target.closest('[data-bm-ch]');
     if (bmBtn) {
       readerCtrl.goChapter(Number(bmBtn.dataset.bmCh), { paraIndex: Number(bmBtn.dataset.bmPara) });
       $('tocDrawer').hidden = true;
+      syncHistoryAfterOverlayClose();
       return;
     }
     const delBm = e.target.closest('[data-del-bm]');
@@ -1924,7 +2063,10 @@ function bindAllEvents() {
   // Reader More Menu
   $('btnReaderMore').addEventListener('click', () => {
     $('appearancePanel').hidden = true;
-    $('readerMoreMenu').hidden = !$('readerMoreMenu').hidden;
+    const willOpen = $('readerMoreMenu').hidden;
+    $('readerMoreMenu').hidden = !willOpen;
+    if (willOpen) pushOverlayHistory();
+    else syncHistoryAfterOverlayClose();
   });
   $('readerMoreMenu').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-more]');
@@ -1936,12 +2078,14 @@ function bindAllEvents() {
     } else if (act === 'share') {
       openShareModal({ kind: 'book', bookId: readerCtrl.book.id });
     } else if (act === 'wakeLock') {
+      syncHistoryAfterOverlayClose();
       const on = await readerCtrl.toggleWakeLock();
       $('lblWakeLock').textContent = `螢幕保持恆亮：${on ? '開啟' : '關閉'}`;
       toast(on ? '螢幕將保持恆亮' : '已關閉螢幕恆亮', 'info');
     } else if (act === 'ocr') {
       openOcrModalForBook(readerCtrl.book.id);
     } else if (act === 'copyChapter') {
+      syncHistoryAfterOverlayClose();
       const ch = readerCtrl.book.chapters?.[readerCtrl.chapterIndex];
       await navigator.clipboard.writeText(`${ch?.title || ''}\n\n${ch?.content || ''}`.trim());
       toast('已複製本章純文字', 'ok');
@@ -2023,8 +2167,66 @@ function bindAllEvents() {
       $('appearancePanel').hidden = true;
       $('readerMoreMenu').hidden = true;
       $('tocDrawer').hidden = true;
+      if (!$('inBookSearchBar').hidden) {
+        $('inBookSearchBar').hidden = true;
+        $('inBookSearchInput').value = '';
+        readerCtrl.searchInBook('');
+      }
+      syncHistoryAfterOverlayClose();
     }
   });
+}
+
+function initNavHistory() {
+  navReady = true;
+  const baseUrl = getNavBaseUrl();
+  history.replaceState({ prNav: 'exit-guard' }, '', baseUrl);
+  history.pushState({ prNav: 'home' }, '', baseUrl);
+  if (hasAnyOverlayOpen()) {
+    history.pushState({ prNav: 'overlay' }, '', baseUrl);
+  }
+}
+
+function handlePopState(e) {
+  if (!navReady) return;
+  const nav = e.state?.prNav;
+
+  if (nav === 'reader') {
+    disarmExitPrompt({ restoreHome: false });
+    closeAllOverlaysDom({ abortOcr: true });
+    return;
+  }
+
+  if (nav === 'home') {
+    disarmExitPrompt({ restoreHome: false });
+    closeAllOverlaysDom({ abortOcr: true });
+    if (!$('readerView').hidden) {
+      exitReaderDom();
+    }
+    return;
+  }
+
+  if (nav === 'exit-guard' || !nav) {
+    if (hasAnyOverlayOpen()) {
+      closeAllOverlaysDom({ abortOcr: true });
+      history.pushState({ prNav: 'home' }, '', getNavBaseUrl());
+      return;
+    }
+    if (!$('readerView').hidden) {
+      exitReaderDom();
+      history.pushState({ prNav: 'home' }, '', getNavBaseUrl());
+      return;
+    }
+    if (state.searchQuery.trim()) {
+      state.searchQuery = '';
+      $('librarySearchInput').value = '';
+      $('btnClearSearch').hidden = true;
+      renderSearchResults();
+      history.pushState({ prNav: 'home' }, '', getNavBaseUrl());
+      return;
+    }
+    armExitPrompt();
+  }
 }
 
 // ── Bootstrapping ─────────────────────────────────────────────────────────────
@@ -2109,9 +2311,14 @@ async function bootstrap() {
       onBookMutated: (book) => putBook(book),
       onChapterChange: () => ttsCtrl?.stop(),
       onCanvasTap: () => {
+        const hadPanel = !$('appearancePanel').hidden || !$('readerMoreMenu').hidden;
         $('appearancePanel').hidden = true;
         $('readerMoreMenu').hidden = true;
-        $('readerView').classList.toggle('is-immersive');
+        if (hadPanel) {
+          syncHistoryAfterOverlayClose();
+        } else {
+          $('readerView').classList.toggle('is-immersive');
+        }
       },
       onParagraphAction: (paraIdx, text) => {
         state.paraActionTarget = { paraIdx, text };
@@ -2129,6 +2336,8 @@ async function bootstrap() {
   setupLaunchQueue();
   await checkShareInbox();
   await handleIncomingHash();
+  initNavHistory();
+  window.addEventListener('popstate', handlePopState);
   window.addEventListener('hashchange', () => handleIncomingHash());
 }
 

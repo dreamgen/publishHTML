@@ -1,4 +1,4 @@
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const CACHE_PREFIX = 'pocketReader-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
 const SHARE_CACHE_NAME = 'pocketReader-share-inbox';
