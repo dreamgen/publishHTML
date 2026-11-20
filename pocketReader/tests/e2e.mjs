@@ -469,6 +469,124 @@ async function run() {
     assert.equal(backNavCheck.stayRestoredHome, true);
     console.log('PASS  Back navigation (overlay -> reader -> home -> clear search -> exit prompt -> stay)');
 
+    // 8. Gesture page turn & chapter switch (swipe page-chapter, edge protection, swipe chapter-only, tap zones)
+    const dispatchSwipe = async (startX, endX, y) => {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: startX, y }],
+      });
+      const steps = 6;
+      for (let s = 1; s <= steps; s++) {
+        const x = Math.round(startX + ((endX - startX) * s) / steps);
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x, y }],
+        });
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      });
+      await new Promise((r) => setTimeout(r, 300));
+    };
+
+    const dispatchTap = async (x, y) => {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 200));
+    };
+
+    const dims = await cdp.eval(`
+      const guideCard = [...document.querySelectorAll('.book-card')].find(c => c.dataset.bookId === 'starter-guide');
+      guideCard.querySelector('[data-book-action="open"]').click();
+      for (let i = 0; i < 20; i++) {
+        if (!document.getElementById('readerView').hidden && document.getElementById('readerDocTitle').textContent.includes('隨身閱讀使用指南')) break;
+        await new Promise(r => setTimeout(r, 80));
+      }
+      // Make font large so chapter 1 overflows vertically for intra-chapter page turn test
+      document.getElementById('rangeFontSize').value = '40';
+      document.getElementById('rangeFontSize').dispatchEvent(new Event('input', { bubbles: true }));
+      const sa = document.getElementById('readerScrollArea');
+      sa.scrollTop = 0;
+      await new Promise(r => setTimeout(r, 100));
+      const rect = sa.getBoundingClientRect();
+      return {
+        w: window.innerWidth,
+        h: window.innerHeight,
+        cx: Math.round(rect.left + rect.width * 0.5),
+        cy: Math.round(rect.top + rect.height * 0.5),
+        rx: Math.round(rect.left + rect.width * 0.9),
+        canScroll: sa.scrollHeight > sa.clientHeight + 30,
+        indicatorStart: document.querySelector('.chapter-indicator')?.textContent?.trim(),
+      };
+    `);
+    assert.equal(dims.indicatorStart, '1 / 3');
+    assert.equal(dims.canScroll, true);
+
+    // Swipe left inside chapter 1 -> scrolls page down (stays on 1 / 3)
+    await dispatchSwipe(Math.round(dims.w * 0.72), Math.round(dims.w * 0.25), dims.cy);
+    const afterIntraTurn = await cdp.eval(`
+      return {
+        scrollTop: document.getElementById('readerScrollArea').scrollTop,
+        indicator: document.querySelector('.chapter-indicator')?.textContent?.trim(),
+      };
+    `);
+    assert.ok(afterIntraTurn.scrollTop > 20, `Expected scrollTop > 20, got ${afterIntraTurn.scrollTop}`);
+    assert.equal(afterIntraTurn.indicator, '1 / 3');
+
+    // Scroll to bottom of chapter 1 and swipe left -> turns to chapter 2
+    await cdp.eval(`
+      const sa = document.getElementById('readerScrollArea');
+      sa.scrollTop = sa.scrollHeight - sa.clientHeight;
+    `);
+    await dispatchSwipe(Math.round(dims.w * 0.72), Math.round(dims.w * 0.25), dims.cy);
+    const ch2Indicator = await cdp.eval(`return document.querySelector('.chapter-indicator')?.textContent?.trim();`);
+    assert.equal(ch2Indicator, '2 / 3');
+
+    // Edge guard: swipe from x=10 (OS back gesture zone) must NOT turn back to chapter 1
+    await dispatchSwipe(10, 220, dims.cy);
+    const stillCh2 = await cdp.eval(`return document.querySelector('.chapter-indicator')?.textContent?.trim();`);
+    assert.equal(stillCh2, '2 / 3');
+
+    // Swipe right at top of chapter 2 -> returns to chapter 1 (landAt end)
+    await cdp.eval(`document.getElementById('readerScrollArea').scrollTop = 0;`);
+    await dispatchSwipe(Math.round(dims.w * 0.25), Math.round(dims.w * 0.75), dims.cy);
+    const backToCh1 = await cdp.eval(`return document.querySelector('.chapter-indicator')?.textContent?.trim();`);
+    assert.equal(backToCh1, '1 / 3');
+
+    // Switch swipe mode to 'chapter' (direct chapter turn anywhere) -> swipe left goes directly to chapter 2
+    await cdp.eval(`
+      document.getElementById('readerScrollArea').scrollTop = 0;
+      document.getElementById('btnToggleAppearance').click();
+      document.querySelector('#appearancePanel [data-swipe="chapter"]').click();
+      document.getElementById('btnCloseAppearance').click();
+    `);
+    await new Promise((r) => setTimeout(r, 150));
+    await dispatchSwipe(Math.round(dims.w * 0.72), Math.round(dims.w * 0.25), dims.cy);
+    const directCh2 = await cdp.eval(`return document.querySelector('.chapter-indicator')?.textContent?.trim();`);
+    assert.equal(directCh2, '2 / 3');
+
+    // Tap center toggles immersive bars
+    await dispatchTap(dims.cx, dims.cy);
+    const immersiveOn = await cdp.eval(`return document.getElementById('readerView').classList.contains('is-immersive');`);
+    assert.equal(immersiveOn, true);
+    await dispatchTap(dims.cx, dims.cy);
+
+    // Tap right zone turns forward (page or chapter 3)
+    await cdp.eval(`
+      const sa = document.getElementById('readerScrollArea');
+      sa.scrollTop = sa.scrollHeight - sa.clientHeight;
+    `);
+    await dispatchTap(dims.rx, dims.cy);
+    const tapCh3 = await cdp.eval(`
+      const ind = document.querySelector('.chapter-indicator')?.textContent?.trim();
+      document.getElementById('btnBackLibrary').click();
+      return ind;
+    `);
+    assert.equal(tapCh3, '3 / 3');
+    console.log('PASS  Gesture page turn, boundary cross-chapter, edge guard, chapter mode & tap zones');
+
     assert.equal(consoleErrors.length, 0, `Unexpected console errors: ${consoleErrors.join(' | ')}`);
     assert.equal(failedRequests.length, 0, `Unexpected HTTP >=400 requests: ${failedRequests.join(' | ')}`);
     console.log('PASS  Zero console errors & zero failed same-origin requests');

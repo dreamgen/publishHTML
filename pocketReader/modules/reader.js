@@ -21,6 +21,8 @@ export const DEFAULT_READER_PREFS = {
   reciteMode: 'off', // off | mask | first-char | cloze
   granularity: 'sentence', // sentence | clause
   hintChars: 1,
+  swipeMode: 'page-chapter', // page-chapter | chapter | off
+  tapZoneTurn: true,
 };
 
 const FONT_STACKS = {
@@ -50,13 +52,17 @@ export class ReaderController {
     this.wakeLockEnabled = false;
     this.wakeLockSentinel = null;
 
-    // Pinch state
+    // Pinch & swipe state
     this._pinchActive = false;
     this._pinchStartDist = 0;
     this._pinchStartSize = 20;
     this._pinchAnchor = null;
     this._zoomHudTimer = null;
+    this._gestureHudTimer = null;
     this._saveProgressTimer = null;
+    this._swipeState = null;
+    this._pdfSwipeState = null;
+    this._lastSwipeAt = 0;
 
     // PDF original view state
     this.pdfLoadingTask = null;
@@ -72,17 +78,49 @@ export class ReaderController {
   _bindEvents() {
     const area = this.els.scrollArea;
 
-    // Pinch-to-zoom ONLY for 2 touches; single finger scroll stays 100% native
+    // Pinch-to-zoom (2 touches) & horizontal page/chapter swipe (1 touch)
     area.addEventListener(
       'touchstart',
       (e) => {
         if (this.viewMode !== 'text') return;
         if (e.touches.length === 2) {
+          this._swipeState = null;
+          this._hideGestureHud();
           this._pinchActive = true;
           this._pinchStartDist = this._touchDist(e.touches[0], e.touches[1]);
           this._pinchStartSize = this.prefs.fontSize;
           this._pinchAnchor = this._captureTopAnchor();
+          return;
         }
+        if (e.touches.length !== 1 || this._pinchActive) {
+          this._swipeState = null;
+          return;
+        }
+        if ((this.prefs.swipeMode || 'page-chapter') === 'off') {
+          this._swipeState = null;
+          return;
+        }
+        const x = e.touches[0].clientX;
+        const y = e.touches[0].clientY;
+        const vw = window.innerWidth || area.clientWidth || 360;
+        // Preserve OS edge-back swipe gestures near screen edges
+        if (x < 24 || x > vw - 24) {
+          this._swipeState = null;
+          return;
+        }
+        if (e.target?.closest?.('.reader-table-wrap, .reader-code')) {
+          this._swipeState = null;
+          return;
+        }
+        const bounds = this._getScrollBoundaries();
+        this._swipeState = {
+          startX: x,
+          startY: y,
+          startTime: Date.now(),
+          locked: null,
+          startAtStart: bounds.atStart,
+          startAtEnd: bounds.atEnd,
+        };
       },
       { passive: true }
     );
@@ -90,30 +128,185 @@ export class ReaderController {
     area.addEventListener(
       'touchmove',
       (e) => {
-        if (!this._pinchActive || this.viewMode !== 'text') return;
-        if (e.touches.length !== 2) return;
-        e.preventDefault();
-        const dist = this._touchDist(e.touches[0], e.touches[1]);
-        if (this._pinchStartDist < 10) return;
-        const ratio = dist / this._pinchStartDist;
-        const nextSize = Math.min(44, Math.max(14, Math.round(this._pinchStartSize * ratio)));
-        if (nextSize !== this.prefs.fontSize) {
-          this.setFontSize(nextSize, { preserveAnchor: this._pinchAnchor, silentSave: true, showHud: true });
-        } else {
-          this._showZoomHud(nextSize);
+        if (this.viewMode !== 'text') return;
+        if (this._pinchActive) {
+          if (e.touches.length !== 2) return;
+          e.preventDefault();
+          const dist = this._touchDist(e.touches[0], e.touches[1]);
+          if (this._pinchStartDist < 10) return;
+          const ratio = dist / this._pinchStartDist;
+          const nextSize = Math.min(44, Math.max(14, Math.round(this._pinchStartSize * ratio)));
+          if (nextSize !== this.prefs.fontSize) {
+            this.setFontSize(nextSize, { preserveAnchor: this._pinchAnchor, silentSave: true, showHud: true });
+          } else {
+            this._showZoomHud(nextSize);
+          }
+          return;
+        }
+
+        const st = this._swipeState;
+        if (!st || e.touches.length !== 1) {
+          this._swipeState = null;
+          return;
+        }
+        const dx = e.touches[0].clientX - st.startX;
+        const dy = e.touches[0].clientY - st.startY;
+        if (!st.locked && Math.hypot(dx, dy) > 14) {
+          if (Math.abs(dy) > Math.abs(dx) * 1.15) {
+            st.locked = 'y';
+            this._hideGestureHud();
+          } else if (Math.abs(dx) > Math.abs(dy) * 1.2) {
+            st.locked = 'x';
+          }
+        }
+        if (st.locked === 'x') {
+          if (!this.isVertical) e.preventDefault();
+          if (Math.abs(dx) > 26) {
+            const mode = this.prefs.swipeMode || 'page-chapter';
+            const forceChapter = mode === 'chapter';
+            const direction = this._resolveSwipeDirection(dx);
+            const atVerticalEdge = direction > 0 ? st.startAtEnd : st.startAtStart;
+            if (!this.isVertical || forceChapter || atVerticalEdge) {
+              const label = this._describeTurnAction(direction, {
+                forceChapter,
+                atStart: st.startAtStart,
+                atEnd: st.startAtEnd,
+              });
+              if (label) this._showGestureHud(label, 0);
+            }
+          }
         }
       },
       { passive: false }
     );
 
-    const endPinch = () => {
-      if (!this._pinchActive) return;
-      this._pinchActive = false;
-      this._pinchAnchor = null;
-      this.cb.onPrefsChange?.({ ...this.prefs });
+    const endTouch = (e) => {
+      if (this._pinchActive) {
+        this._pinchActive = false;
+        this._pinchAnchor = null;
+        this._swipeState = null;
+        this.cb.onPrefsChange?.({ ...this.prefs });
+        return;
+      }
+      const st = this._swipeState;
+      this._swipeState = null;
+      if (!st || st.locked !== 'x' || this.viewMode !== 'text') {
+        this._hideGestureHud();
+        return;
+      }
+      if (e.type === 'touchcancel') {
+        this._hideGestureHud();
+        return;
+      }
+      const touch = e.changedTouches?.[0];
+      if (!touch) {
+        this._hideGestureHud();
+        return;
+      }
+      const dx = touch.clientX - st.startX;
+      const dy = touch.clientY - st.startY;
+      const dt = Date.now() - st.startTime;
+      const fastSwipe = Math.abs(dx) >= 38 && dt < 280;
+      const longSwipe = Math.abs(dx) >= 56;
+      if ((!fastSwipe && !longSwipe) || Math.abs(dx) <= Math.abs(dy) * 1.25) {
+        this._hideGestureHud();
+        return;
+      }
+      const sel = window.getSelection?.();
+      if (sel && sel.toString().trim().length > 0) {
+        this._hideGestureHud();
+        return;
+      }
+      const mode = this.prefs.swipeMode || 'page-chapter';
+      if (mode === 'off') {
+        this._hideGestureHud();
+        return;
+      }
+      const forceChapter = mode === 'chapter';
+      const direction = this._resolveSwipeDirection(dx);
+      if (this.isVertical && !forceChapter) {
+        const canCross = direction > 0 ? st.startAtEnd : st.startAtStart;
+        if (!canCross) {
+          this._hideGestureHud();
+          return;
+        }
+      }
+      this._lastSwipeAt = Date.now();
+      this.turnPage(direction, {
+        forceChapter,
+        atStart: st.startAtStart,
+        atEnd: st.startAtEnd,
+      });
     };
-    area.addEventListener('touchend', endPinch, { passive: true });
-    area.addEventListener('touchcancel', endPinch, { passive: true });
+    area.addEventListener('touchend', endTouch, { passive: true });
+    area.addEventListener('touchcancel', endTouch, { passive: true });
+
+    // Original PDF swipe & tap-zone page turn
+    if (this.els.pdfCanvasWrap) {
+      const wrap = this.els.pdfCanvasWrap;
+      wrap.addEventListener(
+        'touchstart',
+        (e) => {
+          if (this.viewMode !== 'pdf' || e.touches.length !== 1) {
+            this._pdfSwipeState = null;
+            return;
+          }
+          if ((this.prefs.swipeMode || 'page-chapter') === 'off') return;
+          const x = e.touches[0].clientX;
+          const vw = window.innerWidth || wrap.clientWidth || 360;
+          if (x < 24 || x > vw - 24) return;
+          this._pdfSwipeState = {
+            startX: x,
+            startY: e.touches[0].clientY,
+            startTime: Date.now(),
+            atLeft: wrap.scrollLeft <= 12,
+            atRight: wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 12,
+          };
+        },
+        { passive: true }
+      );
+      wrap.addEventListener(
+        'touchend',
+        (e) => {
+          const st = this._pdfSwipeState;
+          this._pdfSwipeState = null;
+          if (!st || this.viewMode !== 'pdf') return;
+          const t = e.changedTouches?.[0];
+          if (!t) return;
+          const dx = t.clientX - st.startX;
+          const dy = t.clientY - st.startY;
+          const dt = Date.now() - st.startTime;
+          const okDist = Math.abs(dx) >= 56 || (Math.abs(dx) >= 38 && dt < 280);
+          if (!okDist || Math.abs(dx) <= Math.abs(dy) * 1.3) return;
+          if (dx < 0 && st.atRight) {
+            this._lastSwipeAt = Date.now();
+            this.turnPage(1);
+          } else if (dx > 0 && st.atLeft) {
+            this._lastSwipeAt = Date.now();
+            this.turnPage(-1);
+          }
+        },
+        { passive: true }
+      );
+      wrap.addEventListener('click', (e) => {
+        if (this.viewMode !== 'pdf') return;
+        if (Date.now() - this._lastSwipeAt < 160) return;
+        if (this.prefs.tapZoneTurn === false) {
+          this.cb.onCanvasTap?.();
+          return;
+        }
+        const rect = wrap.getBoundingClientRect();
+        if (!rect.width) return;
+        const ratio = (e.clientX - rect.left) / rect.width;
+        if (ratio <= 0.22) {
+          this.turnPage(-1);
+        } else if (ratio >= 0.78) {
+          this.turnPage(1);
+        } else {
+          this.cb.onCanvasTap?.();
+        }
+      });
+    }
 
     // Desktop Ctrl+Wheel / Trackpad pinch zoom + Vertical-RL wheel conversion
     area.addEventListener(
@@ -148,8 +341,9 @@ export class ReaderController {
       { passive: true }
     );
 
-    // Article delegation: tap recite/cloze units OR tap center to toggle bars
-    this.els.article.addEventListener('click', (e) => {
+    // Scroll-area delegation: tap recite/cloze units, side tap-zones to turn page, OR tap center to toggle bars
+    area.addEventListener('click', (e) => {
+      if (Date.now() - this._lastSwipeAt < 160) return;
       const unit = e.target.closest('.recite-unit, .cloze-blank');
       if (unit) {
         e.stopPropagation();
@@ -173,6 +367,21 @@ export class ReaderController {
       if (e.target.closest('a, button')) return;
       const sel = window.getSelection?.();
       if (sel && sel.toString().trim().length > 0) return;
+
+      if (this.viewMode === 'text' && this.prefs.tapZoneTurn !== false) {
+        const rect = area.getBoundingClientRect();
+        if (rect.width > 0) {
+          const ratio = (e.clientX - rect.left) / rect.width;
+          if (ratio <= 0.22) {
+            this.turnPage(this.isVertical ? 1 : -1);
+            return;
+          }
+          if (ratio >= 0.78) {
+            this.turnPage(this.isVertical ? -1 : 1);
+            return;
+          }
+        }
+      }
 
       this.cb.onCanvasTap?.();
     });
@@ -325,7 +534,7 @@ export class ReaderController {
     this.renderCurrentView({ targetPara: paraIndex });
   }
 
-  renderCurrentView({ targetPara = null, preserveScroll = false } = {}) {
+  renderCurrentView({ targetPara = null, preserveScroll = false, landAt = null } = {}) {
     if (!this.book) return;
     const showPdf = this.viewMode === 'pdf';
     this.els.scrollArea.hidden = showPdf;
@@ -383,7 +592,22 @@ export class ReaderController {
     this.els.article.innerHTML = headerHtml + bodyHtml + footerHtml;
 
     requestAnimationFrame(() => {
-      if (targetPara !== null && targetPara !== undefined) {
+      if (landAt === 'end') {
+        if (this.isVertical) {
+          this.els.article.querySelector('.reader-chapter-footer')?.scrollIntoView({
+            block: 'nearest',
+            inline: 'nearest',
+          });
+        } else {
+          this.els.scrollArea.scrollTop = Math.max(
+            0,
+            this.els.scrollArea.scrollHeight - this.els.scrollArea.clientHeight
+          );
+        }
+      } else if (landAt === 'start') {
+        this.els.scrollArea.scrollTop = 0;
+        this.els.scrollArea.scrollLeft = 0;
+      } else if (targetPara !== null && targetPara !== undefined) {
         this.scrollToParagraph(targetPara);
       } else if (preserveScroll && anchor) {
         this._restoreTopAnchor(anchor);
@@ -430,13 +654,145 @@ export class ReaderController {
     }
   }
 
-  goChapter(idx, { paraIndex = 0 } = {}) {
+  _showGestureHud(text, duration = 1200) {
+    const hud = this.els.gestureHud;
+    if (!hud) return;
+    hud.textContent = text;
+    hud.classList.add('is-visible');
+    clearTimeout(this._gestureHudTimer);
+    if (duration > 0) {
+      this._gestureHudTimer = setTimeout(() => hud.classList.remove('is-visible'), duration);
+    }
+  }
+
+  _hideGestureHud() {
+    clearTimeout(this._gestureHudTimer);
+    this.els.gestureHud?.classList.remove('is-visible');
+  }
+
+  _playTurnAnimation(direction) {
+    const el = this.els.article;
+    if (!el || !direction) return;
+    const cls = direction === 'next' ? 'is-turn-next' : 'is-turn-prev';
+    el.classList.remove('is-turn-next', 'is-turn-prev');
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
+  _getScrollBoundaries() {
+    const area = this.els.scrollArea;
+    if (!area) return { atStart: true, atEnd: true };
+    if (this.isVertical) {
+      const maxScroll = Math.max(0, area.scrollWidth - area.clientWidth);
+      if (maxScroll <= 8) return { atStart: true, atEnd: true };
+      const areaRect = area.getBoundingClientRect();
+      const artRect = this.els.article.getBoundingClientRect();
+      return {
+        atStart: artRect.right <= areaRect.right + 36,
+        atEnd: artRect.left >= areaRect.left - 36,
+      };
+    }
+    const maxScroll = Math.max(0, area.scrollHeight - area.clientHeight);
+    if (maxScroll <= 8) return { atStart: true, atEnd: true };
+    return {
+      atStart: area.scrollTop <= 24,
+      atEnd: area.scrollTop + area.clientHeight >= area.scrollHeight - 24,
+    };
+  }
+
+  _resolveSwipeDirection(dx) {
+    // Horizontal: swipe left (dx < 0) -> forward (+1); Vertical-RL: swipe right (dx > 0) -> forward (+1)
+    return this.isVertical ? (dx > 0 ? 1 : -1) : dx < 0 ? 1 : -1;
+  }
+
+  _describeTurnAction(direction, { forceChapter = false, atStart = false, atEnd = false } = {}) {
+    if (this.viewMode === 'pdf') {
+      if (!this.pdfDoc) return '';
+      if (direction < 0) return this.pdfPage <= 1 ? '已是第一頁' : `‹ 上一頁（${this.pdfPage - 1}/${this.pdfDoc.numPages}）`;
+      return this.pdfPage >= this.pdfDoc.numPages ? '已是最後一頁' : `下一頁（${this.pdfPage + 1}/${this.pdfDoc.numPages}） ›`;
+    }
+    const chapters = this.book?.chapters || [];
+    const atBoundary = direction > 0 ? atEnd : atStart;
+    if (forceChapter || atBoundary) {
+      const targetIdx = this.chapterIndex + direction;
+      if (targetIdx < 0) return '已是第一章';
+      if (targetIdx >= chapters.length) return '已是最後一章';
+      const title = chapters[targetIdx]?.title || `第 ${targetIdx + 1} 章`;
+      return direction > 0 ? `下一章：${title} ›` : `‹ 上一章：${title}`;
+    }
+    return direction > 0 ? '下一頁 ›' : '‹ 上一頁';
+  }
+
+  turnPage(direction, { forceChapter = false, atStart = null, atEnd = null } = {}) {
+    if (!this.book) return false;
+    const dir = direction >= 0 ? 1 : -1;
+
+    if (this.viewMode === 'pdf') {
+      if (!this.pdfDoc) return false;
+      if (dir < 0 && this.pdfPage <= 1) {
+        this._showGestureHud('已是第一頁', 1100);
+        return false;
+      }
+      if (dir > 0 && this.pdfPage >= this.pdfDoc.numPages) {
+        this._showGestureHud('已是最後一頁', 1100);
+        return false;
+      }
+      this.stepPdfPage(dir);
+      this._showGestureHud(`PDF 第 ${this.pdfPage} / ${this.pdfDoc.numPages} 頁`, 900);
+      return true;
+    }
+
+    const bounds = atStart === null || atEnd === null ? this._getScrollBoundaries() : { atStart, atEnd };
+    const atBoundary = dir > 0 ? bounds.atEnd : bounds.atStart;
+    const chapters = this.book.chapters || [];
+
+    if (forceChapter || atBoundary) {
+      const targetIdx = this.chapterIndex + dir;
+      if (targetIdx < 0) {
+        this._showGestureHud('已是第一章', 1100);
+        return false;
+      }
+      if (targetIdx >= chapters.length) {
+        this._showGestureHud('已是最後一章', 1100);
+        return false;
+      }
+      const landAt = !forceChapter && dir < 0 ? 'end' : 'start';
+      this.goChapter(targetIdx, {
+        paraIndex: null,
+        landAt,
+        animate: dir > 0 ? 'next' : 'prev',
+        announce: true,
+      });
+      return true;
+    }
+
+    const area = this.els.scrollArea;
+    if (this.isVertical) {
+      const step = Math.max(120, Math.round(area.clientWidth * 0.88));
+      area.scrollBy({ left: -dir * step, behavior: 'smooth' });
+    } else {
+      const step = Math.max(120, Math.round(area.clientHeight * 0.88));
+      area.scrollBy({ top: dir * step, behavior: 'smooth' });
+    }
+    this._playTurnAnimation(dir > 0 ? 'next' : 'prev');
+    this._hideGestureHud();
+    return true;
+  }
+
+  goChapter(idx, { paraIndex = 0, landAt = null, animate = '', announce = false } = {}) {
     if (!this.book) return;
     const chapters = this.book.chapters || [];
     if (idx < 0 || idx >= chapters.length) return;
+    const prevIdx = this.chapterIndex;
     this.chapterIndex = idx;
     this.revealedUnits.clear();
-    this.renderCurrentView({ targetPara: paraIndex });
+    const resolvedLandAt = landAt || (paraIndex === 0 ? 'start' : null);
+    this.renderCurrentView({ targetPara: paraIndex, landAt: resolvedLandAt });
+    this._playTurnAnimation(animate || (idx >= prevIdx ? 'next' : 'prev'));
+    if (announce) {
+      const chTitle = chapters[idx]?.title || `第 ${idx + 1} 章`;
+      this._showGestureHud(`${idx + 1}/${chapters.length} · ${chTitle}`, 1400);
+    }
     this.persistReadingPosition();
     this.cb.onChapterChange?.(idx);
   }

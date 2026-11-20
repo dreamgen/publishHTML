@@ -580,6 +580,11 @@ function syncAppearanceControlsToPrefs() {
   document.querySelectorAll('#appearancePanel [data-theme]').forEach((b) => {
     b.classList.toggle('is-active', b.dataset.theme === p.theme);
   });
+  document.querySelectorAll('#appearancePanel [data-swipe]').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.swipe === (p.swipeMode || 'page-chapter'));
+  });
+  const tapChk = $('chkTapZoneTurn');
+  if (tapChk) tapChk.checked = p.tapZoneTurn !== false;
 }
 
 function syncReciteUiToPrefs() {
@@ -1819,17 +1824,24 @@ function bindAllEvents() {
     const widthBtn = e.target.closest('[data-width]');
     const fontBtn = e.target.closest('[data-font]');
     const themeBtn = e.target.closest('[data-theme]');
+    const swipeBtn = e.target.closest('[data-swipe]');
     if (widthBtn) {
       readerCtrl.prefs.maxWidth = Number(widthBtn.dataset.width);
     } else if (fontBtn) {
       readerCtrl.prefs.fontFamily = fontBtn.dataset.font;
     } else if (themeBtn) {
       readerCtrl.prefs.theme = themeBtn.dataset.theme;
+    } else if (swipeBtn) {
+      readerCtrl.prefs.swipeMode = swipeBtn.dataset.swipe;
     } else {
       return;
     }
     readerCtrl.applyAppearance();
     syncAppearanceControlsToPrefs();
+    setSetting('readerPrefs', readerCtrl.prefs);
+  });
+  $('chkTapZoneTurn')?.addEventListener('change', (e) => {
+    readerCtrl.prefs.tapZoneTurn = e.target.checked;
     setSetting('readerPrefs', readerCtrl.prefs);
   });
 
@@ -2163,6 +2175,14 @@ function bindAllEvents() {
       e.preventDefault();
       readerCtrl.setFontSize(20);
       syncAppearanceControlsToPrefs();
+    } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      e.preventDefault();
+      const dir = e.key === 'PageDown' ? 1 : readerCtrl.isVertical ? -1 : 1;
+      readerCtrl.turnPage(dir);
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault();
+      const dir = e.key === 'PageUp' ? -1 : readerCtrl.isVertical ? 1 : -1;
+      readerCtrl.turnPage(dir);
     } else if (e.key === 'Escape') {
       $('appearancePanel').hidden = true;
       $('readerMoreMenu').hidden = true;
@@ -2297,6 +2317,7 @@ async function bootstrap() {
       pdfCanvas: $('pdfCanvas'),
       pdfPageLabel: $('pdfPageLabel'),
       zoomHud: $('zoomHud'),
+      gestureHud: $('gestureHud'),
     },
     {
       onPrefsChange: (prefs) => {
