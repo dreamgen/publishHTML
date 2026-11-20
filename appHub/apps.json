@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-17T02:23:48.879Z",
-  "count": 22,
+  "generatedAt": "2026-11-20T09:45:48.378Z",
+  "count": 23,
   "apps": [
     {
       "id": "bridgeGame",
@@ -137,6 +137,21 @@
       "themeColor": "#667eea",
       "categories": [
         "games",
+        "utilities"
+      ]
+    },
+    {
+      "id": "pocketReader",
+      "name": "隨身閱讀 PocketReader",
+      "shortName": "隨身閱讀",
+      "description": "離線隨身書庫與背誦查閱工具：支援 PDF 自動抽字與離線 OCR、EPUB、Word、純文字大字重排、雙指縮放、背誦遮罩、語音朗讀與跨裝置雲端同步。",
+      "path": "../pocketReader/",
+      "icon": "../pocketReader/icons/pocketReader-192.png",
+      "themeColor": "#5F6F58",
+      "categories": [
+        "books",
+        "education",
+        "productivity",
         "utilities"
       ]
     },

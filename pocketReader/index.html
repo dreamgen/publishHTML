@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>隨身閱讀 PocketReader</title>
+  <meta name="description" content="將常用書籍、PDF、EPUB、Word 與網頁筆記轉為可放大縮小重排的離線隨身書庫，支援背誦遮罩、語音朗讀、直書與跨裝置雲端同步。">
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/pocketReader-192.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/pocketReader-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="隨身閱讀">
+  <meta name="theme-color" content="#5F6F58">
+
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <!-- ══════ 書庫主畫面 ══════ -->
+  <div id="libraryView" class="app-shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <img src="./icons/pocketReader-192.svg" alt="" class="brand-icon" width="34" height="34">
+          <div>
+            <h1 class="brand-title">隨身閱讀</h1>
+            <div id="syncStatusLine" class="brand-sub">本機離線就緒</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" id="btnQuickSync" class="btn btn-soft" title="立即同步雲端與訂閱">
+            <span class="btn-icon">↻</span>
+            <span class="btn-label">同步</span>
+          </button>
+          <button type="button" id="btnOpenSync" class="btn btn-soft" title="雲端同步、訂閱與備份設定">
+            <span class="btn-icon">☁</span>
+            <span class="btn-label-sm">設定</span>
+          </button>
+          <button type="button" id="btnOpenAdd" class="btn btn-primary">
+            <span>＋ 新增內容</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="library-main">
+      <!-- 全文搜尋列 -->
+      <section class="search-section" aria-label="全書庫搜尋">
+        <div class="search-box">
+          <span class="search-glyph" aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            id="librarySearchInput"
+            class="search-input"
+            placeholder="搜尋全書庫書名、章節或內文關鍵字（臨時查閱秒找）…"
+            autocomplete="off"
+          >
+          <button type="button" id="btnClearSearch" class="icon-clear" hidden aria-label="清除搜尋">✕</button>
+        </div>
+        <div id="searchResultsPanel" class="search-results" hidden></div>
+      </section>
+
+      <!-- 繼續閱讀 -->
+      <section id="continueSection" class="continue-section" hidden></section>
+
+      <!-- 分類與排序 -->
+      <section class="filter-bar">
+        <div id="categoryChips" class="category-chips no-scrollbar" role="tablist"></div>
+        <div class="filter-tools">
+          <button type="button" id="btnShareCategory" class="btn btn-xs btn-outline" hidden>分享此分類</button>
+          <select id="sortSelect" class="sort-select" aria-label="排序方式">
+            <option value="recent">最近閱讀</option>
+            <option value="updated">最近更新</option>
+            <option value="title">書名筆畫</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- 書架清單 -->
+      <section id="bookList" class="book-grid" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <!-- ══════ 閱讀器全螢幕畫面 ══════ -->
+  <div id="readerView" class="reader-view" data-reader-theme="paper" hidden>
+    <!-- 頂部工具列 -->
+    <header id="readerTopBar" class="reader-topbar">
+      <div class="reader-topbar-left">
+        <button type="button" id="btnBackLibrary" class="r-btn" aria-label="返回書庫">← 書庫</button>
+        <div id="readerDocTitle" class="reader-doc-title"></div>
+      </div>
+      <div class="reader-topbar-right">
+        <div id="viewModeSwitch" class="seg-switch" hidden>
+          <button type="button" id="btnModeText" class="seg-btn is-active">純文字</button>
+          <button type="button" id="btnModePdf" class="seg-btn">原版 PDF</button>
+        </div>
+        <button type="button" id="btnFontMinus" class="r-btn r-btn-compact" title="縮小文字 (-)">A−</button>
+        <button type="button" id="btnFontPlus" class="r-btn r-btn-compact" title="放大文字 (+)">A+</button>
+        <button type="button" id="btnToggleAppearance" class="r-btn" title="字體與外觀設定">Aa</button>
+        <button type="button" id="btnToggleVertical" class="r-btn" title="切換橫書 / 直書">直書</button>
+        <button type="button" id="btnToggleRecite" class="r-btn" title="背誦遮罩與挖空">背誦</button>
+        <button type="button" id="btnToggleTts" class="r-btn" title="語音朗讀">朗讀</button>
+        <button type="button" id="btnToggleSearch" class="r-btn" title="文內搜尋">搜尋</button>
+        <button type="button" id="btnToggleToc" class="r-btn" title="目錄與書籤">目錄</button>
+        <button type="button" id="btnReaderMore" class="r-btn r-btn-compact" title="更多操作">⋯</button>
+      </div>
+    </header>
+
+    <!-- 文內搜尋列 -->
+    <div id="inBookSearchBar" class="reader-subbar" hidden>
+      <input type="search" id="inBookSearchInput" class="subbar-input" placeholder="在目前書籍內搜尋關鍵字…">
+      <span id="inBookSearchCount" class="subbar-counter">0/0</span>
+      <button type="button" id="btnSearchPrev" class="r-btn r-btn-compact">↑</button>
+      <button type="button" id="btnSearchNext" class="r-btn r-btn-compact">↓</button>
+      <button type="button" id="btnCloseInBookSearch" class="r-btn r-btn-compact">✕</button>
+    </div>
+
+    <!-- 背誦控制列 -->
+    <div id="reciteControlBar" class="reader-subbar recite-bar" hidden>
+      <div class="recite-row">
+        <div class="seg-switch" id="reciteModeSwitch">
+          <button type="button" data-recite="off" class="seg-btn is-active">正常</button>
+          <button type="button" data-recite="mask" class="seg-btn">逐句遮罩</button>
+          <button type="button" data-recite="first-char" class="seg-btn">首字提示</button>
+          <button type="button" data-recite="cloze" class="seg-btn">自訂挖空</button>
+        </div>
+        <select id="reciteGranularity" class="subbar-select" title="切句粒度">
+          <option value="sentence">按句切分</option>
+          <option value="clause">按短語切分</option>
+        </select>
+        <select id="reciteHintChars" class="subbar-select" title="提示字數" hidden>
+          <option value="1">提示 1 字</option>
+          <option value="2">提示 2 字</option>
+        </select>
+      </div>
+      <div class="recite-row">
+        <button type="button" id="btnRevealNext" class="btn btn-xs btn-primary">顯示下一句</button>
+        <button type="button" id="btnHideAll" class="btn btn-xs btn-soft">全部蓋住</button>
+        <button type="button" id="btnRevealAll" class="btn btn-xs btn-soft">全部顯示</button>
+        <button type="button" id="btnAddClozeTerm" class="btn btn-xs btn-outline" hidden>＋ 新增挖空詞</button>
+      </div>
+      <div id="clozeTermsChips" class="cloze-chips" hidden></div>
+    </div>
+
+    <!-- 語音朗讀控制條 -->
+    <div id="ttsControlBar" class="reader-subbar tts-bar" hidden>
+      <div class="tts-row">
+        <button type="button" id="btnTtsPrev" class="r-btn r-btn-compact" title="上一句">⏮</button>
+        <button type="button" id="btnTtsPlayPause" class="btn btn-xs btn-primary">▶ 朗讀</button>
+        <button type="button" id="btnTtsStop" class="r-btn r-btn-compact" title="停止">⏹</button>
+        <button type="button" id="btnTtsNext" class="r-btn r-btn-compact" title="下一句">⏭</button>
+        <select id="ttsRateSelect" class="subbar-select" aria-label="語速">
+          <option value="0.7">0.7x 慢讀</option>
+          <option value="0.85">0.85x</option>
+          <option value="1" selected>1.0x 正常</option>
+          <option value="1.2">1.2x</option>
+          <option value="1.4">1.4x</option>
+          <option value="1.7">1.7x</option>
+        </select>
+        <select id="ttsLoopSelect" class="subbar-select" aria-label="循環模式">
+          <option value="off">單次朗讀</option>
+          <option value="para">單段循環</option>
+          <option value="chapter">全章循環</option>
+          <option value="ab">A-B 區段循環</option>
+        </select>
+        <select id="ttsVoiceSelect" class="subbar-select tts-voice-select" aria-label="語音選擇"></select>
+      </div>
+      <div id="ttsAbInfo" class="tts-ab-info" hidden></div>
+    </div>
+
+    <!-- 閱讀內容舞台 -->
+    <div id="readerStage" class="reader-stage">
+      <div id="zoomHud" class="zoom-hud" aria-hidden="true">20 px</div>
+
+      <!-- 純文字重排區域 -->
+      <div id="readerScrollArea" class="reader-scroll-area">
+        <article id="readerArticle" class="reader-article"></article>
+      </div>
+
+      <!-- 原版 PDF 檢視區域 -->
+      <div id="readerPdfArea" class="reader-pdf-area" hidden>
+        <div class="pdf-toolbar">
+          <button type="button" id="btnPdfPrev" class="btn btn-xs btn-soft">‹ 上頁</button>
+          <span id="pdfPageLabel" class="pdf-page-label">第 1 / 1 頁</span>
+          <button type="button" id="btnPdfNext" class="btn btn-xs btn-soft">下頁 ›</button>
+          <button type="button" id="btnPdfZoomOut" class="btn btn-xs btn-soft">－</button>
+          <button type="button" id="btnPdfZoomIn" class="btn btn-xs btn-soft">＋</button>
+          <button type="button" id="btnPdfRunOcr" class="btn btn-xs btn-primary">離線 OCR 轉文字</button>
+        </div>
+        <div id="pdfStatus" class="pdf-status" hidden></div>
+        <div id="pdfCanvasWrap" class="pdf-canvas-wrap">
+          <canvas id="pdfCanvas"></canvas>
+        </div>
+      </div>
+
+      <!-- 外觀設定浮動面板 -->
+      <div id="appearancePanel" class="floating-panel" hidden>
+        <div class="panel-head">
+          <strong>閱讀字體與排版</strong>
+          <button type="button" id="btnCloseAppearance" class="r-btn r-btn-compact">✕</button>
+        </div>
+        <div class="panel-row">
+          <label>字級大小 <span id="lblFontSize">20 px</span></label>
+          <div class="range-group">
+            <button type="button" id="btnPanelFontMinus" class="btn btn-xs btn-soft">A−</button>
+            <input type="range" id="rangeFontSize" min="14" max="44" step="1" value="20">
+            <button type="button" id="btnPanelFontPlus" class="btn btn-xs btn-soft">A+</button>
+          </div>
+          <small class="hint-text">手機可直接雙指捏合／張開縮放文字</small>
+        </div>
+        <div class="panel-row">
+          <label>行距 <span id="lblLineHeight">1.85</span></label>
+          <input type="range" id="rangeLineHeight" min="1.4" max="2.4" step="0.05" value="1.85">
+        </div>
+        <div class="panel-row">
+          <label>版面寬度</label>
+          <div class="seg-switch">
+            <button type="button" data-width="640" class="seg-btn">窄欄</button>
+            <button type="button" data-width="740" class="seg-btn is-active">適中</button>
+            <button type="button" data-width="900" class="seg-btn">寬幅</button>
+          </div>
+        </div>
+        <div class="panel-row">
+          <label>字體風格</label>
+          <div class="seg-switch">
+            <button type="button" data-font="sans" class="seg-btn is-active">黑體</button>
+            <button type="button" data-font="serif" class="seg-btn">明體</button>
+            <button type="button" data-font="kai" class="seg-btn">楷體</button>
+            <button type="button" data-font="mono" class="seg-btn">等寬</button>
+          </div>
+        </div>
+        <div class="panel-row">
+          <label>紙張主題</label>
+          <div class="theme-dots">
+            <button type="button" data-theme="paper" class="theme-chip is-active" style="background:#FAF9F6;color:#2B2B2B">暖白</button>
+            <button type="button" data-theme="sepia" class="theme-chip" style="background:#F3EAD8;color:#3E3222">羊皮</button>
+            <button type="button" data-theme="slate" class="theme-chip" style="background:#1A2226;color:#DDE5E7">墨青</button>
+            <button type="button" data-theme="oled" class="theme-chip" style="background:#000000;color:#E5E5E5">純黑</button>
+            <button type="button" data-theme="contrast" class="theme-chip" style="background:#FFFFFF;color:#000000;border-color:#000">高對比</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 更多操作選單 -->
+      <div id="readerMoreMenu" class="floating-menu" hidden>
+        <button type="button" data-more="edit">✏️ 編輯此書內容與分類</button>
+        <button type="button" data-more="share">🔗 產生分享碼 / 訂閱連結</button>
+        <button type="button" data-more="wakeLock">🔆 <span id="lblWakeLock">螢幕保持恆亮：關閉</span></button>
+        <button type="button" data-more="ocr" id="btnMoreOcr" hidden>🔍 重新離線 OCR 轉文字</button>
+        <button type="button" data-more="copyChapter">📋 複製本章純文字</button>
+      </div>
+    </div>
+
+    <!-- 底部進度列 -->
+    <footer id="readerBottomBar" class="reader-bottombar">
+      <button type="button" id="btnPrevChapter" class="r-btn r-btn-compact">‹ 上章</button>
+      <div class="reader-progress-box">
+        <span id="readerProgressLabel">第 1/1 章 · 0%</span>
+        <div class="progress-track"><div id="readerProgressFill" class="progress-fill"></div></div>
+      </div>
+      <button type="button" id="btnAddBookmarkNow" class="r-btn" title="將目前段落加入書籤">🔖 書籤</button>
+      <button type="button" id="btnNextChapter" class="r-btn r-btn-compact">下章 ›</button>
+    </footer>
+
+    <!-- 目錄與書籤抽屜 -->
+    <aside id="tocDrawer" class="side-drawer" hidden>
+      <div class="drawer-backdrop" data-close-drawer="1"></div>
+      <div class="drawer-panel">
+        <div class="drawer-head">
+          <div class="seg-switch">
+            <button type="button" id="tabTocChapters" class="seg-btn is-active">章節目錄</button>
+            <button type="button" id="tabTocBookmarks" class="seg-btn">書籤筆記</button>
+          </div>
+          <button type="button" id="btnCloseToc" class="r-btn r-btn-compact">✕</button>
+        </div>
+        <div id="tocList" class="drawer-body"></div>
+      </div>
+    </aside>
+
+    <!-- 段落長按動作表 -->
+    <div id="paraActionModal" class="modal-backdrop" hidden>
+      <div class="modal-card modal-sm">
+        <div class="modal-head">
+          <h3>段落操作</h3>
+          <button type="button" class="icon-close" data-close-modal="paraActionModal">✕</button>
+        </div>
+        <p id="paraActionPreview" class="para-preview"></p>
+        <div class="action-sheet-list">
+          <button type="button" id="btnParaBookmark" class="btn btn-soft btn-block">🔖 加入書籤與筆記</button>
+          <button type="button" id="btnParaTts" class="btn btn-soft btn-block">▶ 從這一段開始朗讀</button>
+          <button type="button" id="btnParaCloze" class="btn btn-soft btn-block">✂️ 加入「自訂挖空」關鍵詞</button>
+          <div class="ab-row">
+            <button type="button" id="btnParaSetA" class="btn btn-outline">設為朗讀起點 A</button>
+            <button type="button" id="btnParaSetB" class="btn btn-outline">設為朗讀終點 B</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ 新增內容彈窗 ══════ -->
+  <div id="addModal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>新增閱讀資料</h2>
+        <button type="button" class="icon-close" data-close-modal="addModal">✕</button>
+      </div>
+
+      <div class="tabs-bar" id="addTabs">
+        <button type="button" class="tab-btn is-active" data-tab="paste">貼上／撰寫</button>
+        <button type="button" class="tab-btn" data-tab="file">匯入檔案</button>
+        <button type="button" class="tab-btn" data-tab="web">網頁擷取</button>
+        <button type="button" class="tab-btn" data-tab="subscribe">訂閱分享碼</button>
+      </div>
+
+      <!-- Tab 1: 貼上 / 撰寫 -->
+      <form id="formAddPaste" class="tab-pane">
+        <div class="form-grid">
+          <div class="field">
+            <label>書名 / 標題 *</label>
+            <input type="text" id="pasteTitle" required placeholder="例如：論語學而篇、值班 SOP 速查">
+          </div>
+          <div class="field">
+            <label>分類</label>
+            <input type="text" id="pasteCategory" list="categoryDatalist" placeholder="例如：背誦經典、工作查閱">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>作者 / 來源（選填）</label>
+            <input type="text" id="pasteAuthor" placeholder="選填">
+          </div>
+          <div class="field field-checkbox">
+            <label><input type="checkbox" id="pasteVertical"> 預設以直書閱讀</label>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-label-row">
+            <label>內文（支援 `# 章節標題`、`{{挖空文字}}` 與 Markdown）*</label>
+            <button type="button" id="btnInsertClozePaste" class="btn btn-xs btn-outline">＋ 包成 {{挖空}}</button>
+          </div>
+          <textarea id="pasteContent" rows="9" required placeholder="貼上文字、筆記或經文…&#10;&#10;小技巧：使用 # 第一章 可自動分章；使用 {{重點詞}} 可在背誦模式變成挖空自測。"></textarea>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-soft" data-close-modal="addModal">取消</button>
+          <button type="submit" class="btn btn-primary">存入隨身書庫</button>
+        </div>
+      </form>
+
+      <!-- Tab 2: 匯入檔案 -->
+      <div id="paneAddFile" class="tab-pane" hidden>
+        <div class="form-grid">
+          <div class="field">
+            <label>匯入分類</label>
+            <input type="text" id="fileCategory" list="categoryDatalist" value="長篇書籍">
+          </div>
+          <div class="field field-checkbox">
+            <label><input type="checkbox" id="fileKeepPdf" checked> PDF 同時保留原版檔案（可切換對照）</label>
+          </div>
+        </div>
+        <label id="fileDropZone" class="drop-zone">
+          <input type="file" id="fileInput" accept=".pdf,.epub,.docx,.txt,.md,.markdown" multiple hidden>
+          <div class="drop-icon">📄</div>
+          <div class="drop-title">點選或拖放檔案到這裡</div>
+          <div class="drop-sub">支援 PDF（自動抽字＋離線 OCR）、EPUB 電子書、Word (.docx)、TXT、Markdown (.md)</div>
+        </label>
+        <div id="fileImportStatus" class="status-box" hidden></div>
+      </div>
+
+      <!-- Tab 3: 網頁擷取 -->
+      <div id="paneAddWeb" class="tab-pane" hidden>
+        <div class="field">
+          <label>文章或網頁網址</label>
+          <div class="inline-input-btn">
+            <input type="url" id="webUrlInput" placeholder="https://...">
+            <button type="button" id="btnFetchWeb" class="btn btn-primary">擷取內文</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>存入分類</label>
+          <input type="text" id="webCategory" list="categoryDatalist" value="工作查閱">
+        </div>
+        <div id="webPreviewBox" class="web-preview-box" hidden>
+          <div class="field">
+            <label>擷取標題（可修改）</label>
+            <input type="text" id="webPreviewTitle">
+          </div>
+          <div class="field">
+            <label>內文預覽</label>
+            <textarea id="webPreviewContent" rows="7"></textarea>
+          </div>
+          <div class="modal-foot">
+            <button type="button" id="btnSaveWebArticle" class="btn btn-primary">存入書庫</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: 訂閱分享碼 -->
+      <div id="paneAddSubscribe" class="tab-pane" hidden>
+        <div class="field">
+          <label>輸入 8 碼分享碼或完整訂閱連結</label>
+          <div class="inline-input-btn">
+            <input type="text" id="subCodeInput" placeholder="例如：74LTTtFw 或貼上 #sub=74LTTtFw">
+            <button type="button" id="btnPreviewSub" class="btn btn-primary">查詢書單</button>
+          </div>
+          <small class="hint-text">需先在「設定 → 雲端同步」填妥 Worker 網址，才能從雲端拉取公開分享。</small>
+        </div>
+        <div id="subPreviewBox" class="status-box" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ 編輯書籍內容彈窗 ══════ -->
+  <div id="editModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-lg">
+      <div class="modal-head">
+        <h2>編輯書籍與章節</h2>
+        <button type="button" class="icon-close" data-close-modal="editModal">✕</button>
+      </div>
+      <form id="formEditBook">
+        <div class="form-grid">
+          <div class="field">
+            <label>書名 *</label>
+            <input type="text" id="editTitle" required>
+          </div>
+          <div class="field">
+            <label>分類</label>
+            <input type="text" id="editCategory" list="categoryDatalist">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>作者 / 標籤（標籤以逗號分隔）</label>
+            <input type="text" id="editTags" placeholder="例如：背誦, 法會, 重點">
+          </div>
+          <div class="field field-checkbox">
+            <label><input type="checkbox" id="editPinned"> 置頂於書庫</label>
+            <label><input type="checkbox" id="editVertical"> 預設直書</label>
+          </div>
+        </div>
+        <div class="edit-chapter-bar">
+          <label>選擇編輯章節</label>
+          <div class="inline-input-btn">
+            <select id="editChapterSelect"></select>
+            <button type="button" id="btnEditAddChapter" class="btn btn-xs btn-soft">＋ 章節</button>
+            <button type="button" id="btnEditDelChapter" class="btn btn-xs btn-danger-soft">刪除此章</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>章節標題</label>
+          <input type="text" id="editChapterTitle">
+        </div>
+        <div class="field">
+          <div class="field-label-row">
+            <label>章節正文（修改後可直接同步到其他裝置）</label>
+            <button type="button" id="btnInsertClozeEdit" class="btn btn-xs btn-outline">＋ 包成 {{挖空}}</button>
+          </div>
+          <textarea id="editChapterContent" rows="10"></textarea>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-soft" data-close-modal="editModal">取消</button>
+          <button type="submit" class="btn btn-primary">儲存修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ══════ 離線 OCR 轉文字彈窗 ══════ -->
+  <div id="ocrModal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-sm">
+      <div class="modal-head">
+        <h2>PDF 本機離線 OCR 轉文字</h2>
+        <button type="button" class="icon-close" data-close-modal="ocrModal">✕</button>
+      </div>
+      <p class="hint-text">所有圖片與文字辨識完全在您的手機／電腦本機完成，不會上傳至任何第三方伺服器。</p>
+      <div class="field">
+        <label>文件排版方向</label>
+        <select id="ocrLangSelect">
+          <option value="chi_tra+eng">繁體中文＋英文（一般橫排）</option>
+          <option value="chi_tra_vert+chi_tra">繁體中文直排（經書／直式書籍）</option>
+        </select>
+      </div>
+      <div id="ocrProgressBox" class="status-box" hidden>
+        <div id="ocrProgressText">準備中…</div>
+        <div class="progress-track"><div id="ocrProgressFill" class="progress-fill"></div></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" id="btnCancelOcr" class="btn btn-soft">取消</button>
+        <button type="button" id="btnStartOcr" class="btn btn-primary">開始離線辨識</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ 分享與訂閱連結彈窗 ══════ -->
+  <div id="shareModal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>分享與訂閱發佈</h2>
+        <button type="button" class="icon-close" data-close-modal="shareModal">✕</button>
+      </div>
+      <div id="shareFormArea">
+        <div class="field">
+          <label>分享標題</label>
+          <input type="text" id="shareTitleInput">
+        </div>
+        <div class="field">
+          <label>說明（選填）</label>
+          <input type="text" id="shareDescInput" placeholder="例如：最新修訂版講義，加入後可隨時檢查更新">
+        </div>
+        <div class="field field-checkbox">
+          <label><input type="checkbox" id="shareIncludePdf"> 一併附帶原版 PDF 檔案（若體積較大將延長上傳時間）</label>
+        </div>
+        <div id="shareExistingNotice" class="status-box" hidden></div>
+        <div class="modal-foot">
+          <button type="button" id="btnUpdateExistingShare" class="btn btn-outline" hidden>更新既有分享碼</button>
+          <button type="button" id="btnCreateNewShare" class="btn btn-primary">產生分享碼與連結</button>
+        </div>
+      </div>
+      <div id="shareResultArea" class="share-result" hidden>
+        <div class="share-code-badge">分享碼：<strong id="shareResultCode"></strong></div>
+        <canvas id="shareQrCanvas" class="qr-canvas"></canvas>
+        <div class="field">
+          <label>訂閱網址（傳給對方點擊即可一鍵加入並同步更新）</label>
+          <div class="inline-input-btn">
+            <input type="text" id="shareResultUrl" readonly>
+            <button type="button" id="btnCopyShareUrl" class="btn btn-soft">複製</button>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" id="btnSystemShareLink" class="btn btn-primary">系統分享</button>
+          <button type="button" class="btn btn-soft" data-close-modal="shareModal">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ 雲端同步、訂閱管理與備份彈窗 ══════ -->
+  <div id="syncModal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>雲端同步、訂閱與備份</h2>
+        <button type="button" class="icon-close" data-close-modal="syncModal">✕</button>
+      </div>
+
+      <div class="tabs-bar" id="syncTabs">
+        <button type="button" class="tab-btn is-active" data-tab="cloud">跨裝置同步</button>
+        <button type="button" class="tab-btn" data-tab="subs">訂閱與分享</button>
+        <button type="button" class="tab-btn" data-tab="backup">本機備份與空間</button>
+      </div>
+
+      <!-- Sync Tab 1: Cloud -->
+      <div id="paneSyncCloud" class="tab-pane">
+        <div class="field">
+          <label>Cloudflare Worker 後端網址</label>
+          <div class="inline-input-btn">
+            <input type="url" id="syncWorkerUrl" placeholder="https://pocket-reader-sync.你的子網域.workers.dev">
+            <button type="button" id="btnTestWorker" class="btn btn-soft">測試</button>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>同步碼（多台裝置輸入相同代碼）</label>
+            <div class="inline-input-btn">
+              <input type="text" id="syncVaultCode" placeholder="例如：PR-8K3M-9Q2W">
+              <button type="button" id="btnGenVaultCode" class="btn btn-soft">產生</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>同步密碼（僅在裝置端衍生金鑰，不上傳明文）</label>
+            <div class="inline-input-btn">
+              <input type="password" id="syncPassphrase" placeholder="至少 4 字元">
+              <button type="button" id="btnTogglePassVis" class="btn btn-soft">👁</button>
+            </div>
+          </div>
+        </div>
+        <div class="field field-checkbox">
+          <label><input type="checkbox" id="syncIncludePdfBlobs" checked> 一併同步原版 PDF 檔案</label>
+        </div>
+        <div id="syncProgressBox" class="status-box" hidden></div>
+        <div class="sync-btn-row">
+          <button type="button" id="btnSaveSyncCfg" class="btn btn-soft">儲存設定</button>
+          <button type="button" id="btnShowPairQr" class="btn btn-outline">顯示配對 QR Code</button>
+          <button type="button" id="btnRunSyncNow" class="btn btn-primary">↻ 立即雙向同步</button>
+        </div>
+        <div id="pairQrBox" class="pair-qr-box" hidden>
+          <canvas id="pairQrCanvas" class="qr-canvas"></canvas>
+          <label class="qr-opt"><input type="checkbox" id="pairQrIncludePass"> 配對連結包含密碼（僅限本人兩支手機掃描時勾選）</label>
+          <input type="text" id="pairUrlInput" readonly>
+        </div>
+      </div>
+
+      <!-- Sync Tab 2: Subscriptions & Shares -->
+      <div id="paneSyncSubs" class="tab-pane" hidden>
+        <div class="sub-head-row">
+          <strong>我訂閱的書庫</strong>
+          <button type="button" id="btnRefreshAllSubs" class="btn btn-xs btn-primary">檢查全部更新</button>
+        </div>
+        <div id="subscriptionsList" class="manage-list"></div>
+        <hr class="soft-hr">
+        <div class="sub-head-row">
+          <strong>我發布的分享</strong>
+        </div>
+        <div id="mySharesList" class="manage-list"></div>
+      </div>
+
+      <!-- Sync Tab 3: Backup & Storage -->
+      <div id="paneSyncBackup" class="tab-pane" hidden>
+        <div id="storageStatsBox" class="status-box">計算離線空間中…</div>
+        <div class="backup-actions">
+          <button type="button" id="btnExportTextBackup" class="btn btn-soft">⬇ 匯出純文字 JSON 備份</button>
+          <button type="button" id="btnExportFullBackup" class="btn btn-soft">⬇ 匯出完整備份（含原檔 PDF）</button>
+          <label class="btn btn-outline file-btn">
+            ⬆ 匯入還原 JSON 備份
+            <input type="file" id="importBackupInput" accept=".json,application/json" hidden>
+          </label>
+          <button type="button" id="btnCleanupBlobs" class="btn btn-danger-soft">🧹 清理未使用的暫存原檔</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 提示訊息 Toast -->
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <datalist id="categoryDatalist"></datalist>
+
+  <script type="module" src="./modules/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch((err) => {
+          console.warn('[PocketReader SW] Registration failed:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>

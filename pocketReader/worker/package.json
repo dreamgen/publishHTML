@@ -1,0 +1,14 @@
+{
+  "name": "pocket-reader-sync",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8799",
+    "deploy": "wrangler deploy",
+    "test": "node --test ../tests/worker.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

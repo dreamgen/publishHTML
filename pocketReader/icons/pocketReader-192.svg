@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="pocketReaderBg192" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6F8267"/>
+      <stop offset="100%" stop-color="#4A5A44"/>
+    </linearGradient>
+    <linearGradient id="pocketReaderPage192" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFDF8"/>
+      <stop offset="100%" stop-color="#F2ECE0"/>
+    </linearGradient>
+    <linearGradient id="pocketReaderGold192" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E1BA63"/>
+      <stop offset="100%" stop-color="#C09236"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="176" height="176" rx="40" fill="url(#pocketReaderBg192)"/>
+  <!-- Left & Right open book pages -->
+  <path d="M96 54 C80 46 54 46 40 52 C36 53.7 34 57 34 61 L34 134 C34 138 37.5 141 41.5 139.5 C56 134 79 135 96 143 Z" fill="url(#pocketReaderPage192)"/>
+  <path d="M96 54 C112 46 138 46 152 52 C156 53.7 158 57 158 61 L158 134 C158 138 154.5 141 150.5 139.5 C136 134 113 135 96 143 Z" fill="#FBF7EE"/>
+  <!-- Spine shadow -->
+  <line x1="96" y1="54" x2="96" y2="143" stroke="#D5CDBF" stroke-width="2.5"/>
+  <!-- Bookmark ribbon -->
+  <path d="M126 48 L126 86 L133 79 L140 86 L140 48 Z" fill="url(#pocketReaderGold192)"/>
+  <!-- Left page text lines -->
+  <line x1="48" y1="72" x2="82" y2="70" stroke="#7C8B74" stroke-width="4.5" stroke-linecap="round"/>
+  <line x1="48" y1="88" x2="82" y2="86" stroke="#9BA694" stroke-width="4.5" stroke-linecap="round"/>
+  <line x1="48" y1="104" x2="78" y2="102" stroke="#9BA694" stroke-width="4.5" stroke-linecap="round"/>
+  <line x1="48" y1="120" x2="72" y2="118" stroke="#B6BFAE" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- Right page crisp "文" / zoom A badge -->
+  <circle cx="129" cy="112" r="24" fill="#5F6F58"/>
+  <circle cx="129" cy="112" r="21" fill="none" stroke="#FAF9F6" stroke-width="2" opacity="0.35"/>
+  <text x="129" y="120" text-anchor="middle" font-family="system-ui, -apple-system, 'PingFang TC', sans-serif" font-size="24" font-weight="700" fill="#FAF9F6">文</text>
+</svg>

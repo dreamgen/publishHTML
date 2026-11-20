@@ -1,0 +1,11 @@
+name = "pocket-reader-sync"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "READER_BUCKET"
+bucket_name = "pocket-reader-data"
+
+[observability]
+enabled = true

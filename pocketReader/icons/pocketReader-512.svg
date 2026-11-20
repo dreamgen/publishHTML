@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="pocketReaderBg512" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6F8267"/>
+      <stop offset="100%" stop-color="#4A5A44"/>
+    </linearGradient>
+    <linearGradient id="pocketReaderPageL512" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFDF8"/>
+      <stop offset="100%" stop-color="#EFE8DA"/>
+    </linearGradient>
+    <linearGradient id="pocketReaderPageR512" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FDFBF5"/>
+      <stop offset="100%" stop-color="#EBE3D3"/>
+    </linearGradient>
+    <linearGradient id="pocketReaderGold512" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E4BE67"/>
+      <stop offset="100%" stop-color="#BD8E33"/>
+    </linearGradient>
+  </defs>
+  <rect x="20" y="20" width="472" height="472" rx="108" fill="url(#pocketReaderBg512)"/>
+  <!-- Subtle outer book cover -->
+  <path d="M84 156 C84 144 92 136 104 136 L408 136 C420 136 428 144 428 156 L428 368 C428 380 420 388 408 388 L104 388 C92 388 84 380 84 368 Z" fill="#3D4B38" opacity="0.38"/>
+  <!-- Left & Right open book pages -->
+  <path d="M256 144 C214 122 146 122 108 138 C98 142 92 150 92 162 L92 356 C92 366 101 374 111 370 C150 355 212 358 256 380 Z" fill="url(#pocketReaderPageL512)"/>
+  <path d="M256 144 C298 122 366 122 404 138 C414 142 420 150 420 162 L420 356 C420 366 411 374 401 370 C362 355 300 358 256 380 Z" fill="url(#pocketReaderPageR512)"/>
+  <!-- Spine crease -->
+  <line x1="256" y1="144" x2="256" y2="380" stroke="#D2C9B9" stroke-width="6"/>
+  <!-- Bookmark ribbon -->
+  <path d="M334 128 L334 226 L354 208 L374 226 L374 128 Z" fill="url(#pocketReaderGold512)"/>
+  <!-- Left page text lines -->
+  <line x1="128" y1="192" x2="220" y2="186" stroke="#7C8B74" stroke-width="12" stroke-linecap="round"/>
+  <line x1="128" y1="234" x2="220" y2="228" stroke="#9AA593" stroke-width="12" stroke-linecap="round"/>
+  <line x1="128" y1="276" x2="210" y2="270" stroke="#9AA593" stroke-width="12" stroke-linecap="round"/>
+  <line x1="128" y1="318" x2="192" y2="312" stroke="#B5BEB0" stroke-width="12" stroke-linecap="round"/>
+  <!-- Right page top lines -->
+  <line x1="290" y1="192" x2="320" y2="190" stroke="#B5BEB0" stroke-width="10" stroke-linecap="round"/>
+  <line x1="290" y1="224" x2="320" y2="222" stroke="#B5BEB0" stroke-width="10" stroke-linecap="round"/>
+  <!-- Right page crisp text zoom badge -->
+  <circle cx="344" cy="298" r="64" fill="#5F6F58"/>
+  <circle cx="344" cy="298" r="56" fill="none" stroke="#FAF9F6" stroke-width="4" opacity="0.35"/>
+  <text x="344" y="320" text-anchor="middle" font-family="system-ui, -apple-system, 'PingFang TC', sans-serif" font-size="64" font-weight="700" fill="#FAF9F6">文</text>
+</svg>
