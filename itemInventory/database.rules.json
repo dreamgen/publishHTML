@@ -1,0 +1,26 @@
+{
+  "rules": {
+    "artifacts": {
+      "itemInventory": {
+        "public": {
+          "data": {
+            "sessions": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "$code.matches(/^[A-Z0-9]{4,6}$/)"
+              }
+            },
+            "images": {
+              "$code": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "$code.matches(/^[A-Z0-9]{4,6}$/)"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

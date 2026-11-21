@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-20T09:45:48.378Z",
-  "count": 23,
+  "generatedAt": "2026-11-21T14:03:03.872Z",
+  "count": 24,
   "apps": [
     {
       "id": "bridgeGame",
@@ -51,6 +51,19 @@
       "categories": [
         "education",
         "productivity"
+      ]
+    },
+    {
+      "id": "itemInventory",
+      "name": "物品盤點 — 分組拍照與投影決議",
+      "shortName": "物品盤點",
+      "description": "分組拍照登錄盤點物品，盤點後統一投影展示，大家一起決議續留、丟棄或其它處理方式，支援即時同步與報表匯出",
+      "path": "../itemInventory/",
+      "icon": "../itemInventory/icons/itemInventory-192.svg",
+      "themeColor": "#0f766e",
+      "categories": [
+        "productivity",
+        "utilities"
       ]
     },
     {

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>物品盤點 — 分組拍照與投影決議</title>
+  <meta name="description" content="分組拍照登錄盤點物品，盤點後統一投影展示，大家一起決議續留、丟棄或其它處理方式。" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="./icons/itemInventory-192.svg" />
+  <link rel="apple-touch-icon" href="./icons/itemInventory-192.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="./vendor/qrious.min.js" defer></script>
+</head>
+<body>
+  <!-- ── 頂部導覽列 ── -->
+  <header class="topbar no-print">
+    <div class="topbar-inner">
+      <div class="brand">
+        <img src="./icons/itemInventory-192.svg" alt="" class="brand-icon" />
+        <div style="min-width:0;">
+          <div class="brand-title" id="headerTitle">物品盤點站</div>
+          <div class="brand-sub" id="headerSub">分組拍照盤點 ・ 投影共同決議</div>
+        </div>
+      </div>
+      <div class="topbar-actions" id="sessionTopActions">
+        <button class="code-pill hidden" id="btnShowQr" title="顯示加入代碼與 QR Code">
+          <span id="headerCode">------</span>
+          <span>QR</span>
+        </button>
+        <span class="mode-pill hidden" id="headerModePill">☁️ 雲端同步</span>
+        <button class="btn btn-sm hidden" id="btnLeaveSession">離開場次</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- ── 警示橫幅（例如 Firebase 權限或離線提示） ── -->
+    <div class="alert-banner hidden no-print" id="alertBanner">
+      <span id="alertBannerText"></span>
+      <button class="btn btn-sm" id="btnAlertAction"></button>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+         首頁：建立或加入盤點場次
+    ═════════════════════════════════════════════════════════════ -->
+    <section id="homeView">
+      <div class="hero">
+        <h1>📦 物品盤點與投影決議</h1>
+        <p>各組拿手機拍照列清單，盤點完成後一鍵投影到大螢幕，大家一起決定「續留、丟棄、其它處理」。</p>
+        <div class="mode-switch" role="group" aria-label="資料儲存模式">
+          <button type="button" id="btnModeFirebase" class="active">☁️ 雲端多人同步</button>
+          <button type="button" id="btnModeLocal">💻 本機單機／雙視窗</button>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:16px;">
+        <!-- 建立場次 -->
+        <div class="card">
+          <h2 class="card-title">✨ 建立新盤點場次</h2>
+          <form id="formCreateSession">
+            <div class="field">
+              <label for="inputSessionTitle">盤點名稱</label>
+              <input class="input" id="inputSessionTitle" type="text" placeholder="例：2026 庫房大清理、3F 儲藏室盤點" required />
+            </div>
+            <div class="field">
+              <label for="inputPresetGroups">預設組別（以逗號分隔，現場也可自由新增）</label>
+              <input class="input" id="inputPresetGroups" type="text" value="第一組, 第二組, 第三組" placeholder="例：廚房組, 文書組, 庫房組" />
+            </div>
+            <button type="submit" class="btn btn-primary btn-lg btn-block">建立場次並取得代碼</button>
+          </form>
+        </div>
+
+        <!-- 加入場次 -->
+        <div class="card">
+          <h2 class="card-title">📱 加入現有盤點場次</h2>
+          <form id="formJoinSession">
+            <div class="field">
+              <label for="inputJoinCode">輸入 4～6 碼場次代碼</label>
+              <input class="input" id="inputJoinCode" type="text" maxlength="6" placeholder="例：A7K9M2" style="text-transform:uppercase; font-family:monospace; font-size:1.2rem; letter-spacing:0.12em;" required />
+            </div>
+            <button type="submit" class="btn btn-soft btn-lg btn-block">進入盤點場次</button>
+          </form>
+
+          <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;" />
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+            <span style="font-size:0.86rem; color:var(--text-muted);">有先前的備份檔案？</span>
+            <label class="btn btn-sm" style="margin:0;">
+              📂 匯入 JSON 備份
+              <input type="file" id="inputImportJson" accept=".json,application/json" hidden />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 最近開啟的場次 -->
+      <div class="card hidden" id="recentCard" style="margin-top:16px;">
+        <h2 class="card-title">🕘 最近使用場次</h2>
+        <div id="recentList" class="chip-row"></div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════
+         場次內主畫面
+    ═════════════════════════════════════════════════════════════ -->
+    <section id="sessionView" class="hidden">
+      <!-- 分頁切換 -->
+      <nav class="tabs no-print" aria-label="工作模式切換">
+        <button type="button" class="tab-btn active" data-tab="collect">📷 分組拍照盤點</button>
+        <button type="button" class="tab-btn" data-tab="overview">📋 總覽與統計 (<span id="tabTotalCount">0</span>)</button>
+        <button type="button" class="tab-btn tab-projector" id="btnOpenProjector">📺 投影決議模式</button>
+      </nav>
+
+      <!-- ── Tab 1: 分組拍照盤點 ── -->
+      <div id="tabCollect">
+        <div class="grid-2">
+          <!-- 左側：拍照與登錄表單 -->
+          <div class="card">
+            <h2 class="card-title" id="itemFormTitle">📸 拍照登錄物品</h2>
+            <form id="formItem">
+              <!-- 組別選擇 -->
+              <div class="field">
+                <label>目前盤點組別</label>
+                <div class="chip-row" id="groupChips"></div>
+                <div style="display:flex; gap:6px; margin-top:8px;">
+                  <input class="input" id="inputNewGroup" type="text" placeholder="或輸入新組別名稱（例：B1 儲藏室）" style="padding:7px 10px; font-size:0.86rem;" />
+                  <button type="button" class="btn btn-sm" id="btnAddGroup">＋ 新增組別</button>
+                </div>
+              </div>
+
+              <!-- 照片區 -->
+              <div class="field">
+                <label>物品照片（自動壓縮上傳）</label>
+                <div class="photo-zone" id="photoZone">
+                  <div id="photoEmptyState">
+                    <div style="font-size:2rem; margin-bottom:4px;">📷</div>
+                    <div style="font-size:0.88rem; color:var(--text-muted); margin-bottom:10px;">點擊拍照或從相簿選取物品照片</div>
+                    <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                      <label class="btn btn-primary btn-sm" style="margin:0;">
+                        📷 開啟相機拍照
+                        <input type="file" id="inputCamera" accept="image/*" capture="environment" hidden />
+                      </label>
+                      <label class="btn btn-sm" style="margin:0;">
+                        🖼️ 從相簿選取
+                        <input type="file" id="inputGallery" accept="image/*" hidden />
+                      </label>
+                    </div>
+                  </div>
+                  <div id="photoPreviewState" class="hidden">
+                    <div class="photo-preview-wrap">
+                      <img id="imgFormPreview" alt="物品預覽" />
+                    </div>
+                    <div class="photo-meta" id="photoMetaText"></div>
+                    <div style="display:flex; gap:8px; justify-content:center; margin-top:8px; flex-wrap:wrap;">
+                      <label class="btn btn-sm" style="margin:0;">
+                        🔄 重拍／更換
+                        <input type="file" id="inputReplacePhoto" accept="image/*" capture="environment" hidden />
+                      </label>
+                      <button type="button" class="btn btn-sm btn-danger" id="btnClearPhoto">移除照片</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 物品名稱與數量 -->
+              <div class="field">
+                <label for="inputItemName">物品名稱 *</label>
+                <input class="input" id="inputItemName" type="text" placeholder="例：白色折疊桌、立式電風扇" required />
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div class="field">
+                  <label>數量</label>
+                  <div class="stepper">
+                    <button type="button" id="btnQtyMinus">−</button>
+                    <input class="input" id="inputItemQty" type="number" min="1" value="1" />
+                    <button type="button" id="btnQtyPlus">＋</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="inputItemUnit">單位</label>
+                  <input class="input" id="inputItemUnit" type="text" value="件" placeholder="件 / 箱 / 張 / 台" />
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div class="field">
+                  <label for="inputItemLocation">存放位置（會記住上次輸入）</label>
+                  <input class="input" id="inputItemLocation" type="text" placeholder="例：2F 角落櫃" />
+                </div>
+                <div class="field">
+                  <label for="inputCreatedBy">盤點人（選填）</label>
+                  <input class="input" id="inputCreatedBy" type="text" placeholder="您的名字" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="inputItemNote">狀況與備註（選填）</label>
+                <textarea class="input" id="inputItemNote" rows="2" placeholder="例：功能正常但有灰塵、缺一個輪子"></textarea>
+              </div>
+
+              <div class="field">
+                <label>盤點組初步建議（供投影討論參考）</label>
+                <div class="chip-row" id="suggestionChips">
+                  <button type="button" class="chip active" data-sug="none">未預先建議</button>
+                  <button type="button" class="chip" data-sug="keep">✅ 建議續留</button>
+                  <button type="button" class="chip" data-sug="discard">🗑️ 建議丟棄</button>
+                  <button type="button" class="chip" data-sug="other">🔄 建議其它</button>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:8px;">
+                <button type="submit" class="btn btn-primary btn-lg" style="flex:1;" id="btnSubmitItem">✅ 登錄物品</button>
+                <button type="button" class="btn btn-lg hidden" id="btnCancelEdit">取消編輯</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- 右側：已盤點清單 -->
+          <div class="card" style="display:flex; flex-direction:column;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+              <h2 class="card-title" style="margin:0;">📝 已盤點項目 (<span id="collectListCount">0</span>)</h2>
+              <label style="font-size:0.84rem; display:inline-flex; align-items:center; gap:5px; cursor:pointer;">
+                <input type="checkbox" id="chkOnlyMyGroup" checked />
+                只看目前組別
+              </label>
+            </div>
+            <div id="collectItemsList" style="display:flex; flex-direction:column; gap:10px; max-height:760px; overflow-y:auto;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tab 2: 總覽與統計 ── -->
+      <div id="tabOverview" class="hidden">
+        <!-- 列印專用標頭 -->
+        <div class="print-only" style="margin-bottom:16px; border-bottom:2px solid #000; padding-bottom:8px;">
+          <h1 style="margin:0; font-size:1.4rem;" id="printTitle">物品盤點決議清單</h1>
+          <p style="margin:4px 0 0; font-size:0.9rem;" id="printSummaryLine"></p>
+        </div>
+
+        <!-- 統計數據 -->
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-num" id="statTotal">0</div>
+            <div class="stat-lbl">📦 總盤點項數</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" style="color:var(--pending);" id="statPending">0</div>
+            <div class="stat-lbl">⏳ 待議</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" style="color:var(--keep);" id="statKeep">0</div>
+            <div class="stat-lbl">✅ 續留</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" style="color:var(--discard);" id="statDiscard">0</div>
+            <div class="stat-lbl">🗑️ 丟棄</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" style="color:var(--other);" id="statOther">0</div>
+            <div class="stat-lbl">🔄 其它處理</div>
+          </div>
+        </div>
+
+        <!-- 篩選與匯出工具列 -->
+        <div class="card no-print" style="margin-bottom:16px;">
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap; flex:1; min-width:240px;">
+              <input class="input" id="inputSearch" type="search" placeholder="🔍 搜尋物品名稱、位置、備註…" style="max-width:240px;" />
+              <select class="input" id="selectFilterGroup" style="max-width:160px;">
+                <option value="all">全部組別</option>
+              </select>
+              <select class="input" id="selectFilterDecision" style="max-width:150px;">
+                <option value="all">全部決議狀態</option>
+                <option value="pending">⏳ 僅看待議</option>
+                <option value="keep">✅ 續留</option>
+                <option value="discard">🗑️ 丟棄</option>
+                <option value="other">🔄 其它處理</option>
+              </select>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm" id="btnExportCsv">📊 匯出 CSV</button>
+              <button type="button" class="btn btn-sm" id="btnExportJson">💾 匯出備份</button>
+              <button type="button" class="btn btn-sm" id="btnPrint">🖨️ 列印／PDF</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 物品卡片牆 -->
+        <div class="items-grid" id="overviewGrid"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ════════════════════════════════════════════════════════════
+       投影決議模式 (全螢幕高對比)
+  ═════════════════════════════════════════════════════════════ -->
+  <section id="projectorOverlay" class="projector-overlay hidden" aria-label="投影決議模式">
+    <div class="proj-header">
+      <div class="proj-title">
+        <span>📺 投影決議模式</span>
+        <span class="code-pill" style="background:#0f172a; border-color:#334155; color:#5eead4;" id="projProgressText">0 / 0</span>
+      </div>
+      <div class="proj-controls">
+        <label class="proj-toggle">
+          <input type="checkbox" id="chkProjOnlyPending" />
+          只看待議項目
+        </label>
+        <label class="proj-toggle">
+          <input type="checkbox" id="chkProjAutoNext" checked />
+          決議後自動下一項
+        </label>
+        <button type="button" class="btn btn-sm" style="background:#334155; border-color:#475569; color:#f8fafc;" id="btnCloseProjector">✕ 退出投影 (Esc)</button>
+      </div>
+    </div>
+
+    <div class="proj-main" id="projMainContent">
+      <!-- 左側大圖 -->
+      <div class="proj-stage" id="projPhotoStage">
+        <span style="color:#64748b;">此物品未附照片</span>
+      </div>
+
+      <!-- 右側資訊與決議按鈕 -->
+      <div class="proj-info-card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+          <span class="badge badge-group" id="projGroupBadge" style="font-size:0.9rem; padding:4px 12px;">組別</span>
+          <span class="badge" id="projCurrentBadge" style="font-size:0.9rem; padding:4px 12px;">⏳ 待議</span>
+        </div>
+
+        <h2 class="proj-item-name" id="projItemName">物品名稱</h2>
+
+        <div class="proj-detail-grid">
+          <div><span class="proj-detail-lbl">數量</span><strong id="projItemQty">1 件</strong></div>
+          <div><span class="proj-detail-lbl">存放位置</span><strong id="projItemLocation">—</strong></div>
+          <div><span class="proj-detail-lbl">盤點人</span><span id="projItemCreatedBy">—</span></div>
+          <div><span class="proj-detail-lbl">組別初步建議</span><span id="projItemSuggestion">—</span></div>
+        </div>
+
+        <div id="projNoteBox" style="background:#0f172a; padding:10px 14px; border-radius:10px; font-size:0.96rem; color:#e2e8f0;">
+          <span style="font-size:0.76rem; color:#94a3b8; display:block;">現場備註</span>
+          <span id="projItemNote">—</span>
+        </div>
+
+        <!-- 四大決議按鈕 -->
+        <div>
+          <div style="font-size:0.84rem; color:#94a3b8; margin-bottom:8px; font-weight:600;">大家決定如何處理？</div>
+          <div class="proj-decision-grid">
+            <button type="button" class="dec-btn" data-dec="keep">✅ 續留 <small style="opacity:0.65;">[1]</small></button>
+            <button type="button" class="dec-btn" data-dec="discard">🗑️ 丟棄 <small style="opacity:0.65;">[2]</small></button>
+            <button type="button" class="dec-btn" data-dec="other">🔄 其它處理 <small style="opacity:0.65;">[3]</small></button>
+            <button type="button" class="dec-btn" data-dec="pending">⏳ 暫緩待議 <small style="opacity:0.65;">[0]</small></button>
+          </div>
+        </div>
+
+        <!-- 其它處理快速標籤與去向備註 -->
+        <div style="background:#0f172a; padding:12px; border-radius:12px; border:1px solid #334155;">
+          <div style="font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">處理方式／去向說明（選填，點標籤可快填）</div>
+          <div class="chip-row" id="projOtherTags" style="margin-bottom:8px;"></div>
+          <div style="display:grid; grid-template-columns:1fr 130px; gap:8px;">
+            <input class="proj-input" id="inputProjDecNote" type="text" placeholder="例：轉贈慈濟、移至 2F 櫃子…" />
+            <input class="proj-input" id="inputProjDecBy" type="text" placeholder="負責人" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="proj-footer">
+      <button type="button" class="btn" style="background:#1e293b; border-color:#475569; color:#f8fafc;" id="btnProjPrev">← 上一項</button>
+      <div class="proj-kbd">快捷鍵：← / → 切換項目 ｜ 1 續留 ｜ 2 丟棄 ｜ 3 其它 ｜ 0 待議</div>
+      <button type="button" class="btn btn-primary" id="btnProjNext">下一項 →</button>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════
+       QR Code / 邀請 Modal
+  ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop hidden" id="qrModal">
+    <div class="modal-box" style="text-align:center;">
+      <h3 style="margin:0 0 6px;">📱 邀請各組加入盤點</h3>
+      <p style="margin:0 0 14px; font-size:0.88rem; color:var(--text-muted);">請夥伴掃描 QR Code 或輸入以下場次代碼</p>
+      <div style="font-size:2rem; font-weight:800; font-family:monospace; letter-spacing:0.16em; color:var(--primary); margin-bottom:12px;" id="modalCodeText">------</div>
+      <canvas id="qrCanvas" style="margin:0 auto 14px; display:block; border-radius:10px; border:1px solid var(--border);"></canvas>
+      <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary" id="btnCopyLink">🔗 複製加入連結</button>
+        <button type="button" class="btn" id="btnCloseQrModal">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       圖片放大檢視 Lightbox
+  ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop hidden" id="lightboxModal" style="background:rgba(2,6,23,0.88);">
+    <img id="lightboxImg" class="lightbox-img" alt="放大照片" />
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
