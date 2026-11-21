@@ -1517,6 +1517,8 @@ async function mineAlbumTests() {
   let aurl = r.data.album_url;
   let acode = aurl.split('/')[2];
   ok(acode !== up, '相簿碼與上傳碼不同');
+  r = await api('GET', `/api/u/${up}/info`);
+  ok(r.status === 200 && r.data.album_url === aurl, '上傳頁 /info 帶回已開放的相簿連結');
   const albumApi = (method, path, { dev, body, headers = {} } = {}) => api(method, `/api/a/${acode}${path}`, { body, headers: { ...(dev ? { 'x-device': dev } : {}), ...headers } });
   r = await albumApi('GET', '/info');
   ok(r.status === 200 && r.data.me.kind === null && r.data.photos.length === 4, '匿名可看相簿（4 張）');

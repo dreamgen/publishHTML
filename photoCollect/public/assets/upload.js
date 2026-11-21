@@ -139,11 +139,15 @@ function initPick() {
   if (ev.location) sub.push(ev.location);
   if (info.closes_at) sub.push('開放上傳至 ' + fmtDay(info.closes_at));
   $('pick-sub').textContent = sub.join(' · ');
-  // 回頭看：這支手機（或帳號）上傳過照片時，提供「我上傳的照片」入口
+  // 回頭看：這支手機（或帳號）上傳過照片時，提供「我上傳的照片」入口；已開放相簿時提供相簿入口
   const mineN = Math.max(info.device_count || 0, info.me?.count || 0);
   $('pick-mine').hidden = !mineN;
   $('pick-mine').href = `/u/${encodeURIComponent(code)}/mine`;
   $('pick-mine').textContent = `查看、修改我上傳的 ${mineN} 張照片`;
+  const albumUrl = info.album_url || '';
+  $('pick-album').hidden = !albumUrl;
+  if (albumUrl) $('pick-album').href = albumUrl;
+  $('pick-actions').hidden = !mineN && !albumUrl;
   // 同意說明改成一行文字：選照片即表示同意；太長時收合，可展開完整說明
   const notice = (info.notice || '').trim();
   const short = Array.from(notice).length > 60 ? Array.from(notice).slice(0, 58).join('') + '…' : notice;
@@ -997,6 +1001,9 @@ async function showDone() {
   lines.forEach((t, i) => { if (i) sub.append(document.createElement('br')); sub.append(t); });
 
   $('mine-link').href = `/u/${encodeURIComponent(code)}/mine`;
+  const albumUrl = info.album_url || '';
+  $('done-album-link').hidden = !albumUrl;
+  if (albumUrl) $('done-album-link').href = albumUrl;
   paintNeed();
   show('done');
   say($('ok-h').textContent);

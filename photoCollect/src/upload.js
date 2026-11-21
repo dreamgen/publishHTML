@@ -42,6 +42,7 @@ export async function info(env, code, url, req) {
     rotations: rotationsPublic(cfg),
     import: cfg.upload.import_enabled !== false, // 可貼 Google 相簿／雲端硬碟連結匯入
     import_drive: cfg.upload.import_enabled !== false && !!(typeof env.GOOGLE_API_KEY === 'string' && env.GOOGLE_API_KEY.trim()),
+    album_url: cfg.album && cfg.album.enabled && cfg.album.code ? `/a/${cfg.album.code}` : null,
     progress: prog.progress,
   };
   if (device) out.device_count = prog.device_count;
