@@ -1,5 +1,5 @@
 // Service Worker：只快取 app shell；API 一律走網路、不快取。
-const CACHE = 'mv-upload-v5';
+const CACHE = 'mv-upload-v6';
 const SHELL_URL = '/u/_app'; // 後端對 /u/* 回 upload.html（無轉址），拿來當離線外殼
 const SHELL = [
   SHELL_URL,

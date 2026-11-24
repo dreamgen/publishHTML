@@ -110,6 +110,11 @@ async function load(keepView = false) {
   if (!keepView) show('list');
 }
 
+const fmtDur = (s) => {
+  const sec = Math.round(Number(s) || 0);
+  if (!sec) return '▶ 影片';
+  return `▶ ${Math.floor(sec / 60)}:${pad(sec % 60)}`;
+};
 const segLabel = (p) => p.segment_effective || '待標環節';
 
 function paintList() {
@@ -171,6 +176,7 @@ function tile(p) {
     b.append(img);
   }
   if (selecting && !p.excluded) b.append(el('span', { class: 'check-dot' }, svg('M5 12l5 5 9-10')));
+  if (p.media === 'video') b.append(el('span', { class: 'badge b-vid' }, fmtDur(p.duration)));
   let badge = null;
   if (p.excluded) badge = el('span', { class: 'badge b-ex' }, '主辦者已排除');
   else if (!p.segment_effective) badge = el('span', { class: 'badge b-warn' }, '待標環節');
@@ -241,7 +247,8 @@ function openEdit(hashes, mode = 'single') {
     $('pv-img').alt = `${segLabel(first)} 的照片`;
     $('pv-votes').hidden = !first.votes;
     $('pv-votes').textContent = `相簿 ${first.votes} 票`;
-    $('replace-btn').disabled = !canEdit;
+    $('replace-btn').disabled = !canEdit || first.media === 'video';
+    $('replace-label').textContent = first.media === 'video' ? '影片請刪除重傳' : '更換照片';
     $('e-note').value = E.note;
     $('e-note').disabled = !canEdit;
   }
@@ -259,6 +266,7 @@ function paintEdit(first) {
     const lines = [];
     if (E.replace) lines.push(`${E.replace.name}${E.replace.w ? ` · ${E.replace.w}×${E.replace.h}` : ''}`);
     const meta = [];
+    if (p.media === 'video') meta.push(`影片 ${p.duration ? `${fmtDur(p.duration).replace('▶ ', '')} · ` : ''}存於 Google 雲端硬碟`);
     if (p.exif_time) meta.push(`拍攝 ${hm(p.exif_time)}`);
     if (p.uploaded_at) meta.push(`上傳 ${fmtWhen(p.uploaded_at)}`);
     if (p.edited_at) meta.push(`修改 ${fmtWhen(p.edited_at)}`);
@@ -266,7 +274,7 @@ function paintEdit(first) {
     lines.push(meta.join(' · '));
     $('pv-line').replaceChildren(...lines.flatMap((t, i) => (i ? [el('br'), t] : [t])));
     $('pv-new').hidden = !E.replace;
-    $('replace-label').textContent = E.replace ? '復原原照片' : '更換照片';
+    if (p.media !== 'video') $('replace-label').textContent = E.replace ? '復原原照片' : '更換照片';
     const rn = $('replace-note');
     rn.hidden = !E.replace;
     rn.textContent = `換成 ${E.replace ? E.replace.name : ''}。小隊、環節、備註會保留${p.votes ? `；相簿已有的 ${p.votes} 票會歸零，因為參與者選的是舊照片` : ''}。`;

@@ -1,7 +1,7 @@
 // 攝影師手機上傳頁：單頁三狀態（選擇 → 上傳中 → 完成）
 // 所有伺服器／使用者字串一律用 textContent 插入，不使用 innerHTML。
 import { readExifTime, mtimeToLocalIso } from './upload-exif.js';
-import { sha256Hex, guessMime, processImage } from './upload-image.js';
+import { sha256Hex, guessMime, guessVideoMime, isVideoMime, processImage, processVideo } from './upload-image.js';
 import { putPending, delPending, listPending, clearPending } from './upload-db.js';
 import { dateRangeText, groupByDay } from './days.js';
 
@@ -154,6 +154,12 @@ function initPick() {
   $('notice-short').textContent = short;
   $('notice-text').textContent = notice;
   $('notice-more').hidden = short === notice;
+  const vOn = !!info.video;
+  $('file-input').accept = vOn ? 'image/*,video/mp4,video/quicktime,video/webm,video/*' : 'image/*';
+  const ql = document.querySelector('#quick-btn .quick-label');
+  const qs = document.querySelector('#quick-btn .quick-sub');
+  if (ql) ql.textContent = vOn ? '選照片／影片，馬上上傳' : '選照片，馬上上傳';
+  if (qs) qs.textContent = vOn ? '可一次選多張照片或短片；影片直接存入雲端硬碟' : '可一次選很多張，會自動壓縮、保留拍攝時間';
   if (P.inited) { paintWho(); return refreshPick(); }
   P.inited = true;
 
@@ -400,12 +406,12 @@ const readyToStart = () => !missingHint();
 
 function refreshPick() {
   const n = P.files.length;
-  $('pick-label').textContent = n ? `已選 ${n} 張，點此重選` : '從相簿選擇（可多選）';
+  $('pick-label').textContent = n ? `已選 ${n} ${info?.video ? '個檔案' : '張'}，點此重選` : (info?.video ? '從相簿選擇照片或影片（可多選）' : '從相簿選擇（可多選）');
   const hint = missingHint();
   const b = $('start-btn');
   b.disabled = !!hint;
   b.setAttribute('aria-disabled', hint ? 'true' : 'false');
-  b.textContent = hint || `上傳 ${n} 張 ↑`;
+  b.textContent = hint || `上傳 ${n} ${info?.video ? '個檔案' : '張'} ↑`;
   if (!info) return;
   const parts = applySummary();
   $('more-sum').textContent = parts.join(' · ');
@@ -479,7 +485,9 @@ async function startUpload(resumed, quick = false, imports = null) {
     // 連結匯入：不用壓縮、算雜湊，伺服器直接向 Google 取檔；hash 先放佔位，傳完換成真的
     imports.forEach((x, i) => {
       const it = makeItem(null, i);
-      Object.assign(it, { name: x.name, status: 'wait', imp: x, hash: `imp:${x.uid}`, exifTime: x.taken || '', thumbUrl: x.thumb });
+      Object.assign(it, {
+        name: x.name, status: 'wait', imp: x, isVideo: x.media === 'video', hash: `imp:${x.uid}`, exifTime: x.taken || '', thumbUrl: x.thumb,
+      });
       S.items.push(it);
     });
     S.prepDone = true;
@@ -507,12 +515,22 @@ async function prepare(sess) {
       if (sess.cancelled) return;
       setItem(it, { status: 'hash', text: '檢查中', tone: 'muted' });
       try {
-        const mime = guessMime(it.file);
-        if (!mime) { failItem(it, '不支援的檔案格式'); continue; }
+        let mime = guessMime(it.file);
+        if (!mime && info.video) mime = guessVideoMime(it.file);
+        if (!mime) {
+          failItem(it, !guessMime(it.file) && guessVideoMime(it.file) ? '這個活動未開放上傳影片' : '不支援的檔案格式');
+          continue;
+        }
         it.mime = mime;
+        it.isVideo = isVideoMime(mime);
+        if (it.isVideo && it.file.size > (info.video_max_mb || 200) * 1024 * 1024) {
+          setItem(it, { status: 'toobig', text: `超過 ${info.video_max_mb || 200} MB 影片上限`, tone: 'err', pct: 100 });
+          it.file = null;
+          continue;
+        }
         const buf = await it.file.arrayBuffer();
         it.hash = await sha256Hex(buf);
-        it.exifTime = readExifTime(buf); // 只有 JPEG 會有值；HEIC 不解析
+        it.exifTime = it.isVideo ? '' : readExifTime(buf); // 只有 JPEG 會有值；HEIC／影片不解析 EXIF
         it.timeSrc = it.exifTime ? 'exif' : 'mtime';
         if (!it.exifTime) it.exifTime = mtimeToLocalIso(it.file.lastModified);
       } catch (_) {
@@ -569,6 +587,31 @@ function pump() {
 async function runItem(sess, it) {
   try {
     if (it.imp) { await uploadWithRetry(sess, it); return; }
+    if (it.isVideo) {
+      if (!it.meta) {
+        setItem(it, { text: '準備影片縮圖', tone: 'active', pct: 3 });
+        const r = await processVideo(it.file);
+        it.thumb = r.thumb;
+        if (r.thumb) { it.thumbUrl = URL.createObjectURL(r.thumb); setItem(it, {}); }
+        it.meta = {
+          hash: it.hash,
+          mime: it.mime,
+          size: it.file.size,
+          orig_name: it.name,
+          uploader: sess.opts.uploader,
+          device: deviceId,
+          groups: it.groups || sess.opts.groups,
+          segment: sess.opts.segment,
+          exif_time: it.exifTime || '',
+          time_src: it.timeSrc,
+          w: r.w || '',
+          h: r.h || '',
+          duration: r.duration || 0,
+        };
+      }
+      await uploadWithRetry(sess, it);
+      return;
+    }
     if (!it.blob) {
       setItem(it, { text: '壓縮中', tone: 'active', pct: 5 });
       const r = await processImage(it.file, it.mime, sess.opts.original);
@@ -608,10 +651,16 @@ const REASONS = {
   import_daily_limit: '今天的連結匯入已達上限',
   import_disabled: '主辦者已關閉連結匯入',
   list_expired: '清單已過期，請重新貼連結',
-  source_gone: 'Google 上已無法存取這張',
+  source_gone: 'Google 上已無法存取這個檔案',
   too_large: '檔案太大，超過上限',
   bad_type: '不支援的檔案格式',
-  event_full: '本活動照片數已達上限',
+  event_full: '本活動數量已達上限',
+  video_disabled: '這個活動未開放上傳影片',
+  gdrive_not_connected: '尚未連結影片雲端硬碟',
+  gdrive_copy_failed: '影片轉存到雲端硬碟失敗，稍後可重試',
+  drive_rate_limited: 'Google 雲端硬碟暫時限制存取，稍後可重試',
+  upload_incomplete: '雲端硬碟尚未收到完整影片',
+  invalid_token: '上傳憑證已過期',
   invalid: '檔案資料有誤',
   not_found: '連結已失效',
 };
@@ -640,7 +689,8 @@ async function uploadWithRetry(sess, it) {
       continue;
     }
     if (tries >= RETRY_DELAYS.length) {
-      failItem(it, st === 429 ? '上傳太頻繁，稍後可重試' : '網路不穩，稍後可重試', true);
+      const code5 = res.body && res.body.error;
+      failItem(it, REASONS[code5] || (res.body && res.body.message) || (st === 429 ? '上傳太頻繁，稍後可重試' : '網路不穩，稍後可重試'), true);
       return;
     }
     setItem(it, { text: `重試中（第 ${tries + 1} 次）`, tone: 'warn', pct: 15 });
@@ -652,6 +702,7 @@ async function uploadWithRetry(sess, it) {
 // 以 XHR 上傳以取得進度；回傳 {ok,status,body}，網路錯誤 status=0
 function postPhoto(sess, it) {
   if (it.imp) return postImport(sess, it);
+  if (it.isVideo) return postVideo(sess, it);
   return new Promise((resolve) => {
     const fd = new FormData();
     const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif' }[it.blob.type] || 'jpg';
@@ -679,13 +730,78 @@ function postPhoto(sess, it) {
   });
 }
 
+// 影片三步驟直傳 Google 雲端硬碟：/video/init -> 直接 XHR PUT 至 Google -> /video/complete
+async function postVideo(sess, it) {
+  if (!it.videoUploaded) {
+    setItem(it, { text: '建立影片上傳', tone: 'active', pct: 2 });
+    let initRes;
+    try {
+      const r = await fetch(`${API}/video/init`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(it.meta),
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) return { ok: false, status: r.status, body };
+      if (body && body.duplicate) return { ok: true, status: 200, body };
+      initRes = body;
+    } catch (_) {
+      return { ok: false, status: 0, body: null };
+    }
+    const putRes = await new Promise((resolve) => {
+      const x = new XMLHttpRequest();
+      sess.xhrs.add(x);
+      x.open('PUT', initRes.upload_url);
+      x.timeout = 0; // 大影片不設短逾時，避免慢速網路中斷
+      if (it.mime) x.setRequestHeader('Content-Type', it.mime);
+      x.upload.onprogress = (e) => {
+        if (e.lengthComputable) setItem(it, { text: '上傳影片至雲端硬碟', pct: Math.max(5, Math.min(95, Math.round((e.loaded / e.total) * 95))) });
+      };
+      const end = (status, text) => {
+        sess.xhrs.delete(x);
+        let body = null;
+        try { body = JSON.parse(text); } catch (_) { /* 非 JSON */ }
+        resolve({ ok: status >= 200 && status < 300, status, body });
+      };
+      x.onload = () => end(x.status, x.responseText);
+      x.onerror = () => end(0, '');
+      x.onabort = () => end(0, '');
+      x.send(it.file);
+    });
+    if (sess.cancelled) return { ok: false, status: 0, body: null };
+    if (!putRes.ok) {
+      // 404/410 代表 resumable session 過期，交由重試機制重新 init
+      const st = putRes.status === 404 || putRes.status === 410 ? 500 : putRes.status;
+      return { ok: false, status: st, body: null };
+    }
+    it.videoUploaded = {
+      upload_token: initRes.upload_token,
+      drive_id: (putRes.body && putRes.body.id) || '',
+    };
+  }
+  setItem(it, { text: '寫入索引與縮圖', tone: 'active', pct: 98 });
+  try {
+    const fd = new FormData();
+    fd.append('upload_token', it.videoUploaded.upload_token);
+    if (it.videoUploaded.drive_id) fd.append('drive_id', it.videoUploaded.drive_id);
+    if (it.thumb) fd.append('thumb', it.thumb, 'thumb.jpg');
+    const cr = await fetch(`${API}/video/complete`, { method: 'POST', body: fd });
+    const cbody = await cr.json().catch(() => null);
+    if (cr.status === 400) it.videoUploaded = null;
+    return { ok: cr.ok, status: cr.status, body: cbody };
+  } catch (_) {
+    return { ok: false, status: 0, body: null };
+  }
+}
+
 // 連結匯入一張：伺服器向 Google 取檔，沒有上傳進度，用假進度條表示「處理中」
 async function postImport(sess, it) {
   const ctrl = new AbortController();
   const fake = { abort: () => ctrl.abort() };
   sess.xhrs.add(fake);
-  setItem(it, { text: '從 Google 取得中', pct: 30 });
-  const t = setTimeout(() => ctrl.abort(), 120000);
+  const isVid = it.imp.media === 'video';
+  setItem(it, { text: isVid ? '從雲端硬碟轉存影片中' : '從 Google 取得中', pct: 30 });
+  const t = setTimeout(() => ctrl.abort(), isVid ? 180000 : 120000);
   try {
     const x = it.imp;
     const r = await fetch(`${API}/import/photo`, {
@@ -703,22 +819,22 @@ async function postImport(sess, it) {
   }
 }
 
-function releaseBlobs(it) { it.blob = null; it.thumb = null; }
+function releaseBlobs(it) { it.blob = null; it.thumb = null; it.file = null; it.videoUploaded = null; }
 function doneItem(it) {
   setItem(it, { status: 'done', text: '完成', tone: 'ok', pct: 100 });
   if (it.patchAfter) { it.patchAfter = false; patchGroups(it); } // 上傳途中補的小隊，傳完再寫回
-  if (!it.imp) delPending(code, it.hash);
+  if (!it.imp && !it.isVideo) delPending(code, it.hash);
   releaseBlobs(it);
 }
 function skipItem(it) {
   setItem(it, { status: 'skip', text: '已存在，略過', tone: 'muted', pct: 100 });
-  if (it.hash && !it.imp) delPending(code, it.hash);
+  if (it.hash && !it.imp && !it.isVideo) delPending(code, it.hash);
   releaseBlobs(it);
 }
 function failItem(it, text, retryable, drop) {
   setItem(it, { status: 'fail', text, tone: 'err', pct: 100 });
   it.retryable = !!retryable;
-  if (drop && it.hash && !it.imp) delPending(code, it.hash); // 4xx 再試也不會成功，不留在續傳佇列
+  if (drop && it.hash && !it.imp && !it.isVideo) delPending(code, it.hash); // 4xx 再試也不會成功，不留在續傳佇列
   if (drop) releaseBlobs(it);
 }
 
@@ -814,6 +930,7 @@ function paintAll() { S.items.forEach(paintRow); paintOverall(); }
 function buildRow(it) {
   const img = el('img', { class: 'row-thumb', alt: '', width: '48', height: '48' });
   img.style.background = TONES[it.id % TONES.length];
+  img.addEventListener('error', () => { img.removeAttribute('src'); });
   const name = el('span', { class: 'row-name' });
   name.textContent = it.name;
   const status = el('span', { class: 'row-status' });
@@ -884,7 +1001,7 @@ function checkFinished() {
   $('pause-btn').hidden = true;
   $('stay-warn').hidden = true;
   $('finish-btn').hidden = false;
-  $('retry-btn').hidden = !S.items.some((it) => it.status === 'fail' && it.retryable && (it.blob || it.imp));
+  $('retry-btn').hidden = !S.items.some((it) => it.status === 'fail' && it.retryable && (it.blob || it.imp || (it.isVideo && it.file)));
   paintOverall();
   say(c.fail ? `上傳結束，有 ${c.fail} 張沒有成功` : `全部完成，已上傳 ${c.done} 張`);
 }
@@ -903,7 +1020,7 @@ $('retry-btn').addEventListener('click', () => {
   if (!S) return;
   S.finished = false;
   for (const it of S.items) {
-    if (it.status === 'fail' && it.retryable && (it.blob || it.imp)) setItem(it, { status: 'wait', text: '等待中', tone: 'muted', pct: 0 });
+    if (it.status === 'fail' && it.retryable && (it.blob || it.imp || (it.isVideo && it.file))) setItem(it, { status: 'wait', text: '等待中', tone: 'muted', pct: 0 });
   }
   $('retry-btn').hidden = true;
   $('finish-btn').hidden = true;
@@ -1050,12 +1167,29 @@ const IMP_ERR = {
   drive_disabled: '這個活動還沒開放雲端硬碟匯入，請改貼 Google 相簿連結或直接上傳。',
   rate_limited: '操作太頻繁，請等一分鐘再試。',
 };
+const fmtDur = (s) => {
+  const sec = Math.round(Number(s) || 0);
+  return sec ? `▶ ${Math.floor(sec / 60)}:${pad(sec % 60)}` : '▶ 影片';
+};
+const impReadLabel = () => (info?.video ? '讀取照片／影片' : '讀取照片');
 
 function initImport() {
   const on = info.import !== false;
   $('imp-open').hidden = !on;
   $('imp-open2').hidden = !on;
-  if (!on || I.inited) return;
+  if (!on) return;
+  const vOn = !!info.video;
+  const openSpan = $('imp-open').querySelector('span');
+  if (openSpan) openSpan.textContent = vOn ? '照片／影片已在 Google 相簿或雲端硬碟？貼連結匯入' : '照片已在 Google 相簿或雲端硬碟？貼連結匯入';
+  $('imp-open2').textContent = vOn ? '或貼 Google 相簿／雲端硬碟連結匯入（支援雲端硬碟影片，套用下方小隊、環節）' : '或貼 Google 相簿／雲端硬碟連結匯入（套用下方小隊、環節）';
+  $('imp-read').textContent = impReadLabel();
+  if (vOn) {
+    $('imp-help-drive').replaceChildren(
+      el('b', {}, 'Google 雲端硬碟'),
+      '：在資料夾或影片檔案按右鍵 →「共用」→ 一般存取權改成「知道連結的任何人」→「複製連結」。會讀取資料夾內的照片與影片（MP4、MOV、WebM、3GP），以及往下一層子資料夾。',
+    );
+  }
+  if (I.inited) return;
   I.inited = true;
   $('imp-help-drive').hidden = !info.import_drive;
   $('imp-url').placeholder = info.import_drive ? 'https://photos.app.goo.gl/…\nhttps://drive.google.com/drive/folders/…' : 'https://photos.app.goo.gl/…';
@@ -1101,10 +1235,12 @@ async function readLinks() {
       const r = await fetch(`${API}/import/list`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(IMP_ERR[d.error] || d.message || `讀取失敗（${r.status}）`);
-      const a = { ...d, url, original: false, sel: new Set(d.items.filter((x) => !x.have).map((x) => x.uid)) };
+      const a = { ...d, url, original: false, sel: new Set(d.items.filter((x) => !x.have && !x.too_large).map((x) => x.uid)) };
       I.albums.push(a);
       ph.replaceWith(albumCard(a));
-      say(`${a.title}：${a.count} 張照片`);
+      const vn = d.items.filter((x) => x.media === 'video').length;
+      const pn = a.count - vn;
+      say(vn ? `${a.title}：${pn ? `${pn} 張照片、` : ''}${vn} 支影片` : `${a.title}：${a.count} 張照片`);
     } catch (e) {
       ph.remove();
       errs.push(urls.length > 1 ? `${url}\n→ ${e.message}` : e.message);
@@ -1112,7 +1248,7 @@ async function readLinks() {
   }
   I.busy = false;
   $('imp-read').disabled = false;
-  $('imp-read').textContent = '讀取照片';
+  $('imp-read').textContent = impReadLabel();
   if (errs.length) impError(errs.join('\n\n'));
   else $('imp-url').value = '';
   paintImpFoot();
@@ -1120,19 +1256,24 @@ async function readLinks() {
 
 const THUMB_PAGE = 120; // 一次畫幾格（其餘捲到底再補）
 function albumCard(a) {
+  const videoN = a.items.filter((x) => x.media === 'video').length;
+  const photoN = a.count - videoN;
   const haveN = a.items.filter((x) => x.have).length;
-  const meta = [`${SRC_NAME[a.source] || ''} · ${a.count} 張`];
-  if (haveN) meta.push(`${haveN} 張已匯入過`);
-  if (a.truncated) meta.push('只列出前 1000 張');
-  const grid = el('div', { class: 'imp-grid', role: 'group', 'aria-label': `${a.title} 的照片` });
+  const bigN = a.items.filter((x) => x.too_large).length;
+  const countTxt = videoN && photoN ? `${photoN} 張照片 · ${videoN} 支影片` : videoN ? `${videoN} 支影片` : `${a.count} 張`;
+  const unit = videoN ? '項' : '張';
+  const meta = [`${SRC_NAME[a.source] || ''} · ${countTxt}`];
+  if (haveN) meta.push(`${haveN} ${unit}已匯入過`);
+  if (a.truncated) meta.push(`只列出前 1000 ${unit}`);
+  const grid = el('div', { class: 'imp-grid', role: 'group', 'aria-label': `${a.title} 的項目` });
   const all = el('input', { type: 'checkbox' });
   const count = el('span', {});
   const cells = new Map();
   const paintSel = () => {
-    const pick = a.items.filter((x) => !x.have);
+    const pick = a.items.filter((x) => !x.have && !x.too_large);
     all.checked = pick.length > 0 && pick.every((x) => a.sel.has(x.uid));
     all.indeterminate = !all.checked && pick.some((x) => a.sel.has(x.uid));
-    count.textContent = `全選（已勾 ${a.sel.size} 張）`;
+    count.textContent = `全選（已勾 ${a.sel.size} ${unit}）`;
     for (const [uid, b] of cells) if (!b.disabled) b.setAttribute('aria-pressed', String(a.sel.has(uid)));
     paintImpFoot();
   };
@@ -1142,9 +1283,22 @@ function albumCard(a) {
     drawn += next.length;
     for (const x of next) {
       const t = x.taken ? `${x.taken.slice(5, 10).replace('-', '/')} ${x.taken.slice(11, 16)}` : '沒有拍攝時間';
-      const b = el('button', { type: 'button', class: 'imp-cell', 'aria-pressed': String(a.sel.has(x.uid)), 'aria-label': `${x.name || '照片'}，${t}${x.have ? '，已匯入過' : ''}`, title: t },
-        el('img', { src: `${API}/import/thumb/${a.aid}/${encodeURIComponent(x.uid)}`, alt: '', loading: 'lazy', decoding: 'async' }));
+      const isVid = x.media === 'video';
+      const img = el('img', { src: `${API}/import/thumb/${a.aid}/${encodeURIComponent(x.uid)}`, alt: '', loading: 'lazy', decoding: 'async' });
+      const b = el('button', {
+        type: 'button',
+        class: 'imp-cell',
+        'aria-pressed': String(a.sel.has(x.uid)),
+        'aria-label': `${x.name || (isVid ? '影片' : '照片')}，${t}${x.have ? '，已匯入過' : x.too_large ? '，超過影片大小上限' : ''}`,
+        title: t,
+      }, img);
+      img.addEventListener('error', () => {
+        img.remove();
+        b.prepend(el('span', { class: 'imp-noimg' }, isVid ? fmtDur(x.duration) : '無預覽'));
+      });
+      if (isVid) b.append(el('span', { class: 'imp-vid' }, fmtDur(x.duration)));
       if (x.have) { b.disabled = true; b.append(el('span', { class: 'imp-have' }, '已匯入')); }
+      else if (x.too_large) { b.disabled = true; b.append(el('span', { class: 'imp-have imp-big' }, `超過 ${info.video_max_mb || 200}MB`)); }
       b.addEventListener('click', () => { if (a.sel.has(x.uid)) a.sel.delete(x.uid); else a.sel.add(x.uid); paintSel(); });
       cells.set(x.uid, b);
       grid.append(b);
@@ -1153,7 +1307,7 @@ function albumCard(a) {
   drawMore();
   grid.addEventListener('scroll', () => { if (drawn < a.items.length && grid.scrollTop + grid.clientHeight > grid.scrollHeight - 200) drawMore(); });
   all.addEventListener('change', () => {
-    for (const x of a.items) if (!x.have) { if (all.checked) a.sel.add(x.uid); else a.sel.delete(x.uid); }
+    for (const x of a.items) if (!x.have && !x.too_large) { if (all.checked) a.sel.add(x.uid); else a.sel.delete(x.uid); }
     paintSel();
   });
   const kids = [
@@ -1168,7 +1322,12 @@ function albumCard(a) {
     kids.push(el('label', { class: 'check' }, orig, el('span', {}, '取原始檔（攝影師用；預設長邊 2560 像素）')));
   }
   kids.push(grid);
-  if (a.daily_left < a.count) kids.push(el('div', { class: 'imp-more' }, `這個活動今天還能匯入 ${a.daily_left} 張`));
+  if (a.skipped_videos > 0) {
+    const reason = a.video_reason === 'video_disabled' ? '這個活動未開放上傳影片' : '主辦單位尚未連結影片雲端硬碟';
+    kids.push(el('div', { class: 'imp-more' }, `另有 ${a.skipped_videos} 支影片無法匯入（${reason}）`));
+  }
+  if (bigN > 0) kids.push(el('div', { class: 'imp-more' }, `有 ${bigN} 支影片超過 ${info.video_max_mb || 200} MB 上限，無法匯入`));
+  if (a.daily_left < a.count) kids.push(el('div', { class: 'imp-more' }, `這個活動今天還能匯入 ${a.daily_left} ${unit}`));
   const card = el('section', { class: 'imp-card', 'aria-label': a.title }, ...kids);
   setTimeout(paintSel, 0);
   return card;
@@ -1178,20 +1337,30 @@ function impSelected() {
   const out = [];
   for (const a of I.albums) {
     for (const x of a.items) {
-      if (!a.sel.has(x.uid) || x.have) continue;
-      out.push({ aid: a.aid, uid: x.uid, taken: x.taken, original: a.original, name: x.name || `${a.title}・${out.length + 1}`, thumb: `${API}/import/thumb/${a.aid}/${encodeURIComponent(x.uid)}` });
+      if (!a.sel.has(x.uid) || x.have || x.too_large) continue;
+      out.push({
+        aid: a.aid, uid: x.uid, media: x.media || 'photo', taken: x.taken, original: a.original,
+        name: x.name || `${a.title}・${out.length + 1}`,
+        thumb: `${API}/import/thumb/${a.aid}/${encodeURIComponent(x.uid)}`,
+      });
     }
   }
   return out;
 }
 
 function paintImpFoot() {
-  const n = impSelected().length;
+  const sel = impSelected();
+  const n = sel.length;
+  const vn = sel.filter((x) => x.media === 'video').length;
+  const pn = n - vn;
   $('imp-foot').hidden = !I.albums.length;
   const b = $('imp-start');
   b.disabled = !n;
   b.setAttribute('aria-disabled', n ? 'false' : 'true');
-  b.textContent = n ? `匯入 ${n} 張 ↓` : '請先勾選照片';
+  b.textContent = !n ? '請先勾選要匯入的項目'
+    : pn && vn ? `匯入 ${pn} 張照片、${vn} 支影片 ↓`
+    : vn ? `匯入 ${vn} 支影片 ↓`
+    : `匯入 ${n} 張 ↓`;
   const parts = I.batch ? applySummary() : ['環節：依拍攝時間自動判斷', '小隊可在匯入時補'];
   const who = $('uploader').value.trim();
   $('imp-line').replaceChildren(...(n ? [el('span', {}, '套用：'), ...(who ? [el('span', { class: 'apply-chip' }, who)] : []), ...parts.map((t) => el('span', { class: 'apply-chip' }, t))] : []));

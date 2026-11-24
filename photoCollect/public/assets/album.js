@@ -212,20 +212,26 @@ function paintPicks() {
   own.textContent = `另選了自己拍的 ${me.self.length} 張（攝影者選自己的作品不限張數，結果會分開標示）`;
 }
 
+const fmtDur = (s) => {
+  const sec = Math.round(Number(s) || 0);
+  if (!sec) return '▶ 影片';
+  return `▶ ${Math.floor(sec / 60)}:${pad(sec % 60)}`;
+};
 const isPicked = (p) => info.me.picks.includes(p.hash) || info.me.self.includes(p.hash);
 
 function tile(p, i) {
   const on = isPicked(p);
   const wrap = el('div', { class: 'tile', style: 'cursor:default' });
   const open = el('button', { type: 'button', class: 'tile', style: 'position:absolute;inset:0;border-radius:0;background:transparent', 'aria-label': `開啟大圖：${p.segment || '未分類'}${p.uploader ? `，攝影 ${p.uploader}` : ''}`, onclick: () => openViewer(i) });
-  if (p.has_thumb || p.viewable) {
+  if (p.has_thumb || (p.viewable && p.media !== 'video')) {
     const img = el('img', { alt: '', loading: 'lazy', decoding: 'async' });
     img.addEventListener('error', () => { img.remove(); open.append(el('span', { class: 'noimg' }, '無預覽')); });
     img.src = imgUrl('thumb', p.hash);
     open.append(img);
-  } else open.append(el('span', { class: 'noimg' }, '無預覽'));
+  } else open.append(el('span', { class: 'noimg' }, p.media === 'video' ? fmtDur(p.duration) : '無預覽'));
   wrap.append(open);
   if (p.segment) wrap.append(el('span', { class: 'badge b-seg' }, p.segment));
+  if (p.media === 'video') wrap.append(el('span', { class: 'badge b-vid' }, fmtDur(p.duration)));
   if (p.mine) wrap.append(el('span', { class: 'badge b-mine' }, '我拍的 · 不佔名額'));
   const full = !p.mine && countedPicks() >= info.album.limit && !on;
   const heart = el('button', {
@@ -273,6 +279,8 @@ function openViewer(i) {
 function closeViewer() {
   const i = vIdx;
   vIdx = -1;
+  const vid = $('v-vid');
+  if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
   $('viewer').hidden = true;
   const tiles = $('grid').querySelectorAll('.tile > .tile');
   if (tiles[i]) tiles[i].focus();
@@ -285,8 +293,22 @@ function paintViewer() {
   const on = isPicked(p);
   $('v-pos').textContent = `${vIdx + 1} / ${shown.length}`;
   $('v-picks').textContent = info.me.kind ? `我的選擇 ${countedPicks()} / ${info.album.limit}` : '';
-  $('v-img').src = p.viewable ? imgUrl('photo', p.hash) : imgUrl('thumb', p.hash);
-  $('v-img').alt = `${p.segment || '未分類'}${p.uploader ? `，攝影 ${p.uploader}` : ''}`;
+  const img = $('v-img');
+  const vid = $('v-vid');
+  if (p.media === 'video') {
+    img.hidden = true;
+    img.removeAttribute('src');
+    vid.hidden = false;
+    vid.poster = p.has_thumb ? imgUrl('thumb', p.hash) : '';
+    vid.src = imgUrl('photo', p.hash);
+  } else {
+    vid.pause();
+    vid.hidden = true;
+    vid.removeAttribute('src');
+    img.hidden = false;
+    img.src = p.viewable ? imgUrl('photo', p.hash) : imgUrl('thumb', p.hash);
+    img.alt = `${p.segment || '未分類'}${p.uploader ? `，攝影 ${p.uploader}` : ''}`;
+  }
   $('v-seg').textContent = p.segment || '未分類';
   $('v-by').textContent = [p.uploader ? `攝影：${p.uploader}${p.mine ? '（你）' : ''}` : (p.mine ? '你拍的' : ''), hm(p.exif_time)].filter(Boolean).join(' · ');
   $('v-votes').textContent = info.album.votes_visible ? `${p.votes || 0} 人選它` : '';

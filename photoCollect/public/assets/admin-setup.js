@@ -75,7 +75,7 @@ export function lineMessage(ctx, message) {
 }
 
 export function renderSetup(ctx, panel) {
-  let cur = 0;
+  let cur = ctx.gdReturn ? Math.max(0, ITEMS.findIndex((x) => x.key === 'upload')) : 0;
   let dirty = false;
   let editor = null; // { key, node, collect(), noSave }
 
@@ -361,21 +361,98 @@ export function renderSetup(ctx, panel) {
     const imp = h('input', { type: 'checkbox' });
     imp.checked = u.import_enabled !== false;
     const impRow = h('label', { class: 'field full', style: 'flex-direction:row;align-items:center;gap:10px' }, imp,
-      h('span', {}, '允許貼 Google 相簿／雲端硬碟分享連結匯入', h('br'), h('span', { class: 'small muted', text: '攝影師的照片若已在雲端，貼連結就能整批匯入，不用先下載到手機。' })));
+      h('span', {}, '允許貼 Google 相簿／雲端硬碟分享連結匯入', h('br'), h('span', { class: 'small muted', text: '攝影師的照片或影片若已在雲端，貼連結就能整批匯入（雲端硬碟支援匯入影片），不用先下載到手機。' })));
+
+    const vid = h('input', { type: 'checkbox' });
+    vid.checked = u.video_enabled !== false;
+    const vidRow = h('label', { class: 'field full', style: 'flex-direction:row;align-items:center;gap:10px' }, vid,
+      h('span', {}, '允許上傳影片（直存全站 Google 雲端硬碟，不佔用 R2 空間）', h('br'), h('span', { class: 'small muted', text: '支援手機直接上傳短片，或貼 Google 雲端硬碟連結匯入影片；影片位元組會直接存入下方的全站共用雲端硬碟，R2 只保留封面縮圖與統計索引。' })));
+    const vmb = h('select', { class: 'select' });
+    for (const n of [...new Set([100, 200, 500, 1024, u.video_max_mb].filter(Boolean))].sort((a, b) => a - b)) {
+      const label = n === 200 ? '200 MB（建議）' : n === 1024 ? '1024 MB (1 GB)' : `${n} MB`;
+      vmb.append(h('option', { value: String(n), text: label }));
+    }
+    vmb.value = String(u.video_max_mb || 200);
+
+    // ---- 全站影片 Google 雲端硬碟設定（跨活動共用） ----
+    const gdBox = h('div', { class: 'card stack', style: 'background:var(--c-bg);padding:14px;gap:10px' },
+      h('div', { class: 'small muted', text: '讀取全站雲端硬碟設定中…' }));
+    const drawGdrive = (st, errText) => {
+      if (errText) { mount(gdBox, h('div', { class: 'warn', text: `無法讀取雲端硬碟設定：${errText}` })); return; }
+      const tag = st.connected
+        ? h('span', { class: 'tag tag-ok', text: '已連結' })
+        : h('span', { class: 'tag tag-warn', text: st.need_reconnect ? '需重新連結' : '尚未連結' });
+      const folderInp = input('text', st.root_folder_id || '', { placeholder: '貼上資料夾連結或 ID', 'aria-label': '全站目標雲端硬碟資料夾 ID' });
+      folderInp.addEventListener('input', (e) => e.stopPropagation());
+      const saveFolderBtn = h('button', {
+        type: 'button', class: 'btn', text: '套用資料夾',
+        disabled: !ctx.canWrite,
+        onclick: async () => {
+          const val = folderInp.value.trim();
+          if (!val) { toast('請輸入資料夾 ID 或連結', 'err'); return; }
+          saveFolderBtn.disabled = true;
+          try {
+            const next = await ctx.api('/gdrive', { method: 'PATCH', body: { root_folder_id: val } });
+            toast('已更新目標雲端硬碟資料夾');
+            drawGdrive(next);
+          } catch (e) { toast(`設定失敗：${e.message}`, 'err'); saveFolderBtn.disabled = !ctx.canWrite; }
+        },
+      });
+      const connectBtn = h('button', {
+        type: 'button', class: 'btn btn-primary', text: st.connected ? '更換／重新連結帳號' : '連結 Google 雲端硬碟',
+        disabled: !ctx.canWrite || !st.enabled,
+        onclick: async () => {
+          connectBtn.disabled = true;
+          try {
+            const r = await ctx.api('/gdrive/connect', { method: 'POST' });
+            try { sessionStorage.setItem('mv.gp.return', location.hash); } catch { /* 私密模式 */ }
+            location.href = r.auth_url;
+          } catch (e) { toast(`無法開始連結：${e.message}`, 'err'); connectBtn.disabled = !ctx.canWrite; }
+        },
+      });
+      const discBtn = st.connected ? h('button', {
+        type: 'button', class: 'btn', text: '中斷連結',
+        disabled: !ctx.canWrite,
+        onclick: async () => {
+          const ok = await ctx.ask({ title: '中斷全站影片雲端硬碟連結', body: '中斷後，所有活動的上傳頁將暫時不提供上傳影片，已存入雲端硬碟的影片不會被刪除。', okLabel: '中斷連結', danger: true });
+          if (!ok) return;
+          try { const next = await ctx.api('/gdrive/disconnect', { method: 'POST' }); toast('已中斷連結'); drawGdrive(next); }
+          catch (e) { toast(`操作失敗：${e.message}`, 'err'); }
+        },
+      }) : null;
+      mount(gdBox,
+        h('div', { class: 'row', style: 'justify-content:space-between;align-items:center' },
+          h('b', { text: '全站影片雲端硬碟（共用雲端硬碟）' }), tag),
+        st.last_error ? h('div', { class: 'warn', text: st.last_error }) : null,
+        st.account_email ? h('div', { class: 'small muted', text: `授權帳號：${st.account_email}${st.connected_at ? ` · 連結於 ${fmtDateTime(st.connected_at)}` : ''}` }) : null,
+        h('div', { class: 'small muted' }, '目標資料夾：',
+          st.root_folder_url
+            ? h('a', { href: st.root_folder_url, target: '_blank', rel: 'noopener', text: st.root_folder_name ? `${st.root_folder_name} (${st.root_folder_id})` : st.root_folder_id })
+            : h('span', { text: st.root_folder_id || '尚未指定' })),
+        st.event_folder_url ? h('div', { class: 'small muted' }, '本活動影片子資料夾：',
+          h('a', { href: st.event_folder_url, target: '_blank', rel: 'noopener', text: '在 Google 雲端硬碟開啟' })) : null,
+        h('div', { class: 'row' }, folderInp, saveFolderBtn),
+        h('div', { class: 'row' }, connectBtn, discBtn),
+        !st.enabled ? h('div', { class: 'small muted', text: '伺服器尚未設定 GOOGLE_CLIENT_SECRET，無法進行 OAuth 授權。' }) : null);
+    };
+    ctx.api('/gdrive').then((st) => drawGdrive(st)).catch((e) => drawGdrive(null, e.message));
+
     const info = h('div', { class: 'note' });
     const d = ctx.data;
     info.textContent = d.delete_at ? `目前設定下，照片會在 ${fmtDateTime(d.delete_at).slice(0, 10)} 自動刪除。` : '還沒設定截止時間，照片不會自動刪除（可到「安全與保存」手動刪除）。';
     return {
       node: h('div', { class: 'stack' },
         h('div', { class: 'grid2' },
-          field('開始開放', opens), field('截止', closes), field('照片保存', ret), field('單張上限', mb),
-          field('上傳模式', mode, 'full'),
+          field('開始開放', opens), field('截止', closes), field('照片保存', ret), field('單張照片上限', mb),
+          field('上傳模式', mode), field('單支影片上限', vmb),
           impRow,
+          vidRow,
           h('label', { class: 'field full' }, '上傳前告知文字（需主辦單位確認）', notice,
             h('span', { class: 'small muted' }, '文字中的 {delete_date} 會自動代入實際刪除日期。 ', cnt))),
+        gdBox,
         info,
         h('div', { class: 'small muted', text: '時間以你目前瀏覽器的時區為準。開始開放設在過去的時間，儲存後（自動模式）就會立刻開放上傳。' })),
-      collect: () => ({ upload: { ...u, opens_at: localInputToIso(opens.value), closes_at: localInputToIso(closes.value), retention_days: Number(ret.value), max_mb: Number(mb.value), notice: notice.value.trim(), mode: mode.value, import_enabled: imp.checked } }),
+      collect: () => ({ upload: { ...u, opens_at: localInputToIso(opens.value), closes_at: localInputToIso(closes.value), retention_days: Number(ret.value), max_mb: Number(mb.value), video_max_mb: Number(vmb.value), video_enabled: vid.checked, notice: notice.value.trim(), mode: mode.value, import_enabled: imp.checked } }),
       validate: () => {
         if (opens.value && closes.value && new Date(closes.value) <= new Date(opens.value)) return '截止時間必須晚於開始開放時間';
         return '';

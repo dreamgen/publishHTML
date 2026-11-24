@@ -199,7 +199,7 @@ export function renderGphotos(ctx, panel) {
     }
     if (!st.album_title) {
       kids.push(
-        h('div', { class: 'muted' }, '用你的 Google 帳號授權後，系統會在你的 Google 相簿建立一本「', h('b', { text: ctx.cfg.basic?.name || '活動' }), '」相簿，把收到的照片自動放進去。你再到 Google 相簿 App 把相簿設成共用，就能分享給大家。'),
+        h('div', { class: 'muted' }, '用你的 Google 帳號授權後，系統會在你的 Google 相簿建立一本「', h('b', { text: ctx.cfg.basic?.name || '活動' }), '」相簿，把收到的照片與活動影片自動放進去。你再到 Google 相簿 App 把相簿設成共用，就能分享給大家。'),
         h('ol', { class: 'note gp-steps' },
           h('li', { text: '按「連結 Google 相簿」，用要存放照片的 Google 帳號登入並勾選全部權限。' }),
           h('li', { text: '回到這裡後按「立即同步」（或開啟每小時自動同步）。' }),

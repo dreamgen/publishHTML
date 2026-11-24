@@ -11,6 +11,7 @@ import * as mine from './mine.js';
 import * as importer from './importer.js';
 import * as album from './album.js';
 import * as gphotos from './gphotos.js';
+import * as gdrive from './gdrive.js';
 import { assertSameOrigin, getSession } from './session.js';
 
 const methodNotAllowed = () => new HttpError(405, 'method_not_allowed', '不支援的請求方法。');
@@ -122,6 +123,13 @@ export async function handleApi(req, env, url) {
     throw notFound();
   }
 
+  // /api/u/{code}/video/{init|complete}：影片直傳 Google 雲端硬碟
+  if (a === 'u' && b && c === 'video' && parts.length === 5) {
+    if (d === 'init') { if (m !== 'POST') throw methodNotAllowed(); return gdrive.videoInit(env, b, req); }
+    if (d === 'complete') { if (m !== 'POST') throw methodNotAllowed(); return gdrive.videoComplete(env, b, req); }
+    throw notFound();
+  }
+
   // /api/u/{code}/info|check|photo
   if (a === 'u' && b && parts.length === 4) {
     if (c === 'info') { if (m !== 'GET') throw methodNotAllowed(); return upload.info(env, b, url, req); }
@@ -140,6 +148,17 @@ export async function handleApi(req, env, url) {
         throw methodNotAllowed();
       }
       const post = { connect: gphotos.connect, sync: gphotos.sync, disconnect: gphotos.disconnect };
+      if (parts.length === 5 && post[d]) { if (m !== 'POST') throw methodNotAllowed(); return post[d](env, req, b); }
+      throw notFound();
+    }
+    // /api/admin/{id}/gdrive[/connect|disconnect]：全站影片雲端硬碟設定
+    if (c === 'gdrive') {
+      if (parts.length === 4) {
+        if (m === 'GET') return gdrive.status(env, req, b);
+        if (m === 'PATCH') return gdrive.patch(env, req, b);
+        throw methodNotAllowed();
+      }
+      const post = { connect: gdrive.connect, disconnect: gdrive.disconnect };
       if (parts.length === 5 && post[d]) { if (m !== 'POST') throw methodNotAllowed(); return post[d](env, req, b); }
       throw notFound();
     }

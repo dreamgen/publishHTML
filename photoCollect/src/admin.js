@@ -10,7 +10,8 @@ import {
 import {
   adminStats, invalidate, parsePhoto, photoView, purgePhotos,
 } from './stats.js';
-import { EXT_MIME } from './util.js';
+import { EXT_MIME, ALL_EXT_MIME } from './util.js';
+import { streamDriveVideo } from './gdrive.js';
 
 // ac = requireRole 的結果：{ role, auth }。viewer 看不到同步金鑰明碼（§8.6）
 async function view(env, cfg, origin, ac) {
@@ -87,12 +88,15 @@ export async function thumb(env, req, id, hash) {
   const { cfg } = await requireRole(env, req, id, 'viewer');
   if (!HASH_RE.test(hash)) throw new HttpError(400, 'invalid', '照片編號格式不正確。');
   let obj = await env.PHOTOS.get(`events/${cfg.id}/t/${hash}.jpg`);
-  let type = 'image/jpeg';
+  let type = (obj && obj.httpMetadata && obj.httpMetadata.contentType) || 'image/jpeg';
   if (!obj) {
     const key = await findPhotoKey(env, cfg.id, hash);
     if (key) {
-      obj = await env.PHOTOS.get(key);
-      type = EXT_MIME[key.split('.').pop()] || 'application/octet-stream';
+      const candidate = await env.PHOTOS.get(key);
+      if (candidate && !(candidate.customMetadata && candidate.customMetadata.media === 'video')) {
+        obj = candidate;
+        type = EXT_MIME[key.split('.').pop()] || 'application/octet-stream';
+      }
     }
   }
   if (!obj) throw new HttpError(404, 'not_found', '找不到這張照片。');
@@ -113,6 +117,12 @@ export async function original(env, req, id, hash) {
   const obj = key ? await env.PHOTOS.get(key) : null;
   if (!obj) throw new HttpError(404, 'not_found', '找不到這張照片。');
   const ext = key.split('.').pop();
+  if (obj.customMetadata && obj.customMetadata.media === 'video' && obj.customMetadata.drive_id) {
+    return streamDriveVideo(env, obj.customMetadata.drive_id, req, {
+      mime: ALL_EXT_MIME[ext] || 'video/mp4',
+      filename: `${hash.slice(0, 10)}.${ext}`,
+    });
+  }
   return new Response(obj.body, {
     headers: {
       'content-type': EXT_MIME[ext] || 'application/octet-stream',
@@ -131,7 +141,9 @@ export async function photos(env, req, id, url) {
     prefix: `events/${cfg.id}/p/`, include: ['customMetadata'], limit: 200, cursor,
   });
   const ex = new Set(cfg.excluded || []);
-  const list = page.objects.map(parsePhoto).filter(Boolean).map((p) => ({ ...photoView(p, cfg, ex), ext: p.ext, size: p.size }));
+  const list = page.objects.map(parsePhoto).filter(Boolean).map((p) => ({
+    ...photoView(p, cfg, ex), ext: p.ext, size: p.size, drive_id: p.drive_id || '',
+  }));
   return json({ photos: list, cursor: page.truncated ? page.cursor : null });
 }
 

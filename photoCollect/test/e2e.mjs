@@ -1381,6 +1381,7 @@ async function main() {
   await rotationTests();
   await importTests();
   await gphotosTests();
+  await gdriveVideoTests();
 
   console.log(`\n結果：通過 ${pass} 項，失敗 ${fail} 項`);
   process.exit(fail ? 1 : 0);
@@ -1859,9 +1860,15 @@ main().catch((e) => { console.error('測試異常', e); process.exit(1); });
 // 用本機假伺服器模擬 Google（.dev.vars 的 IMPORT_TEST_ORIGIN 讓 Worker 把 https://{google 網域}/… 改連 http://127.0.0.1:8799/{網域}/…）
 async function importTests() {
   const http = await import('node:http');
-  const { classifyUrl, parseAlbumHtml } = await import('../src/importer.js');
+  const { classifyUrl, parseAlbumHtml, normalizeVideoMime } = await import('../src/importer.js');
   console.log('[連結匯入]');
-  // ---- 單元：連結辨識 ----
+  // ---- 單元：連結辨識與影片 MIME 正規化 ----
+  eq(normalizeVideoMime('video/mp4'), 'video/mp4', 'normalizeVideoMime: mp4');
+  eq(normalizeVideoMime('video/quicktime; codecs="avc1"'), 'video/quicktime', 'normalizeVideoMime: mov 帶參數');
+  eq(normalizeVideoMime('video/x-m4v', 'clip.m4v'), 'video/mp4', 'normalizeVideoMime: x-m4v → video/mp4');
+  eq(normalizeVideoMime('video/x-quicktime'), 'video/quicktime', 'normalizeVideoMime: x-quicktime → video/quicktime');
+  eq(normalizeVideoMime('video/x-matroska', 'clip.mp4'), 'video/mp4', 'normalizeVideoMime: video/* 依副檔名');
+  eq(normalizeVideoMime('image/jpeg', 'a.mp4'), '', 'normalizeVideoMime: image/* → 空字串');
   eq(classifyUrl('https://photos.app.goo.gl/AbCdEf123')?.source, 'gphotos', '短網址 → Google 相簿');
   eq(classifyUrl('https://photos.google.com/share/AF1QipX?key=abc')?.source, 'gphotos', 'share 網址 → Google 相簿');
   eq(classifyUrl('https://photos.google.com/photo/AF1QipX'), null, '個人相片網址（非分享）→ 不支援');
@@ -1893,12 +1900,18 @@ async function importTests() {
   const driveFiles = {
     FOLDER0001: { id: 'FOLDER0001', name: '攝影組上傳', mimeType: 'application/vnd.google-apps.folder' },
     SUBFOLD001: { id: 'SUBFOLD001', name: '第二天', mimeType: 'application/vnd.google-apps.folder' },
+    VIDFOLD001: { id: 'VIDFOLD001', name: '只有影片', mimeType: 'application/vnd.google-apps.folder' },
     FILE000001: { id: 'FILE000001', name: 'DSC_0001.JPG', mimeType: 'image/jpeg', size: '1200', imageMediaMetadata: { time: '2026:11:20 10:15:00', width: 6000, height: 4000 }, thumbnailLink: 'https://lh3.googleusercontent.com/pw/DTHUMB1=s220' },
     FILE000002: { id: 'FILE000002', name: 'DSC_0002.JPG', mimeType: 'image/jpeg', size: String(80 * 1024 * 1024), imageMediaMetadata: { time: '2026:11:20 10:20:00' } },
     FILE000003: { id: 'FILE000003', name: 'IMG_9.JPG', mimeType: 'image/jpeg', size: '900', resourceKey: '0-sub' },
+    VIDFILE001: { id: 'VIDFILE001', name: 'CLIP_1.MP4', mimeType: 'video/mp4', size: '2048' },
     PRIVATE001: null,
   };
-  const children = { FOLDER0001: ['FILE000001', 'FILE000002', 'SUBFOLD001'], SUBFOLD001: ['FILE000003'] };
+  const children = {
+    FOLDER0001: ['FILE000001', 'FILE000002', 'SUBFOLD001', 'VIDFILE001'],
+    SUBFOLD001: ['FILE000003'],
+    VIDFOLD001: ['VIDFILE001'],
+  };
   const srv = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     const send = (code, type, body, h = {}) => { res.writeHead(code, { 'content-type': type, ...h }); res.end(body); };
@@ -2002,11 +2015,18 @@ async function importTests() {
     r = await api('GET', `/api/u/${up}/info`);
     ok(r.data.import === true && r.data.import_drive === true, 'info 回報 import=true、雲端硬碟可用');
 
-    // ---- 雲端硬碟 ----
+    // ---- 雲端硬碟（未連結全站影片雲端硬碟時：照片可匯入、影片回略過或 503）----
+    const gdCheck = await api('GET', `/api/admin/${id}/gdrive`, { token: tok });
+    if (gdCheck.data && gdCheck.data.connected) await api('POST', `/api/admin/${id}/gdrive/disconnect`, { token: tok });
     r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/PRIVATE001' } });
     ok(r.status === 422 && r.data.error === 'drive_not_public', '非公開資料夾 → 422 drive_not_public', r.data);
     r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/FOLDER0001?usp=sharing' } });
-    ok(r.status === 200 && r.data.source === 'gdrive' && r.data.title === '攝影組上傳' && r.data.count === 3, '雲端硬碟資料夾（含一層子資料夾、略過 PDF）', r.data);
+    ok(r.status === 200 && r.data.source === 'gdrive' && r.data.title === '攝影組上傳' && r.data.count === 3 && r.data.skipped_videos === 1 && r.data.video_reason === 'gdrive_not_connected', '雲端硬碟資料夾（含一層子資料夾、略過 PDF 與未連結時略過影片）', r.data);
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/VIDFOLD001' } });
+    ok(r.status === 503 && r.data.error === 'gdrive_not_connected', '全站影片雲端硬碟未連結：純影片資料夾 → 503 gdrive_not_connected', r.data);
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/file/d/VIDFILE001/view' } });
+    ok(r.status === 503 && r.data.error === 'gdrive_not_connected', '全站影片雲端硬碟未連結：單檔影片 → 503 gdrive_not_connected', r.data);
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/FOLDER0001?usp=sharing' } });
     eq(r.data.items.map((x) => [x.uid, x.taken]), [['gd:FILE000001', '2026-11-20T10:15:00'], ['gd:FILE000002', '2026-11-20T10:20:00'], ['gd:FILE000003', '']], '依拍攝時間排序、EXIF 時間轉 ISO');
     ok([...stats.keys].every((k) => k === 'local-test-key'), 'Drive API 帶伺服器端金鑰');
     const daid = r.data.aid;
@@ -2228,6 +2248,567 @@ async function gphotosTests() {
     ok(r.status === 200 && r.data.connected === false && fake.revoked.includes('RT1') && r.data.album_title, '中斷連結：撤銷 token、保留相簿資訊', r.data);
     r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: {} });
     ok(r.status === 409, '中斷後不能同步');
+  } finally {
+    srv.close();
+  }
+}
+
+// ================= 全站共用雲端硬碟（影片直傳、不存 R2）=================
+async function gdriveVideoTests() {
+  const http = await import('node:http');
+  console.log('[影片上傳至共用雲端硬碟]');
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+  const GP_APPEND = 'https://www.googleapis.com/auth/photoslibrary.appendonly';
+  const GP_READ = 'https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata';
+  const DEFAULT_FID = '1JVE139tWgdCi7jBb5NV3tIW5CSTxoERr';
+  const fake = {
+    folders: new Map([
+      [DEFAULT_FID, { id: DEFAULT_FID, name: '共用影片資料夾', mimeType: 'application/vnd.google-apps.folder', supportsAllDrives: true }],
+      ['NEWFOLDER12345', { id: 'NEWFOLDER12345', name: '新資料夾', mimeType: 'application/vnd.google-apps.folder' }],
+    ]),
+    files: new Map(),
+    sessions: new Map(),
+    gpAlbums: new Map(),
+    gpUploads: [],
+    gpBatches: [],
+    nSeq: 0,
+    revoked: [],
+    allDrivesFlags: [],
+    publicFiles: new Map(),
+    publicChildren: new Map(),
+    publicThumbs: new Map(),
+    revokedPublic: new Set(),
+    copyCalls: [],
+    publicAltMediaCalls: [],
+    publicRkHeaders: [],
+  };
+  const readBody = (req) => new Promise((r) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => r(Buffer.concat(c))); });
+  const srv = http.createServer(async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const p = u.pathname;
+    const body = await readBody(req);
+    const send = (code, obj, hdrs = {}) => {
+      const data = Buffer.isBuffer(obj) ? obj : typeof obj === 'string' ? obj : JSON.stringify(obj);
+      const ct = Buffer.isBuffer(obj) ? 'application/octet-stream' : typeof obj === 'string' ? 'text/plain' : 'application/json';
+      res.writeHead(code, { 'content-type': ct, ...hdrs });
+      res.end(data);
+    };
+    if (p === '/oauth2.googleapis.com/token') {
+      const f = new URLSearchParams(body.toString());
+      if (f.get('grant_type') === 'authorization_code') {
+        return send(200, {
+          access_token: 'AT_GD1', expires_in: 3599, refresh_token: 'RT_GD1',
+          scope: `openid email ${DRIVE_SCOPE} ${GP_APPEND} ${GP_READ}`, id_token: `x.${b64u(JSON.stringify({ email: 'drive-admin@example.com' }))}.y`,
+        });
+      }
+      if (f.get('grant_type') === 'refresh_token' && f.get('refresh_token') === 'RT_GD1') {
+        return send(200, { access_token: 'AT_GD2', expires_in: 3599 });
+      }
+      return send(400, { error: 'invalid_grant' });
+    }
+    if (p === '/oauth2.googleapis.com/revoke') {
+      fake.revoked.push(new URLSearchParams(body.toString()).get('token'));
+      return send(200, {});
+    }
+    if (p === '/photoslibrary.googleapis.com/v1/albums' && req.method === 'POST') {
+      const j = JSON.parse(body.toString());
+      const aid = `GP_ALB_${++fake.nSeq}`;
+      fake.gpAlbums.set(aid, { id: aid, title: j.album.title, productUrl: `https://photos.google.com/lr/album/${aid}` });
+      return send(200, fake.gpAlbums.get(aid));
+    }
+    if (p === '/photoslibrary.googleapis.com/v1/uploads' && req.method === 'POST') {
+      const ut = `GP_UT_${fake.gpUploads.length + 1}`;
+      fake.gpUploads.push({
+        token: ut,
+        type: req.headers['x-goog-upload-content-type'],
+        name: req.headers['x-goog-upload-file-name'],
+        bytes: body,
+      });
+      return send(200, ut, { 'content-type': 'text/plain' });
+    }
+    if (p === '/photoslibrary.googleapis.com/v1/mediaItems:batchCreate' && req.method === 'POST') {
+      const j = JSON.parse(body.toString());
+      fake.gpBatches.push(j);
+      return send(200, {
+        newMediaItemResults: j.newMediaItems.map((m, i) => ({
+          uploadToken: m.simpleMediaItem.uploadToken,
+          status: { message: 'Success' },
+          mediaItem: { id: `GP_MI_${i + 1}` },
+        })),
+      });
+    }
+    if (p === '/www.googleapis.com/upload/drive/v3/files') {
+      if (req.method === 'POST') {
+        const auth = req.headers.authorization || '';
+        if (!/^Bearer AT_GD[12]$/.test(auth)) return send(401, { error: { code: 401 } });
+        fake.allDrivesFlags.push(u.searchParams.get('supportsAllDrives'));
+        const sid = `USESS${++fake.nSeq}`;
+        const meta = JSON.parse(body.toString());
+        fake.sessions.set(sid, { meta, mime: req.headers['x-upload-content-type'] || 'video/mp4', bytes: null, fileId: null });
+        const loc = `http://127.0.0.1:8799/www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=${sid}`;
+        return send(200, '', { location: loc });
+      }
+      if (req.method === 'PUT') {
+        const sid = u.searchParams.get('upload_id');
+        const sess = fake.sessions.get(sid);
+        if (!sess) return send(404, { error: { code: 404 } });
+        if ((req.headers['content-range'] || '').startsWith('bytes */') && body.length === 0) {
+          if (!sess.fileId) return send(308, '');
+          return send(200, { id: sess.fileId, name: sess.meta.name, size: String(sess.bytes.length), mimeType: sess.mime });
+        }
+        const fid = `GD_VID_${++fake.nSeq}`;
+        sess.bytes = body;
+        sess.fileId = fid;
+        fake.files.set(fid, {
+          id: fid,
+          name: sess.meta.name,
+          parents: sess.meta.parents,
+          description: sess.meta.description || '',
+          mimeType: sess.mime,
+          bytes: body,
+        });
+        return send(200, { id: fid, name: sess.meta.name, size: String(body.length), mimeType: sess.mime });
+      }
+    }
+    if (p.startsWith('/lh3.googleusercontent.com/pw/')) {
+      const k = p.slice('/lh3.googleusercontent.com/pw/'.length).split('=')[0];
+      const pt = fake.publicThumbs.get(k);
+      if (pt) return send(200, pt.bytes, { 'content-type': pt.mime });
+      return send(404, { error: { code: 404 } });
+    }
+    if (p === '/drive.google.com/thumbnail') {
+      const pid = u.searchParams.get('id');
+      const pt = fake.publicThumbs.get(pid);
+      if (pt) return send(200, pt.bytes, { 'content-type': pt.mime });
+      return send(404, { error: { code: 404 } });
+    }
+    const auth = req.headers.authorization || '';
+    const apiKey = u.searchParams.get('key');
+    if (apiKey && !auth) {
+      if (req.headers['x-goog-drive-resource-keys']) fake.publicRkHeaders.push(req.headers['x-goog-drive-resource-keys']);
+      if (p === '/www.googleapis.com/drive/v3/files' && req.method === 'GET') {
+        const pid = (/'([^']+)' in parents/.exec(u.searchParams.get('q') || '') || [])[1];
+        if (!pid || fake.revokedPublic.has(pid)) return send(404, { error: { code: 404 } });
+        const kids = (fake.publicChildren.get(pid) || []).map((cid) => fake.publicFiles.get(cid)).filter((x) => x && !fake.revokedPublic.has(x.id));
+        return send(200, { files: kids });
+      }
+      const pfm = /^\/www\.googleapis\.com\/drive\/v3\/files\/([^/]+)$/.exec(p);
+      if (pfm && req.method === 'GET') {
+        const pid = decodeURIComponent(pfm[1]);
+        const f = fake.publicFiles.get(pid);
+        if (!f || fake.revokedPublic.has(pid)) return send(404, { error: { code: 404 } });
+        if (u.searchParams.get('alt') === 'media') {
+          fake.publicAltMediaCalls.push(pid);
+          const bytes = f.bytes || makeJpeg('pub-' + pid);
+          return send(200, bytes, { 'content-type': f.mimeType, 'content-length': String(bytes.length) });
+        }
+        const { bytes: _b, ...metaOnly } = f;
+        return send(200, metaOnly);
+      }
+      return send(404, { error: { code: 404 } });
+    }
+    if (!/^Bearer AT_GD[12]$/.test(auth)) return send(401, { error: { code: 401 } });
+    if (p === '/www.googleapis.com/drive/v3/files' && req.method === 'POST') {
+      fake.allDrivesFlags.push(u.searchParams.get('supportsAllDrives'));
+      const j = JSON.parse(body.toString());
+      const fid = `EV_FOLD_${++fake.nSeq}`;
+      fake.folders.set(fid, { id: fid, name: j.name, mimeType: j.mimeType, parents: j.parents || [] });
+      return send(200, { id: fid, name: j.name, mimeType: j.mimeType });
+    }
+    const cm = /^\/www\.googleapis\.com\/drive\/v3\/files\/([^/]+)\/copy$/.exec(p);
+    if (cm && req.method === 'POST') {
+      const sid = decodeURIComponent(cm[1]);
+      fake.allDrivesFlags.push(u.searchParams.get('supportsAllDrives'));
+      const j = JSON.parse(body.toString());
+      fake.copyCalls.push({ id: sid, parents: j.parents || [], rk: req.headers['x-goog-drive-resource-keys'] || '', name: j.name, description: j.description });
+      if (sid === 'PUB_VID_NOCOPY') {
+        return send(403, { error: { code: 403, errors: [{ reason: 'cannotCopyFile', message: 'Cannot copy file' }] } });
+      }
+      if (sid === 'PUB_VID_MOV') {
+        return send(403, { error: { code: 403, errors: [{ reason: 'forbidden', message: 'Cross-drive copy blocked' }] } });
+      }
+      const src = fake.publicFiles.get(sid);
+      if (!src || fake.revokedPublic.has(sid)) return send(404, { error: { code: 404 } });
+      const newId = `GD_COPY_${++fake.nSeq}`;
+      fake.files.set(newId, {
+        id: newId,
+        name: j.name || src.name,
+        parents: j.parents || [],
+        description: j.description || '',
+        mimeType: src.mimeType,
+        sha256Checksum: src.sha256Checksum || '',
+        bytes: src.bytes,
+      });
+      return send(200, {
+        id: newId,
+        name: j.name || src.name,
+        size: String(src.bytes.length),
+        mimeType: src.mimeType,
+        sha256Checksum: src.sha256Checksum || '',
+      });
+    }
+    const fm = /^\/www\.googleapis\.com\/drive\/v3\/files\/([^/]+)$/.exec(p);
+    if (fm && req.method === 'DELETE') {
+      const id = decodeURIComponent(fm[1]);
+      fake.allDrivesFlags.push(u.searchParams.get('supportsAllDrives'));
+      fake.files.delete(id);
+      fake.folders.delete(id);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (fm && req.method === 'GET') {
+      const id = decodeURIComponent(fm[1]);
+      fake.allDrivesFlags.push(u.searchParams.get('supportsAllDrives'));
+      if (u.searchParams.get('alt') === 'media') {
+        const f = fake.files.get(id);
+        if (!f) return send(404, { error: { code: 404 } });
+        const range = req.headers.range;
+        if (range) {
+          const rm = /^bytes=(\d+)-(\d*)$/.exec(range);
+          if (rm) {
+            const start = Number(rm[1]);
+            const end = rm[2] ? Math.min(f.bytes.length - 1, Number(rm[2])) : f.bytes.length - 1;
+            const slice = f.bytes.subarray(start, end + 1);
+            return send(206, slice, {
+              'content-type': f.mimeType,
+              'content-length': String(slice.length),
+              'content-range': `bytes ${start}-${end}/${f.bytes.length}`,
+            });
+          }
+        }
+        return send(200, f.bytes, { 'content-type': f.mimeType, 'content-length': String(f.bytes.length) });
+      }
+      const folder = fake.folders.get(id);
+      if (folder) return send(200, folder);
+      const f = fake.files.get(id);
+      if (f) {
+        return send(200, {
+          id: f.id,
+          name: f.name,
+          size: String(f.bytes.length),
+          mimeType: f.mimeType,
+          parents: f.parents || [],
+          description: f.description || '',
+          trashed: false,
+        });
+      }
+      return send(404, { error: { code: 404 } });
+    }
+    send(404, { error: { code: 404 } });
+  });
+  await new Promise((r) => srv.listen(8799, '127.0.0.1', r));
+  try {
+    const ev = await createEvent('影片營', '2026-11-20');
+    const tok = ev.admin_code; const up = ev.upload_code; const id = ev.event_id;
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { groups: ['一小隊'], upload: { mode: 'open' }, schedule_text: '09:00-11:00 闖關' } });
+
+    let r = await api('GET', `/api/admin/${id}/gdrive`);
+    ok(r.status === 401, '未帶管理碼查 gdrive → 401');
+    r = await api('GET', `/api/admin/${id}/gdrive`, { token: tok });
+    ok(r.status === 200 && r.data.enabled === true && r.data.root_folder_id === DEFAULT_FID, '預設為指定的共用雲端硬碟資料夾 ID', r.data);
+    if (r.data.connected) await api('POST', `/api/admin/${id}/gdrive/disconnect`, { token: tok });
+
+    r = await api('GET', `/api/u/${up}/info`);
+    ok(r.data.video === false && r.data.video_max_mb === 200, '尚未連結雲端硬碟時 info.video=false，video_max_mb=200', r.data);
+
+    const v1 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypmp42'), Buffer.from('CAMP_VIDEO_BYTES_0123456789ABCDEF')]);
+    const h1 = sha(v1);
+    r = await api('POST', `/api/u/${up}/video/init`, { body: { hash: h1, mime: 'video/mp4', size: v1.length } });
+    ok(r.status === 503 && r.data.error === 'gdrive_not_connected', '未連結雲端硬碟時 /video/init → 503', r.data);
+
+    // ---- OAuth 連結全站共用雲端硬碟 ----
+    r = await api('POST', `/api/admin/${id}/gdrive/connect`, { token: tok });
+    const au = new URL(r.data.auth_url);
+    const state = au.searchParams.get('state');
+    const nonceCookie = (r.headers.get('set-cookie') || '').split(';')[0];
+    ok(r.status === 200 && au.searchParams.get('scope').includes(DRIVE_SCOPE), 'gdrive connect 產生含 drive scope 的授權網址');
+    const cbRes = await fetch(`${BASE}/oauth/gphotos/callback?code=GOODCODE&state=${encodeURIComponent(state)}`, {
+      redirect: 'manual', headers: { cookie: nonceCookie },
+    });
+    const frag = new URLSearchParams((cbRes.headers.get('location') || '').split('#')[1] || '');
+    ok(cbRes.status === 302 && frag.get('gd') === 'ok' && frag.get('e') === id, 'OAuth callback 回導 gd=ok', cbRes.headers.get('location'));
+    ok(fake.allDrivesFlags.every((v) => v === 'true'), '所有 Drive API 皆帶 supportsAllDrives=true', fake.allDrivesFlags);
+
+    r = await api('GET', `/api/admin/${id}/gdrive`, { token: tok });
+    ok(r.data.connected === true && r.data.account_email === 'drive-admin@example.com' && r.data.root_folder_name === '共用影片資料夾', '全站雲端硬碟已連結並記住資料夾名稱', r.data);
+
+    // 貼完整連結更新資料夾
+    r = await api('PATCH', `/api/admin/${id}/gdrive`, { token: tok, body: { root_folder_id: 'https://drive.google.com/drive/folders/NEWFOLDER12345?usp=sharing' } });
+    ok(r.status === 200 && r.data.root_folder_id === 'NEWFOLDER12345' && r.data.root_folder_name === '新資料夾', '從網址抽出資料夾 ID 並驗證名稱');
+    r = await api('PATCH', `/api/admin/${id}/gdrive`, { token: tok, body: { root_folder_id: 'NO_SUCH_FOLDER_1234' } });
+    ok(r.status === 400 && r.data.error === 'bad_folder', '找不到資料夾 → 400 bad_folder');
+    await api('PATCH', `/api/admin/${id}/gdrive`, { token: tok, body: { root_folder_id: DEFAULT_FID } });
+
+    r = await api('GET', `/api/u/${up}/info`);
+    ok(r.data.video === true && r.data.video_max_mb === 200, '連結後 info.video=true');
+
+    // 先記下純文字/基準 R2 用量（先上傳 1 張照片做基準）
+    const p0 = await uploadPhoto(up, { bytes: makeJpeg('vid-base-photo'), meta: { device: 'dev-vid-1' } });
+    const baseBytes = (await api('GET', `/api/admin/${id}`, { token: tok })).data.stats.bytes;
+
+    // ---- 三步驟影片上傳（帶 drive_id 完成） ----
+    r = await api('POST', `/api/u/${up}/video/init`, {
+      body: {
+        hash: h1, mime: 'video/mp4', size: v1.length, orig_name: 'camp.mp4',
+        uploader: '大雄', device: 'dev-vid-1', groups: ['一小隊'], exif_time: '2026-11-20T10:30:00', duration: 15,
+      },
+    });
+    ok(r.status === 200 && r.data.duplicate === false && r.data.upload_url && r.data.upload_token, '/video/init 建立 Resumable Session', r.data);
+    const put1 = await fetch(r.data.upload_url, { method: 'PUT', headers: { 'content-type': 'video/mp4' }, body: v1 });
+    const put1Json = await put1.json();
+    ok(put1.status === 200 && /^GD_VID_\d+$/.test(put1Json.id), '前端直接 PUT 影片位元組至 Google Drive 假伺服器', put1Json);
+
+    const fd1 = new FormData();
+    fd1.set('upload_token', r.data.upload_token);
+    fd1.set('drive_id', put1Json.id);
+    fd1.set('thumb', new File([JPEG], 't.jpg', { type: 'image/jpeg' }));
+    const comp1 = await fetch(`${BASE}/api/u/${up}/video/complete`, { method: 'POST', body: fd1 });
+    const comp1Json = await comp1.json();
+    ok(comp1.status === 201 && comp1Json.ok === true && comp1Json.drive_id === put1Json.id, '/video/complete 寫入 0-byte 索引與縮圖', comp1Json);
+
+    // ---- 三步驟影片上傳（不帶 drive_id，由後端向 upload_url 查回） ----
+    const v2 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypqt  '), Buffer.from('SECOND_VIDEO_MOV_PAYLOAD_XYZ')]);
+    const h2 = sha(v2);
+    r = await api('POST', `/api/u/${up}/video/init`, { body: { hash: h2, mime: 'video/quicktime', size: v2.length, device: 'dev-vid-1', duration: 8 } });
+    const put2 = await fetch(r.data.upload_url, { method: 'PUT', headers: { 'content-type': 'video/quicktime' }, body: v2 });
+    const put2Json = await put2.json();
+    ok(put2.status === 200 && /^GD_VID_\d+$/.test(put2Json.id), '第二支 MOV 影片上傳至 Drive');
+    const comp2 = await api('POST', `/api/u/${up}/video/complete`, { body: { upload_token: r.data.upload_token } });
+    ok(comp2.status === 201 && comp2.data.drive_id === put2Json.id, '未帶 drive_id 時 /video/complete 自動向 session 查詢確認', comp2.data);
+
+    // ---- R2 零影片空間驗證 & 統計 ----
+    r = await api('GET', `/api/admin/${id}`, { token: tok });
+    eq([r.data.stats.bytes, r.data.stats.video_count, r.data.stats.video_bytes], [baseBytes, 2, v1.length + v2.length], 'R2 用量完全未增加（0-byte 索引），統計正確記錄 2 支影片與雲端硬碟容量', r.data.stats);
+    const evFolder = [...fake.folders.values()].find((x) => x.parents && x.parents.includes(DEFAULT_FID) && x.name.includes('影片營'));
+    ok(!!evFolder && fake.files.get(put1Json.id).parents.includes(evFolder.id), '自動在共用雲端硬碟下建立活動子資料夾並存放影片');
+
+    // ---- 安全檢查：偽造他檔 drive_id 應被拒絕 ----
+    const forgedInit = await api('POST', `/api/u/${up}/video/init`, { body: { hash: 'c'.repeat(64), mime: 'video/mp4', size: v1.length } });
+    const forgedComp = await api('POST', `/api/u/${up}/video/complete`, { body: { upload_token: forgedInit.data.upload_token, drive_id: put1Json.id } });
+    ok(forgedComp.status === 400 && forgedComp.data.error === 'upload_incomplete', '傳入非本次上傳的 drive_id → 400 upload_incomplete 拒絕', forgedComp.data);
+
+    // ---- 去重、上限、開關 ----
+    r = await api('POST', `/api/u/${up}/video/init`, { body: { hash: h1, mime: 'video/mp4', size: v1.length } });
+    ok(r.status === 200 && r.data.duplicate === true, '同 hash 影片重複上傳 → duplicate:true');
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { video_max_mb: 10 } } });
+    r = await api('POST', `/api/u/${up}/video/init`, { body: { hash: 'a'.repeat(64), mime: 'video/mp4', size: 11 * 1024 * 1024 } });
+    ok(r.status === 413 && r.data.error === 'too_large', '超過 video_max_mb → 413 too_large');
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { video_enabled: false } } });
+    r = await api('GET', `/api/u/${up}/info`);
+    ok(r.data.video === false, '關閉 video_enabled 後 info.video=false');
+    r = await api('POST', `/api/u/${up}/video/init`, { body: { hash: 'b'.repeat(64), mime: 'video/mp4', size: 100 } });
+    ok(r.status === 403 && r.data.error === 'video_disabled', '關閉 video_enabled 後 /video/init → 403');
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { video_enabled: true } } });
+
+    // ---- 串流播放（Range 206）、管理下載、MV 同步 ----
+    const orig = await api('GET', `/api/admin/${id}/original/${h1}`, { token: tok });
+    ok(orig.status === 200 && orig.buf.equals(v1) && orig.headers.get('content-type') === 'video/mp4', '管理原檔下載可代理串流 Google Drive 影片', orig.status);
+
+    const sk = (await api('POST', `/api/admin/${id}/sync-key`, { token: tok })).data.sync_key;
+    r = await api('GET', `/api/sync/${id}/manifest`, { token: sk });
+    const mv = (r.data.photos || []).find((x) => x.hash === h1);
+    ok(mv && mv.media === 'video' && mv.duration === 15 && mv.drive_id === put1Json.id && mv.size === v1.length, 'manifest 含影片欄位（media/duration/drive_id/size）', mv);
+
+    const syncRange = await fetch(`${BASE}/api/sync/${id}/photo/${h1}`, { headers: { authorization: `Bearer ${sk}`, range: 'bytes=0-3' } });
+    ok(syncRange.status === 206 && Buffer.from(await syncRange.arrayBuffer()).equals(v1.subarray(0, 4)), 'sync /photo 支援 Range 206 影片串流');
+
+    r = await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { enabled: true } } });
+    const acode = r.data.album_url.split('/')[2];
+    r = await api('GET', `/api/a/${acode}/info`);
+    const ap = r.data.photos.find((x) => x.hash === h1);
+    ok(ap && ap.media === 'video' && ap.duration === 15 && ap.viewable === true, '相簿 info 回報影片 viewable/media/duration');
+    const aRange = await fetch(`${BASE}/api/a/${acode}/photo/${h1}`, { headers: { range: 'bytes=0-3' } });
+    ok(aRange.status === 206 && Buffer.from(await aRange.arrayBuffer()).equals(v1.subarray(0, 4)), '相簿播放支援 Range 206 串流');
+
+    // ---- 同步到 Google 相簿（含共用雲端硬碟影片串流）----
+    r = await api('POST', `/api/admin/${id}/gphotos/connect`, { token: tok });
+    const gpState = new URL(r.data.auth_url).searchParams.get('state');
+    const gpNc = (r.headers.get('set-cookie') || '').split(';')[0];
+    const gpCb = await fetch(`${BASE}/oauth/gphotos/callback?code=GOODCODE&state=${encodeURIComponent(gpState)}`, {
+      redirect: 'manual', headers: { cookie: gpNc },
+    });
+    ok(gpCb.status === 302 && /gp=ok/.test(gpCb.headers.get('location') || ''), '影片活動連結 Google 相簿');
+    r = await api('GET', `/api/admin/${id}/gphotos`, { token: tok });
+    eq(r.data.eligible, 3, 'gphotos eligible 包含 1 張照片與 2 支雲端硬碟影片', r.data);
+    r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: { limit: 8 } });
+    ok(r.status === 200 && r.data.added === 3 && r.data.synced === 3 && r.data.remaining === 0, 'Google 相簿同步一次送出照片與雲端硬碟影片', r.data);
+    const upV1 = fake.gpUploads.find((u) => u.name === `${h1.slice(0, 10)}.mp4`);
+    const upV2 = fake.gpUploads.find((u) => u.name === `${h2.slice(0, 10)}.mov`);
+    ok(upV1 && upV1.type === 'video/mp4' && upV1.bytes.equals(v1), 'MP4 影片位元組自 Drive 串流送至 Google Photos /uploads（Content-Type 正確）', upV1);
+    ok(upV2 && upV2.type === 'video/quicktime' && upV2.bytes.equals(v2), 'MOV 影片位元組自 Drive 串流送至 Google Photos /uploads（Content-Type 正確）', upV2);
+    await api('POST', `/api/admin/${id}/gphotos/disconnect`, { token: tok });
+
+    // ---- Google 雲端硬碟連結匯入影片 ----
+    const v3 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypmp42'), Buffer.from('DRIVE_IMPORT_MP4_COPY_PAYLOAD')]);
+    const h3 = sha(v3);
+    const v4 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypqt  '), Buffer.from('DRIVE_IMPORT_MOV_STREAM_FALLBACK')]);
+    const h4 = sha(v4);
+    const v5 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypmp42'), Buffer.from('DRIVE_IMPORT_SINGLE_VIDEO')]);
+    const h5 = sha(v5);
+    const v6 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypmp42'), Buffer.from('DRIVE_IMPORT_DISABLED_CHECK')]);
+    const h6 = sha(v6);
+
+    fake.publicFiles.set('PUB_FOLD01', { id: 'PUB_FOLD01', name: '活動雲端資料夾', mimeType: 'application/vnd.google-apps.folder' });
+    fake.publicFiles.set('PUB_SUB001', { id: 'PUB_SUB001', name: '第二天影片', mimeType: 'application/vnd.google-apps.folder' });
+    fake.publicFiles.set('PUB_VID_ONLY1', { id: 'PUB_VID_ONLY1', name: '純影片資料夾', mimeType: 'application/vnd.google-apps.folder' });
+    fake.publicFiles.set('PUB_IMG001', {
+      id: 'PUB_IMG001', name: 'IMG_01.jpg', mimeType: 'image/jpeg', size: '1500',
+      imageMediaMetadata: { time: '2026:11:20 09:15:00', width: 1200, height: 800 },
+      thumbnailLink: 'https://lh3.googleusercontent.com/pw/PUBIMG1=s220',
+      bytes: makeJpeg('pub-img-1'),
+    });
+    fake.publicFiles.set('PUB_VID_DUP', {
+      id: 'PUB_VID_DUP', name: 'already_up.mp4', mimeType: 'video/mp4', size: String(v1.length),
+      sha256Checksum: h1, modifiedTime: '2026-11-20T01:40:00.000Z',
+      videoMediaMetadata: { width: 1920, height: 1080, durationMillis: '15000' },
+      bytes: v1,
+    });
+    fake.publicFiles.set('PUB_VID_MP4', {
+      id: 'PUB_VID_MP4', name: 'camp_copy.mp4', mimeType: 'video/mp4', size: String(v3.length),
+      sha256Checksum: h3, modifiedTime: '2026-11-20T02:10:00.000Z',
+      videoMediaMetadata: { width: 1920, height: 1080, durationMillis: '23400' },
+      thumbnailLink: 'https://lh3.googleusercontent.com/pw/PUBVID3=s220',
+      bytes: v3,
+    });
+    fake.publicFiles.set('PUB_VID_BIG', {
+      id: 'PUB_VID_BIG', name: 'too_big.mp4', mimeType: 'video/mp4', size: String(250 * 1024 * 1024),
+      sha256Checksum: 'd'.repeat(64),
+      videoMediaMetadata: { width: 3840, height: 2160, durationMillis: '60000' },
+    });
+    fake.publicFiles.set('PUB_VID_MOV', {
+      id: 'PUB_VID_MOV', name: 'fallback_clip.mov', mimeType: 'video/x-quicktime', resourceKey: '0-vidsub',
+      size: String(v4.length), sha256Checksum: h4, createdTime: '2026-11-20T03:05:00.000Z',
+      videoMediaMetadata: { width: 1280, height: 720, durationMillis: '9000' },
+      thumbnailLink: 'https://lh3.googleusercontent.com/pw/PUBVID4=s220',
+      bytes: v4,
+    });
+    fake.publicFiles.set('PUB_VID_NOCOPY', {
+      id: 'PUB_VID_NOCOPY', name: 'nocopy.mp4', mimeType: 'video/mp4', size: String(v3.length),
+      sha256Checksum: 'e'.repeat(64), bytes: v3,
+    });
+    fake.publicFiles.set('PUB_VID_REVOKE', {
+      id: 'PUB_VID_REVOKE', name: 'revoked.mp4', mimeType: 'video/mp4', size: String(v3.length),
+      sha256Checksum: 'f'.repeat(64), bytes: v3,
+    });
+    fake.publicFiles.set('PUB_VID_SINGLE', {
+      id: 'PUB_VID_SINGLE', name: 'single_clip.mp4', mimeType: 'video/mp4', size: String(v5.length),
+      sha256Checksum: h5, modifiedTime: '2026-11-20T04:00:00.000Z',
+      videoMediaMetadata: { width: 1920, height: 1080, durationMillis: '12000' },
+      bytes: v5,
+    });
+    fake.publicFiles.set('PUB_VID_DIS', {
+      id: 'PUB_VID_DIS', name: 'disabled_check.mp4', mimeType: 'video/mp4', size: String(v6.length),
+      sha256Checksum: h6, bytes: v6,
+    });
+    fake.publicChildren.set('PUB_FOLD01', ['PUB_IMG001', 'PUB_VID_DUP', 'PUB_VID_MP4', 'PUB_VID_BIG', 'PUB_SUB001', 'PUB_VID_NOCOPY', 'PUB_VID_REVOKE', 'PUB_VID_DIS']);
+    fake.publicChildren.set('PUB_SUB001', ['PUB_VID_MOV']);
+    fake.publicChildren.set('PUB_VID_ONLY1', ['PUB_VID_MP4']);
+    fake.publicThumbs.set('PUBIMG1', { mime: 'image/jpeg', bytes: TINY_JPG });
+    fake.publicThumbs.set('PUBVID3', { mime: 'image/png', bytes: TINY_PNG });
+    fake.publicThumbs.set('PUBVID4', { mime: 'image/jpeg', bytes: TINY_JPG });
+
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/PUB_FOLD01?usp=sharing' } });
+    ok(r.status === 200 && r.data.source === 'gdrive' && r.data.count === 8, '雲端硬碟資料夾列出照片＋各類影片', r.data);
+    const itDup = r.data.items.find((x) => x.uid === 'gd:PUB_VID_DUP');
+    const itMp4 = r.data.items.find((x) => x.uid === 'gd:PUB_VID_MP4');
+    const itBig = r.data.items.find((x) => x.uid === 'gd:PUB_VID_BIG');
+    const itMov = r.data.items.find((x) => x.uid === 'gd:PUB_VID_MOV');
+    ok(itDup && itDup.have === true && itDup.media === 'video' && itDup.duration === 15, '已手動上傳的影片依 sha256Checksum 標記 have=true', itDup);
+    ok(itMp4 && itMp4.media === 'video' && itMp4.duration === 23 && itMp4.taken === '2026-11-20T10:10:00' && itMp4.size === v3.length && itMp4.too_large === false, '影片帶 media/duration/size 與台灣時間', itMp4);
+    ok(itBig && itBig.too_large === true, '超過 video_max_mb 的影片標記 too_large=true', itBig);
+    ok(itMov && itMov.media === 'video' && itMov.duration === 9 && itMov.taken === '2026-11-20T11:05:00', '子資料夾 x-quicktime 影片正確辨識', itMov);
+
+    const impAid = r.data.aid;
+    const bytesBeforeImp = (await api('GET', `/api/admin/${id}`, { token: tok })).data.stats.bytes;
+
+    // 1. files.copy 匯入 MP4 + PNG 縮圖 MIME
+    r = await api('POST', `/api/u/${up}/import/photo`, {
+      body: { aid: impAid, uid: 'gd:PUB_VID_MP4', uploader: '小靜', device: 'dev-video-import-1', groups: ['一小隊'] },
+    });
+    ok(r.status === 201 && r.data.media === 'video' && r.data.hash === h3 && r.data.taken === '2026-11-20T10:10:00' && /^GD_COPY_\d+$/.test(r.data.drive_id), '雲端硬碟 MP4 透過 files.copy 匯入成功', r.data);
+    const copyCallMp4 = fake.copyCalls.find((c) => c.id === 'PUB_VID_MP4');
+    const copyIdMp4 = r.data.drive_id;
+    ok(copyCallMp4 && copyCallMp4.parents.includes(evFolder.id) && fake.files.get(copyIdMp4)?.bytes.equals(v3), 'files.copy 將影片放入活動資料夾', copyCallMp4);
+
+    const stAfterMp4 = (await api('GET', `/api/admin/${id}`, { token: tok })).data.stats;
+    eq([stAfterMp4.bytes, stAfterMp4.video_count, stAfterMp4.video_bytes], [bytesBeforeImp, 3, v1.length + v2.length + v3.length], '匯入影片不佔用 R2 空間，stats 計入 video_count 與 video_bytes', stAfterMp4);
+
+    const admThumb = await api('GET', `/api/admin/${id}/thumb/${h3}`, { token: tok });
+    ok(admThumb.status === 200 && admThumb.headers.get('content-type') === 'image/png' && admThumb.buf.equals(TINY_PNG), '管理端縮圖保留 PNG Content-Type');
+    const albThumb = await fetch(`${BASE}/api/a/${acode}/thumb/${h3}`);
+    ok(albThumb.status === 200 && albThumb.headers.get('content-type') === 'image/png' && Buffer.from(await albThumb.arrayBuffer()).equals(TINY_PNG), '相簿縮圖保留 PNG Content-Type');
+    const mineThumb = await fetch(`${BASE}/api/u/${up}/mine/${h3}/thumb?d=dev-video-import-1`);
+    ok(mineThumb.status === 200 && mineThumb.headers.get('content-type') === 'image/png' && Buffer.from(await mineThumb.arrayBuffer()).equals(TINY_PNG), '我上傳的縮圖保留 PNG Content-Type');
+
+    const albInfoImp = await api('GET', `/api/a/${acode}/info`);
+    const apImp = albInfoImp.data.photos.find((x) => x.hash === h3);
+    ok(apImp && apImp.media === 'video' && apImp.duration === 23 && apImp.viewable === true, '相簿列出匯入的影片');
+    const impAlbRange = await fetch(`${BASE}/api/a/${acode}/photo/${h3}`, { headers: { range: 'bytes=0-3' } });
+    ok(impAlbRange.status === 206 && Buffer.from(await impAlbRange.arrayBuffer()).equals(v3.subarray(0, 4)), '相簿播放匯入的影片支援 Range 206');
+    const impSyncMan = await api('GET', `/api/sync/${id}/manifest`, { token: sk });
+    const mvImp = (impSyncMan.data.photos || []).find((x) => x.hash === h3);
+    ok(mvImp && mvImp.media === 'video' && mvImp.drive_id === copyIdMp4 && mvImp.duration === 23, 'sync manifest 含匯入影片');
+    const impSyncRange = await fetch(`${BASE}/api/sync/${id}/photo/${h3}`, { headers: { authorization: `Bearer ${sk}`, range: 'bytes=0-3' } });
+    ok(impSyncRange.status === 206 && Buffer.from(await impSyncRange.arrayBuffer()).equals(v3.subarray(0, 4)), 'sync /photo 支援匯入影片 Range 206');
+    const impOrig = await api('GET', `/api/admin/${id}/original/${h3}`, { token: tok });
+    ok(impOrig.status === 200 && impOrig.buf.equals(v3), '管理原檔下載可讀取匯入影片');
+
+    // 2. 重複匯入去重
+    const copiesBeforeDup = fake.copyCalls.length;
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: impAid, uid: 'gd:PUB_VID_MP4', device: 'dev-video-import-1' } });
+    ok(r.status === 200 && r.data.duplicate === true && r.data.hash === h3 && fake.copyCalls.length === copiesBeforeDup, '同一影片重複匯入 → duplicate 且不再 copy', r.data);
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/PUB_FOLD01?usp=sharing' } });
+    ok(r.data.items.find((x) => x.uid === 'gd:PUB_VID_MP4')?.have === true, '重新讀取清單時已匯入影片標記 have=true');
+
+    // 3. files.copy 回 403 時改走 alt=media 串流至 resumable upload（含子資料夾 resourceKey）
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: impAid, uid: 'gd:PUB_VID_MOV', device: 'dev-video-import-1' } });
+    ok(r.status === 201 && r.data.media === 'video' && r.data.hash === h4 && r.data.taken === '2026-11-20T11:05:00' && /^GD_VID_\d+$/.test(r.data.drive_id), 'files.copy 被拒時改以 alt=media 串流轉存成功', r.data);
+    const copyCallMov = fake.copyCalls.find((c) => c.id === 'PUB_VID_MOV');
+    ok(copyCallMov && copyCallMov.rk === 'PUB_VID_MOV/0-vidsub' && fake.publicAltMediaCalls.includes('PUB_VID_MOV') && fake.files.get(r.data.drive_id)?.bytes.equals(v4), '子資料夾影片帶 resourceKey 且串流位元組完整一致');
+
+    // 4. Google 相簿同步含匯入的影片
+    r = await api('POST', `/api/admin/${id}/gphotos/connect`, { token: tok });
+    const gpState2 = new URL(r.data.auth_url).searchParams.get('state');
+    const gpNc2 = (r.headers.get('set-cookie') || '').split(';')[0];
+    await fetch(`${BASE}/oauth/gphotos/callback?code=GOODCODE&state=${encodeURIComponent(gpState2)}`, { redirect: 'manual', headers: { cookie: gpNc2 } });
+    for (let i = 0; i < 4; i++) {
+      r = await api('POST', `/api/admin/${id}/gphotos/sync`, { token: tok, body: { limit: 8 } });
+      if (!r.data || !r.data.remaining) break;
+    }
+    ok(r.status === 200 && r.data.remaining === 0 && fake.gpUploads.some((x) => x.name === `${h3.slice(0, 10)}.mp4` && x.bytes.equals(v3)) && fake.gpUploads.some((x) => x.name === `${h4.slice(0, 10)}.mov` && x.bytes.equals(v4)), 'Google 相簿同步可匯出雲端硬碟匯入的影片', r.data);
+    await api('POST', `/api/admin/${id}/gphotos/disconnect`, { token: tok });
+
+    // 5. 錯誤情境：cannotCopyFile、太大、取消分享防 confused-deputy、單檔連結、關閉影片
+    const altBeforeNoCopy = fake.publicAltMediaCalls.length;
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: impAid, uid: 'gd:PUB_VID_NOCOPY' } });
+    ok(r.status === 410 && r.data.error === 'source_gone' && fake.publicAltMediaCalls.length === altBeforeNoCopy, 'cannotCopyFile → 410 source_gone 且不走下載 fallback', r.data);
+
+    const copiesBeforeBig = fake.copyCalls.length;
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: impAid, uid: 'gd:PUB_VID_BIG' } });
+    ok(r.status === 413 && r.data.error === 'too_large' && fake.copyCalls.length === copiesBeforeBig, '超過 video_max_mb → 413 too_large 且不呼叫 copy', r.data);
+
+    fake.revokedPublic.add('PUB_VID_REVOKE');
+    const copiesBeforeRevoke = fake.copyCalls.length;
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: impAid, uid: 'gd:PUB_VID_REVOKE' } });
+    ok(r.status === 410 && r.data.error === 'source_gone' && fake.copyCalls.length === copiesBeforeRevoke, '來源在 list 後取消分享 → 410 source_gone 且不以 OAuth token 呼叫 copy（防 confused deputy）', r.data);
+
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/file/d/PUB_VID_SINGLE/view' } });
+    ok(r.status === 200 && r.data.count === 1 && r.data.items[0].media === 'video', '雲端硬碟單檔影片連結可列出', r.data);
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: r.data.aid, uid: 'gd:PUB_VID_SINGLE', device: 'dev-video-import-1' } });
+    ok(r.status === 201 && r.data.hash === h5 && r.data.media === 'video', '雲端硬碟單檔影片連結可匯入', r.data);
+
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { video_enabled: false } } });
+    r = await api('POST', `/api/u/${up}/import/list`, { body: { url: 'https://drive.google.com/drive/folders/PUB_VID_ONLY1' } });
+    ok(r.status === 403 && r.data.error === 'video_disabled', '關閉 video_enabled 後純影片資料夾 → 403 video_disabled', r.data);
+    r = await api('POST', `/api/u/${up}/import/photo`, { body: { aid: impAid, uid: 'gd:PUB_VID_DIS' } });
+    ok(r.status === 403 && r.data.error === 'video_disabled', '關閉 video_enabled 後匯入已列出影片 → 403 video_disabled', r.data);
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { upload: { video_enabled: true } } });
+
+    // ---- 中斷連結 ----
+    r = await api('POST', `/api/admin/${id}/gdrive/disconnect`, { token: tok });
+    ok(r.status === 200 && r.data.connected === false && fake.revoked.includes('RT_GD1'), '中斷連結：撤銷 RT_GD1 並回報未連結', r.data);
+    void p0;
   } finally {
     srv.close();
   }

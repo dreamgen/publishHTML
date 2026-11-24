@@ -2,7 +2,7 @@
 // 選票存在 events/{id}/votes/{voter}.json：{ kind, name, picks:[hash], self:[hash], updated_at }
 //   voter = g_{Google sub} 或 d_{sha256(裝置碼) 前 32 碼}；self 是「選自己拍的照片」，不佔名額
 import {
-  HttpError, json, readJson, safeEqual, sha256Hex, HASH_RE, UPLOAD_CODE_RE, ID_RE, EXT_MIME, newUploadCode,
+  HttpError, json, readJson, safeEqual, sha256Hex, HASH_RE, UPLOAD_CODE_RE, ID_RE, EXT_MIME, ALL_EXT_MIME, newUploadCode,
 } from './util.js';
 import { getConfig, mutateConfig, albumVotingOpen, segmentOf } from './config.js';
 import { loadPhotos } from './stats.js';
@@ -10,6 +10,7 @@ import { getSession, assertSameOrigin } from './session.js';
 import { updateJson, NO_CHANGE } from './store.js';
 import { requireRole } from './auth.js';
 import { cleanText } from './upload.js';
+import { streamDriveVideo } from './gdrive.js';
 
 const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const notFound = () => new HttpError(404, 'not_found', '相簿未開放，或連結已失效。');
@@ -158,7 +159,10 @@ export async function info(env, code, req, url) {
       const c = counts.get(p.hash);
       const o = {
         hash: p.hash, segment: segmentOf(p, cfg.segments, cfg), uploader: p.uploader, exif_time: p.exif_time,
-        mine: isMine(p, who), has_thumb: p.has_thumb, viewable: ['jpg', 'png', 'webp', 'gif'].includes(p.ext),
+        mine: isMine(p, who), has_thumb: p.has_thumb,
+        media: p.media || 'photo',
+        duration: p.duration || 0,
+        viewable: ['jpg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', '3gp'].includes(p.ext),
       };
       if (show) o.votes = c ? c.votes + c.self : 0;
       return o;
@@ -183,9 +187,20 @@ export async function image(env, code, hash, kind, req, url) {
   const cfg = await resolveAlbum(env, code);
   await access(env, req, url, cfg);
   const p = await albumPhoto(env, cfg, hash);
+  if (kind === 'photo' && p.media === 'video' && p.drive_id) {
+    const dl = url.searchParams.get('download') === '1';
+    if (dl && !cfg.album.allow_download) throw new HttpError(403, 'forbidden', '主辦者沒有開放下載原檔。');
+    return streamDriveVideo(env, p.drive_id, req, {
+      mime: ALL_EXT_MIME[p.ext] || 'video/mp4',
+      filename: dl ? `video-${hash.slice(0, 10)}.${p.ext}` : '',
+    });
+  }
   let obj = null;
   let type = 'image/jpeg';
-  if (kind === 'thumb' && p.has_thumb) obj = await env.PHOTOS.get(`events/${cfg.id}/t/${hash}.jpg`);
+  if (kind === 'thumb' && p.has_thumb) {
+    obj = await env.PHOTOS.get(`events/${cfg.id}/t/${hash}.jpg`);
+    if (obj && obj.httpMetadata && obj.httpMetadata.contentType) type = obj.httpMetadata.contentType;
+  }
   if (!obj) {
     if (kind === 'thumb' && !['jpg', 'png', 'webp', 'gif'].includes(p.ext)) throw new HttpError(404, 'not_found', '沒有預覽圖。');
     obj = await env.PHOTOS.get(`events/${cfg.id}/p/${hash}.${p.ext}`);

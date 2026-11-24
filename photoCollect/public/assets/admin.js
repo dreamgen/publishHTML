@@ -62,11 +62,11 @@ function showError(title, body, retry, { login = false } = {}) {
   btn.onclick = retry || null;
 }
 
-// ---------- 從 Google 相簿授權頁回來（#e=…&gp=ok|denied|err）：還原原本的網址片段（含管理碼） ----------
-const gpReturn = (() => {
+// ---------- 從 Google 授權頁回來（#e=…&gp|gd=ok|denied|err）：還原原本的網址片段（含管理碼） ----------
+function popOAuthReturn(paramKey) {
   const q = new URLSearchParams(location.hash.replace(/^#/, ''));
-  const gp = q.get('gp');
-  if (!gp) return null;
+  const status = q.get(paramKey);
+  if (!status) return null;
   let back = '';
   try { back = sessionStorage.getItem('mv.gp.return') || ''; sessionStorage.removeItem('mv.gp.return'); } catch { /* 私密模式 */ }
   const e = q.get('e') || '';
@@ -78,8 +78,12 @@ const gpReturn = (() => {
     frag = `e=${encodeURIComponent(e)}${rec ? `&k=${encodeURIComponent(rec.admin_code)}` : ''}`;
   }
   history.replaceState(null, '', `${location.pathname}${location.search}#${frag}`);
-  return { gp, why: q.get('why') || '', ge: (q.get('ge') || '').slice(0, 40), reused: q.get('reused') === '1' };
-})();
+  return { status, why: q.get('why') || '', ge: (q.get('ge') || '').slice(0, 40), reused: q.get('reused') === '1' };
+}
+const gpReturnRaw = popOAuthReturn('gp');
+const gpReturn = gpReturnRaw ? { gp: gpReturnRaw.status, why: gpReturnRaw.why, ge: gpReturnRaw.ge, reused: gpReturnRaw.reused } : null;
+const gdReturnRaw = popOAuthReturn('gd');
+const gdReturn = gdReturnRaw ? { gd: gdReturnRaw.status, why: gdReturnRaw.why, ge: gdReturnRaw.ge } : null;
 
 // ---------- 啟動 ----------
 const params = new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -89,7 +93,7 @@ let authOn = false;      // 登入功能是否啟用（/api/auth/config）
 let bootSub = null;      // 載入當下的登入身分（sub）；之後登入／登出／換帳號就重新載入
 
 const ctx = {
-  id, k, gpReturn,
+  id, k, gpReturn, gdReturn,
   api: adminApi(id, k),
   data: null,                 // 最近一次 GET/PATCH 回傳
   listeners: new Set(),
@@ -312,6 +316,20 @@ async function boot() {
   void panels;
   ctx.apply(d, 'init');
   selectTab(gpReturn ? 'gphotos' : 'setup');
+  if (gdReturn) {
+    if (gdReturn.gd === 'ok') toast('已連結全站影片 Google 雲端硬碟');
+    else if (gdReturn.gd === 'denied') toast('已取消連結 Google 雲端硬碟', 'err');
+    else {
+      const msg = {
+        folder: '找不到指定的共用雲端硬碟資料夾，或目前登入帳號沒有存取權限',
+        scope: '授權時沒有勾選 Google 雲端硬碟權限',
+        refresh: 'Google 沒有發出長期授權，請到 Google 帳號移除本應用程式授權後再重連',
+        nonce: '請在同一個瀏覽器完成授權',
+        state: '授權逾時，請再試一次',
+      }[gdReturn.why] || `連結失敗（${gdReturn.why || gdReturn.ge || 'error'}）`;
+      toast(msg, 'err');
+    }
+  }
 
   // 每 30 秒自動更新（瀏覽器分頁可見時；輸入中的準備中心不被覆蓋，因為它只更新狀態列）
   setInterval(() => {

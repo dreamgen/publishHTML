@@ -233,6 +233,9 @@ h1:focus, h2:focus { outline: none; }
 .imp-cell:disabled { cursor: default; }
 .imp-cell:disabled::after { display: none; }
 .imp-cell .imp-have { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 0; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; text-align: center; }
+.imp-cell .imp-have.imp-big { background: rgba(154,43,27,.85); }
+.imp-vid { position: absolute; top: 5px; left: 5px; padding: 2px 5px; border-radius: 4px; background: rgba(0,0,0,.68); color: #fff; font-size: 10px; font-weight: 600; line-height: 1.3; pointer-events: none; }
+.imp-noimg { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--c-muted); padding: 4px; text-align: center; }
 .imp-cell:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 1px; }
 .imp-more { margin-top: 6px; font-size: 12px; color: var(--c-muted); }
 .imp-loading { padding: 18px; text-align: center; color: var(--c-muted); font-size: 14px; }

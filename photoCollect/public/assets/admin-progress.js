@@ -75,6 +75,11 @@ export function renderProgress(ctx, panel) {
       slot.append(h('span', { class: 'nopv', text: '無預覽' }));
     }
     if (p.excluded) wrap.append(h('span', { class: 'ex-badge', text: '已排除' }));
+    if (p.media === 'video') {
+      const s = Math.round(Number(p.duration) || 0);
+      const lbl = s ? `▶ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '▶ 影片';
+      wrap.append(h('span', { class: 'ex-badge', style: 'top:6px;right:6px;left:auto;background:rgba(14,111,106,.9)', text: lbl }));
+    }
     const t = p.exif_time ? p.exif_time.slice(11, 16) : fmtDateTime(p.uploaded_at).slice(11);
     const who = [p.uploader || '匿名', (p.groups || []).join('、') || null, p.segment || '未分類', t].filter(Boolean).join(' · ');
     const btn = h('button', { type: 'button', 'data-hash': p.hash, class: `btn${p.excluded ? '' : ' dng'}`, text: p.excluded ? '取消排除' : '排除' });
@@ -174,9 +179,9 @@ export function renderProgress(ctx, panel) {
     const d = ctx.data, s = d.stats || {};
     const kpi = (l, v, hint) => h('div', { class: 'card kpi' }, h('div', { class: 'l', text: l }), h('div', { class: 'v', text: v }), h('div', { class: 'hint', text: hint }));
     const kpis = h('section', { class: 'kpis', 'aria-label': '總覽' },
-      kpi('已收到照片', String(s.total ?? 0), '不含已排除的照片'),
+      kpi('已收到照片／影片', String(s.total ?? 0), s.video_count ? `含 ${s.video_count} 支影片，不含已排除` : '不含已排除的項目'),
       kpi('上傳人數', String(s.uploaders ?? 0), s.last_upload_at ? `最近一筆 ${relTime(s.last_upload_at)}` : '還沒有人上傳'),
-      kpi('雲端用量', fmtBytes(s.bytes), `免費額度 10 GB（已用 ${(((s.bytes || 0) / FREE_BYTES) * 100).toFixed(1)}%）`),
+      kpi('R2 雲端用量', fmtBytes(s.bytes), `免費額度 10 GB（已用 ${(((s.bytes || 0) / FREE_BYTES) * 100).toFixed(1)}%）${s.video_count ? ` · 影片 ${fmtBytes(s.video_bytes)} 存於雲端硬碟` : ''}`),
       kpi('已排除', String(s.excluded_count ?? 0), '同步時略過'));
 
     // 各環節

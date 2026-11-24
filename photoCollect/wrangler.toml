@@ -16,7 +16,8 @@ bucket_name = "mv-photo-collect"
 crons = ["17 3 * * *", "47 * * * *"]  # 每日清除過期活動；每小時 Google 相簿自動同步
 
 [vars]
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.1"
+GOOGLE_DRIVE_FOLDER_ID = "1JVE139tWgdCi7jBb5NV3tIW5CSTxoERr"
 
 # ---- Google 帳號登入（選填）----
 # GOOGLE_CLIENT_ID 留空字串 = 功能關閉，一切維持原本只用管理碼／建立密碼的行為。

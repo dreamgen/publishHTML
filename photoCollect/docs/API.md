@@ -336,13 +336,14 @@ shares/{sha256(lower(email))}.json   {"events":[{"event_id","role","added_at","a
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| POST | `/api/u/{code}/import/list` | `{url}` → `{aid, source:'gphotos'|'gdrive', title, count, truncated, daily_limit, daily_left, items:[{uid, w, h, taken, name, have}]}` |
+| POST | `/api/u/{code}/import/list` | `{url}` → `{aid, source:'gphotos'|'gdrive', title, count, truncated, daily_limit, daily_left, skipped_videos, video_reason, items:[{uid, w, h, taken, name, have, media:'photo'|'video', duration, size, too_large}]}` |
 | GET | `/api/u/{code}/import/thumb/{aid}/{uid}` | 代理 320px 預覽（只限清單內項目） |
-| POST | `/api/u/{code}/import/photo` | `{aid, uid, original?, uploader?, device?, groups?, segment?}` → `201 {ok, hash, duplicate:false, segment, taken}`；已有 → `200 {duplicate:true, hash}` |
+| POST | `/api/u/{code}/import/photo` | `{aid, uid, original?, uploader?, device?, groups?, segment?}` → `201 {ok, hash, duplicate:false, segment, taken}`（雲端硬碟影片另帶 `media:'video', drive_id`）；已有 → `200 {duplicate:true, hash}` |
 
 - 支援連結：`photos.app.goo.gl/…`、`goo.gl/photos/…`、`photos.google.com/share/…`；`drive.google.com/drive/folders/{id}`（可含 `resourcekey`）、`/file/d/{id}`、`/open?id=`。
-- `uid`：`gp:{相簿項目 id}`／`gd:{雲端硬碟檔案 id}`，寫進照片 metadata `src`（`parsePhoto().src`）。
-- 錯誤碼：`bad_source` 400、`album_not_public`／`drive_not_public`／`album_empty`／`short_link_unresolved` 422、`album_not_found` 404、`album_parse_failed`／`source_fetch_failed` 502、`source_timeout` 504、`drive_disabled` 503、`import_disabled` 403、`import_daily_limit` 429、`list_expired` 410、`source_gone` 410。
+- Google 雲端硬碟影片匯入（需活動開啟 `video_enabled` 且全站已連結共用雲端硬碟）：支援 `MP4`、`MOV`、`WebM`、`3GP`（含 `m4v`/`x-quicktime` 別名），大小受 `video_max_mb` 限制；匯入時以 API key 二次驗證來源公開與未刪除後，透過 Drive `files.copy`（跨硬碟／權限不允許時退回 `alt=media` 串流至 resumable upload）轉存至活動專用子資料夾，R2 只存 0-byte 索引與縮圖（接受 JPEG／PNG／WebP）。資料夾僅含影片或單檔影片在未連結雲端硬碟／關閉影片時分別回 `503 gdrive_not_connected` 或 `403 video_disabled`；混有照片的資料夾照常列出照片並附 `skipped_videos` 與 `video_reason`。
+- `uid`：`gp:{相簿項目 id}`／`gd:{雲端硬碟檔案 id}`，寫進照片／影片 metadata `src`（`parsePhoto().src`）。
+- 錯誤碼：`bad_source` 400、`album_not_public`／`drive_not_public`／`album_empty`／`short_link_unresolved` 422、`album_not_found` 404、`album_parse_failed`／`source_fetch_failed`／`gdrive_copy_failed` 502、`source_timeout` 504、`drive_disabled`／`gdrive_not_connected` 503、`import_disabled`／`video_disabled` 403、`import_daily_limit`／`drive_rate_limited` 429、`list_expired` 410、`source_gone` 410。
 - 設定：`upload.import_enabled`（預設 true）、`upload.import_daily`（預設 1500，0–5000）。
 - 環境：secret `GOOGLE_API_KEY`（雲端硬碟用，建議在 Google Cloud 限制只能呼叫 Drive API）；`IMPORT_TZ_OFFSET_MIN`（預設 480）；本機測試 `DEV_MODE=1`＋`IMPORT_TEST_ORIGIN` 把 Google 網域導向假伺服器。
 

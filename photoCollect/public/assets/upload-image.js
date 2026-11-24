@@ -12,6 +12,11 @@ export async function sha256Hex(buf) {
 const EXT_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif', gif: 'image/gif' };
 const ALLOWED = new Set(Object.values(EXT_MIME));
 
+const VIDEO_EXT_MIME = { mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/mp4', webm: 'video/webm', '3gp': 'video/3gpp' };
+const VIDEO_ALLOWED = new Set(Object.values(VIDEO_EXT_MIME));
+
+export const isVideoMime = (mime) => VIDEO_ALLOWED.has(String(mime || '').toLowerCase());
+
 // 部分瀏覽器對 HEIC 給空的 type，依副檔名補上；回傳 '' 表示不是支援的格式
 export function guessMime(file) {
   const t = (file.type || '').toLowerCase();
@@ -19,6 +24,14 @@ export function guessMime(file) {
   if (t && t !== 'application/octet-stream') return '';
   const ext = (file.name || '').split('.').pop().toLowerCase();
   return EXT_MIME[ext] || '';
+}
+
+export function guessVideoMime(file) {
+  const t = String(file?.type || '').split(';')[0].trim().toLowerCase();
+  if (t === 'video/x-m4v') return 'video/mp4';
+  if (VIDEO_ALLOWED.has(t)) return t;
+  const ext = (file?.name || '').split('.').pop().toLowerCase();
+  return VIDEO_EXT_MIME[ext] || '';
 }
 
 function canvasToJpeg(bmp, w, h, quality) {
@@ -66,4 +79,62 @@ export async function processImage(file, mime, original) {
   } finally {
     if (bmp.close) bmp.close();
   }
+}
+
+// 擷取影片封面縮圖、寬高與秒數（解碼失敗或逾時 8 秒則降級回傳無縮圖，不影響上傳）
+export function processVideo(file) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.playsInline = true;
+    const url = URL.createObjectURL(file);
+    let done = false;
+    const finish = (res) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      v.removeAttribute('src');
+      try { v.load(); } catch (_) { /* 忽略 */ }
+      URL.revokeObjectURL(url);
+      resolve(res);
+    };
+    const timer = setTimeout(() => {
+      finish({ thumb: null, w: v.videoWidth || 0, h: v.videoHeight || 0, duration: Number.isFinite(v.duration) ? Math.round(v.duration) : 0 });
+    }, 8000);
+    const snap = () => {
+      const w = v.videoWidth || 0;
+      const h = v.videoHeight || 0;
+      const duration = Number.isFinite(v.duration) ? Math.round(v.duration) : 0;
+      if (!w || !h) { finish({ thumb: null, w: 0, h: 0, duration }); return; }
+      try {
+        const long = Math.max(w, h);
+        const k = long > THUMB_EDGE ? THUMB_EDGE / long : 1;
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * k));
+        c.height = Math.max(1, Math.round(h * k));
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((blob) => {
+          c.width = c.height = 0;
+          finish({ thumb: blob || null, w, h, duration });
+        }, 'image/jpeg', 0.8);
+      } catch (_) {
+        finish({ thumb: null, w, h, duration });
+      }
+    };
+    v.addEventListener('error', () => finish({ thumb: null, w: 0, h: 0, duration: 0 }), { once: true });
+    v.addEventListener('loadedmetadata', () => {
+      const target = Number.isFinite(v.duration) && v.duration > 0.2 ? Math.min(1, v.duration * 0.1) : 0;
+      if (target > 0) {
+        v.addEventListener('seeked', snap, { once: true });
+        try { v.currentTime = target; } catch (_) { v.addEventListener('loadeddata', snap, { once: true }); }
+      } else {
+        v.addEventListener('loadeddata', snap, { once: true });
+      }
+    }, { once: true });
+    v.src = url;
+  });
 }

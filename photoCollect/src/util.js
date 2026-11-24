@@ -6,15 +6,15 @@ export const UPLOAD_CODE_RE = /^[A-Za-z0-9_-]{22}$/;
 
 // 合約 §6 的 CSP
 export const CSP =
-  "default-src 'self'; img-src 'self' blob: data:; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; " +
+  "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; " +
   "font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 // 合約 §8.8：有 Google 登入的頁面（/、/admin、/u/*）的 CSP，在 §6 基礎上加入 Google Identity Services 網域
 export const LOGIN_CSP =
-  "default-src 'self'; img-src 'self' blob: data: https://lh3.googleusercontent.com; " +
+  "default-src 'self'; img-src 'self' blob: data: https://lh3.googleusercontent.com; media-src 'self' blob:; " +
   "style-src 'self' https://fonts.googleapis.com https://accounts.google.com/gsi/style 'unsafe-inline'; " +
   "font-src https://fonts.gstatic.com; script-src 'self' https://accounts.google.com/gsi/client; " +
-  "connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; " +
+  "connect-src 'self' https://accounts.google.com/gsi/ https://www.googleapis.com; frame-src https://accounts.google.com/gsi/; " +
   "base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 // 可預期的錯誤：由路由層轉成 {"error","message"} JSON
@@ -150,6 +150,15 @@ export const MIME_EXT = {
   'image/gif': 'gif',
 };
 export const EXT_MIME = Object.fromEntries(Object.entries(MIME_EXT).map(([m, e]) => [e, m]));
+
+export const VIDEO_MIME_EXT = {
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
+  'video/3gpp': '3gp',
+};
+export const VIDEO_EXT_MIME = Object.fromEntries(Object.entries(VIDEO_MIME_EXT).map(([m, e]) => [e, m]));
+export const ALL_EXT_MIME = { ...EXT_MIME, ...VIDEO_EXT_MIME };
 
 // 分享預覽圖：副檔名 ↔ MIME，以及 R2 key（events/{id}/og.png | og.jpg）
 export const OG_EXT_MIME = { png: 'image/png', jpg: 'image/jpeg' };

@@ -25,6 +25,7 @@
 .badge.b-ex { background: var(--c-danger); }
 .badge.b-seg { top: 8px; left: 8px; bottom: auto; background: rgba(28,35,33,.62); font-weight: 400; }
 .badge.b-mine { background: #fff; color: var(--c-accent-ink); bottom: 10px; left: 8px; }
+.badge.b-vid { top: 8px; right: 8px; left: auto; bottom: auto; background: rgba(28,35,33,.72); font-variant-numeric: tabular-nums; }
 .check-dot { position: absolute; right: 6px; top: 6px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.28); display: flex; align-items: center; justify-content: center; z-index: 1; }
 .tile.is-sel .check-dot { background: var(--c-accent); }
 .legend { font-size: 12px; color: var(--c-muted); line-height: 1.6; }
@@ -79,6 +80,8 @@
 .viewer-x { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .viewer-stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; }
 .viewer-stage img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.viewer-stage video { max-width: 100%; max-height: 100%; display: block; outline: none; }
+.viewer-stage img[hidden], .viewer-stage video[hidden] { display: none; }
 .viewer-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(17,22,21,.55); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .viewer-nav.prev { left: 6px; } .viewer-nav.next { right: 6px; }
 .viewer-foot { padding: 14px 16px 20px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; max-width: 480px; width: 100%; margin: 0 auto; }

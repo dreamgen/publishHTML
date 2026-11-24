@@ -9,6 +9,7 @@ import { loadPhotos, invalidate } from './stats.js';
 import { getSession, assertSameOrigin } from './session.js';
 import { loadVotes } from './album.js';
 import { inferGroups, rotationsPublic } from './rotation.js';
+import { deleteDriveFile } from './gdrive.js';
 
 export const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const notMine = () => new HttpError(404, 'not_found', '找不到這張照片，或不是由你上傳的。');
@@ -54,6 +55,8 @@ function mineView(p, cfg, ex, counts) {
     replaced: !!p.replaced_from,
     excluded: ex.has(p.hash),
     has_thumb: p.has_thumb,
+    media: p.media || 'photo',
+    duration: p.duration || 0,
     votes: c ? c.votes + c.self : 0,
     priority: (cfg.mv_priority || []).includes(p.hash),
   };
@@ -91,8 +94,8 @@ export async function thumb(env, code, hash, req, url) {
   const who = await callerOf(env, req, url);
   const p = await findMine(env, cfg, hash, who);
   let obj = p.has_thumb ? await env.PHOTOS.get(`events/${cfg.id}/t/${hash}.jpg`) : null;
-  let type = 'image/jpeg';
-  if (!obj) {
+  let type = (obj && obj.httpMetadata && obj.httpMetadata.contentType) || 'image/jpeg';
+  if (!obj && p.media !== 'video') {
     obj = await env.PHOTOS.get(`events/${cfg.id}/p/${hash}.${p.ext}`);
     type = EXT_MIME[p.ext] || 'application/octet-stream';
   }
@@ -164,6 +167,7 @@ export async function remove(env, code, hash, req, url) {
   const who = await callerOf(env, req, url, { mutating: true });
   const p = await findMine(env, cfg, hash, who);
   await env.PHOTOS.delete([`events/${cfg.id}/p/${hash}.${p.ext}`, `events/${cfg.id}/t/${hash}.jpg`]);
+  if (p.media === 'video' && p.drive_id) await deleteDriveFile(env, p.drive_id);
   await markRemoved(env, cfg, hash);
   invalidate(cfg.id);
   return json({ ok: true, hash });
@@ -176,6 +180,7 @@ export async function replace(env, code, hash, req, url) {
   const who = await callerOf(env, req, url, { mutating: true });
   const old = await findMine(env, cfg, hash, who);
   assertEditable(cfg, old);
+  if (old.media === 'video') throw new HttpError(400, 'invalid', '影片不支援直接更換，請刪除後重新上傳。');
   const { file, meta, hash: nh, mime, ext, thumbBuf } = await readUploadForm(req, cfg);
   if (nh === hash) throw new HttpError(400, 'same_photo', '選到的是同一張照片。');
   const exist = await env.PHOTOS.list({ prefix: `events/${cfg.id}/p/${nh}.`, limit: 1 });

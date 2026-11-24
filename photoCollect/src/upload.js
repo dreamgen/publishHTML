@@ -6,6 +6,7 @@ import { getConfig, derive, renderNotice, mutateConfig } from './config.js';
 import { loadPhotos, noteUploaded, uploadProgress } from './stats.js';
 import { recordUploadSafe, uploadMe, uploadSession } from './account.js';
 import { inferGroups, rotationsPublic } from './rotation.js';
+import { isReady as isDriveReady } from './gdrive.js';
 
 const notFound = () => new HttpError(404, 'not_found', '找不到這個上傳連結，可能已失效。');
 
@@ -43,6 +44,8 @@ export async function info(env, code, url, req) {
     import: cfg.upload.import_enabled !== false, // 可貼 Google 相簿／雲端硬碟連結匯入
     import_drive: cfg.upload.import_enabled !== false && !!(typeof env.GOOGLE_API_KEY === 'string' && env.GOOGLE_API_KEY.trim()),
     album_url: cfg.album && cfg.album.enabled && cfg.album.code ? `/a/${cfg.album.code}` : null,
+    video: cfg.upload.video_enabled !== false && await isDriveReady(env),
+    video_max_mb: cfg.upload.video_max_mb || 200,
     progress: prog.progress,
   };
   if (device) out.device_count = prog.device_count;

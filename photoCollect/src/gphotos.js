@@ -11,13 +11,14 @@
 // 自動同步索引：gphotos/auto/{id}（排程只掃這個前綴）
 // refresh token 以 AES-GCM 加密，金鑰由 SESSION_SECRET 經 HKDF 衍生（更換 SESSION_SECRET ＝ 需要重新連結）
 import {
-  HttpError, json, readJson, bytesToB64u, b64uToBytes, strToB64u, b64uToStr, safeEqual, randomCode, EXT_MIME, clip,
+  HttpError, json, readJson, bytesToB64u, b64uToBytes, strToB64u, b64uToStr, safeEqual, randomCode, ALL_EXT_MIME, clip,
 } from './util.js';
 import { getConfig } from './config.js';
 import { requireRole } from './auth.js';
 import { loadPhotos } from './stats.js';
 import { updateJson, readJsonObj } from './store.js';
 import { googleClientId, sessionSecret } from './session.js';
+import { callback as gdriveCallback, openDriveReadStream } from './gdrive.js';
 
 export const SCOPES = [
   'openid',
@@ -311,6 +312,7 @@ export async function callback(env, req) {
   if (!gphotosEnabled(env)) return redirectAdmin(url, '', 'err', '&why=disabled');
   const st = await readState(env, url.searchParams.get('state'));
   if (!st) return redirectAdmin(url, '', 'err', '&why=state');
+  if (st.e === '_gdrive') return gdriveCallback(env, req, st);
   const id = st.e;
   if (!safeEqual(cookieOf(req, NONCE_COOKIE), st.n)) return redirectAdmin(url, id, 'err', '&why=nonce');
   if (url.searchParams.get('error')) return redirectAdmin(url, id, 'denied');
@@ -461,25 +463,56 @@ export async function runSync(env, cfg, { limit = 8, retryFailed = false, now = 
   try {
     const token = await accessToken(env, id, st);
     const c = await counts(env, cfg, st);
-    const todo = c.eligibleList
+    const pending = c.eligibleList
       .filter((p) => !st.items[p.hash] && !((st.failed[p.hash] || {}).n >= MAX_FAIL))
-      .sort((a, b) => String(a.uploaded_at).localeCompare(String(b.uploaded_at)))
-      .slice(0, n);
+      .sort((a, b) => String(a.uploaded_at).localeCompare(String(b.uploaded_at)));
+    const todo = [];
+    let vidCount = 0;
+    for (const p of pending) {
+      if (todo.length >= n) break;
+      // 影片串流較耗時：單批最多同步 2 支影片，避免逾時
+      if (p.media === 'video' && vidCount >= 2) continue;
+      if (p.media === 'video') vidCount++;
+      todo.push(p);
+    }
     const uploads = [];
     for (const p of todo) {
-      const obj = await env.PHOTOS.get(`events/${id}/p/${p.hash}.${p.ext}`);
-      if (!obj) { failed[p.hash] = '雲端找不到這張照片'; continue; }
-      const bytes = await obj.arrayBuffer();
+      let bodyStream;
+      let contentLength = '';
+      if (p.media === 'video') {
+        if (!p.drive_id) { failed[p.hash] = '缺少雲端硬碟影片編號'; continue; }
+        let dres = null;
+        try {
+          dres = await openDriveReadStream(env, p.drive_id);
+        } catch (e) {
+          failed[p.hash] = e && e.message ? clip(e.message, 200) : '讀取雲端硬碟影片失敗';
+          continue;
+        }
+        if (!dres || !dres.ok || !dres.body) {
+          failed[p.hash] = `讀取雲端硬碟影片失敗（HTTP ${dres ? dres.status : 0}）`;
+          continue;
+        }
+        bodyStream = dres.body;
+        contentLength = dres.headers.get('content-length') || (p.size ? String(p.size) : '');
+      } else {
+        const obj = await env.PHOTOS.get(`events/${id}/p/${p.hash}.${p.ext}`);
+        if (!obj) { failed[p.hash] = '雲端找不到這張照片'; continue; }
+        bodyStream = obj.body;
+        contentLength = String(obj.size);
+      }
+      const headers = {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/octet-stream',
+        'x-goog-upload-content-type': ALL_EXT_MIME[p.ext] || 'application/octet-stream',
+        'x-goog-upload-protocol': 'raw',
+        'x-goog-upload-file-name': `${p.hash.slice(0, 10)}.${p.ext}`,
+      };
+      if (contentLength) headers['content-length'] = contentLength;
       const res = await gfetch(env, `${API}/uploads`, {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/octet-stream',
-          'x-goog-upload-content-type': EXT_MIME[p.ext] || 'application/octet-stream',
-          'x-goog-upload-protocol': 'raw',
-          'x-goog-upload-file-name': `${p.hash.slice(0, 10)}.${p.ext}`,
-        },
-        body: bytes,
+        headers,
+        body: bodyStream,
+        duplex: 'half',
       }, 60_000);
       const text = await res.text();
       if (res.status === 401) { tokenCache.delete(id); fatal = new HttpError(502, 'gphotos_token_failed', 'Google 授權逾時，請再按一次同步。'); break; }

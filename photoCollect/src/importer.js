@@ -4,11 +4,12 @@
 // 流程：POST import/list 解析連結 → 清單存 R2（events/{id}/imports/{aid}.json，1 天）
 //      → GET import/thumb/{aid}/{uid} 代理縮圖 → POST import/photo 一次匯入一張（Worker 直接向 Google 取檔寫入 R2）
 // 安全：只連 Google 網域、每一跳轉址都檢查；只下載清單內的項目；上傳碼驗證＋速率限制＋每日上限。
-import { HttpError, json, readJson, sha256Hex, MIME_EXT, clip } from './util.js';
+import { HttpError, json, readJson, sha256Hex, MIME_EXT, VIDEO_MIME_EXT, HASH_RE, clip } from './util.js';
 import { derive, getConfig, mutateConfig } from './config.js';
-import { resolveUpload, buildMetadata, checkRate } from './upload.js';
+import { resolveUpload, buildMetadata, fitMetadata, checkRate } from './upload.js';
 import { loadPhotos, noteUploaded } from './stats.js';
 import { recordUploadSafe, uploadSession } from './account.js';
+import { isReady as isDriveReady, copyPublicVideoToDrive, deleteDriveFile } from './gdrive.js';
 
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_REDIRECTS = 5;
@@ -225,7 +226,22 @@ async function listGooglePhotos(env, url) {
 }
 
 // ---------- Google 雲端硬碟：公開資料夾／檔案 ----------
-const DRIVE_FIELDS = 'id,name,mimeType,size,resourceKey,thumbnailLink,imageMediaMetadata(time,width,height)';
+const DRIVE_FIELDS = 'id,name,mimeType,size,trashed,resourceKey,thumbnailLink,sha256Checksum,modifiedTime,createdTime,imageMediaMetadata(time,width,height),videoMediaMetadata(width,height,durationMillis)';
+const THUMB_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const VIDEO_EXT_FALLBACK = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp' };
+const VIDEO_MIME_ALIAS = { 'video/x-m4v': 'video/mp4', 'video/m4v': 'video/mp4', 'video/x-quicktime': 'video/quicktime' };
+
+export function normalizeVideoMime(mime, name = '') {
+  const m = String(mime || '').split(';')[0].trim().toLowerCase();
+  if (VIDEO_MIME_EXT[m]) return m;
+  if (VIDEO_MIME_ALIAS[m]) return VIDEO_MIME_ALIAS[m];
+  if (m.startsWith('video/')) {
+    const ext = String(name || '').split('.').pop().toLowerCase();
+    return VIDEO_EXT_FALLBACK[ext] || '';
+  }
+  return '';
+}
+
 function driveKey(env) {
   const k = typeof env.GOOGLE_API_KEY === 'string' ? env.GOOGLE_API_KEY.trim() : '';
   if (!k) throw importError(503, 'drive_disabled', '主辦單位還沒設定雲端硬碟匯入，請改貼 Google 相簿連結或直接上傳。');
@@ -246,35 +262,64 @@ async function driveJson(env, url, headers) {
   return res.json();
 }
 const isImageMime = (m) => typeof m === 'string' && m.startsWith('image/');
-function driveItem(f) {
+function driveItem(f, env) {
+  const rawSha = String(f.sha256Checksum || '').toLowerCase();
+  const sha256 = HASH_RE.test(rawSha) ? rawSha : '';
+  const thumb = typeof f.thumbnailLink === 'string' ? f.thumbnailLink : '';
+  const videoMime = normalizeVideoMime(f.mimeType, f.name);
+  if (videoMime) {
+    const vm = f.videoMediaMetadata || {};
+    const durMs = Number(vm.durationMillis);
+    const duration = Number.isFinite(durMs) && durMs > 0 && durMs < 86400_000 ? Math.round(durMs / 1000) : 0;
+    const ts = Date.parse(f.modifiedTime || f.createdTime || '');
+    const taken = Number.isFinite(ts) && ts > 0 ? localIsoFromMs(ts, env) : '';
+    return {
+      uid: `gd:${f.id}`, src: f.id, rk: f.resourceKey || '', name: clip(f.name || '', 80), mime: videoMime, media: 'video',
+      size: Number(f.size) || 0, w: Number(vm.width) || 0, h: Number(vm.height) || 0, duration,
+      taken, time_src: taken ? 'mtime' : '', sha256, thumb,
+    };
+  }
   const md = f.imageMediaMetadata || {};
   return {
-    uid: `gd:${f.id}`, src: f.id, rk: f.resourceKey || '', name: clip(f.name || '', 80), mime: f.mimeType,
+    uid: `gd:${f.id}`, src: f.id, rk: f.resourceKey || '', name: clip(f.name || '', 80), mime: f.mimeType, media: 'photo',
     size: Number(f.size) || 0, w: Number(md.width) || 0, h: Number(md.height) || 0, taken: isoFromExif(md.time),
-    thumb: typeof f.thumbnailLink === 'string' ? f.thumbnailLink : '',
+    sha256, thumb,
   };
 }
-async function listDrive(env, c) {
+async function listDrive(env, c, { allowVideo = false, videoEnabled = true } = {}) {
   const key = driveKey(env);
   const meta = await driveJson(env, `${DRIVE_API}/${c.id}?fields=${encodeURIComponent(`${DRIVE_FIELDS}`)}&supportsAllDrives=true&key=${key}`, rkHeader([[c.id, c.rk]]));
   if (meta.mimeType !== 'application/vnd.google-apps.folder') {
-    if (!isImageMime(meta.mimeType)) throw importError(422, 'album_empty', '這個雲端硬碟檔案不是照片。');
-    return { source: 'gdrive', title: meta.name || '雲端硬碟檔案', truncated: false, items: [driveItem(meta)] };
+    if (meta.trashed) throw importError(410, 'source_gone', '這個雲端硬碟檔案已被刪除。');
+    if (isImageMime(meta.mimeType)) return { source: 'gdrive', title: meta.name || '雲端硬碟檔案', truncated: false, items: [driveItem(meta, env)] };
+    if (normalizeVideoMime(meta.mimeType, meta.name)) {
+      if (allowVideo) return { source: 'gdrive', title: meta.name || '雲端硬碟檔案', truncated: false, items: [driveItem(meta, env)] };
+      if (!videoEnabled) throw importError(403, 'video_disabled', '這個活動未開放上傳影片。');
+      throw importError(503, 'gdrive_not_connected', '主辦單位尚未連結影片雲端硬碟，暫時無法匯入影片。');
+    }
+    throw importError(422, 'album_empty', allowVideo ? '這個雲端硬碟檔案不是支援的照片或影片（影片支援 MP4、MOV、WebM、3GP）。' : '這個雲端硬碟檔案不是照片。');
   }
-  // 資料夾：本層照片＋第一層子資料夾的照片（最多 20 個子資料夾）
+  // 資料夾：本層照片／影片＋第一層子資料夾的照片／影片（最多 20 個子資料夾）
   const items = [];
   const folders = [[c.id, c.rk]];
   let truncated = false;
+  let skippedVideos = 0;
   const listFolder = async (fid, frk, collectFolders) => {
     let pageToken = '';
     for (let p = 0; p < MAX_PAGES; p++) {
-      const q = `'${fid}' in parents and trashed=false and (mimeType contains 'image/'${collectFolders ? " or mimeType='application/vnd.google-apps.folder'" : ''})`;
+      const q = `'${fid}' in parents and trashed=false and (mimeType contains 'image/' or mimeType contains 'video/'${collectFolders ? " or mimeType='application/vnd.google-apps.folder'" : ''})`;
       const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(`nextPageToken,files(${DRIVE_FIELDS})`)}&pageSize=1000&orderBy=name&supportsAllDrives=true&includeItemsFromAllDrives=true&key=${key}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
       const r = await driveJson(env, url, rkHeader([[fid, frk]]));
       for (const f of r.files || []) {
         if (f.mimeType === 'application/vnd.google-apps.folder') { if (collectFolders && folders.length < 21) folders.push([f.id, f.resourceKey || '']); else if (collectFolders) truncated = true; }
-        else if (isImageMime(f.mimeType) && items.length < MAX_ITEMS) items.push(driveItem(f));
-        else if (isImageMime(f.mimeType)) truncated = true;
+        else if (isImageMime(f.mimeType)) {
+          if (items.length < MAX_ITEMS) items.push(driveItem(f, env));
+          else truncated = true;
+        } else if (normalizeVideoMime(f.mimeType, f.name)) {
+          if (!allowVideo) skippedVideos++;
+          else if (items.length < MAX_ITEMS) items.push(driveItem(f, env));
+          else truncated = true;
+        }
       }
       pageToken = r.nextPageToken || '';
       if (!pageToken || items.length >= MAX_ITEMS) break;
@@ -286,9 +331,22 @@ async function listDrive(env, c) {
     if (items.length >= MAX_ITEMS) { truncated = true; break; }
     await listFolder(fid, frk, false);
   }
-  if (!items.length) throw importError(422, 'album_empty', '資料夾裡沒有照片（或子資料夾超過一層）。');
+  if (!items.length) {
+    if (skippedVideos > 0) {
+      if (!videoEnabled) throw importError(403, 'video_disabled', '資料夾裡只有影片，但這個活動未開放上傳影片。');
+      throw importError(503, 'gdrive_not_connected', '資料夾裡只有影片，但主辦單位尚未連結影片雲端硬碟，暫時無法匯入影片。');
+    }
+    throw importError(422, 'album_empty', allowVideo ? '資料夾裡沒有照片或影片（或子資料夾超過一層）。' : '資料夾裡沒有照片（或子資料夾超過一層）。');
+  }
   items.sort((a, b) => (a.taken || '9').localeCompare(b.taken || '9') || a.name.localeCompare(b.name));
-  return { source: 'gdrive', title: meta.name || '雲端硬碟資料夾', truncated, items };
+  return {
+    source: 'gdrive',
+    title: meta.name || '雲端硬碟資料夾',
+    truncated,
+    items,
+    skipped_videos: skippedVideos,
+    video_reason: skippedVideos ? (videoEnabled ? 'gdrive_not_connected' : 'video_disabled') : '',
+  };
 }
 
 // ---------- 清單快取（R2） ----------
@@ -328,16 +386,40 @@ export async function list(env, code, req) {
   const body = await readJson(req, 8 * 1024);
   const c = classifyUrl(body.url);
   if (!c) throw importError(400, 'bad_source', '請貼上 Google 相簿分享連結（photos.app.goo.gl/… 或 photos.google.com/share/…）或雲端硬碟資料夾／檔案連結。');
-  const data = c.source === 'gphotos' ? await listGooglePhotos(env, c.url) : await listDrive(env, c);
+  const videoEnabled = cfg.upload.video_enabled !== false;
+  const allowVideo = videoEnabled && await isDriveReady(env);
+  const videoMaxBytes = (cfg.upload.video_max_mb || 200) * 1024 * 1024;
+  const data = c.source === 'gphotos'
+    ? await listGooglePhotos(env, c.url)
+    : await listDrive(env, c, { allowVideo, videoEnabled });
   const aid = (await sha256Hex(`${cfg.id}|${String(body.url).trim()}`)).slice(0, 16);
   await saveList(env, cfg, aid, data);
   const { photos } = await loadPhotos(env, cfg.id);
   const have = new Set(photos.map((p) => p.src).filter(Boolean));
+  const haveHash = new Set(photos.map((p) => p.hash));
   const st = importSettings(cfg);
   return json({
-    aid, source: data.source, title: data.title, truncated: data.truncated, count: data.items.length,
-    daily_limit: st.daily, daily_left: Math.max(0, st.daily - todayImported(photos)),
-    items: data.items.map((it) => ({ uid: it.uid, w: it.w, h: it.h, taken: it.taken, name: it.name || '', have: have.has(it.uid) })),
+    aid,
+    source: data.source,
+    title: data.title,
+    truncated: data.truncated,
+    count: data.items.length,
+    daily_limit: st.daily,
+    daily_left: Math.max(0, st.daily - todayImported(photos)),
+    skipped_videos: data.skipped_videos || 0,
+    video_reason: data.video_reason || '',
+    items: data.items.map((it) => ({
+      uid: it.uid,
+      w: it.w,
+      h: it.h,
+      taken: it.taken,
+      name: it.name || '',
+      have: have.has(it.uid) || !!(it.sha256 && haveHash.has(it.sha256)),
+      media: it.media || 'photo',
+      duration: it.duration || 0,
+      size: it.size || 0,
+      too_large: it.media === 'video' && it.size > 0 && it.size > videoMaxBytes,
+    })),
   });
 }
 
@@ -366,6 +448,183 @@ async function fetchThumb(env, source, it, size) {
   return null;
 }
 
+async function fetchThumbBytes(env, source, it) {
+  try {
+    const t = await fetchThumb(env, source, it, 320);
+    if (!t) return null;
+    const mime = String(t.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!THUMB_MIMES.has(mime)) {
+      await t.body?.cancel?.().catch(() => {});
+      return null;
+    }
+    const buf = await t.arrayBuffer();
+    if (!buf.byteLength || buf.byteLength > 512 * 1024) return null;
+    return { buf, mime };
+  } catch {
+    return null;
+  }
+}
+
+async function importDriveVideo(env, cfg, code, req, d, it, body) {
+  if (d.source !== 'gdrive') throw importError(400, 'bad_source', '這個來源不支援影片匯入。');
+  if (cfg.upload.video_enabled === false) throw importError(403, 'video_disabled', '這個活動未開放上傳影片。');
+
+  const key = driveKey(env);
+  const metaRes = await gfetch(
+    env,
+    `${DRIVE_API}/${encodeURIComponent(it.src)}?fields=${encodeURIComponent(DRIVE_FIELDS)}&supportsAllDrives=true&key=${encodeURIComponent(key)}`,
+    { headers: rkHeader([[it.src, it.rk]]) },
+  );
+  if (metaRes.status === 403 || metaRes.status === 404) {
+    await metaRes.body?.cancel?.().catch(() => {});
+    throw importError(410, 'source_gone', '這支影片已無法存取（可能已取消分享或刪除）。');
+  }
+  if (metaRes.status === 429) {
+    await metaRes.body?.cancel?.().catch(() => {});
+    throw importError(429, 'drive_rate_limited', 'Google 雲端硬碟暫時限制存取，請稍後再試。');
+  }
+  if (!metaRes.ok) {
+    await metaRes.body?.cancel?.().catch(() => {});
+    throw importError(502, 'source_fetch_failed', `從 Google 讀取影片資訊失敗（${metaRes.status}）。`);
+  }
+  const fresh = await metaRes.json().catch(() => null);
+  if (!fresh || fresh.trashed) throw importError(410, 'source_gone', '這支影片已無法存取（可能已取消分享或刪除）。');
+
+  const mime = normalizeVideoMime(fresh.mimeType || it.mime, fresh.name || it.name);
+  const ext = VIDEO_MIME_EXT[mime];
+  if (!ext) throw importError(415, 'bad_type', '只接受 MP4、MOV、WebM、3GP 影片。');
+
+  const maxMb = cfg.upload.video_max_mb || 200;
+  const maxBytes = maxMb * 1024 * 1024;
+  if (fresh.size === '0' || fresh.size === 0) throw importError(502, 'source_fetch_failed', '下載到空檔案。');
+  const size = Number(fresh.size) || it.size || 0;
+  if (size > maxBytes) throw importError(413, 'too_large', `影片超過 ${maxMb} MB 上限。`);
+
+  const rawSha = String(fresh.sha256Checksum || it.sha256 || '').toLowerCase();
+  const preHash = HASH_RE.test(rawSha) ? rawSha : await sha256Hex(`gd:${it.src}`);
+  const preExist = await env.PHOTOS.list({ prefix: `events/${cfg.id}/p/${preHash}.`, limit: 1 });
+  if (preExist.objects.length) return json({ ok: true, duplicate: true, hash: preHash });
+
+  const vm = fresh.videoMediaMetadata || {};
+  const durMs = Number(vm.durationMillis);
+  const dur = Number.isFinite(durMs) && durMs > 0 && durMs < 86400_000 ? Math.round(durMs / 1000) : (it.duration || 0);
+  const w = Number(vm.width) || it.w || 0;
+  const h = Number(vm.height) || it.h || 0;
+  const ts = Date.parse(fresh.modifiedTime || fresh.createdTime || '');
+  const taken = Number.isFinite(ts) && ts > 0 ? localIsoFromMs(ts, env) : (it.taken || '');
+  const meta = {
+    orig_name: clip(fresh.name || it.name || '雲端硬碟影片', 80),
+    uploader: body.uploader,
+    device: body.device,
+    groups: body.groups,
+    segment: body.segment,
+    exif_time: taken,
+    time_src: taken ? 'mtime' : '',
+    w,
+    h,
+    original: '',
+  };
+
+  const copied = await copyPublicVideoToDrive(env, cfg, {
+    sourceId: it.src,
+    rk: it.rk,
+    hash: preHash,
+    mime,
+    ext,
+    size,
+    meta,
+    apiKey: key,
+  });
+  const finalHash = HASH_RE.test(rawSha) ? rawSha : (copied.sha256 || preHash);
+  const finalSize = copied.size || size;
+  if (finalSize <= 0) {
+    deleteDriveFile(env, copied.driveId).catch(() => {});
+    throw importError(502, 'source_fetch_failed', '下載到空檔案。');
+  }
+  if (finalSize > maxBytes) {
+    deleteDriveFile(env, copied.driveId).catch(() => {});
+    throw importError(413, 'too_large', `影片超過 ${maxMb} MB 上限。`);
+  }
+  if (finalHash !== preHash) {
+    const postExist = await env.PHOTOS.list({ prefix: `events/${cfg.id}/p/${finalHash}.`, limit: 1 });
+    if (postExist.objects.length) {
+      deleteDriveFile(env, copied.driveId).catch(() => {});
+      return json({ ok: true, duplicate: true, hash: finalHash });
+    }
+  }
+
+  const thumb = await fetchThumbBytes(env, 'gdrive', { ...it, thumb: fresh.thumbnailLink || it.thumb });
+  const thumbKey = `events/${cfg.id}/t/${finalHash}.jpg`;
+  if (thumb) await env.PHOTOS.put(thumbKey, thumb.buf, { httpMetadata: { contentType: thumb.mime } });
+
+  const sess = await uploadSession(env, req);
+  const md = buildMetadata(meta, finalHash, { size: finalSize }, !!thumb, cfg, { sub: sess ? sess.sub : '' });
+  md.src = it.uid;
+  md.media = 'video';
+  md.drive_id = copied.driveId;
+  md.video_size = String(finalSize);
+  if (dur > 0) md.duration = String(dur);
+  fitMetadata(md);
+
+  const keyPath = `events/${cfg.id}/p/${finalHash}.${ext}`;
+  const put = await env.PHOTOS.put(keyPath, new Uint8Array(0), {
+    httpMetadata: { contentType: mime },
+    customMetadata: md,
+    onlyIf: { etagDoesNotMatch: '*' },
+  });
+  if (put === null) {
+    if (thumb) await env.PHOTOS.delete(thumbKey);
+    deleteDriveFile(env, copied.driveId).catch(() => {});
+    return json({ ok: true, duplicate: true, hash: finalHash });
+  }
+
+  const latest = await getConfig(env, cfg.id);
+  if (!latest || latest.deleted_at) {
+    await env.PHOTOS.delete(thumb ? [keyPath, thumbKey] : [keyPath]);
+    deleteDriveFile(env, copied.driveId).catch(() => {});
+    throw importError(403, 'upload_closed', '目前不開放上傳。');
+  }
+  if ((latest.removed || []).includes(finalHash)) {
+    try { await mutateConfig(env, latest, async () => getConfig(env, cfg.id), (c) => { c.removed = (c.removed || []).filter((x) => x !== finalHash); }); } catch (e) { console.error('unremove failed', e && e.message); }
+  }
+
+  noteUploaded(cfg.id, {
+    hash: finalHash,
+    ext,
+    size: finalSize,
+    r2_size: 0,
+    media: 'video',
+    drive_id: copied.driveId,
+    duration: dur,
+    uploader: md.uploader || '',
+    device: md.device || '',
+    groups: JSON.parse(md.groups || '[]'),
+    segment: md.segment || 'auto',
+    exif_time: md.exif_time || '',
+    time_src: md.time_src || '',
+    w: Number(md.w) || 0,
+    h: Number(md.h) || 0,
+    uploaded_at: md.uploaded_at,
+    original: false,
+    has_thumb: !!thumb,
+    note: '',
+    sub: md.sub || '',
+    replaced_from: '',
+    edited_at: '',
+    src: it.uid,
+  });
+  await recordUploadSafe(env, req, cfg, code);
+  return json({
+    ok: true,
+    duplicate: false,
+    hash: finalHash,
+    media: 'video',
+    drive_id: copied.driveId,
+    segment: md.segment || 'auto',
+    taken: md.exif_time || '',
+  }, 201);
+}
+
 // POST /api/u/{code}/import/photo  { aid, uid, original?, groups?, segment?, uploader?, device? }
 export async function photo(env, code, req) {
   checkRate(req);
@@ -380,6 +639,8 @@ export async function photo(env, code, req) {
   const st = importSettings(cfg);
   if (todayImported(photos) >= st.daily) throw importError(429, 'import_daily_limit', `這個活動今天的連結匯入已達 ${st.daily} 張上限，明天再試或直接上傳。`);
   if (photos.length >= cfg.upload.max_photos) throw importError(409, 'event_full', '這個活動的照片數量已達上限。');
+
+  if (it.media === 'video') return importDriveVideo(env, cfg, code, req, d, it, body);
 
   // 取檔：相簿預設長邊 2560（勾原圖改 =d）；雲端硬碟原檔不超過上限就取原檔，否則取 2560 預覽
   const maxBytes = cfg.upload.max_mb * 1024 * 1024;
@@ -409,15 +670,8 @@ export async function photo(env, code, req) {
   if (exist.objects.length) return json({ ok: true, duplicate: true, hash: h });
 
   // 縮圖：向 Google 再取 320px 版
-  let thumbBuf = null;
-  try {
-    const t = await fetchThumb(env, d.source, it, 320);
-    if (t && String(t.headers.get('content-type') || '').startsWith('image/jpeg')) {
-      const tb = await t.arrayBuffer();
-      if (tb.byteLength > 0 && tb.byteLength <= 512 * 1024) thumbBuf = tb;
-    }
-  } catch { /* 沒縮圖也可以 */ }
-  if (thumbBuf) await env.PHOTOS.put(`events/${cfg.id}/t/${h}.jpg`, thumbBuf, { httpMetadata: { contentType: 'image/jpeg' } });
+  const thumb = await fetchThumbBytes(env, d.source, it);
+  if (thumb) await env.PHOTOS.put(`events/${cfg.id}/t/${h}.jpg`, thumb.buf, { httpMetadata: { contentType: thumb.mime } });
 
   const sess = await uploadSession(env, req);
   const meta = {
@@ -425,8 +679,9 @@ export async function photo(env, code, req) {
     uploader: body.uploader, device: body.device, groups: body.groups, segment: body.segment,
     exif_time: it.taken || '', time_src: it.taken ? 'exif' : '', w: it.w, h: it.h, original: original ? '1' : '',
   };
-  const md = buildMetadata(meta, h, null, !!thumbBuf, cfg, { sub: sess ? sess.sub : '' });
+  const md = buildMetadata(meta, h, null, !!thumb, cfg, { sub: sess ? sess.sub : '' });
   md.src = it.uid; // 來源：gp:{相簿照片 uid}／gd:{雲端硬碟檔案 id}，用來避免重複匯入
+  fitMetadata(md);
   const put = await env.PHOTOS.put(`${prefix}${ext}`, buf, { httpMetadata: { contentType: mime }, customMetadata: md, onlyIf: { etagDoesNotMatch: '*' } });
   if (put === null) return json({ ok: true, duplicate: true, hash: h });
   const latest = await getConfig(env, cfg.id);
@@ -441,7 +696,7 @@ export async function photo(env, code, req) {
     hash: h, ext, size: buf.byteLength, uploader: md.uploader || '', device: md.device || '',
     groups: JSON.parse(md.groups || '[]'), segment: md.segment || 'auto', exif_time: md.exif_time || '',
     time_src: md.time_src || '', w: Number(md.w) || 0, h: Number(md.h) || 0, uploaded_at: md.uploaded_at,
-    original: md.original === '1', has_thumb: !!thumbBuf, note: '', sub: md.sub || '', replaced_from: '', edited_at: '', src: it.uid,
+    original: md.original === '1', has_thumb: !!thumb, note: '', sub: md.sub || '', replaced_from: '', edited_at: '', src: it.uid,
   });
   await recordUploadSafe(env, req, cfg, code);
   return json({ ok: true, duplicate: false, hash: h, segment: md.segment || 'auto', taken: md.exif_time || '' }, 201);

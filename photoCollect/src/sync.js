@@ -1,10 +1,11 @@
 // 同步 API（Bearer 同步金鑰）：給本地 mvctl sync 使用
-import { HttpError, json, readJson, HASH_RE, EXT_MIME } from './util.js';
+import { HttpError, json, readJson, HASH_RE, EXT_MIME, ALL_EXT_MIME } from './util.js';
 import { requireSync } from './auth.js';
 import { parsePhoto } from './stats.js';
 import { mutateConfig } from './config.js';
 import { loadVotes } from './album.js';
 import { rotationsPublic } from './rotation.js';
+import { streamDriveVideo } from './gdrive.js';
 
 const NOTHING = Symbol('nothing-to-update');
 
@@ -25,6 +26,7 @@ export async function manifest(env, req, id, url) {
       segment: p.segment, exif_time: p.exif_time, time_src: p.time_src, w: p.w, h: p.h,
       uploaded_at: p.uploaded_at, original: p.original,
       note: p.note, edited_at: p.edited_at || '',
+      media: p.media || 'photo', duration: p.duration || 0, drive_id: p.drive_id || '',
       priority: prio.has(p.hash), // 主辦者標的 MV 優先
       votes: (counts.get(p.hash) || { votes: 0 }).votes, // 相簿票數（不含攝影者自選）
     }));
@@ -60,7 +62,13 @@ export async function photo(env, req, id, hash) {
   if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
   const obj = await env.PHOTOS.get(key);
   if (!obj) throw new HttpError(404, 'not_found', '找不到這張照片。');
-  headers['content-type'] = EXT_MIME[key.split('.').pop()] || 'application/octet-stream';
+  const ext = key.split('.').pop();
+  if (obj.customMetadata && obj.customMetadata.media === 'video' && obj.customMetadata.drive_id) {
+    return streamDriveVideo(env, obj.customMetadata.drive_id, req, {
+      mime: ALL_EXT_MIME[ext] || 'video/mp4',
+    });
+  }
+  headers['content-type'] = EXT_MIME[ext] || 'application/octet-stream';
   headers['content-length'] = String(obj.size);
   return new Response(obj.body, { headers });
 }

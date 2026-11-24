@@ -92,6 +92,10 @@ export async function getConfig(env, id) {
   if (!Array.isArray(cfg.rotations)) cfg.rotations = []; // v5 以前沒有輪站課程
   if (cfg.checklist_done && cfg.checklist_done.rotation === undefined) cfg.checklist_done.rotation = false;
   if (cfg.basic && cfg.basic.end_date === undefined) cfg.basic.end_date = null; // v3 以前沒有結束日期
+  if (cfg.upload) {
+    if (cfg.upload.video_enabled === undefined) cfg.upload.video_enabled = true;
+    if (cfg.upload.video_max_mb === undefined) cfg.upload.video_max_mb = 200;
+  }
   Object.defineProperty(cfg, '_etag', { value: o.etag, writable: true, enumerable: false });
   return cfg;
 }
@@ -145,6 +149,8 @@ export function newConfig(id, { name, date, end_date = null }, { adminHash, uplo
       max_photos: 5000,
       import_enabled: true, // 允許貼 Google 相簿／雲端硬碟連結匯入
       import_daily: 1500, // 每活動每天最多匯入張數
+      video_enabled: true, // 允許上傳影片（直接存入全站 Google 雲端硬碟）
+      video_max_mb: 200, // 單支影片上限（MB）
     },
     mv: { maker: '', song: '' },
     invite: defaultInvite(),
@@ -495,6 +501,14 @@ export function applyPatch(cfg, body, opts = {}) {
     if (u.import_daily !== undefined) {
       if (!isInt(u.import_daily) || u.import_daily < 0 || u.import_daily > 5000) throw bad('import_daily 需為 0–5000。');
       cfg.upload.import_daily = u.import_daily;
+    }
+    if (u.video_enabled !== undefined) {
+      if (typeof u.video_enabled !== 'boolean') throw bad('video_enabled 需為 true / false。');
+      cfg.upload.video_enabled = u.video_enabled;
+    }
+    if (u.video_max_mb !== undefined) {
+      if (!isInt(u.video_max_mb) || u.video_max_mb < 10 || u.video_max_mb > 1024) throw bad('video_max_mb 需為 10–1024。');
+      cfg.upload.video_max_mb = u.video_max_mb;
     }
   }
 

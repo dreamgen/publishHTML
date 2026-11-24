@@ -6,7 +6,7 @@ import { OG_KEYS } from './util.js';
 const TTL_MS = 30_000;
 const cache = new Map(); // id -> { t, photos: [], hashes: Set }
 
-// 把 R2 物件轉成照片紀錄
+// 把 R2 物件轉成照片／影片紀錄
 export function parsePhoto(obj) {
   const md = obj.customMetadata || {};
   const m = /\/p\/([0-9a-f]{64})\.([a-z0-9]+)$/.exec(obj.key);
@@ -16,10 +16,15 @@ export function parsePhoto(obj) {
     const g = JSON.parse(md.groups || '[]');
     if (Array.isArray(g)) groups = g.filter((x) => typeof x === 'string');
   } catch {}
+  const isVideo = md.media === 'video' || ['mp4', 'mov', 'webm', '3gp'].includes(m[2]);
   return {
     hash: m[1],
     ext: m[2],
-    size: obj.size || 0,
+    media: isVideo ? 'video' : 'photo',
+    drive_id: md.drive_id || '',
+    duration: Number(md.duration) || 0,
+    r2_size: obj.size || 0,
+    size: isVideo ? (Number(md.video_size) || obj.size || 0) : (obj.size || 0),
     uploader: md.uploader || '',
     device: md.device || '',
     groups,
@@ -77,7 +82,7 @@ export function invalidate(id) {
 
 // 回傳給前端的單張照片摘要（recent / photos 共用）
 export function photoView(p, cfg, excludedSet) {
-  return {
+  const out = {
     hash: p.hash,
     uploader: p.uploader,
     groups: p.groups,
@@ -86,7 +91,10 @@ export function photoView(p, cfg, excludedSet) {
     uploaded_at: p.uploaded_at,
     excluded: excludedSet.has(p.hash),
     has_thumb: p.has_thumb,
+    media: p.media || 'photo',
   };
+  if (p.media === 'video') out.duration = p.duration || 0;
+  return out;
 }
 
 // 各環節進度（目標張數 = 同名 shots 的 target 加總）
@@ -130,9 +138,12 @@ export async function adminStats(env, cfg) {
     .slice(0, 24)
     .map((p) => photoView(p, cfg, ex));
   const last = photos.reduce((m, p) => (p.uploaded_at > m ? p.uploaded_at : m), '');
+  const videos = counted.filter((p) => p.media === 'video');
   return {
     total: counted.length,
-    bytes: counted.reduce((a, p) => a + p.size, 0),
+    bytes: counted.reduce((a, p) => a + (p.r2_size !== undefined ? p.r2_size : p.size), 0),
+    video_count: videos.length,
+    video_bytes: videos.reduce((a, p) => a + p.size, 0),
     uploaders: new Set(counted.map((p) => p.device).filter(Boolean)).size,
     last_upload_at: last || null,
     excluded_count: photos.filter((p) => ex.has(p.hash)).length,
