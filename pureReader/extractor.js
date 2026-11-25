@@ -85,7 +85,16 @@
     if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
     if (/^(?:javascript|vbscript|mailto|tel):/i.test(trimmed)) return '';
     try {
-      return new URL(trimmed, baseUrl).href;
+      if (baseUrl) {
+        return new URL(trimmed, baseUrl).href;
+      }
+      if (/^https?:\/\//i.test(trimmed)) {
+        return new URL(trimmed).href;
+      }
+      if (trimmed.startsWith('//')) {
+        return new URL('https:' + trimmed).href;
+      }
+      return '';
     } catch {
       return '';
     }
@@ -1396,6 +1405,13 @@
       remove: ['.ad_in_news', '.part_pictxt_3', '.related-news', '.fb-like'],
     },
     {
+      match: /(?:^|\.)sportsv\.net$/i,
+      content: ['.article_content', '.article-content', 'article .content', 'article', '.post-content'],
+      heading: ['h1.article_title', 'h1.title', 'article h1', 'h1'],
+      byline: ['.author_name', '.article_author', '.author'],
+      remove: ['.related_articles', '.related-articles', '.share_box', '.social', '.ad', '.ads', '.author_box', '.tag_list', '.comment'],
+    },
+    {
       match: /(?:^|\.)(?:technews\.tw|ithome\.com\.tw|inside\.com\.tw|bnext\.com\.tw|storm\.mg|twreporter\.org|pansci\.asia)$/i,
       content: [
         '.indent',
@@ -1504,7 +1520,10 @@
     );
 
     const sourceTag = getMeta('meta[name="pr-source"]');
-    const canonical = safeResolveUrl(doc.querySelector('link[rel="canonical"]')?.getAttribute('href'), url);
+    const canonical = safeResolveUrl(
+      doc.querySelector('link[rel="canonical"]')?.getAttribute('href') || getMeta('meta[property="og:url"]'),
+      url
+    );
 
     return {
       title,
@@ -1565,8 +1584,8 @@
     if (!src) return true;
     const s = src.trim().toLowerCase();
     return (
-      s.startsWith('data:image/svg+xml') ||
-      s.startsWith('data:image/gif') ||
+      (s.startsWith('data:image/svg+xml') && s.length < 400) ||
+      (s.startsWith('data:image/gif') && s.length < 250) ||
       /(?:blank|spacer|placeholder|loading|lazy|transparent|grey|gray|pixel|1x1)\.(?:gif|png|jpg|svg|webp)(?:\?|$)/i.test(s)
     );
   }
@@ -1779,7 +1798,7 @@
 
   function _preCleanDocument(doc, url, DOMParserImpl) {
     // 0. Inject <base> so Readability resolves relative URLs against the actual article URL
-    if (doc.head) {
+    if (doc.head && url) {
       let base = doc.head.querySelector('base');
       if (!base) {
         base = doc.createElement('base');
@@ -2319,6 +2338,387 @@
     };
   }
 
+  // ─── MHTML (.mhtml / .mht) Parser (Chrome 離線網頁封存檔) ─────────────────
+  function _decodeQuotedPrintableToBytes(str) {
+    // 移除軟換行 (=\r\n 或 =\n)
+    const unfolded = String(str || '').replace(/=\r?\n/g, '');
+    const out = [];
+    for (let i = 0; i < unfolded.length; i++) {
+      const ch = unfolded[i];
+      if (ch === '=' && i + 2 < unfolded.length && /^[0-9A-Fa-f]{2}$/.test(unfolded.slice(i + 1, i + 3))) {
+        out.push(parseInt(unfolded.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        out.push(unfolded.charCodeAt(i) & 0xff);
+      }
+    }
+    return new Uint8Array(out);
+  }
+
+  function _decodeRfc2047Word(headerVal) {
+    if (!headerVal) return '';
+    return String(headerVal).replace(/=\?([^?]+)\?([QBqb])\?([^?]+)\?=/g, (_, charset, enc, payload) => {
+      try {
+        const cs = normalizeCharsetName(charset) || 'utf-8';
+        let bytes;
+        if (enc.toUpperCase() === 'B') {
+          const bin = atob(payload.replace(/\s+/g, ''));
+          bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        } else {
+          bytes = _decodeQuotedPrintableToBytes(payload.replace(/_/g, ' '));
+        }
+        return new TextDecoder(cs, { fatal: false }).decode(bytes);
+      } catch {
+        return payload;
+      }
+    });
+  }
+
+  function _parseMimeHeaders(rawBlock) {
+    const unfolded = String(rawBlock || '').replace(/\r?\n[ \t]+/g, ' ');
+    const headers = {};
+    for (const line of unfolded.split(/\r?\n/)) {
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const key = line.slice(0, idx).trim().toLowerCase();
+      const val = line.slice(idx + 1).trim();
+      if (!headers[key]) headers[key] = val;
+    }
+    return headers;
+  }
+
+  function isMhtmlContent(rawText) {
+    if (!rawText || typeof rawText !== 'string') return false;
+    const head = rawText.slice(0, 2000);
+    return /Content-Type:\s*multipart\/related/i.test(head) && /boundary=/i.test(head);
+  }
+
+  /**
+   * 解析 Chrome / Edge 另存的 .mhtml / .mht 離線網頁，還原 HTML 與內嵌圖片
+   */
+  function parseMhtml(rawInput) {
+    let rawText = '';
+    if (typeof rawInput === 'string') {
+      rawText = rawInput;
+    } else {
+      const bytes = rawInput instanceof Uint8Array ? rawInput : new Uint8Array(rawInput || 0);
+      // 以 Latin-1 讀出 MIME 結構，避免破壞各區段的原始編碼位元組
+      let s = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+      }
+      rawText = s;
+    }
+
+    const headerEndMatch = rawText.match(/\r?\n\r?\n/);
+    if (!headerEndMatch || typeof headerEndMatch.index !== 'number') return null;
+
+    const topHeaders = _parseMimeHeaders(rawText.slice(0, headerEndMatch.index));
+    const ct = topHeaders['content-type'] || '';
+    const boundaryMatch = ct.match(/boundary\s*=\s*"?([^";\r\n]+)"?/i);
+    if (!boundaryMatch?.[1]) return null;
+
+    const boundary = boundaryMatch[1].trim();
+    const sourceUrl = topHeaders['snapshot-content-location'] || topHeaders['content-location'] || '';
+    const subject = _decodeRfc2047Word(topHeaders['subject'] || '');
+
+    const rawBody = rawText.slice(headerEndMatch.index + headerEndMatch[0].length);
+    const parts = rawBody.split(`--${boundary}`);
+
+    let html = '';
+    let htmlLocation = sourceUrl;
+    const imageMap = new Map(); // location / cid -> data URI
+
+    for (const part of parts) {
+      const cleanedPart = part.replace(/^(?:\r?\n)+/, '');
+      const trimmed = cleanedPart.trim();
+      if (!trimmed || trimmed === '--') continue;
+      const sepMatch = cleanedPart.match(/\r?\n\r?\n/);
+      if (!sepMatch || typeof sepMatch.index !== 'number') continue;
+
+      const partHeaders = _parseMimeHeaders(cleanedPart.slice(0, sepMatch.index).trim());
+      const partBody = cleanedPart.slice(sepMatch.index + sepMatch[0].length);
+      const partCt = partHeaders['content-type'] || '';
+      const partEnc = (partHeaders['content-transfer-encoding'] || '').toLowerCase();
+      const partLoc = (partHeaders['content-location'] || '').trim();
+      const partCid = (partHeaders['content-id'] || '').replace(/^<|>$/g, '').trim();
+
+      if (!html && /text\/html/i.test(partCt)) {
+        let bytes;
+        if (partEnc === 'quoted-printable') {
+          bytes = _decodeQuotedPrintableToBytes(partBody);
+        } else if (partEnc === 'base64') {
+          try {
+            const bin = atob(partBody.replace(/\s+/g, ''));
+            bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          } catch {
+            bytes = new TextEncoder().encode(partBody);
+          }
+        } else {
+          bytes = new Uint8Array(partBody.length);
+          for (let i = 0; i < partBody.length; i++) bytes[i] = partBody.charCodeAt(i) & 0xff;
+        }
+        html = decodeHtmlBytes(bytes, partCt);
+        if (partLoc && !htmlLocation) htmlLocation = partLoc;
+      } else if (/^image\/(?:jpeg|jpg|png|webp|gif|avif)/i.test(partCt) && partEnc === 'base64' && imageMap.size < 60) {
+        const cleanB64 = partBody.replace(/\s+/g, '');
+        if (cleanB64.length > 0 && cleanB64.length < 3_000_000) {
+          const mime = partCt.split(';')[0].trim().toLowerCase();
+          const dataUri = `data:${mime};base64,${cleanB64}`;
+          if (partLoc) imageMap.set(partLoc, dataUri);
+          if (partCid) imageMap.set(`cid:${partCid}`, dataUri);
+        }
+      }
+    }
+
+    if (!html) return null;
+
+    // 將 HTML 內的 cid: 與離線圖片網址還原為內嵌 data URI（離線也能顯示配圖）
+    if (imageMap.size > 0) {
+      html = html.replace(/(src|data-src|data-original)\s*=\s*(["'])([^"']+)\2/gi, (full, attr, quote, val) => {
+        const decodedVal = val.replace(/&amp;/g, '&');
+        let hit = imageMap.get(decodedVal) || imageMap.get(val);
+        if (!hit && htmlLocation) {
+          const resolved = safeResolveUrl(decodedVal, htmlLocation);
+          if (resolved) hit = imageMap.get(resolved);
+        }
+        return hit ? `${attr}=${quote}${hit}${quote}` : full;
+      });
+    }
+
+    return {
+      html,
+      sourceUrl: htmlLocation || sourceUrl,
+      title: subject,
+    };
+  }
+
+  // ─── Pasted / Imported Content Extractor (方案三：剪貼簿富文本／HTML／MHTML／純文字) ─
+  function _looksLikeHtmlMarkup(str) {
+    if (!str || typeof str !== 'string') return false;
+    return /<(?:!doctype\s+html|html|head|body|article|section|main|div|p|h[1-6]|img|figure|blockquote|ul|ol|table)\b[^>]*>/i.test(
+      str
+    );
+  }
+
+  function _looksLikeMarkdown(str) {
+    if (!str || typeof str !== 'string') return false;
+    let signals = 0;
+    if (/^#{1,6}\s+\S/m.test(str)) signals++;
+    if (/^```/m.test(str)) signals++;
+    if (/!\[[^\]]*\]\(https?:\/\/[^)]+\)/.test(str)) signals++;
+    if (/\[[^\]]+\]\(https?:\/\/[^)]+\)/.test(str)) signals++;
+    if (/^\s*[-*+]\s+\S/m.test(str) && /\n\s*[-*+]\s+\S/m.test(str)) signals++;
+    return signals >= 2;
+  }
+
+  function _extractFromHtmlFragment(fragmentHtml, baseUrl, customTitle, DOMParserImpl) {
+    const wrapped = `<!DOCTYPE html><html><head><meta charset="utf-8"><base href="${_escapeHtml(baseUrl || 'https://local.invalid/')}"></head><body><div id="pr-frag">${fragmentHtml}</div></body></html>`;
+    const doc = new DOMParserImpl().parseFromString(wrapped, 'text/html');
+    const frag = doc.getElementById('pr-frag');
+    if (!frag) return null;
+
+    _unwrapNoscriptImages(doc, DOMParserImpl);
+    _restoreLazyImages(frag, baseUrl);
+    _cleanHiddenNodes(doc);
+    frag.querySelectorAll('script, noscript, style, template, iframe, object, embed, form, button, nav, footer, aside').forEach((el) =>
+      el.remove()
+    );
+    _normalizeBrToParagraphs(frag, doc);
+
+    const inferredHeading = frag.querySelector('h1, h2')?.textContent?.trim() || '';
+    const title = (customTitle || '').trim() || _cleanTitle(inferredHeading, '') || '貼上的文章';
+
+    const polished = _polishContentHtml(frag.innerHTML, {
+      title,
+      baseUrl: baseUrl || '',
+      DOMParserImpl,
+    });
+    if (!polished.html || (polished.plainText.length < 10 && !/<img\b/i.test(polished.html))) return null;
+
+    const stats = _computeReadingStats(polished.plainText);
+    let domain = '';
+    try {
+      domain = baseUrl ? new URL(baseUrl).hostname : '手動匯入';
+    } catch {
+      domain = '手動匯入';
+    }
+
+    return {
+      title,
+      byline: '',
+      publishedTime: '',
+      siteName: '',
+      domain,
+      leadImage: '',
+      content: polished.html,
+      textContent: polished.plainText,
+      extractorTier: 'paste-html',
+      finalUrl: baseUrl || '',
+      ...stats,
+    };
+  }
+
+  function _extractFromPlainText(rawText, baseUrl, customTitle) {
+    const cleaned = String(rawText || '')
+      .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+      .replace(/\r\n?/g, '\n')
+      .trim();
+    if (!cleaned) return null;
+
+    const rawBlocks = cleaned
+      .split(/\n{2,}/)
+      .map((b) =>
+        b
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l && !BOILERPLATE_LINE_PATTERNS.some((re) => re.test(l)))
+      )
+      .filter((lines) => lines.length > 0);
+
+    // 若整段文字都只用單一換行分隔（常見手機複製結果），改以單行拆段
+    const blocks =
+      rawBlocks.length === 1 && rawBlocks[0].length >= 3
+        ? rawBlocks[0].map((line) => [line])
+        : rawBlocks;
+
+    if (blocks.length === 0) return null;
+
+    let title = (customTitle || '').trim();
+    if (!title) {
+      const firstLine = blocks[0][0] || '';
+      const looksLikeHeading =
+        blocks.length > 1 &&
+        firstLine.length >= 2 &&
+        firstLine.length <= 80 &&
+        !/^https?:\/\//i.test(firstLine) &&
+        !/[。！？.!?]$/.test(firstLine);
+      if (looksLikeHeading) {
+        title = firstLine;
+        if (blocks[0].length === 1) blocks.shift();
+        else blocks[0].shift();
+      } else {
+        title = firstLine.slice(0, 40) + (firstLine.length > 40 ? '…' : '');
+      }
+    }
+
+    const linkify = (line) =>
+      _escapeHtml(line).replace(
+        /(https?:\/\/[^\s<]+)/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+      );
+
+    const contentHtml = blocks
+      .map((lines) => `<p>${lines.map(linkify).join('<br>')}</p>`)
+      .join('\n');
+
+    const plainText = blocks.map((lines) => lines.join(' ')).join('\n');
+    const stats = _computeReadingStats(plainText);
+
+    let domain = '';
+    try {
+      domain = baseUrl ? new URL(baseUrl).hostname : '手動貼上';
+    } catch {
+      domain = '手動貼上';
+    }
+
+    return {
+      title: title || '貼上的文章',
+      byline: '',
+      publishedTime: '',
+      siteName: '',
+      domain,
+      leadImage: '',
+      content: contentHtml,
+      textContent: plainText,
+      extractorTier: 'paste-text',
+      finalUrl: baseUrl || '',
+      ...stats,
+    };
+  }
+
+  /**
+   * 統一處理使用者手動貼上或匯入的內容（支援富文本 HTML 剪貼簿、原始 HTML、Chrome .mhtml、Markdown 與純文字）
+   */
+  function extractFromPastedContent({
+    html = '',
+    text = '',
+    sourceUrl = '',
+    customTitle = '',
+    DOMParserImpl = globalScope.DOMParser,
+    ReadabilityImpl = globalScope.Readability,
+  } = {}) {
+    let effectiveUrl = sourceUrl ? normalizeUrl(sourceUrl) : '';
+    let effectiveTitle = (customTitle || '').trim();
+    let candidateHtml = typeof html === 'string' ? html.trim() : '';
+    const candidateText = typeof text === 'string' ? text.trim() : '';
+
+    // 1. MHTML (.mhtml / .mht) 自動拆封
+    if (isMhtmlContent(candidateText) || isMhtmlContent(candidateHtml)) {
+      const parsedMhtml = parseMhtml(isMhtmlContent(candidateText) ? candidateText : candidateHtml);
+      if (parsedMhtml?.html) {
+        candidateHtml = parsedMhtml.html;
+        if (!effectiveUrl && parsedMhtml.sourceUrl) effectiveUrl = normalizeUrl(parsedMhtml.sourceUrl);
+        if (!effectiveTitle && parsedMhtml.title) effectiveTitle = parsedMhtml.title;
+      }
+    }
+
+    // 若使用者把原始 HTML 貼在文字框內，自動視為 HTML
+    if (!candidateHtml && _looksLikeHtmlMarkup(candidateText)) {
+      candidateHtml = candidateText;
+    }
+
+    // 2. HTML 處理：區分「完整網頁（含側欄／導覽）」與「手動框選的局部富文本片段」
+    if (candidateHtml) {
+      const isFullPage =
+        /<(?:!doctype\s+html|html|head|body)\b/i.test(candidateHtml) ||
+        /<(?:nav|header|footer|aside)\b/i.test(candidateHtml) ||
+        candidateHtml.length > 20000;
+
+      if (isFullPage) {
+        const extracted = extractFromHtml(candidateHtml, effectiveUrl, {
+          mode: 'article',
+          DOMParserImpl,
+          ReadabilityImpl,
+        });
+        if (extracted?.content) {
+          if (effectiveTitle) extracted.title = effectiveTitle;
+          if (!extracted.domain) extracted.domain = '匯入網頁';
+          return extracted;
+        }
+      }
+
+      // 局部選取片段或完整頁退回方案：保留使用者選取內容並做乾淨化後處理
+      const fragResult = _extractFromHtmlFragment(candidateHtml, effectiveUrl, effectiveTitle, DOMParserImpl);
+      if (fragResult) return fragResult;
+    }
+
+    // 3. Markdown 內容
+    if (candidateText && _looksLikeMarkdown(candidateText)) {
+      const mdHtml = markdownToHtml(candidateText, effectiveUrl, { isJina: false });
+      const extracted = extractFromHtml(mdHtml, effectiveUrl, {
+        mode: 'article',
+        DOMParserImpl,
+        ReadabilityImpl,
+      });
+      if (extracted?.content) {
+        if (effectiveTitle) extracted.title = effectiveTitle;
+        if (!extracted.domain) extracted.domain = '匯入文件';
+        return extracted;
+      }
+    }
+
+    // 4. 純文字
+    if (candidateText) {
+      return _extractFromPlainText(candidateText, effectiveUrl, effectiveTitle);
+    }
+
+    return null;
+  }
+
   // ─── Formatting Helpers ────────────────────────────────────────────────────
   function formatPublishedDate(rawDate) {
     if (!rawDate) return '';
@@ -2351,6 +2751,9 @@
     fetchViaProxies,
     resetProxyHealth,
     extractFromHtml,
+    isMhtmlContent,
+    parseMhtml,
+    extractFromPastedContent,
     formatPublishedDate,
   };
 });

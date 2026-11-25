@@ -517,18 +517,88 @@
 
         <div id="input-section" class="flex flex-col flex-1 gap-8">
 
-            <!-- URL Input Card -->
+            <!-- URL / Paste Content Input Card -->
             <div class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-md p-6 sm:p-8 border border-gray-100 dark:border-gray-700 text-center">
                 <h2 class="text-2xl font-bold mb-2">開始淨化閱讀</h2>
-                <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">貼上文章網址，自動提取無廣告正文。或安裝後從瀏覽器分享鍵直接傳送。</p>
+                <p id="input-mode-desc" class="text-gray-500 dark:text-gray-400 text-sm mb-5">貼上文章網址，自動提取無廣告正文。或安裝後從瀏覽器分享鍵直接傳送。</p>
 
+                <!-- Mode Switch Tabs -->
+                <div class="inline-flex w-full max-w-md bg-gray-100 dark:bg-gray-700/70 p-1 rounded-xl mb-5" role="tablist">
+                    <button type="button" id="tab-mode-url" role="tab" aria-selected="true" onclick="switchInputMode('url')"
+                        class="flex-1 py-2 px-3 text-sm font-semibold rounded-lg transition-all bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm cursor-pointer">
+                        貼上網址
+                    </button>
+                    <button type="button" id="tab-mode-paste" role="tab" aria-selected="false" onclick="switchInputMode('paste')"
+                        class="flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white cursor-pointer">
+                        貼上內容／匯入 HTML
+                    </button>
+                </div>
+
+                <!-- Mode 1: URL Form -->
                 <form id="url-form" class="flex flex-col gap-3" onsubmit="handleUrlSubmit(event)">
                     <input type="text" inputmode="url" id="url-input" placeholder="https://example.com/article" required
                         class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
-                    <button type="submit" id="submit-btn" class="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg shadow-md transition-all flex justify-center items-center gap-2">
+                    <button type="submit" id="submit-btn" class="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg shadow-md transition-all flex justify-center items-center gap-2 cursor-pointer">
                         <span>解析並淨化網頁</span>
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
                     </button>
+                </form>
+
+                <!-- Mode 2: Paste Content / Import HTML-MHTML Form -->
+                <form id="paste-form" class="hidden flex flex-col gap-3 text-left" onsubmit="handlePasteSubmit(event)">
+                    <!-- Quick Action Buttons -->
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="pasteFromClipboardAndRead()"
+                            class="flex-1 min-w-[160px] py-2.5 px-3 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-sm font-semibold rounded-lg border border-emerald-200 dark:border-emerald-800/60 transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path></svg>
+                            一鍵貼上剪貼簿閱讀
+                        </button>
+                        <button type="button" onclick="document.getElementById('paste-html-file-input').click()"
+                            class="flex-1 min-w-[160px] py-2.5 px-3 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-sm font-semibold rounded-lg border border-indigo-200 dark:border-indigo-800/60 transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M12 18v-6"></path><path d="m9 15 3-3 3 3"></path></svg>
+                            匯入 .html / .mhtml 檔
+                        </button>
+                        <input type="file" id="paste-html-file-input" class="hidden" accept=".html,.htm,.mhtml,.mht,.md,.markdown,.txt,text/html,text/plain,multipart/related" onchange="handlePasteFileImport(event)">
+                    </div>
+
+                    <!-- Rich-paste status badge -->
+                    <div id="paste-format-badge" class="hidden flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/60 text-xs text-blue-700 dark:text-blue-300">
+                        <span id="paste-format-text">✨ 已偵測富文本網頁內容（保留標題、段落與圖片）</span>
+                        <button type="button" onclick="clearPasteContent()" class="underline hover:opacity-80 shrink-0 cursor-pointer">清除</button>
+                    </div>
+
+                    <!-- Paste / Drop Textarea -->
+                    <textarea id="paste-content-input" rows="6"
+                        onpaste="handleRichPaste(event)"
+                        oninput="handlePasteInputEdit()"
+                        ondragover="handlePasteDragOver(event)"
+                        ondragleave="handlePasteDragLeave(event)"
+                        ondrop="handlePasteFileDrop(event)"
+                        placeholder="在此貼上從瀏覽器複製的文章（自動保留標題與圖片）、HTML 原始碼、Markdown 或純文字；也可以直接把 .html／Chrome 離線 .mhtml 檔拖曳到這裡…"
+                        class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm leading-relaxed resize-y"></textarea>
+
+                    <!-- Optional source URL & custom title -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div class="relative flex items-center">
+                            <input type="text" inputmode="url" id="paste-source-url" oninput="updatePasteOpenOriginLink()"
+                                placeholder="來源網址（選填，用於還原圖片相對路徑）"
+                                class="w-full px-3 py-2 pr-16 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/70 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm">
+                            <a id="paste-open-origin-link" href="#" target="_blank" rel="noopener noreferrer"
+                                class="hidden absolute right-2 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/40">開啟原頁 ↗</a>
+                        </div>
+                        <input type="text" id="paste-custom-title"
+                            placeholder="自訂標題（選填，留空將自動偵測）"
+                            class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/70 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm">
+                    </div>
+
+                    <button type="submit" id="paste-submit-btn"
+                        class="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg shadow-md transition-all flex justify-center items-center gap-2 cursor-pointer">
+                        <span>淨化並開始閱讀</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </button>
+                    <p class="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed text-center">
+                        小技巧：在 Android Chrome 開啟網站後點右上角「下載（離線儲存）」會產生 <code>.mhtml</code> 檔，直接匯入即可完整離線閱讀含圖片正文。
+                    </p>
                 </form>
             </div>
 
@@ -666,11 +736,13 @@
         </div>
 
         <!-- Error State -->
-        <div id="error-section" class="hidden mb-6 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4 text-center">
+        <div id="error-section" class="hidden mb-6 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-5 text-center">
             <p id="error-message" class="text-red-600 dark:text-red-400 font-medium whitespace-pre-line"></p>
-            <div class="mt-3 flex flex-wrap justify-center gap-2">
-                <button id="error-deep-retry-btn" onclick="retryLastUrlDeep()" class="hidden px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-md text-sm font-medium transition-colors">無頭瀏覽器深度重試</button>
-                <button onclick="resetView()" class="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">返回重試</button>
+            <div class="mt-4 flex flex-wrap justify-center gap-2">
+                <button id="error-paste-mode-btn" onclick="openPasteModeFromError()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium transition-colors cursor-pointer">改用貼上內容／匯入網頁</button>
+                <a id="error-open-url-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">瀏覽器開啟原頁 ↗</a>
+                <button id="error-deep-retry-btn" onclick="retryLastUrlDeep()" class="hidden px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-md text-sm font-medium transition-colors cursor-pointer">無頭瀏覽器深度重試</button>
+                <button onclick="resetView()" class="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer">返回首頁</button>
             </div>
         </div>
 
@@ -1571,18 +1643,31 @@
             renderHistoryList();
         }
 
+        const _pastedSessionCache = new Map(); // 大容量匯入（如含多張內嵌圖片的 MHTML 超過 localStorage 配額）時的工作階段快取
+
         function cacheArticle(url, data) {
+            const payload = { ...data, savedAt: Date.now() };
             try {
-                localStorage.setItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url),
-                    JSON.stringify({ ...data, savedAt: Date.now() }));
-            } catch (e) { console.warn('[pureReader] Storage full, skip cache:', e); }
+                localStorage.setItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url), JSON.stringify(payload));
+                _pastedSessionCache.delete(url);
+            } catch (e) {
+                console.warn('[pureReader] Storage full, fallback to session cache:', e);
+                if (url && (url.startsWith('pasted://') || String(data?.extractorTier || '').startsWith('paste') || String(data?.fetchSource || '').includes('匯入'))) {
+                    _pastedSessionCache.set(url, payload);
+                    if (_pastedSessionCache.size > 10) {
+                        const oldestKey = _pastedSessionCache.keys().next().value;
+                        _pastedSessionCache.delete(oldestKey);
+                    }
+                }
+            }
         }
 
         function getCachedArticle(url) {
             try {
                 const raw = localStorage.getItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
-                return raw ? JSON.parse(raw) : null;
-            } catch (e) { return null; }
+                if (raw) return JSON.parse(raw);
+            } catch (e) {}
+            return _pastedSessionCache.get(url) || null;
         }
 
         function getFavorites() {
@@ -1654,6 +1739,10 @@
             }
         }
 
+        function _escapeHtmlUi(str) {
+            return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
         function renderFavoritesList() {
             const favs      = getFavorites();
             const sectionEl = document.getElementById('favorites-section');
@@ -1670,10 +1759,10 @@
                 return `<li class="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer flex items-center justify-between gap-3"
                     onclick="loadFromHistory('${safeUrl}')">
                     <div class="flex-1 min-w-0">
-                        <h4 class="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 text-sm leading-snug mb-1">${item.title || '無標題'}</h4>
+                        <h4 class="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 text-sm leading-snug mb-1">${_escapeHtmlUi(item.title || '無標題')}</h4>
                         <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                             <span>${formatDate(item.timestamp)}</span>
-                            <span class="truncate max-w-[120px]">${domain}</span>
+                            <span class="truncate max-w-[120px]">${_escapeHtmlUi(domain)}</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
@@ -1694,6 +1783,7 @@
             const inFav = getFavorites().some(i => i.url === url);
             if (!inFav) {
                 localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(url));
+                _pastedSessionCache.delete(url);
             }
             renderHistoryList();
         }
@@ -1705,6 +1795,7 @@
                 const inFav = favs.some(f => f.url === i.url);
                 if (!inFav) {
                     localStorage.removeItem(STORAGE_KEY_CACHE_PFX + _cacheKey(i.url));
+                    _pastedSessionCache.delete(i.url);
                 }
             });
             localStorage.removeItem(STORAGE_KEY_HISTORY);
@@ -1735,10 +1826,10 @@
                 return `<li class="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer flex items-center justify-between gap-3"
                     onclick="loadFromHistory('${safeUrl}')">
                     <div class="flex-1 min-w-0">
-                        <h4 class="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 text-sm leading-snug mb-1">${item.title || '無標題'}</h4>
+                        <h4 class="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 text-sm leading-snug mb-1">${_escapeHtmlUi(item.title || '無標題')}</h4>
                         <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                             <span>${formatDate(item.timestamp)}</span>
-                            <span class="truncate max-w-[120px]">${domain}</span>
+                            <span class="truncate max-w-[120px]">${_escapeHtmlUi(domain)}</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
@@ -1758,6 +1849,15 @@
         }
 
         function loadFromHistory(url) {
+            if (typeof url === 'string' && url.startsWith('pasted://')) {
+                const cached = getCachedArticle(url);
+                if (cached) {
+                    renderArticle(cached, url, true);
+                } else {
+                    showSyncBar('⚠ 此手動貼上的離線快取已被清除，請重新貼上或匯入內容', null, null, 4500);
+                }
+                return;
+            }
             document.getElementById('url-input').value = url;
             extractArticle(url);
         }
@@ -2070,20 +2170,31 @@
             showSection('error-section');
             document.getElementById('error-message').innerText = msg;
             _lastFailedUrl = failedUrl || _lastFailedUrl;
+            const hasHttpUrl = Boolean(_lastFailedUrl && /^https?:\/\//i.test(_lastFailedUrl));
             const retryDeepBtn = document.getElementById('error-deep-retry-btn');
             if (retryDeepBtn) {
-                retryDeepBtn.classList.toggle('hidden', !_lastFailedUrl);
+                retryDeepBtn.classList.toggle('hidden', !hasHttpUrl);
+            }
+            const openUrlLink = document.getElementById('error-open-url-link');
+            if (openUrlLink) {
+                if (hasHttpUrl) {
+                    openUrlLink.href = _lastFailedUrl;
+                    openUrlLink.classList.remove('hidden');
+                } else {
+                    openUrlLink.href = '#';
+                    openUrlLink.classList.add('hidden');
+                }
             }
         }
 
         function retryLastUrlDeep() {
-            if (_lastFailedUrl) {
+            if (_lastFailedUrl && /^https?:\/\//i.test(_lastFailedUrl)) {
                 extractArticle(_lastFailedUrl, { forceRefresh: true, forceJina: true });
             }
         }
 
         function refreshCurrentArticle(forceJina = false) {
-            if (currentArticleUrl) {
+            if (currentArticleUrl && /^https?:\/\//i.test(currentArticleUrl)) {
                 extractArticle(currentArticleUrl, { forceRefresh: true, forceJina });
             }
         }
@@ -2364,7 +2475,7 @@
                 if (!htmlContent) {
                     if (hadChallengePage) {
                         recordFailedHost(url, '網站防火牆／真人驗證');
-                        throw new Error('網站防火牆阻擋。目標網站啟用了「真人驗證機制」（Cloudflare / WAF），淨讀器無法自動通過驗證。請嘗試「無頭瀏覽器深度重試」或利用瀏覽器直接開啟。');
+                        throw new Error('網站防火牆阻擋。目標網站啟用了「真人驗證機制」（Cloudflare / WAF），代理伺服器無法自動通過驗證。\n\n建議：點下方「瀏覽器開啟原頁 ↗」後複製正文（或於 Chrome 儲存離線網頁 .mhtml），再按「改用貼上內容／匯入網頁」即可無廣告閱讀。');
                     }
                     recordFailedHost(url, lastError || '所有代理均失敗');
                     if (!forceRefresh && !forceJina) {
@@ -2470,6 +2581,9 @@
             const contentEl = document.getElementById('article-content');
             if (!contentEl) return;
 
+            const isHttpUrl = /^https?:\/\//i.test(originalUrl || '');
+            const isLocalPasted = !isHttpUrl || (originalUrl || '').startsWith('pasted://');
+
             const cleanHTML = sanitizeArticleHtml(articleData.content);
             contentEl.innerHTML = cleanHTML;
 
@@ -2477,7 +2591,7 @@
             try {
                 contentEl.querySelectorAll('img').forEach(img => {
                     const src = img.getAttribute('src');
-                    if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+                    if (isHttpUrl && src && !src.startsWith('http') && !src.startsWith('data:')) {
                         try { img.src = new URL(src, originalUrl).href; } catch (e) {}
                     }
                     img.setAttribute('loading', 'lazy');
@@ -2495,22 +2609,24 @@
             let deepContainer = document.getElementById('deep-fetch-container');
             if (deepContainer) deepContainer.remove();
 
-            contentEl.insertAdjacentHTML('afterend', `
-                <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺漏、圖片未載入，或網頁需要 JS 動態渲染？</p>
-                    <div class="flex flex-wrap items-center justify-center gap-3">
-                        <button type="button" onclick="refreshCurrentArticle(true)" class="px-5 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 cursor-pointer">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-                            深度渲染重抓（無頭瀏覽器）
-                        </button>
-                        <button type="button" onclick="refreshCurrentArticle(false)" class="px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition-colors text-sm font-medium border border-gray-200 dark:border-gray-700 inline-flex items-center justify-center gap-2 cursor-pointer">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                            強制重新擷取
-                        </button>
+            if (!isLocalPasted) {
+                contentEl.insertAdjacentHTML('afterend', `
+                    <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺漏、圖片未載入，或網頁需要 JS 動態渲染？</p>
+                        <div class="flex flex-wrap items-center justify-center gap-3">
+                            <button type="button" onclick="refreshCurrentArticle(true)" class="px-5 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 cursor-pointer">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                深度渲染重抓（無頭瀏覽器）
+                            </button>
+                            <button type="button" onclick="refreshCurrentArticle(false)" class="px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition-colors text-sm font-medium border border-gray-200 dark:border-gray-700 inline-flex items-center justify-center gap-2 cursor-pointer">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                強制重新擷取
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">深度渲染將透過無頭瀏覽器完整執行網頁腳本後，直接於淨讀器內重新排版。</p>
                     </div>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">深度渲染將透過無頭瀏覽器完整執行網頁腳本後，直接於淨讀器內重新排版。</p>
-                </div>
-            `);
+                `);
+            }
         }
 
         function renderArticle(articleData, originalUrl, isFromCache) {
@@ -2521,6 +2637,12 @@
             const sourceBadge  = document.getElementById('extract-source-badge');
             const sourceLinkEl = document.getElementById('article-source-link');
             const cacheBadge   = document.getElementById('cache-badge');
+            const refreshBtn   = document.getElementById('refresh-btn');
+            const shareBtn     = document.getElementById('share-btn');
+            const reportBtn    = document.getElementById('report-btn');
+            const novelBtn     = document.getElementById('novel-mode-btn');
+
+            const isLocalPasted = !/^https?:\/\//i.test(originalUrl || '');
 
             titleEl.textContent = articleData.title || '無標題';
 
@@ -2563,14 +2685,26 @@
                 }
             }
 
-            try {
-                const domain = new URL(originalUrl).hostname;
-                sourceLinkEl.textContent = domain;
-                sourceLinkEl.href = originalUrl;
-            } catch (e) {
-                sourceLinkEl.textContent = '來源網址';
-                sourceLinkEl.href = originalUrl;
+            if (isLocalPasted) {
+                sourceLinkEl.textContent = articleData.domain || '手動匯入';
+                sourceLinkEl.removeAttribute('href');
+                sourceLinkEl.classList.add('pointer-events-none', 'no-underline');
+            } else {
+                sourceLinkEl.classList.remove('pointer-events-none', 'no-underline');
+                try {
+                    const domain = new URL(originalUrl).hostname;
+                    sourceLinkEl.textContent = domain;
+                    sourceLinkEl.href = originalUrl;
+                } catch (e) {
+                    sourceLinkEl.textContent = '來源網址';
+                    sourceLinkEl.href = originalUrl;
+                }
             }
+
+            // 隱藏不適用於無來源網址本地貼上內容的遠端操作按鈕
+            if (refreshBtn) refreshBtn.classList.toggle('hidden', isLocalPasted);
+            if (shareBtn)   shareBtn.classList.toggle('hidden', isLocalPasted);
+            if (reportBtn)  reportBtn.classList.toggle('hidden', isLocalPasted);
 
             // Show cache badge & bump history timestamp when loaded from cache
             if (isFromCache) {
@@ -2588,10 +2722,10 @@
             currentArticleDomain = articleData.domain || (() => { try { return new URL(originalUrl).hostname; } catch(e){ return ''; } })();
             showSection('article-section');
             document.getElementById('font-controls').classList.remove('hidden');
-            document.getElementById('novel-mode-btn').classList.remove('hidden');
+            if (novelBtn) novelBtn.classList.toggle('hidden', isLocalPasted);
             document.getElementById('favorite-toggle-btn').classList.remove('hidden');
             updateFavoriteButtonState();
-            if (typeof NovelMode !== 'undefined') {
+            if (!isLocalPasted && typeof NovelMode !== 'undefined') {
                 NovelMode.onPageLoaded(originalUrl);
             }
             window.scrollTo(0, 0);
@@ -2599,10 +2733,12 @@
 
         // ─── Copy Full Text ───────────────────────────────────────────────────
         function copyArticleText() {
-            const title     = document.getElementById('article-title').innerText;
-            const content   = document.getElementById('article-content').innerText;
-            const sourceUrl = document.getElementById('article-source-link').href;
-            const fullText  = `【${title}】\n來源：${sourceUrl}\n\n${content}`;
+            const title      = document.getElementById('article-title').innerText;
+            const content    = document.getElementById('article-content').innerText;
+            const sourceLine = currentArticleUrl && /^https?:\/\//i.test(currentArticleUrl)
+                ? `來源：${currentArticleUrl}\n\n`
+                : '\n';
+            const fullText   = `【${title}】\n${sourceLine}${content}`;
 
             const copyBtn  = document.getElementById('copy-btn');
             const copyText = document.getElementById('copy-text');
@@ -2639,7 +2775,10 @@
         // browser or app. Falls back to window.open when unsupported.
         async function shareArticle() {
             const title     = document.getElementById('article-title').innerText;
-            const sourceUrl = document.getElementById('article-source-link').href;
+            const sourceUrl = currentArticleUrl && /^https?:\/\//i.test(currentArticleUrl)
+                ? currentArticleUrl
+                : document.getElementById('article-source-link').getAttribute('href');
+            if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return;
             const shareText = document.getElementById('share-text');
 
             if (navigator.share) {
@@ -2666,8 +2805,9 @@
         
         function reportParseFailure() {
             const el = document.getElementById('article-source-link');
-            if (el && el.href) {
-                recordFailedHost(el.href, '手動標註讀取失敗 / 內容排版異常');
+            const href = el?.getAttribute('href') || '';
+            if (href && /^https?:\/\//i.test(href)) {
+                recordFailedHost(href, '手動標註讀取失敗 / 內容排版異常');
                 const btn = document.getElementById('report-btn');
                 const originalText = btn.innerHTML;
                 btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-xs">已記錄</span>`;
@@ -2680,6 +2820,368 @@
             e.preventDefault();
             const url = document.getElementById('url-input').value.trim();
             if (url) extractArticle(url);
+        }
+
+        // ─── Paste Content / Import HTML & MHTML Mode (方案三) ────────────────
+        let _pastedRichHtml        = '';
+        let _pastedRichSourceLabel = '';
+        let _justHandledRichPaste  = false;
+
+        function switchInputMode(mode) {
+            const isPaste   = mode === 'paste';
+            const urlForm   = document.getElementById('url-form');
+            const pasteForm = document.getElementById('paste-form');
+            const tabUrl    = document.getElementById('tab-mode-url');
+            const tabPaste  = document.getElementById('tab-mode-paste');
+            const descEl    = document.getElementById('input-mode-desc');
+
+            if (urlForm)   urlForm.classList.toggle('hidden', isPaste);
+            if (pasteForm) pasteForm.classList.toggle('hidden', !isPaste);
+
+            const activeCls   = ['bg-white', 'dark:bg-gray-800', 'text-blue-600', 'dark:text-blue-400', 'shadow-sm', 'font-semibold'];
+            const inactiveCls = ['text-gray-500', 'dark:text-gray-300', 'hover:text-gray-700', 'dark:hover:text-white', 'font-medium'];
+
+            if (tabUrl && tabPaste) {
+                tabUrl.setAttribute('aria-selected', String(!isPaste));
+                tabPaste.setAttribute('aria-selected', String(isPaste));
+                if (isPaste) {
+                    tabUrl.classList.remove(...activeCls);
+                    tabUrl.classList.add(...inactiveCls);
+                    tabPaste.classList.remove(...inactiveCls);
+                    tabPaste.classList.add(...activeCls);
+                } else {
+                    tabPaste.classList.remove(...activeCls);
+                    tabPaste.classList.add(...inactiveCls);
+                    tabUrl.classList.remove(...inactiveCls);
+                    tabUrl.classList.add(...activeCls);
+                }
+            }
+
+            if (descEl) {
+                descEl.textContent = isPaste
+                    ? '適用 Cloudflare 驗證或需登入網站：從瀏覽器複製正文、貼上 HTML／Markdown，或匯入 Chrome 離線 .mhtml 檔直接淨化閱讀。'
+                    : '貼上文章網址，自動提取無廣告正文。或安裝後從瀏覽器分享鍵直接傳送。';
+            }
+        }
+
+        function openPasteModeFromError() {
+            const failedUrl = _lastFailedUrl || '';
+            resetView();
+            switchInputMode('paste');
+            const srcInput = document.getElementById('paste-source-url');
+            if (srcInput && failedUrl && /^https?:\/\//i.test(failedUrl)) {
+                srcInput.value = failedUrl;
+                updatePasteOpenOriginLink();
+            }
+            setTimeout(() => document.getElementById('paste-content-input')?.focus(), 50);
+        }
+
+        function updatePasteOpenOriginLink() {
+            const srcInput = document.getElementById('paste-source-url');
+            const linkEl   = document.getElementById('paste-open-origin-link');
+            if (!srcInput || !linkEl) return;
+            const normalized = normalizeUrl(srcInput.value.trim());
+            if (normalized && /^https?:\/\//i.test(normalized)) {
+                linkEl.href = normalized;
+                linkEl.classList.remove('hidden');
+            } else {
+                linkEl.href = '#';
+                linkEl.classList.add('hidden');
+            }
+        }
+
+        function _setPasteBadge(text) {
+            const badge = document.getElementById('paste-format-badge');
+            const label = document.getElementById('paste-format-text');
+            if (label) label.textContent = text;
+            if (badge) badge.classList.remove('hidden');
+        }
+
+        function _hidePasteBadge() {
+            const badge = document.getElementById('paste-format-badge');
+            if (badge) badge.classList.add('hidden');
+        }
+
+        function handleRichPaste(event) {
+            try {
+                const htmlData = event.clipboardData?.getData('text/html') || '';
+                if (htmlData && /<(?:p|div|article|section|h[1-6]|img|figure|ul|ol|blockquote|table|br)\b/i.test(htmlData)) {
+                    _pastedRichHtml = htmlData;
+                    _pastedRichSourceLabel = '剪貼簿富文本';
+                    _justHandledRichPaste = true;
+                    setTimeout(() => { _justHandledRichPaste = false; }, 0);
+                    _setPasteBadge('✨ 已偵測富文本網頁內容（保留標題、段落與圖片）');
+                }
+            } catch (e) {
+                console.warn('[pureReader] handleRichPaste error:', e);
+            }
+        }
+
+        function handlePasteInputEdit() {
+            if (_justHandledRichPaste) return;
+            _pastedRichHtml = '';
+            _pastedRichSourceLabel = '';
+            const val = document.getElementById('paste-content-input')?.value || '';
+            if (typeof PureExtractor !== 'undefined' && PureExtractor.isMhtmlContent(val)) {
+                _setPasteBadge('📦 已偵測 MHTML 離線網頁原始碼');
+            } else if (/<(?:!doctype\s+html|html|article|main|body|div|p|h[1-6]|img)\b[^>]*>/i.test(val)) {
+                _setPasteBadge('📄 已偵測 HTML 原始碼（將自動去除廣告與側欄）');
+            } else {
+                _hidePasteBadge();
+            }
+        }
+
+        function clearPasteContent() {
+            const ta    = document.getElementById('paste-content-input');
+            const srcEl = document.getElementById('paste-source-url');
+            const ttlEl = document.getElementById('paste-custom-title');
+            const fileEl= document.getElementById('paste-html-file-input');
+            if (ta)     ta.value = '';
+            if (srcEl)  srcEl.value = '';
+            if (ttlEl)  ttlEl.value = '';
+            if (fileEl) fileEl.value = '';
+            _pastedRichHtml = '';
+            _pastedRichSourceLabel = '';
+            _hidePasteBadge();
+            updatePasteOpenOriginLink();
+        }
+
+        async function pasteFromClipboardAndRead() {
+            let clipHtml = '';
+            let clipText = '';
+
+            // 1. 優先嘗試 Clipboard API read() 以同時取得富文本 text/html 與純文字
+            if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
+                try {
+                    const items = await navigator.clipboard.read();
+                    for (const item of items) {
+                        if (!clipHtml && item.types.includes('text/html')) {
+                            const blob = await item.getType('text/html');
+                            clipHtml = await blob.text();
+                        }
+                        if (!clipText && item.types.includes('text/plain')) {
+                            const blob = await item.getType('text/plain');
+                            clipText = await blob.text();
+                        }
+                    }
+                } catch (e) {
+                    console.info('[pureReader] clipboard.read unavailable/denied, falling back to readText:', e.message);
+                }
+            }
+
+            // 2. 退回純文字 readText()
+            if (!clipHtml && !clipText && navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+                try {
+                    clipText = await navigator.clipboard.readText();
+                } catch (e) {
+                    console.info('[pureReader] clipboard.readText denied:', e.message);
+                }
+            }
+
+            const hasRichMarkup = Boolean(clipHtml && /<(?:p|div|article|section|h[1-6]|img|figure|ul|ol|blockquote|table|br)\b/i.test(clipHtml));
+            const trimmedText = (clipText || '').trim();
+
+            if (!hasRichMarkup && !trimmedText) {
+                showSyncBar('⚠ 無法自動讀取剪貼簿（或剪貼簿為空），請長按下方文字框手動貼上', null, null, 4500);
+                document.getElementById('paste-content-input')?.focus();
+                return;
+            }
+
+            // 若剪貼簿裡只是單一網址而非文章內容，貼心地填入「來源網址」欄位並提示
+            if (!hasRichMarkup && /^https?:\/\/\S+$/i.test(trimmedText)) {
+                const srcInput = document.getElementById('paste-source-url');
+                if (srcInput) {
+                    srcInput.value = trimmedText;
+                    updatePasteOpenOriginLink();
+                }
+                showSyncBar('ℹ 剪貼簿目前是網址，已填入「來源網址」；請開啟原頁複製文章正文後再貼上', null, null, 5000);
+                document.getElementById('paste-content-input')?.focus();
+                return;
+            }
+
+            const sourceUrl   = document.getElementById('paste-source-url')?.value.trim() || '';
+            const customTitle = document.getElementById('paste-custom-title')?.value.trim() || '';
+            processPastedOrImported({
+                html: hasRichMarkup ? clipHtml : '',
+                text: trimmedText,
+                sourceUrl,
+                customTitle,
+                sourceLabel: hasRichMarkup ? '剪貼簿富文本' : '剪貼簿純文字'
+            });
+        }
+
+        function handlePasteDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const ta = document.getElementById('paste-content-input');
+            if (ta) ta.classList.add('ring-2', 'ring-blue-500', 'border-blue-400', 'bg-blue-50/40', 'dark:bg-blue-900/20');
+        }
+
+        function handlePasteDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const ta = document.getElementById('paste-content-input');
+            if (ta) ta.classList.remove('ring-2', 'ring-blue-500', 'border-blue-400', 'bg-blue-50/40', 'dark:bg-blue-900/20');
+        }
+
+        function handlePasteFileDrop(e) {
+            handlePasteDragLeave(e);
+            const file = e.dataTransfer?.files?.[0];
+            if (file) _importPastedFile(file);
+        }
+
+        function handlePasteFileImport(e) {
+            const input = e.target;
+            const file  = input?.files?.[0];
+            if (input) input.value = '';
+            if (file) _importPastedFile(file);
+        }
+
+        async function _importPastedFile(file) {
+            const MAX_FILE_BYTES = 25 * 1024 * 1024;
+            if (file.size > MAX_FILE_BYTES) {
+                showSyncBar('⚠ 檔案過大（上限 25 MB），請選擇較小的網頁檔案', null, null, 4500);
+                return;
+            }
+
+            try {
+                const buf         = await file.arrayBuffer();
+                const bytes       = new Uint8Array(buf);
+                const lowerName   = (file.name || '').toLowerCase();
+                const fileStem    = (file.name || '').replace(/\.[^.]+$/, '').trim();
+                const inputUrl    = document.getElementById('paste-source-url')?.value.trim() || '';
+                const inputTitle  = document.getElementById('paste-custom-title')?.value.trim() || '';
+
+                // 檢查前 2048 bytes 是否為 MIME multipart/related (MHTML)
+                const headLen = Math.min(bytes.length, 2048);
+                let headStr = '';
+                for (let i = 0; i < headLen; i++) headStr += String.fromCharCode(bytes[i]);
+                const looksMhtml = lowerName.endsWith('.mhtml') || lowerName.endsWith('.mht') ||
+                    (typeof PureExtractor !== 'undefined' && PureExtractor.isMhtmlContent(headStr));
+
+                if (looksMhtml) {
+                    const parsed = PureExtractor.parseMhtml(bytes);
+                    if (!parsed?.html) {
+                        showSyncBar('⚠ 無法解析此 MHTML 檔案，請確認是否為瀏覽器儲存的離線網頁', null, null, 4500);
+                        return;
+                    }
+                    processPastedOrImported({
+                        html: parsed.html,
+                        text: '',
+                        sourceUrl: inputUrl || parsed.sourceUrl || '',
+                        customTitle: inputTitle || parsed.title || '',
+                        fallbackTitle: fileStem,
+                        sourceLabel: '匯入 MHTML'
+                    });
+                    return;
+                }
+
+                const decoded = typeof PureExtractor !== 'undefined'
+                    ? PureExtractor.decodeHtmlBytes(bytes, file.type || '')
+                    : new TextDecoder('utf-8').decode(bytes);
+                const isHtmlFile = lowerName.endsWith('.html') || lowerName.endsWith('.htm') ||
+                    (file.type || '').toLowerCase().includes('html');
+
+                processPastedOrImported({
+                    html: isHtmlFile ? decoded : '',
+                    text: isHtmlFile ? '' : decoded,
+                    sourceUrl: inputUrl,
+                    customTitle: inputTitle,
+                    fallbackTitle: fileStem,
+                    sourceLabel: isHtmlFile ? '匯入 HTML' : '匯入檔案'
+                });
+            } catch (err) {
+                console.error('[pureReader] Import file failed:', err);
+                showSyncBar(`⚠ 讀取檔案失敗：${err.message || '未知錯誤'}`, null, null, 4500);
+            }
+        }
+
+        function handlePasteSubmit(e) {
+            e.preventDefault();
+            const textVal     = document.getElementById('paste-content-input')?.value || '';
+            const sourceUrl   = document.getElementById('paste-source-url')?.value.trim() || '';
+            const customTitle = document.getElementById('paste-custom-title')?.value.trim() || '';
+            if (!_pastedRichHtml && !textVal.trim()) {
+                showSyncBar('⚠ 請先貼上文章內容，或點「匯入 .html / .mhtml 檔」', null, null, 3500);
+                document.getElementById('paste-content-input')?.focus();
+                return;
+            }
+            processPastedOrImported({
+                html: _pastedRichHtml,
+                text: textVal,
+                sourceUrl,
+                customTitle,
+                sourceLabel: _pastedRichSourceLabel || '手動貼上'
+            });
+        }
+
+        function processPastedOrImported({
+            html = '',
+            text = '',
+            sourceUrl = '',
+            customTitle = '',
+            fallbackTitle = '',
+            sourceLabel = '手動貼上'
+        } = {}) {
+            if (typeof PureExtractor === 'undefined' || typeof PureExtractor.extractFromPastedContent !== 'function') {
+                showSyncBar('⚠ 萃取引擎尚未載入完成，請重新整理後再試', null, null, 4000);
+                return false;
+            }
+
+            const t0 = performance.now();
+            const article = PureExtractor.extractFromPastedContent({
+                html,
+                text,
+                sourceUrl,
+                customTitle
+            });
+
+            if (!article || !article.content) {
+                showSyncBar('⚠ 找不到可閱讀的文章內容，請確認已貼入完整正文或 HTML 檔案', null, null, 4500);
+                return false;
+            }
+
+            if (fallbackTitle && (!article.title || article.title === '無標題' || article.title === '貼上的文章')) {
+                article.title = fallbackTitle;
+            }
+
+            const candidateUrl    = normalizeUrl(article.finalUrl || sourceUrl || '');
+            const hasValidHttpUrl = Boolean(candidateUrl && /^https?:\/\//i.test(candidateUrl));
+            const articleKey      = hasValidHttpUrl
+                ? candidateUrl
+                : `pasted://local/${_cacheKey((article.title || '') + '\n' + (article.textContent || '').slice(0, 300))}`;
+
+            let domain = article.domain || '';
+            if (hasValidHttpUrl) {
+                try { domain = new URL(articleKey).hostname; } catch (e) {}
+            }
+            if (!domain) domain = sourceLabel;
+
+            if (hasValidHttpUrl && html) {
+                _lastFetchedRawHtml = { url: articleKey, html };
+            }
+
+            const elapsedMs = Math.max(1, Math.round(performance.now() - t0));
+            const articleData = {
+                title:          article.title || '無標題',
+                byline:         article.byline || '',
+                publishedTime:  article.publishedTime || '',
+                siteName:       article.siteName || '',
+                content:        article.content,
+                domain,
+                charCount:      article.charCount || 0,
+                readingMinutes: article.readingMinutes || 0,
+                extractorTier:  article.extractorTier || 'paste',
+                fetchSource:    sourceLabel,
+                fetchElapsedMs: elapsedMs
+            };
+
+            _lastFailedUrl = null;
+            cacheArticle(articleKey, articleData);
+            saveToHistory(articleKey, articleData.title, domain);
+            clearPasteContent();
+            renderArticle(articleData, articleKey, false);
+            return true;
         }
 
         // ─══════════════════════════════════════════════════════════════════

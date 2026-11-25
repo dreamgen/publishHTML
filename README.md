@@ -93,6 +93,7 @@
 
 **功能：**
 - 貼上任意網址（可省略 `https://`），透過**四層正文萃取引擎**（站點特化規則 → Mozilla Readability → 內容密度啟發式 → JSON-LD 備援）自動提取乾淨正文與圖片，並顯示預估閱讀時間與字數
+- **貼上內容／匯入網頁模式**：遇到 Cloudflare 真人驗證或需登入網站時，可切換至此模式一鍵貼上剪貼簿富文本／純文字／Markdown，或直接匯入 `.html`／Android Chrome 離線下載的 `.mhtml`（自動拆封並還原內嵌圖片）進行無廣告閱讀
 - **對沖競速代理（Hedged Race）＋自動備援**：直連快取通道（Wikipedia／GitHub Markdown）、自有 CF Worker 代理、AllOrigins、CodeTabs 與 **Jina 無頭瀏覽器渲染**；偵測到 Bot 驗證頁或動態 SPA 空殼時自動穿透／升級渲染，支援 GBK／Big5／Shift_JIS 自動轉碼不亂碼
 - DOMPurify 語意化淨化，保留程式碼區塊、表格、圖說與 PTT 可摺疊推文，還原 `<noscript>`／懶加載圖片並附帶防盜連 `no-referrer`，同時清除隱藏浮水印、反爬蜜罐與零寬字元
 - 提供站內**強制重抓**與**無頭瀏覽器深度渲染重抓**，小說模式啟用／自動偵測直接復用原始 HTML 免重抓

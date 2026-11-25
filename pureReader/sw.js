@@ -1,12 +1,12 @@
 /**
- * Service Worker for 淨讀器 (pureReader) PWA — v11
+ * Service Worker for 淨讀器 (pureReader) PWA — v12
  *
  * 1. App Shell : Pre-cache core files + Stale-While-Revalidate
  * 2. Background Sync  : 網路恢復時自動重試失敗的擷取（使用 CF Proxy + Bot 驗證過濾 + 編碼解碼）
  * 3. Background Fetch : 關掉 App 後仍可繼續下載
  */
 
-const SW_VERSION   = 'v11';
+const SW_VERSION   = 'v12';
 const CACHE_NAME   = `pureReader-${SW_VERSION}`;
 const SHARED_CACHE = `pureReader-shared-${SW_VERSION}`;
 const ALL_CACHES   = [CACHE_NAME, SHARED_CACHE];
