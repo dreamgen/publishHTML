@@ -92,8 +92,10 @@
 > 過濾廣告，還原乾淨的網頁閱讀體驗
 
 **功能：**
-- 貼上任意網址，自動提取乾淨正文與圖片（Mozilla Readability）
-- DOMPurify 二次消毒，移除殘餘廣告與惡意指令碼
+- 貼上任意網址（可省略 `https://`），透過**四層正文萃取引擎**（站點特化規則 → Mozilla Readability → 內容密度啟發式 → JSON-LD 備援）自動提取乾淨正文與圖片，並顯示預估閱讀時間與字數
+- **對沖競速代理（Hedged Race）＋自動備援**：直連快取通道（Wikipedia／GitHub Markdown）、自有 CF Worker 代理、AllOrigins、CodeTabs 與 **Jina 無頭瀏覽器渲染**；偵測到 Bot 驗證頁或動態 SPA 空殼時自動穿透／升級渲染，支援 GBK／Big5／Shift_JIS 自動轉碼不亂碼
+- DOMPurify 語意化淨化，保留程式碼區塊、表格、圖說與 PTT 可摺疊推文，還原 `<noscript>`／懶加載圖片並附帶防盜連 `no-referrer`，同時清除隱藏浮水印、反爬蜜罐與零寬字元
+- 提供站內**強制重抓**與**無頭瀏覽器深度渲染重抓**，小說模式啟用／自動偵測直接復用原始 HTML 免重抓
 - 支援 **Web Share Target**：安裝後可從瀏覽器分享選單直接傳送網址閱讀
 - 支援 PureReader Userscript 預存目前章節起算的 **10／50／100 章**，可直接送到 PWA 或儲存為本地章節檔案
 - PWA 離線書庫可將單本小說目前已預存的全部正文下載為 `.purereader.json` 章節檔案，並可用既有匯入功能重新還原
@@ -103,8 +105,7 @@
 - **字體大小調整**（5 級，閱讀時顯示）
 - Userscript 閱讀模式可切換 **全螢幕／適中／書頁** 三種正文寬度，並記住選擇
 - 一鍵**複製全文**為純文字（含標題與來源網址）
-- 雙代理伺服器備援機制（AllOrigins → CodeTabs）
-- 完整離線支援（Service Worker 快取 CDN 函式庫）
+- 完整離線支援（Service Worker 預快取核心模組與 CDN 函式庫，並排除代理回應避免快取污染）
 
 **安裝：** 開啟 `/pureReader/` 後，點選「加入主畫面」即可安裝為獨立 App。
 
@@ -412,6 +413,7 @@ publishHTML/
 │       └── mahjongPractice-512.svg
 ├── pureReader/                  # 淨讀器 PureReader PWA（scope: ./，解析為 …/pureReader/）
 │   ├── index.html
+│   ├── extractor.js             # 對沖競速代理、編碼解碼、Markdown 轉換與四層正文萃取引擎
 │   ├── manifest.webmanifest
 │   ├── sw.js
 │   └── icons/

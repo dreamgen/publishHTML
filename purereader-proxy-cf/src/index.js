@@ -23,6 +23,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
   'Access-Control-Allow-Headers': '*',
+  'Access-Control-Expose-Headers': 'X-Cache, X-Final-URL, X-Detected-Charset, X-Bot-Challenge',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -48,29 +49,140 @@ function normalizeUrl(urlStr) {
 }
 
 /**
- * 產生偽裝瀏覽器請求的 Headers
+ * 阻擋內網／本機位址，避免 SSRF
  */
-function buildBrowserHeaders(targetUrl) {
+function isBlockedHostname(hostname) {
+  const h = (hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h || h === 'localhost' || h === '::1' || h === '0.0.0.0' || h.endsWith('.local') || h.endsWith('.internal')) {
+    return true;
+  }
+  const ipv4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+  }
+  return false;
+}
+
+/**
+ * 產生偽裝瀏覽器請求的 Headers（支援桌面直接造訪與行動端 Google 轉址雙配置）
+ */
+function buildBrowserHeaders(targetUrl, profile = 'desktop') {
   const u = new URL(targetUrl);
-  return {
-    'User-Agent':
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    'Accept':
-      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Referer': `${u.protocol}//${u.hostname}/`,
-    'sec-ch-ua': '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"macOS"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1',
-    'Cache-Control': 'max-age=0',
-    'Connection': 'keep-alive',
-  };
+  const isMobile = profile === 'mobile';
+  const headers = isMobile
+    ? {
+        'User-Agent':
+          'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36',
+        'Accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://www.google.com/',
+        'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+        'sec-ch-ua-mobile': '?1',
+        'sec-ch-ua-platform': '"Android"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+      }
+    : {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+        'Accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+      };
+
+  // PTT 網頁版自動帶入 over18=1，避免卡在滿 18 歲確認頁
+  if (u.hostname === 'www.ptt.cc' || u.hostname === 'ptt.cc') {
+    headers['Cookie'] = 'over18=1';
+  }
+  return headers;
+}
+
+/**
+ * 正規化字元編碼名稱
+ */
+function normalizeCharsetName(raw) {
+  if (!raw) return '';
+  const c = String(raw).trim().toLowerCase().replace(/^["']|["']$/g, '');
+  if (!c) return '';
+  if (c === 'utf8' || c === 'utf-8') return 'utf-8';
+  if (['gb2312', 'gbk', 'gb_2312', 'gb_2312-80', 'x-gbk', 'csgb2312', 'gb18030'].includes(c)) return 'gb18030';
+  if (['big5', 'big5-hkscs', 'cp950', 'csbig5', 'x-x-big5'].includes(c)) return 'big5';
+  if (['shift_jis', 'shift-jis', 'sjis', 'x-sjis', 'ms932', 'windows-31j'].includes(c)) return 'shift-jis';
+  if (['euc-jp', 'eucjp'].includes(c)) return 'euc-jp';
+  if (['euc-kr', 'euckr', 'ks_c_5601-1987', 'cp949'].includes(c)) return 'euc-kr';
+  if (['iso-8859-1', 'latin1', 'windows-1252'].includes(c)) return 'windows-1252';
+  return c;
+}
+
+/**
+ * 偵測 HTML 位元組的真實字元編碼（避免 GBK / Big5 / Shift_JIS 亂碼）
+ */
+function detectHtmlCharset(bytes, headerContentType) {
+  // 1. 優先讀取 HTTP Content-Type 的明確宣告
+  const headerMatch = (headerContentType || '').match(/charset\s*=\s*([^\s;]+)/i);
+  const headerCharset = normalizeCharsetName(headerMatch?.[1]);
+  if (headerCharset && headerCharset !== 'utf-8') {
+    return headerCharset;
+  }
+
+  // 2. 檢查 BOM
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return 'utf-8';
+  }
+
+  // 3. 掃描前 4KB HTML 標頭中的 <meta charset> / <meta http-equiv="Content-Type">
+  const headSlice = bytes.subarray(0, Math.min(bytes.length, 4096));
+  let asciiHead = '';
+  for (let i = 0; i < headSlice.length; i++) {
+    asciiHead += String.fromCharCode(headSlice[i]);
+  }
+  const metaMatch =
+    asciiHead.match(/<meta[^>]+charset\s*=\s*["']?\s*([a-zA-Z0-9._-]+)/i) ||
+    asciiHead.match(/<meta[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9._-]+)/i) ||
+    asciiHead.match(/<\?xml[^>]+encoding\s*=\s*["']([a-zA-Z0-9._-]+)/i);
+  const metaCharset = normalizeCharsetName(metaMatch?.[1]);
+  if (metaCharset) return metaCharset;
+
+  return headerCharset || 'utf-8';
+}
+
+/**
+ * 判斷是否為 Cloudflare / WAF 真人驗證頁（不應寫入 Worker 快取）
+ */
+function isBotChallengeText(text) {
+  if (!text) return false;
+  if (
+    text.includes('cf-browser-verification') ||
+    text.includes('Just a moment...') ||
+    text.includes('Checking if the site connection is secure') ||
+    text.includes('_cf_chl_opt') ||
+    text.includes('cf_chl_') ||
+    text.includes('Attention Required! | Cloudflare') ||
+    text.includes('_Incapsula_Resource') ||
+    text.includes('px-captcha')
+  ) {
+    return true;
+  }
+  if (text.length < 25000 && text.includes('Cloudflare') && text.includes('Ray ID')) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -480,6 +592,77 @@ async function handleHtmlShareOgImage(id, env, method = 'GET') {
 
 // ─── PureReader Proxy ────────────────────────────────────────────────────────
 
+async function fetchOriginWithProfile(targetUrl, profile, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'GET',
+      headers: buildBrowserHeaders(targetUrl, profile),
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const buffer = await res.arrayBuffer();
+    return { res, bytes: new Uint8Array(buffer) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 將 HTML 位元組轉為 UTF-8（若原始編碼為 GBK/Big5/Shift_JIS 等則自動轉碼，避免前端亂碼）
+ */
+function normalizeHtmlPayload(bytes, rawContentType) {
+  const isHtml = !rawContentType || /html|xml|text\/plain/i.test(rawContentType);
+  if (!isHtml) {
+    return {
+      body: bytes,
+      contentType: rawContentType || 'application/octet-stream',
+      detectedCharset: '',
+      sampleText: '',
+    };
+  }
+
+  const detected = detectHtmlCharset(bytes, rawContentType);
+
+  // 先確認是否原本就是合法 UTF-8（部分網站 HTML 寫舊 meta charset，實際已輸出 UTF-8）
+  let decodedText = '';
+  let effectiveCharset = detected;
+  if (detected !== 'utf-8') {
+    let isValidUtf8 = false;
+    try {
+      const utf8Strict = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      // 若含非 ASCII 字元且完全合法 UTF-8，以 UTF-8 為準
+      if (/[\u0080-\uffff]/.test(utf8Strict)) {
+        decodedText = utf8Strict;
+        effectiveCharset = 'utf-8';
+        isValidUtf8 = true;
+      }
+    } catch {
+      isValidUtf8 = false;
+    }
+
+    if (!isValidUtf8) {
+      try {
+        decodedText = new TextDecoder(detected, { fatal: false }).decode(bytes);
+      } catch {
+        decodedText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+        effectiveCharset = 'utf-8';
+      }
+    }
+  } else {
+    decodedText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  }
+
+  const baseMime = (rawContentType || 'text/html').split(';')[0].trim() || 'text/html';
+  return {
+    body: decodedText,
+    contentType: `${baseMime}; charset=utf-8`,
+    detectedCharset: effectiveCharset,
+    sampleText: decodedText,
+  };
+}
+
 async function handlePureReaderProxy(request) {
   // 只允許 GET / HEAD
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -488,6 +671,7 @@ async function handlePureReaderProxy(request) {
 
   const reqUrl = new URL(request.url);
   const targetUrlRaw = reqUrl.searchParams.get('url');
+  const forceFresh = reqUrl.searchParams.get('fresh') === '1';
 
   if (!targetUrlRaw) {
     return errorResponse('Missing required parameter: url');
@@ -500,41 +684,87 @@ async function handlePureReaderProxy(request) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return errorResponse('Only http and https URLs are supported');
     }
+    if (isBlockedHostname(parsed.hostname)) {
+      return errorResponse('Target host is not allowed', 403);
+    }
   } catch {
     return errorResponse('Invalid URL');
   }
 
   const cache = caches.default;
   const cacheKey = new Request(targetUrl, { method: 'GET' });
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    return withCors(cached, { 'X-Cache': 'HIT' });
+  if (!forceFresh) {
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      return withCors(cached, { 'X-Cache': 'HIT' });
+    }
   }
 
   try {
-    const headers = buildBrowserHeaders(targetUrl);
-    const originResponse = await fetch(targetUrl, {
-      method: 'GET',
-      headers,
-      redirect: 'follow',
-    });
+    let attempt = await fetchOriginWithProfile(targetUrl, 'desktop', 11000);
+    let payload = normalizeHtmlPayload(attempt.bytes, attempt.res.headers.get('Content-Type') || '');
+    let challenge = isBotChallengeText(payload.sampleText);
 
-    const body = await originResponse.arrayBuffer();
+    // 若桌面配置遭遇 403/406/429/503、Bot 驗證頁或極短內容，自動改用行動端 + Google Referer 再試一次
+    const needsRetry =
+      challenge ||
+      [403, 406, 429, 503].includes(attempt.res.status) ||
+      (attempt.res.status === 200 && attempt.bytes.length < 400);
 
-    let contentType = originResponse.headers.get('Content-Type') || 'text/html; charset=utf-8';
-    if (contentType.includes('text/html') && !contentType.includes('charset')) {
-      contentType += '; charset=utf-8';
+    if (needsRetry) {
+      try {
+        const mobileAttempt = await fetchOriginWithProfile(targetUrl, 'mobile', 8000);
+        const mobilePayload = normalizeHtmlPayload(
+          mobileAttempt.bytes,
+          mobileAttempt.res.headers.get('Content-Type') || ''
+        );
+        const mobileChallenge = isBotChallengeText(mobilePayload.sampleText);
+
+        const mobileBetter =
+          (mobileAttempt.res.status === 200 && !mobileChallenge && mobileAttempt.bytes.length >= 400) &&
+          (attempt.res.status !== 200 || challenge || mobileAttempt.bytes.length > attempt.bytes.length);
+
+        if (mobileBetter) {
+          attempt = mobileAttempt;
+          payload = mobilePayload;
+          challenge = mobileChallenge;
+        }
+      } catch {
+        // 保留第一次回應供客戶端判斷／切換下一個策略
+      }
     }
 
-    const responseToCache = new Response(body, {
-      status: originResponse.status,
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 's-maxage=600',
-      },
+    const finalUrl = attempt.res.url || targetUrl;
+    const responseHeaders = {
+      'Content-Type': payload.contentType,
+      'Cache-Control': 's-maxage=600',
+      'X-Final-URL': finalUrl,
+    };
+    if (payload.detectedCharset) {
+      responseHeaders['X-Detected-Charset'] = payload.detectedCharset;
+    }
+    if (challenge) {
+      responseHeaders['X-Bot-Challenge'] = '1';
+      responseHeaders['Cache-Control'] = 'no-store';
+    }
+
+    const responseToCache = new Response(payload.body, {
+      status: attempt.res.status,
+      headers: responseHeaders,
     });
 
-    return { responseToCache, cache, cacheKey, originStatus: originResponse.status };
+    const shouldCache =
+      attempt.res.status === 200 &&
+      !challenge &&
+      attempt.bytes.length >= 500;
+
+    return {
+      responseToCache,
+      cache,
+      cacheKey,
+      originStatus: attempt.res.status,
+      shouldCache,
+    };
   } catch (e) {
     return errorResponse(`Fetch failed: ${e.message}`, 502);
   }
@@ -580,8 +810,8 @@ export default {
       return result; // 錯誤回應（errorResponse 已內含 CORS）
     }
 
-    const { responseToCache, cache, cacheKey, originStatus } = result;
-    if (originStatus === 200) {
+    const { responseToCache, cache, cacheKey, shouldCache } = result;
+    if (shouldCache) {
       ctx.waitUntil(cache.put(cacheKey, responseToCache.clone()));
     }
     return withCors(responseToCache, { 'X-Cache': 'MISS' });

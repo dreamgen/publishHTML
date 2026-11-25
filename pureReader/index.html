@@ -55,6 +55,8 @@
     <script src="https://unpkg.com/@mozilla/readability/Readability.js"></script>
     <!-- DOMPurify (Sanitizes HTML to remove malicious scripts/ads) -->
     <script src="https://unpkg.com/dompurify@3.0.6/dist/purify.min.js"></script>
+    <!-- PureReader Enhanced Extraction & Hedged Fetching Engine -->
+    <script src="./extractor.js"></script>
 
     <style>
         /* Hide scrollbar for a cleaner look but keep functionality */
@@ -66,13 +68,52 @@
         /* Smooth transitions */
         body { transition: background-color 0.3s ease, color 0.3s ease; }
 
-        /* Typography adjustments for images */
+        /* Typography adjustments for clean reading */
         .prose img {
             border-radius: 0.5rem;
             margin-left: auto;
             margin-right: auto;
-            max-height: 60vh;
+            max-height: 65vh;
             object-fit: contain;
+        }
+        .prose figure {
+            margin: 1.5rem auto;
+            text-align: center;
+        }
+        .prose figcaption {
+            font-size: 0.85em;
+            color: #64748b;
+            margin-top: 0.5rem;
+        }
+        .dark .prose figcaption { color: #94a3b8; }
+        .prose pre {
+            overflow-x: auto;
+            border-radius: 0.75rem;
+            padding: 1rem 1.25rem;
+            font-size: 0.85em;
+            line-height: 1.6;
+        }
+        .prose table {
+            display: block;
+            overflow-x: auto;
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .prose details {
+            margin-top: 1.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid #e2e8f0;
+            background: rgba(248, 250, 252, 0.7);
+        }
+        .dark .prose details {
+            border-color: #334155;
+            background: rgba(30, 41, 59, 0.5);
+        }
+        .prose summary {
+            cursor: pointer;
+            font-weight: 600;
+            user-select: none;
         }
 
         /* Line clamp for history list items */
@@ -482,7 +523,7 @@
                 <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">貼上文章網址，自動提取無廣告正文。或安裝後從瀏覽器分享鍵直接傳送。</p>
 
                 <form id="url-form" class="flex flex-col gap-3" onsubmit="handleUrlSubmit(event)">
-                    <input type="url" id="url-input" placeholder="https://example.com/article" required
+                    <input type="text" inputmode="url" id="url-input" placeholder="https://example.com/article" required
                         class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
                     <button type="submit" id="submit-btn" class="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg shadow-md transition-all flex justify-center items-center gap-2">
                         <span>解析並淨化網頁</span>
@@ -626,8 +667,11 @@
 
         <!-- Error State -->
         <div id="error-section" class="hidden mb-6 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-4 text-center">
-            <p id="error-message" class="text-red-600 dark:text-red-400 font-medium"></p>
-            <button onclick="resetView()" class="mt-3 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">返回重試</button>
+            <p id="error-message" class="text-red-600 dark:text-red-400 font-medium whitespace-pre-line"></p>
+            <div class="mt-3 flex flex-wrap justify-center gap-2">
+                <button id="error-deep-retry-btn" onclick="retryLastUrlDeep()" class="hidden px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-md text-sm font-medium transition-colors">無頭瀏覽器深度重試</button>
+                <button onclick="resetView()" class="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">返回重試</button>
+            </div>
         </div>
 
         <!-- Article Display Area -->
@@ -635,16 +679,20 @@
             <div class="mb-8 border-b border-gray-200 dark:border-gray-800 pb-6">
                 <h1 id="article-title" class="text-3xl sm:text-4xl font-extrabold leading-tight mb-4"></h1>
                 <div class="flex flex-wrap items-center justify-between gap-3">
-                    <!-- 左側：作者、來源、快取標籤 -->
-                    <div class="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                    <!-- 左側：作者、日期、字數與閱讀時間、來源、擷取狀態標籤 -->
+                    <div class="flex flex-wrap items-center gap-2.5 text-sm text-gray-500 dark:text-gray-400">
                         <div id="article-author" class="hidden flex items-center gap-1">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
                             <span></span>
                         </div>
+                        <span id="article-date" class="hidden text-xs text-gray-400 dark:text-gray-500"></span>
+                        <span id="article-stats" class="hidden text-xs font-medium px-2 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-md"></span>
                         <div id="article-domain" class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
                             <a id="article-source-link" href="#" target="_blank" rel="noopener noreferrer" class="hover:text-blue-500 transition-colors"></a>
                         </div>
+                        <!-- 擷取通道與耗時指示器 -->
+                        <span id="extract-source-badge" class="hidden text-xs font-medium px-2 py-1 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 rounded-full"></span>
                         <!-- 快取載入指示器 -->
                         <span id="cache-badge" class="hidden text-xs font-medium px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-full flex items-center gap-1">
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
@@ -653,6 +701,10 @@
                     </div>
                     <!-- 右側：操作按鈕 -->
                     <div class="flex flex-wrap items-center gap-2">
+                        <button onclick="refreshCurrentArticle()" id="refresh-btn" title="略過快取重新抓取最新內容" class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                            <span class="text-xs">重抓</span>
+                        </button>
                         <button onclick="copyArticleText()" id="copy-btn" class="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-md transition-colors cursor-pointer">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
                             <span id="copy-text">複製全文</span>
@@ -1396,8 +1448,13 @@
         let currentArticleTitle = null;
         let currentArticleDomain = null;
         let _currentArticleData = null; // 目前顯示這篇文章的「原始擷取內容」，供反排文字工具重新套用用
+        let _lastFetchedRawHtml = { url: '', html: '' }; // 保留最近一次原始 HTML，供小說模式自動偵測／預載零重抓復用
+        let _lastFailedUrl      = null; // 最近一次擷取失敗的網址，供錯誤頁「無頭瀏覽器深度重試」使用
 
         function normalizeUrl(urlStr) {
+            if (typeof PureExtractor !== 'undefined') {
+                return PureExtractor.normalizeUrl(urlStr);
+            }
             if (!urlStr || typeof urlStr !== 'string') return urlStr;
             if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) return urlStr;
             try {
@@ -1705,15 +1762,32 @@
             extractArticle(url);
         }
 
-        // ─── Strategy Preference (per hostname) ──────────────────────────────────
+        // ─── Strategy Preference (per hostname, with 7-day TTL) ──────────────────
         function getStratPref() {
             try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STRAT_PREF) || '{}'); }
             catch (e) { return {}; }
         }
+        function getPreferredStrategyIdx(hostname) {
+            if (!hostname) return -1;
+            const entry = getStratPref()[hostname];
+            if (!entry || typeof entry.winner !== 'number') return -1;
+            const ttl = typeof PureExtractor !== 'undefined' ? PureExtractor.STRATEGY_PREF_TTL_MS : 7 * 24 * 3600 * 1000;
+            if (entry.savedAt && Date.now() - entry.savedAt > ttl) return -1;
+            return entry.winner;
+        }
         function saveStratPref(hostname, idx) {
+            if (!hostname || idx < 0) return;
             const p = getStratPref();
             p[hostname] = { winner: idx, savedAt: Date.now() };
             localStorage.setItem(STORAGE_KEY_STRAT_PREF, JSON.stringify(p));
+        }
+        function clearStratPref(hostname) {
+            if (!hostname) return;
+            const p = getStratPref();
+            if (p[hostname]) {
+                delete p[hostname];
+                localStorage.setItem(STORAGE_KEY_STRAT_PREF, JSON.stringify(p));
+            }
         }
 
         // ─── Failed Host Recording ────────────────────────────────────────────
@@ -1891,7 +1965,8 @@
             list.innerHTML = entries.map(([host, d]) => {
                 const safeHost = host.replace(/'/g, '%27');
                 const stratPref = getStratPref()[host];
-                const stratLabel = stratPref ? `▸ 慣用策略${stratPref.winner + 1}` : '';
+                const stratName = stratPref && typeof PureExtractor !== 'undefined' ? PureExtractor.STRATEGY_LABELS[stratPref.winner] : '';
+                const stratLabel = stratPref ? `▸ 慣用：${stratName || `策略${stratPref.winner + 1}`}` : '';
                 return `<li class="flex items-center gap-3 py-2.5">
                     <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium truncate text-gray-900 dark:text-gray-100">${host} <span class="text-xs text-blue-500">${stratLabel}</span></p>
@@ -1991,9 +2066,26 @@
             NovelMode.triggerAutoUpdates();
         }
 
-        function showError(msg) {
+        function showError(msg, failedUrl = null) {
             showSection('error-section');
             document.getElementById('error-message').innerText = msg;
+            _lastFailedUrl = failedUrl || _lastFailedUrl;
+            const retryDeepBtn = document.getElementById('error-deep-retry-btn');
+            if (retryDeepBtn) {
+                retryDeepBtn.classList.toggle('hidden', !_lastFailedUrl);
+            }
+        }
+
+        function retryLastUrlDeep() {
+            if (_lastFailedUrl) {
+                extractArticle(_lastFailedUrl, { forceRefresh: true, forceJina: true });
+            }
+        }
+
+        function refreshCurrentArticle(forceJina = false) {
+            if (currentArticleUrl) {
+                extractArticle(currentArticleUrl, { forceRefresh: true, forceJina });
+            }
         }
 
         // Abort the active foreground fetch and hand the URL to background processing
@@ -2029,7 +2121,10 @@
             // 1. Background Fetch API (continues even after app is closed)
             if ('BackgroundFetch' in reg) {
                 try {
-                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                    const cfBase = typeof PureExtractor !== 'undefined'
+                        ? PureExtractor.CF_PROXY_BASE
+                        : 'https://purereader-proxy-cf.dreamgen-dev.workers.dev/';
+                    const proxyUrl = `${cfBase}?url=${encodeURIComponent(url)}`;
                     await reg.backgroundFetch.fetch(encodeURIComponent(url).substring(0, 100), [proxyUrl], {
                         title: `淨讀器：${new URL(url).hostname}`, downloadTotal: 3 * 1024 * 1024
                     });
@@ -2152,336 +2247,216 @@
             _closeAllUnscramblePanels();
         }
 
-        async function processRawHtml(url, html) {
-            const doc = new DOMParser().parseFromString(html, 'text/html');
-            const arts = Array.from(doc.querySelectorAll('article'));
-            if (arts.length > 1) arts.slice(1).forEach(a => a.remove());
-            doc.querySelectorAll('img').forEach(img => {
-                const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
-                if (s) img.setAttribute('src', s);
+        // ─── Shared Sanitizer (保留表格、程式碼、圖說、摺疊留言等乾淨語意標籤) ───
+        function sanitizeArticleHtml(rawHtml) {
+            return DOMPurify.sanitize(rawHtml || '', {
+                USE_PROFILES: { html: true },
+                ADD_TAGS: [
+                    'img', 'figure', 'figcaption', 'picture', 'source',
+                    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+                    'pre', 'code', 'blockquote', 'details', 'summary', 'hr', 'mark', 'del', 'ins', 'sup', 'sub'
+                ],
+                ADD_ATTR: ['referrerpolicy', 'loading', 'decoding', 'target', 'rel', 'open'],
+                FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed']
             });
-            const sel = ['script','noscript','style','iframe','nav','footer','aside','header',
-                '.ad','.ads','.advertisement','.ad-container','.ad-wrapper','.ad-banner',
-                '[id^="ad-"]','[class^="ad-"]','[class*="-ad-"]','[class*="popup"]','[class*="modal"]',
-                '.dable-widget','#dablewidget','.popin','.outbrain','.teads','.taboola',
-                '[class*="related"]','[class*="recommend"]','[id*="recommend"]',
-                '[class*="sponsor"]','[class*="promo"]','[class*="advertorial"]','[class*="commercial"]',
-                '.ext-reading','.extend-reading','[class*="bottom-article"]','.next-article'];
-            doc.querySelectorAll(sel.join(',')).forEach(el => el.remove());
+        }
+
+        function extractCleanArticleFromHtml(html, url, { mode = 'article' } = {}) {
+            if (typeof PureExtractor !== 'undefined') {
+                return PureExtractor.extractFromHtml(html, url, { mode });
+            }
+            const doc = new DOMParser().parseFromString(html, 'text/html');
             const article = new Readability(doc).parse();
-            if (!article?.content) throw new Error('無法從背景擷取的頁面提取正文');
+            if (!article?.content) return null;
             let domain = ''; try { domain = new URL(url).hostname; } catch (e) {}
-            const data = { title: article.title || '無標題', byline: article.byline || '', content: article.content, domain };
+            return {
+                title: article.title || '無標題',
+                byline: article.byline || '',
+                content: article.content,
+                textContent: article.textContent || '',
+                domain,
+                finalUrl: url
+            };
+        }
+
+        async function processRawHtml(url, html) {
+            const article = extractCleanArticleFromHtml(html, url, { mode: 'article' });
+            if (!article?.content) throw new Error('無法從背景擷取的頁面提取正文');
+            const data = {
+                title:          article.title || '無標題',
+                byline:         article.byline || '',
+                publishedTime:  article.publishedTime || '',
+                content:        article.content,
+                domain:         article.domain || (() => { try { return new URL(url).hostname; } catch (e) { return ''; } })(),
+                charCount:      article.charCount || 0,
+                readingMinutes: article.readingMinutes || 0,
+                extractorTier:  article.extractorTier || ''
+            };
             await idbDelete('raw-html', url);
             cacheArticle(url, data);
-            saveToHistory(url, data.title, domain);
+            saveToHistory(url, data.title, data.domain);
             return data;
         }
 
-        // ─── Shared Proxy Fetch Strategy (extractArticle + NovelMode._fetchHtml) ──
-        // 方案 A：Cloudflare / bot 驗證頁一律視為「該策略失敗」，繼續 fallback 到下一個代理，
-        //         而不是把 challenge 頁當成「成功取得」後才在迴圈外終止。
+        // ─── Shared Proxy Fetch Strategy (委託給 PureExtractor 對沖競速引擎) ──────
         function isBotChallengePage(html) {
-            if (!html) return false;
-            // 注意：正常頁面也可能載入 cloudflareinsights beacon 或
-            // challenge-platform/.../jsd/main.js，不可當作 challenge 判定依據，
-            // 否則會誤殺正常內容。_cf_chl_opt / cf_chl_ 才是 challenge 頁專屬特徵。
-            return html.includes('cf-browser-verification')
-                || html.includes('Just a moment...')
-                || html.includes('Checking if the site connection is secure')
-                || html.includes('_cf_chl_opt')
-                || html.includes('cf_chl_')
-                || (html.includes('Cloudflare') && html.includes('Ray ID'));
+            return typeof PureExtractor !== 'undefined' ? PureExtractor.isBotChallengePage(html) : false;
         }
 
-        function isUsableHtml(html) {
-            if (!html || html.length < 500) return false;
-            if (isBotChallengePage(html)) return false;
-            return true;
+        function isUsableHtml(html, url = '') {
+            return typeof PureExtractor !== 'undefined' ? PureExtractor.isUsableHtml(html, url) : Boolean(html && html.length >= 500);
         }
 
-        // 方案 B：把 Jina Reader 的 markdown 回應（附加 Title:/URL Source:/Markdown Content: 前綴）
-        // 轉成最簡單的 HTML 段落，並將連結分離至 footer 以便 _findNextUrl 提取，下游可以繼續沿用 Readability 解析。
-        function _jinaMarkdownToHtml(markdown) {
-            if (!markdown) return '';
-            let title = '';
-            let body = markdown;
-            const titleMatch = markdown.match(/^Title:\s*(.+)$/m);
-            if (titleMatch) title = titleMatch[1].trim();
-            const contentIdx = markdown.indexOf('Markdown Content:');
-            if (contentIdx >= 0) body = markdown.slice(contentIdx + 'Markdown Content:'.length);
-            
-            const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            
-            let bodyText = body;
-            let linksText = '';
-            const linksIdx = body.indexOf('Links/Buttons:');
-            if (linksIdx >= 0) {
-                bodyText = body.slice(0, linksIdx);
-                linksText = body.slice(linksIdx);
-            }
-
-            const paragraphs = bodyText.split(/\n{2,}/)
-                .map(p => p.trim())
-                .filter(Boolean)
-                .map(p => `<p>${esc(p)}</p>`)
-                .join('\n');
-
-            let footerHtml = '';
-            if (linksText) {
-                const linkParagraphs = linksText.split(/\n{2,}/)
-                    .map(p => p.trim())
-                    .filter(Boolean)
-                    .map(p => {
-                        let escaped = esc(p);
-                        return `<p>${escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')}</p>`;
-                    })
-                    .join('\n');
-                footerHtml = `<footer>${linkParagraphs}</footer>`;
-            }
-
-            return `<html><head><title>${esc(title)}</title></head><body><article>${paragraphs}</article>${footerHtml}</body></html>`;
-        }
-
-        // 方案 B：新增第五個策略 Jina Reader 作為最終防線（真實無頭瀏覽器渲染，可通過多數 Cloudflare 檢查）。
-        function _buildProxyStrategies(url, signal, preferredIdx, setStatus) {
-            const label = (n, name) => `嘗試策略${n}${preferredIdx === (n - 1) ? ' ★慣用' : ''} (${name})…`;
-            const allStrategies = [
-                { idx: 0, label: 'PureReader Proxy (CF)', fn: async (sig = signal) => {
-                    if (setStatus) setStatus(label(1, '自有代理 (CF)'));
-                    const res = await fetch(`https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(url)}`, { signal: sig });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return await res.text();
-                }},
-                { idx: 1, label: 'CodeTabs', fn: async (sig = signal) => {
-                    if (setStatus) setStatus(label(2, 'CodeTabs'));
-                    const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, { signal: sig });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return await res.text();
-                }},
-                { idx: 2, label: 'AllOrigins JSON', fn: async (sig = signal) => {
-                    if (setStatus) setStatus(label(3, 'AllOrigins JSON'));
-                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal: sig });
-                    if (!res.ok) throw new Error('Proxy API Failed');
-                    const data = await res.json();
-                    if (data.status && data.status.http_code >= 400) throw new Error(`HTTP ${data.status.http_code}`);
-                    return data.contents;
-                }},
-                { idx: 3, label: 'AllOrigins Raw', fn: async (sig = signal) => {
-                    if (setStatus) setStatus(label(4, 'AllOrigins Raw'));
-                    const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: sig });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return await res.text();
-                }},
-                { idx: 4, label: 'Jina Reader', fn: async (sig = signal) => {
-                    if (setStatus) setStatus(label(5, 'Jina Reader'));
-                    // Jina Reader 頻率限制防護（每分鐘最多 20 次請求），在此處加入最少 3 秒請求間隔以防預載被阻擋
-                    if (typeof window._lastJinaFetchTime === 'undefined') window._lastJinaFetchTime = 0;
-                    const now = Date.now();
-                    const diff = now - window._lastJinaFetchTime;
-                    if (diff < 3000) {
-                        const delay = 3000 - diff;
-                        console.info(`[pureReader] Jina Reader 頻率限制防護：延遲 ${delay}ms`);
-                        await new Promise(res => setTimeout(res, delay));
-                    }
-                    window._lastJinaFetchTime = Date.now();
-
-                    try {
-                        const res = await fetch(`https://r.jina.ai/${url}`, {
-                            headers: { 'X-Return-Format': 'html' },
-                            signal: sig
-                        });
-                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                        return await res.text();
-                    } catch (e) {
-                        if (e.name === 'AbortError') throw e;
-                        // X-Return-Format 觸發 CORS preflight 失敗時，改用預設 markdown 搭配連結摘要以支持下一章預載
-                        console.warn('[pureReader] Jina Reader (html) failed, falling back to markdown:', e.message);
-
-                        // Fallback 請求同樣需要頻率防護
-                        const now2 = Date.now();
-                        const diff2 = now2 - window._lastJinaFetchTime;
-                        if (diff2 < 3000) {
-                            const delay2 = 3000 - diff2;
-                            console.info(`[pureReader] Jina Reader 頻率限制防護 (Fallback)：延遲 ${delay2}ms`);
-                            await new Promise(res => setTimeout(res, delay2));
-                        }
-                        window._lastJinaFetchTime = Date.now();
-
-                        const res2 = await fetch(`https://r.jina.ai/${url}`, {
-                            headers: { 'X-With-Links-Summary': 'true' },
-                            signal: sig
-                        });
-                        if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
-                        const markdown = await res2.text();
-                        return _jinaMarkdownToHtml(markdown);
-                    }
-                }}
-            ];
-            return preferredIdx >= 0
-                ? [allStrategies.find(s => s.idx === preferredIdx), ...allStrategies.filter(s => s.idx !== preferredIdx)]
-                : allStrategies;
-        }
-
-        // 方案 C：統一抓取邏輯，讓 extractArticle 與 NovelMode._fetchHtml 共用同一份策略清單與 bot 頁偵測，
-        // 避免重複程式碼與預載快取污染。回傳 { html, winnerIdx, lastError, hadChallengePage }。
-        const PROXY_TIMEOUT_MS      = 15000; // 一般代理單次請求上限
-        const PROXY_TIMEOUT_JINA_MS = 30000; // Jina 需實際渲染頁面，給較長時間
-        async function fetchViaProxies(url, { signal, preferredIdx = -1, setStatus } = {}) {
-            const strategies = _buildProxyStrategies(url, signal, preferredIdx, setStatus);
-            let lastError = '';
-            let hadChallengePage = false;
-            for (const strategy of strategies) {
-                // 單一策略逾時保護：部分公開代理（CodeTabs / AllOrigins）偶爾會卡住數十秒才失敗，
-                // 沒有逾時的話小說模式預載／自動更新會整個停在那裡，永遠輪不到後面可用的策略。
-                const timeoutMs = strategy.idx === 4 ? PROXY_TIMEOUT_JINA_MS : PROXY_TIMEOUT_MS;
-                const stratCtrl = new AbortController();
-                const onOuterAbort = () => stratCtrl.abort();
-                if (signal) {
-                    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-                    signal.addEventListener('abort', onOuterAbort, { once: true });
-                }
-                let timedOut = false;
-                const timer = setTimeout(() => { timedOut = true; stratCtrl.abort(); }, timeoutMs);
-                try {
-                    const content = await strategy.fn(stratCtrl.signal);
-                    if (isUsableHtml(content)) {
-                        return { html: content, winnerIdx: strategy.idx, lastError: '', hadChallengePage };
-                    }
-                    if (content && isBotChallengePage(content)) {
-                        hadChallengePage = true;
-                        lastError = 'Cloudflare 真人驗證';
-                        console.warn('[pureReader] Strategy hit bot challenge page, trying next:', strategy.label);
-                        continue; // 換下一個代理，而不是放棄
-                    }
-                    if (content) lastError = '回應內容過短';
-                } catch (e) {
-                    if (e.name === 'AbortError' && !timedOut) throw e; // 使用者／外部中止
-                    lastError = timedOut ? `逾時 (${Math.round(timeoutMs / 1000)}s)` : e.message;
-                    console.warn('[pureReader] Strategy failed:', strategy.label, lastError);
-                } finally {
-                    clearTimeout(timer);
-                    if (signal) signal.removeEventListener('abort', onOuterAbort);
-                }
-            }
-            return { html: null, winnerIdx: -1, lastError, hadChallengePage };
+        async function fetchViaProxies(url, options = {}) {
+            return await PureExtractor.fetchViaProxies(url, options);
         }
 
         // ─── Core: Extract + Render ───────────────────────────────────────────
-        async function extractArticle(url) {
+        async function extractArticle(url, { forceRefresh = false, forceJina = false, redirectDepth = 0, visitedUrls = null } = {}) {
             url = normalizeUrl(url);
             currentFetchUrl   = url;
             currentFetchAbort = new AbortController();
             showLoading();
-            // Show URL hint in loading screen
             const hint = document.getElementById('loading-url-hint');
-            if (hint) { try { hint.textContent = new URL(url).hostname; } catch(e) { hint.textContent = url; } }
+            if (hint) { try { hint.textContent = new URL(url).hostname; } catch (e) { hint.textContent = url; } }
+            const setStatus = t => { const el = document.getElementById('loading-status-text'); if (el) el.textContent = t; };
+            setStatus(forceJina ? '正在透過無頭瀏覽器深度渲染網頁…' : '準備連線擷取網頁…');
 
-            // 1. Cache-first: instant load
-            const cached = getCachedArticle(url);
-            if (cached) {
-                console.info('[pureReader] Serving from cache');
-                setTimeout(() => renderArticle(cached, url, true), 250);
-                return;
+            // 1. Cache-first: 瞬間載入（強制重抓／深度渲染時略過快取）
+            if (!forceRefresh && !forceJina) {
+                const cached = getCachedArticle(url);
+                if (cached) {
+                    console.info('[pureReader] Serving from cache');
+                    renderArticle(cached, url, true);
+                    currentFetchUrl   = null;
+                    currentFetchAbort = null;
+                    return;
+                }
             }
 
-            // 2. Fetch via proxies
+            // 2. Fetch via hedged proxy race / direct fast-path
             try {
                 new URL(url); // Validate URL
 
-                const setStatus = t => { const el = document.getElementById('loading-status-text'); if (el) el.textContent = t; };
-
-                // ─── 策略偏好：從上次成功的策略開始（降低等待時間）─────────────
                 let hostname = ''; try { hostname = new URL(url).hostname; } catch (e) {}
-                const stratPref    = getStratPref();
-                const preferredIdx = stratPref[hostname]?.winner ?? -1;
+                const preferredIdx = forceRefresh ? -1 : getPreferredStrategyIdx(hostname);
 
-                // 方案 A + B + C：共用 fetchViaProxies，challenge 頁自動 fallback 到下一個代理，
-                // 五種策略（含 Jina Reader）與 bot 頁偵測都在單一函式內完成。
-                const { html: htmlContent, winnerIdx, lastError, hadChallengePage } =
-                    await fetchViaProxies(url, { signal: currentFetchAbort?.signal, preferredIdx, setStatus });
+                let fetchRes = await fetchViaProxies(url, {
+                    signal: currentFetchAbort?.signal,
+                    preferredIdx,
+                    setStatus,
+                    mode: 'article',
+                    fresh: forceRefresh,
+                    forceJina,
+                    hedged: true
+                });
 
-                // 成功：儲存此 hostname 的偏好策略（僅在通過 isUsableHtml 驗證後寫入）
-                if (winnerIdx >= 0) saveStratPref(hostname, winnerIdx);
+                let { html: htmlContent, finalUrl, winnerIdx, winnerLabel, elapsedMs, lastError, hadChallengePage } = fetchRes;
+                finalUrl = finalUrl || url;
+
+                // 若原本慣用策略失敗而改由其他策略勝出，立即更新偏好；全部失敗則清除舊偏好
+                if (winnerIdx >= 0 && hostname) {
+                    saveStratPref(hostname, winnerIdx);
+                } else if (winnerIdx < 0 && preferredIdx >= 0 && hostname) {
+                    clearStratPref(hostname);
+                }
 
                 if (!htmlContent) {
                     if (hadChallengePage) {
-                        // 全部策略都失敗，且至少一個回傳 Cloudflare challenge 頁 → 明確告知使用者是防火牆阻擋
-                        recordFailedHost(url, 'Cloudflare 真人驗證');
-                        throw new Error('網站防火牆阻擋。目標網站啟用了「真人驗證機制」（Cloudflare），淨讀器為自動擷取，無法通過驗證。請利用「分享網址」按鈕在完整瀏覽器中開啟。');
+                        recordFailedHost(url, '網站防火牆／真人驗證');
+                        throw new Error('網站防火牆阻擋。目標網站啟用了「真人驗證機制」（Cloudflare / WAF），淨讀器無法自動通過驗證。請嘗試「無頭瀏覽器深度重試」或利用瀏覽器直接開啟。');
                     }
                     recordFailedHost(url, lastError || '所有代理均失敗');
-                    const bgResult = await queueForBackground(url);
-                    if (bgResult) { showSection('input-section'); return; }
-                    throw new Error(`無法讀取此網頁 (${lastError})。\n\n常見原因：\n1. 此為需登入或付費的文章\n2. 網站設定了嚴格的防抓取機制\n3. 網址無效`);
+                    if (!forceRefresh && !forceJina) {
+                        const bgResult = await queueForBackground(url);
+                        if (bgResult) { showSection('input-section'); return; }
+                    }
+                    throw new Error(`無法讀取此網頁 (${lastError})。\n\n常見原因：\n1. 此為需登入或付費的文章\n2. 網站設定了嚴格的防抓取機制\n3. 網址無效或暫時無法連線`);
                 }
 
-                setStatus('網頁已獲取，正在萃取正文…');
-
-                // ── JS Redirect 偵測 ──
-                if (htmlContent.length < 3000) {
-                    const jsRedirectMatch = htmlContent.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
-                    if (jsRedirectMatch && jsRedirectMatch[1]) {
-                        const redirectUrl = new URL(jsRedirectMatch[1], url).href;
-                        console.info('[pureReader] Detected JS redirect to:', redirectUrl);
-                        if (!window._extractRedirects) window._extractRedirects = new Set();
-                        if (!window._extractRedirects.has(redirectUrl)) {
-                            window._extractRedirects.add(redirectUrl);
-                            extractArticle(redirectUrl);
-                            return;
+                // ── Meta Refresh / JS Redirect 偵測（最多追蹤 3 層，不污染全域狀態）──
+                if (redirectDepth < 3 && typeof PureExtractor !== 'undefined') {
+                    const redirectUrl = PureExtractor.detectClientRedirect(htmlContent, finalUrl);
+                    if (redirectUrl) {
+                        const seen = visitedUrls || new Set([url]);
+                        if (!seen.has(redirectUrl)) {
+                            seen.add(redirectUrl);
+                            console.info('[pureReader] Following client redirect to:', redirectUrl);
+                            setStatus('偵測到轉址頁面，自動跟隨目標網址…');
+                            return await extractArticle(redirectUrl, {
+                                forceRefresh,
+                                forceJina,
+                                redirectDepth: redirectDepth + 1,
+                                visitedUrls: seen
+                            });
                         }
                     }
                 }
 
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(htmlContent, 'text/html');
+                setStatus('網頁已獲取，正在多層萃取並淨化正文…');
 
-                // ── 主文章鎖定：移除第一篇之後的所有 <article>，防止廣編稿 / 無限捲動污染 ──
-                const articleTags = Array.from(doc.querySelectorAll('article'));
-                if (articleTags.length > 1) {
-                    articleTags.slice(1).forEach(a => a.remove());
+                // 3. 四層正文萃取（站點特化 → Readability → 密度演算法 → JSON-LD）
+                let article = extractCleanArticleFromHtml(htmlContent, finalUrl, { mode: 'article' });
+
+                // 4. 動態網頁／萃取過短自動升級：若靜態代理無法抽出正文或內容過短，自動切換 Jina 無頭瀏覽器補救
+                const extractedTooThin = !article || !article.content || (article.textLength || 0) < 120;
+                if (extractedTooThin && winnerIdx !== 4 && !forceJina) {
+                    setStatus('靜態解析內容不足，自動切換無頭瀏覽器深度渲染…');
+                    const jinaRes = await fetchViaProxies(finalUrl, {
+                        signal: currentFetchAbort?.signal,
+                        setStatus,
+                        mode: 'article',
+                        forceJina: true
+                    });
+                    if (jinaRes.html) {
+                        const jinaArticle = extractCleanArticleFromHtml(jinaRes.html, jinaRes.finalUrl || finalUrl, { mode: 'article' });
+                        if (jinaArticle?.content && (jinaArticle.textLength || 0) > (article?.textLength || 0)) {
+                            article      = jinaArticle;
+                            htmlContent  = jinaRes.html;
+                            finalUrl     = jinaRes.finalUrl || finalUrl;
+                            winnerIdx    = 4;
+                            winnerLabel  = jinaRes.winnerLabel || 'Jina 渲染引擎';
+                            elapsedMs    = (elapsedMs || 0) + (jinaRes.elapsedMs || 0);
+                            if (hostname) saveStratPref(hostname, 4);
+                        }
+                    }
                 }
-
-                // ── 修復圖片懶加載 (Lazy Loading)：將隱藏的真實網址還原給 src ──
-                doc.querySelectorAll('img').forEach(img => {
-                    const realSrc = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || img.getAttribute('data-srcset');
-                    if (realSrc) img.setAttribute('src', realSrc.split(' ')[0]);
-                });
-
-                // ── 精準清除無用標籤，避免誤殺正常內容 (移除粗暴的 [class*="ad"]) ──
-                const unwantedSelectors = [
-                    'script', 'noscript', 'style', 'iframe', 'nav', 'footer', 'aside', 
-                    '.ad', '.ads', '.advertisement', '[class*="ad-container"]', '[class*="ad-slot"]', '[id^="ad-"]', '[class^="ad-"]',
-                    '[class*="popup"]', '[class*="modal"]', '.related-posts', '.recommendations'
-                ];
-                doc.querySelectorAll(unwantedSelectors.join(',')).forEach(el => el.remove());
-
-                const reader = new Readability(doc);
-                const article = reader.parse();
 
                 if (!article || !article.content) {
-                    throw new Error('自動提取正文失敗。該網頁可能不是標準文章格式，或內容被隱藏。');
+                    throw new Error('自動提取正文失敗。該網頁可能不是標準文章格式、需要登入，或內容由複雜腳本隱藏。');
                 }
 
-                let domain = '';
-                try { domain = new URL(url).hostname; } catch (e) {}
+                // 保留原始 HTML 供小說模式自動偵測／預載零重抓復用
+                _lastFetchedRawHtml = { url: finalUrl, html: htmlContent };
+                _lastFailedUrl = null;
+
+                let domain = article.domain || '';
+                if (!domain) { try { domain = new URL(finalUrl).hostname; } catch (e) {} }
 
                 const articleData = {
-                    title:   article.title  || '無標題',
-                    byline:  article.byline || '',
-                    content: article.content,
-                    domain
+                    title:          article.title || '無標題',
+                    byline:         article.byline || '',
+                    publishedTime:  article.publishedTime || '',
+                    siteName:       article.siteName || '',
+                    content:        article.content,
+                    domain,
+                    charCount:      article.charCount || 0,
+                    readingMinutes: article.readingMinutes || 0,
+                    extractorTier:  article.extractorTier || '',
+                    fetchSource:    winnerLabel || '',
+                    fetchElapsedMs: elapsedMs || 0
                 };
 
-                // 3. Save to cache & history, then render
+                // 5. Save to cache & history, then render
                 cacheArticle(url, articleData);
+                if (finalUrl !== url) cacheArticle(finalUrl, articleData);
                 saveToHistory(url, articleData.title, domain);
-                renderArticle(articleData, url, false);
+                renderArticle(articleData, finalUrl, false);
 
             } catch (error) {
                 if (error.name === 'AbortError') return; // cancelled by user via cancelAndQueue()
                 console.error('[pureReader] Extraction error:', error);
-                showError(error.message || '發生未知錯誤，請確認網址是否正確且公開可存取。');
+                showError(error.message || '發生未知錯誤，請確認網址是否正確且公開可存取。', url);
             } finally {
                 currentFetchUrl   = null;
                 currentFetchAbort = null;
@@ -2495,23 +2470,19 @@
             const contentEl = document.getElementById('article-content');
             if (!contentEl) return;
 
-            const cleanHTML = DOMPurify.sanitize(articleData.content, {
-                USE_PROFILES: { html: true },
-                ADD_TAGS: ['img', 'figure', 'figcaption'],
-                FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
-            });
-
+            const cleanHTML = sanitizeArticleHtml(articleData.content);
             contentEl.innerHTML = cleanHTML;
 
-            // Fix relative image URLs & add lazy loading
+            // Fix relative image URLs, prevent hotlink blocking (no-referrer) & add lazy loading
             try {
-                const baseUri = new URL(originalUrl).origin;
                 contentEl.querySelectorAll('img').forEach(img => {
                     const src = img.getAttribute('src');
                     if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-                        try { img.src = new URL(src, baseUri).href; } catch (e) {}
+                        try { img.src = new URL(src, originalUrl).href; } catch (e) {}
                     }
                     img.setAttribute('loading', 'lazy');
+                    img.setAttribute('decoding', 'async');
+                    img.referrerPolicy = 'no-referrer';
                     img.removeAttribute('width');
                     img.removeAttribute('height');
                 });
@@ -2520,20 +2491,24 @@
             // 反排文字修復：依使用者在工具列選擇的模式套用（自動判斷／全文反排／不處理）
             unscrambleReversedText(contentEl, getUnscrambleMode());
 
-            // 深度解析按鈕（改為直接開新分頁，避免 Vercel Timeout 沒有 CORS 標頭的問題）
+            // 站內深度渲染重抓與強制重抓控制列（直接在淨讀器內完成，不跳開原始亂版分頁）
             let deepContainer = document.getElementById('deep-fetch-container');
             if (deepContainer) deepContainer.remove();
 
-            const deepUrl = `https://purereader-proxy-cf.dreamgen-dev.workers.dev/?url=${encodeURIComponent(originalUrl)}`;
-
             contentEl.insertAdjacentHTML('afterend', `
                 <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺？此網頁可能需要 JS 渲染</p>
-                    <a href="${deepUrl}" target="_blank" rel="noopener noreferrer" class="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 mx-auto">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                        深度解析 (開新分頁讀取完整內容)
-                    </a>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">將透過無頭瀏覽器伺服器完整渲染 JS。</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺漏、圖片未載入，或網頁需要 JS 動態渲染？</p>
+                    <div class="flex flex-wrap items-center justify-center gap-3">
+                        <button type="button" onclick="refreshCurrentArticle(true)" class="px-5 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors text-sm font-medium border border-indigo-100 dark:border-indigo-800/50 inline-flex items-center justify-center gap-2 cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                            深度渲染重抓（無頭瀏覽器）
+                        </button>
+                        <button type="button" onclick="refreshCurrentArticle(false)" class="px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition-colors text-sm font-medium border border-gray-200 dark:border-gray-700 inline-flex items-center justify-center gap-2 cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                            強制重新擷取
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">深度渲染將透過無頭瀏覽器完整執行網頁腳本後，直接於淨讀器內重新排版。</p>
                 </div>
             `);
         }
@@ -2541,6 +2516,9 @@
         function renderArticle(articleData, originalUrl, isFromCache) {
             const titleEl      = document.getElementById('article-title');
             const authorEl     = document.getElementById('article-author');
+            const dateEl       = document.getElementById('article-date');
+            const statsEl      = document.getElementById('article-stats');
+            const sourceBadge  = document.getElementById('extract-source-badge');
             const sourceLinkEl = document.getElementById('article-source-link');
             const cacheBadge   = document.getElementById('cache-badge');
 
@@ -2551,6 +2529,38 @@
                 authorEl.querySelector('span').textContent = articleData.byline.trim();
             } else {
                 authorEl.classList.add('hidden');
+            }
+
+            if (dateEl) {
+                const formattedDate = articleData.publishedTime
+                    ? (typeof PureExtractor !== 'undefined' ? PureExtractor.formatPublishedDate(articleData.publishedTime) : articleData.publishedTime)
+                    : '';
+                if (formattedDate) {
+                    dateEl.textContent = formattedDate;
+                    dateEl.classList.remove('hidden');
+                } else {
+                    dateEl.classList.add('hidden');
+                }
+            }
+
+            if (statsEl) {
+                if (articleData.charCount > 0) {
+                    const mins = articleData.readingMinutes || 1;
+                    statsEl.textContent = `約 ${mins} 分鐘 · ${articleData.charCount.toLocaleString()} 字`;
+                    statsEl.classList.remove('hidden');
+                } else {
+                    statsEl.classList.add('hidden');
+                }
+            }
+
+            if (sourceBadge) {
+                if (!isFromCache && articleData.fetchSource) {
+                    const sec = articleData.fetchElapsedMs ? ` · ${(articleData.fetchElapsedMs / 1000).toFixed(1)}s` : '';
+                    sourceBadge.textContent = `${articleData.fetchSource}${sec}`;
+                    sourceBadge.classList.remove('hidden');
+                } else {
+                    sourceBadge.classList.add('hidden');
+                }
             }
 
             try {
@@ -2793,15 +2803,17 @@
             async function _scanForCandidates(url, keywords) {
                 const results = [];
                 try {
-                    // Try to get the original raw HTML (before Readability stripped it)
-                    // First check IndexedDB raw-html store
+                    // 優先復用剛抓下來的原始 HTML（0ms，免重抓），其次查 IndexedDB，最後才走代理
                     let html = null;
-                    const cached = await idbGet('raw-html', url).catch(() => null);
-                    if (cached?.html) {
-                        html = cached.html;
+                    if (_lastFetchedRawHtml?.html && _lastFetchedRawHtml.url === url) {
+                        html = _lastFetchedRawHtml.html;
                     } else {
-                        // Fetch fresh via proxy for scanning
-                        html = await _fetchHtml(url);
+                        const cached = await idbGet('raw-html', url).catch(() => null);
+                        if (cached?.html) {
+                            html = cached.html;
+                        } else {
+                            html = await _fetchHtml(url);
+                        }
                     }
                     if (!html) return results;
 
@@ -2917,16 +2929,19 @@
                 }
 
                 // Save current page content to novel-pages —— 優先使用 _currentArticleData
-                // 的原始擷取內容（未經反排修復），跟其他章節（prefetch 存的也是原始內容）
-                // 保持一致，這樣之後切換反排文字模式時才不會在已經修好的文字上重複套用。
+                // 的原始擷取內容（未經反排修復），並帶入剛取得的 rawHtml 讓預載不必重抓第一章。
                 const contentEl = document.getElementById('article-content');
                 const pristineContent = (_currentArticleData && currentArticleUrl === currentUrl)
                     ? _currentArticleData.content
                     : (contentEl?.innerHTML || '');
+                const initialRawHtml = (_lastFetchedRawHtml?.html && _lastFetchedRawHtml.url === currentUrl)
+                    ? _lastFetchedRawHtml.html
+                    : undefined;
                 await idbPut('novel-pages', {
                     url:       currentUrl,
                     title:     document.getElementById('article-title')?.textContent || '',
                     content:   pristineContent,
+                    ...(initialRawHtml ? { rawHtml: initialRawHtml } : {}),
                     fetchedAt: Date.now(),
                     sessionId: _session.id
                 });
@@ -3242,14 +3257,8 @@
                         if (activeCtrl.signal.aborted) break;
                         if (!nextHtml) break;
 
-                        // Parse with Readability
-                        const doc = new DOMParser().parseFromString(nextHtml, 'text/html');
-                        doc.querySelectorAll('img').forEach(img => {
-                            const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
-                            if (s) img.setAttribute('src', s);
-                        });
-                        doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
-                        const article = new Readability(doc).parse();
+                        // Parse with unified multi-tier extractor
+                        const article = extractCleanArticleFromHtml(nextHtml, foundNextUrl, { mode: 'novel' });
 
                         if (!article?.content) {
                             console.warn('[NovelMode] Could not parse next page:', foundNextUrl);
@@ -3296,11 +3305,7 @@
                             break;
                         }
 
-                        const cleanContent = DOMPurify.sanitize(article.content, {
-                            USE_PROFILES: { html: true },
-                            ADD_TAGS: ['img', 'figure', 'figcaption'],
-                            FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
-                        });
+                        const cleanContent = sanitizeArticleHtml(article.content);
 
                         await idbPut('novel-pages', {
                             url:       foundNextUrl,
@@ -3576,6 +3581,19 @@
                     try { sourceLink.textContent = new URL(url).hostname; } catch(e) {}
                 }
 
+                document.getElementById('extract-source-badge')?.classList.add('hidden');
+                document.getElementById('article-date')?.classList.add('hidden');
+                const statsEl = document.getElementById('article-stats');
+                if (statsEl) {
+                    const txt = (document.getElementById('article-content')?.textContent || '').replace(/\s+/g, '');
+                    if (txt.length > 0) {
+                        const mins = Math.max(1, Math.round(txt.length / 450));
+                        statsEl.textContent = `約 ${mins} 分鐘 · ${txt.length.toLocaleString()} 字`;
+                        statsEl.classList.remove('hidden');
+                    } else {
+                        statsEl.classList.add('hidden');
+                    }
+                }
                 document.getElementById('cache-badge')?.classList.remove('hidden');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
 
@@ -3946,33 +3964,38 @@
             }
 
             // ── Fetch helper (reuses proxy strategy from main app) ───────────
-            // 方案 C：共用最上層的 fetchViaProxies()（含 Jina Reader 與 bot 頁偵測），
-            // 避免與 extractArticle 重複邏輯，也避免 challenge 頁被當成章節寫入 IndexedDB 快取。
-            async function _fetchHtml(url, signal, depth = 0) {
+            // 共用 PureExtractor 的對沖競速、編碼解碼、Bot 頁偵測與轉址追蹤。
+            async function _fetchHtml(url, signal, depth = 0, { fresh = false } = {}) {
                 url = normalizeUrl(url);
                 if (depth > 3) return null; // Prevent infinite JS redirect loops
                 let html;
+                let finalUrl = url;
                 try {
-                    // 與單篇模式共用「此網域上次成功的策略」偏好：小說模式每章都要抓，
-                    // 若每次都從頭依序嘗試已知會失敗的代理（例如被 Cloudflare 擋下的自有代理），
-                    // 單章就要耗費數十秒，預載／自動更新看起來就像完全沒動作。
                     let hostname = ''; try { hostname = new URL(url).hostname; } catch (e) {}
-                    const preferredIdx = getStratPref()[hostname]?.winner ?? -1;
-                    let winnerIdx;
-                    ({ html, winnerIdx } = await fetchViaProxies(url, { signal, preferredIdx }));
-                    if (html && winnerIdx >= 0 && hostname && winnerIdx !== preferredIdx) saveStratPref(hostname, winnerIdx);
+                    const preferredIdx = getPreferredStrategyIdx(hostname);
+                    const res = await fetchViaProxies(url, {
+                        signal,
+                        preferredIdx,
+                        mode: 'novel',
+                        fresh,
+                        hedged: false
+                    });
+                    html = res.html;
+                    finalUrl = res.finalUrl || url;
+                    if (html && res.winnerIdx >= 0 && hostname && res.winnerIdx !== preferredIdx) {
+                        saveStratPref(hostname, res.winnerIdx);
+                    }
                 } catch (e) {
                     if (e.name === 'AbortError') throw e;
                     return null;
                 }
                 if (!html) return null;
 
-                if (html.length < 3000) {
-                    const jsRedirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
-                    if (jsRedirectMatch && jsRedirectMatch[1]) {
-                        const redirectUrl = new URL(jsRedirectMatch[1], url).href;
-                        console.info('[pureReader] _fetchHtml followed JS redirect to:', redirectUrl);
-                        return await _fetchHtml(redirectUrl, signal, depth + 1);
+                if (typeof PureExtractor !== 'undefined') {
+                    const redirectUrl = PureExtractor.detectClientRedirect(html, finalUrl);
+                    if (redirectUrl && redirectUrl !== url) {
+                        console.info('[pureReader] _fetchHtml followed redirect to:', redirectUrl);
+                        return await _fetchHtml(redirectUrl, signal, depth + 1, { fresh });
                     }
                 }
                 return html;
@@ -3993,23 +4016,11 @@
                 if (!currentPage || !currentPage.content) {
                     try {
                         showSyncBar('🔄 正在重新載入當前章節...', null, null, 2000);
-                        const html = await _fetchHtml(currentUrl);
+                        const html = await _fetchHtml(currentUrl, undefined, 0, { fresh: true });
                         if (html) {
-                            const doc = new DOMParser().parseFromString(html, 'text/html');
-                            // Clean images
-                            doc.querySelectorAll('img').forEach(img => {
-                                const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
-                                if (s) img.setAttribute('src', s);
-                            });
-                            // Clean scripts/ads
-                            doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads').forEach(el => el.remove());
-                            const article = new Readability(doc).parse();
+                            const article = extractCleanArticleFromHtml(html, currentUrl, { mode: 'novel' });
                             if (article?.content) {
-                                const cleanContent = DOMPurify.sanitize(article.content, {
-                                    USE_PROFILES: { html: true },
-                                    ADD_TAGS: ['img', 'figure', 'figcaption'],
-                                    FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
-                                });
+                                const cleanContent = sanitizeArticleHtml(article.content);
                                 await idbPut('novel-pages', {
                                     url:       currentUrl,
                                     title:     article.title || '',
@@ -4028,10 +4039,10 @@
                     }
                 }
 
-                // 2. Check for new chapters from the last page
+                // 2. Check for new chapters from the last page (略過代理快取以即時偵測新章節)
                 const lastUrl = _session.pages[_session.pages.length - 1];
                 try {
-                    const html = await _fetchHtml(lastUrl);
+                    const html = await _fetchHtml(lastUrl, undefined, 0, { fresh: true });
                     if (!html) {
                         showSyncBar('⚠ 無法連線至原始網頁', null, null, 3000);
                         return;
@@ -4114,13 +4125,7 @@
                         const nextHtml = await _fetchHtml(foundNextUrl);
                         if (!nextHtml) break;
 
-                        const doc = new DOMParser().parseFromString(nextHtml, 'text/html');
-                        doc.querySelectorAll('img').forEach(img => {
-                            const s = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
-                            if (s) img.setAttribute('src', s);
-                        });
-                        doc.querySelectorAll('script,noscript,style,iframe,nav,footer,aside,.ad,.ads,[class*="ad-container"],[class*="popup"]').forEach(el => el.remove());
-                        const article = new Readability(doc).parse();
+                        const article = extractCleanArticleFromHtml(nextHtml, foundNextUrl, { mode: 'novel' });
 
                         if (!article?.content) break;
 
@@ -4160,11 +4165,7 @@
                             break;
                         }
 
-                        const cleanContent = DOMPurify.sanitize(article.content, {
-                            USE_PROFILES: { html: true },
-                            ADD_TAGS: ['img', 'figure', 'figcaption'],
-                            FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input']
-                        });
+                        const cleanContent = sanitizeArticleHtml(article.content);
 
                         await idbPut('novel-pages', {
                             url:       foundNextUrl,
@@ -4493,7 +4494,7 @@
                     if (!session) return;
 
                     const lastUrl = session.pages[session.pages.length - 1];
-                    const html = await _fetchHtml(lastUrl);
+                    const html = await _fetchHtml(lastUrl, undefined, 0, { fresh: true });
                     if (!html) {
                         showSyncBar(`⚠ 無法連線至 ${session.title || '小說'} 網頁`, null, null, 3000);
                         return;
@@ -4548,7 +4549,7 @@
                         (async () => {
                             try {
                                 const lastUrl = s.pages[s.pages.length - 1];
-                                const html = await _fetchHtml(lastUrl);
+                                const html = await _fetchHtml(lastUrl, undefined, 0, { fresh: true });
                                 if (!html) return;
 
                                 const foundNextUrl = _findNextUrl(html, lastUrl, s);
