@@ -43,6 +43,7 @@
 
   const STRATEGY_LABELS = {
     '-2': '直連快取通道',
+    '-1': 'Android 原生引擎',
     0: '自有代理 (CF)',
     1: 'CodeTabs',
     2: 'AllOrigins JSON',
@@ -778,6 +779,55 @@
     return null;
   }
 
+  /**
+   * Android 原生混合 App 橋接通道（當執行於 PureReader Android App 時自動啟用）
+   * - 前景文章模式 (mode !== 'novel') 允許遭遇 Cloudflare / WAF 時自動彈出內建瀏覽器驗證頁
+   * - 小說背景預載模式 (mode === 'novel') 僅走無感原生連線與已驗證的同源 WebView，不中斷閱讀
+   */
+  async function tryAndroidNativeFetch(url, signal, { setStatus, mode = 'article', fresh = false } = {}) {
+    const bridge = globalScope.PureReaderNativeBridge;
+    if (!bridge || !bridge.isActive || typeof bridge.fetchHtml !== 'function') return null;
+
+    const allowInteractive = mode !== 'novel';
+    const startedAt = Date.now();
+    if (setStatus) setStatus('正在透過 Android 原生引擎讀取網頁…');
+
+    try {
+      const res = await bridge.fetchHtml(url, { signal, allowInteractive, fresh });
+      if (!res) return null;
+      const finalUrl = res.finalUrl || url;
+      if (res.html && isUsableHtml(res.html, finalUrl)) {
+        return {
+          html: res.html,
+          finalUrl,
+          winnerIdx: -1,
+          winnerLabel: res.winnerLabel || STRATEGY_LABELS['-1'],
+          elapsedMs: typeof res.elapsedMs === 'number' ? res.elapsedMs : Date.now() - startedAt,
+          isMarkdown: false,
+          hadChallengePage: Boolean(res.hadChallenge),
+        };
+      }
+      if (res.cancelled) {
+        return {
+          cancelled: true,
+          hadChallengePage: Boolean(res.hadChallenge),
+          lastError: res.error || '已取消內建瀏覽器驗證',
+        };
+      }
+      if (res.hadChallenge) {
+        return {
+          html: null,
+          hadChallengePage: true,
+          lastError: res.error || '網站防火牆／真人驗證',
+        };
+      }
+      return null;
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      return null;
+    }
+  }
+
   // ─── Proxy Circuit Breaker & Strategy Builders ─────────────────────────────
   function _isProxyCoolingDown(idx) {
     const h = _proxyHealth.get(idx);
@@ -1039,6 +1089,25 @@
       if (direct) return { ...direct, lastError: '' };
     }
 
+    // 1.5 Android 原生混合引擎（無 CORS 限制 + 同源 WebView 復用 + 自動內建瀏覽器救援）
+    const nativeRes = await tryAndroidNativeFetch(url, signal, { setStatus, mode, fresh });
+    if (nativeRes?.html) {
+      return { ...nativeRes, lastError: '' };
+    }
+    if (nativeRes?.cancelled) {
+      return {
+        html: null,
+        finalUrl: url,
+        winnerIdx: -1,
+        winnerLabel: '',
+        elapsedMs: Date.now() - overallStart,
+        isMarkdown: false,
+        hadChallengePage: Boolean(nativeRes.hadChallengePage),
+        lastError: nativeRes.lastError || '已取消內建瀏覽器驗證',
+      };
+    }
+    const nativeHadChallenge = Boolean(nativeRes?.hadChallengePage);
+
     // 2. 若此網域慣用策略已是 Jina（曾確認需無頭瀏覽器渲染或擋所有 HTTP 代理），直接先跑 Jina 省去等待時間
     if (preferredIdx === 4) {
       if (setStatus) setStatus('嘗試慣用通道 (Jina 渲染引擎)…');
@@ -1080,6 +1149,9 @@
       preferredIdx,
       setStatus,
     });
+    if (nativeHadChallenge) {
+      raceResult.hadChallengePage = true;
+    }
 
     if (raceResult.winner) {
       return {
@@ -1409,7 +1481,13 @@
       content: ['.article_content', '.article-content', 'article .content', 'article', '.post-content'],
       heading: ['h1.article_title', 'h1.title', 'article h1', 'h1'],
       byline: ['.author_name', '.article_author', '.author'],
-      remove: ['.related_articles', '.related-articles', '.share_box', '.social', '.ad', '.ads', '.author_box', '.tag_list', '.comment'],
+      remove: [
+        '.related_articles', '.related-articles', '.share_box', '.social',
+        '.ad', '.ads', '.adv01', '.adv02', '.adv03',
+        '.adv-article-content', '.adv-tall-desktop', '[class*="adv-article"]', '[class*="adv-tall"]',
+        '.tmgad', '[id^="tmgad-"]', '.remind', '.google-preferred-source',
+        '.author_box', '.tag_list', '.comment',
+      ],
     },
     {
       match: /(?:^|\.)(?:technews\.tw|ithome\.com\.tw|inside\.com\.tw|bnext\.com\.tw|storm\.mg|twreporter\.org|pansci\.asia)$/i,
@@ -1535,6 +1613,296 @@
       jsonLdBody: jsonLd.body,
       sourceTag,
       canonical,
+    };
+  }
+
+  // ─── Multi-Page Article Pagination Detector ────────────────────────────────
+  const _PAGINATION_QUERY_KEYS = new Set(['page', 'p', 'pn', 'paged', 'pg', 'pageno', 'pageindex']);
+  const _PAGINATION_CONTAINERS = [
+    '[role="navigation"][aria-label*="pag" i]',
+    'nav.pagination',
+    '.pagination',
+    '.pager',
+    '.page-links',
+    '.post-page-numbers',
+    '.page-numbers',
+    '.paging',
+    '.nav-links',
+    '[class*="pagination"]',
+    '[id*="pagination"]',
+  ];
+  const _PAGINATION_EXCLUDE =
+    '#comments, .comments, .comment-list, #disqus_thread, .related, .related-articles, .related_articles, .related-posts, footer:not([data-pr-links]), .footer, aside, .sidebar';
+  const _NEXT_TEXT_RE = /^(?:下一頁|下頁|next(?:\s*page)?|[›»→>]+)$/i;
+  const _PREV_TEXT_RE = /^(?:上一頁|上頁|prev(?:ious)?(?:\s*page)?|[‹«←<]+)$/i;
+
+  function _decomposeArticleUrl(urlStr) {
+    let u;
+    try {
+      u = new URL(urlStr);
+    } catch {
+      return null;
+    }
+    let pageNum = null;
+    let hasQueryPage = false;
+    const extraParams = [];
+    for (const [k, v] of u.searchParams.entries()) {
+      const lk = k.toLowerCase();
+      if (!hasQueryPage && _PAGINATION_QUERY_KEYS.has(lk) && /^\d{1,3}$/.test(v.trim())) {
+        hasQueryPage = true;
+        pageNum = parseInt(v.trim(), 10);
+      } else if (!TRACKING_PARAMS.has(lk)) {
+        extraParams.push([k, v]);
+      }
+    }
+    extraParams.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+    const querySig = extraParams.map(([k, v]) => `${k}=${v}`).join('&');
+
+    let path = (u.pathname || '/').replace(/\/+$/, '') || '/';
+    let ext = '';
+    const extMatch = path.match(/(\.(?:html?|shtml|php|aspx?))$/i);
+    if (extMatch) {
+      ext = extMatch[1].toLowerCase();
+      path = path.slice(0, -ext.length);
+    }
+
+    let stem = path;
+    let pathKind = 'base';
+    let pathPage = null;
+    const subMatch = path.match(/^(.*)\/(?:page|p)\/(\d{1,2})$/i);
+    if (subMatch) {
+      stem = subMatch[1] || '/';
+      pathKind = 'subpage';
+      pathPage = parseInt(subMatch[2], 10);
+    } else {
+      const childNumMatch = path.match(/^(.+)\/(\d{1,2})$/);
+      const sepNumMatch = path.match(/^(.+?)[_-](?:page|p)?(\d{1,2})$/i);
+      if (childNumMatch && parseInt(childNumMatch[2], 10) >= 1 && parseInt(childNumMatch[2], 10) <= 50) {
+        stem = childNumMatch[1];
+        pathKind = 'childnum';
+        pathPage = parseInt(childNumMatch[2], 10);
+      } else if (sepNumMatch && parseInt(sepNumMatch[2], 10) >= 1 && parseInt(sepNumMatch[2], 10) <= 50) {
+        stem = sepNumMatch[1];
+        pathKind = 'sepnum';
+        pathPage = parseInt(sepNumMatch[2], 10);
+      }
+    }
+
+    return {
+      origin: u.origin,
+      href: u.href,
+      path,
+      ext,
+      stem,
+      pathKind,
+      pathPage,
+      querySig,
+      hasQueryPage,
+      pageNum: pageNum !== null ? pageNum : pathPage,
+    };
+  }
+
+  function _isSameArticlePageUrl(candidateUrl, baseUrl) {
+    const cand = _decomposeArticleUrl(candidateUrl);
+    const base = _decomposeArticleUrl(baseUrl);
+    if (!cand || !base) return false;
+    if (cand.origin !== base.origin) return false;
+    if (cand.href === base.href) return false;
+    if (cand.querySig !== base.querySig) return false;
+
+    // Query-based pagination (e.g. /articles/129614 <-> /articles/129614?page=2)
+    if (cand.hasQueryPage || base.hasQueryPage) {
+      return cand.path === base.path && cand.ext === base.ext;
+    }
+
+    if (cand.ext !== base.ext && !(cand.pathKind === 'base' && base.pathKind === 'childnum') && !(base.pathKind === 'base' && cand.pathKind === 'childnum')) {
+      return false;
+    }
+
+    // Subpage path /slug/page/2 or /slug/p/2
+    if (cand.pathKind === 'subpage' || base.pathKind === 'subpage') {
+      return cand.stem === base.stem;
+    }
+
+    // Underscore/dash suffix /slug_2.html <-> /slug.html or /slug_3.html
+    if (cand.pathKind === 'sepnum' || base.pathKind === 'sepnum') {
+      return (cand.pathKind === 'sepnum' ? cand.stem : cand.path) === (base.pathKind === 'sepnum' ? base.stem : base.path);
+    }
+
+    // Direct child number /articles/slug <-> /articles/slug/2, or /articles/slug/2 <-> /articles/slug/3
+    if (cand.pathKind === 'childnum' && cand.stem === base.path) return true;
+    if (base.pathKind === 'childnum' && base.stem === cand.path) return true;
+    if (cand.pathKind === 'childnum' && base.pathKind === 'childnum' && cand.stem === base.stem) {
+      const segs = cand.stem.split('/').filter(Boolean);
+      return segs.length >= 2;
+    }
+
+    return false;
+  }
+
+  function _collectPaginationFromContainer(container, pageUrl, urlPageNum) {
+    const pagesMap = new Map();
+    let explicitNextUrl = '';
+    let explicitPrevUrl = '';
+    const hasListItems = Boolean(container.querySelector('li'));
+    const items = hasListItems
+      ? Array.from(container.querySelectorAll('li'))
+      : Array.from(container.querySelectorAll('a, span, strong, em, button'));
+
+    for (const item of items) {
+      const a = item.tagName === 'A' ? item : item.querySelector('a');
+      const rawHref = a?.getAttribute('href')?.trim() || '';
+      const resolved = rawHref && rawHref !== '#' && !/^javascript:/i.test(rawHref) ? safeResolveUrl(rawHref, pageUrl) : '';
+      const validTarget = resolved && _isSameArticlePageUrl(resolved, pageUrl) ? normalizeUrl(resolved) : '';
+
+      const label = (a?.textContent || item.textContent || '').replace(/\s+/g, ' ').trim();
+      const cls = `${item.className || ''} ${a?.className || ''}`.toLowerCase();
+      const aria = `${item.getAttribute('aria-label') || ''} ${a?.getAttribute('aria-label') || ''} ${a?.getAttribute('title') || ''}`
+        .trim()
+        .toLowerCase();
+      const rel = (a?.getAttribute('rel') || '').toLowerCase();
+      const markedActive =
+        /\b(?:active|current|selected|is-active)\b/.test(cls) ||
+        item.getAttribute('aria-current') === 'page' ||
+        a?.getAttribute('aria-current') === 'page' ||
+        (!a && /^\d{1,2}$/.test(label));
+
+      if (/^(\d{1,2})$/.test(label)) {
+        const num = parseInt(label, 10);
+        if (num >= 1 && num <= 50) {
+          const entryUrl = validTarget || (markedActive || urlPageNum === num ? normalizeUrl(pageUrl) : '');
+          if (entryUrl) {
+            const prevEntry = pagesMap.get(num);
+            pagesMap.set(num, {
+              page: num,
+              label: String(num),
+              url: entryUrl,
+              active: Boolean(markedActive || prevEntry?.active || urlPageNum === num),
+            });
+          }
+        }
+        continue;
+      }
+
+      if (!validTarget || /\bdisabled\b/.test(cls)) continue;
+      if (!explicitNextUrl && (rel.includes('next') || aria.includes('next') || _NEXT_TEXT_RE.test(label))) {
+        explicitNextUrl = validTarget;
+      } else if (!explicitPrevUrl && (rel.includes('prev') || aria.includes('prev') || _PREV_TEXT_RE.test(label))) {
+        explicitPrevUrl = validTarget;
+      }
+    }
+
+    const pages = Array.from(pagesMap.values()).sort((a, b) => a.page - b.page);
+    return { pages, explicitNextUrl, explicitPrevUrl };
+  }
+
+  function _extractPagination(doc, pageUrl) {
+    if (!doc || !pageUrl || !/^https?:\/\//i.test(pageUrl)) return null;
+    const baseInfo = _decomposeArticleUrl(pageUrl);
+    if (!baseInfo) return null;
+    const urlPageNum = baseInfo.pageNum;
+
+    const topArticles = Array.from(doc.querySelectorAll('article')).filter((a) => !a.parentElement?.closest('article'));
+    const scopes = [];
+    if (topArticles.length > 0) scopes.push(topArticles[0]);
+    const mainEl = doc.querySelector('main');
+    if (mainEl && !scopes.includes(mainEl)) scopes.push(mainEl);
+    if (doc.body && !scopes.includes(doc.body)) scopes.push(doc.body);
+
+    let bestPages = [];
+    let nextUrl = '';
+    let prevUrl = '';
+
+    for (const scope of scopes) {
+      let containers = [];
+      try {
+        containers = Array.from(scope.querySelectorAll(_PAGINATION_CONTAINERS.join(',')));
+      } catch {
+        containers = [];
+      }
+      for (const container of containers) {
+        if (container.closest(_PAGINATION_EXCLUDE)) continue;
+        const collected = _collectPaginationFromContainer(container, pageUrl, urlPageNum);
+        const usableCount = collected.pages.filter((p) => p.url && !p.active).length;
+        if (usableCount >= 1 || collected.explicitNextUrl || collected.explicitPrevUrl) {
+          bestPages = collected.pages;
+          if (collected.explicitNextUrl) nextUrl = collected.explicitNextUrl;
+          if (collected.explicitPrevUrl) prevUrl = collected.explicitPrevUrl;
+          break;
+        }
+      }
+      if (bestPages.length >= 2 || nextUrl || prevUrl) break;
+    }
+
+    // Jina Markdown footer / document rel="next" & rel="prev" fallback
+    if (bestPages.length < 2) {
+      const prFooter = doc.querySelector('footer[data-pr-links]');
+      if (prFooter) {
+        const collected = _collectPaginationFromContainer(prFooter, pageUrl, urlPageNum);
+        const usableCount = collected.pages.filter((p) => p.url && !p.active).length;
+        if (usableCount >= 1 || collected.explicitNextUrl || collected.explicitPrevUrl) {
+          bestPages = collected.pages;
+          if (!nextUrl && collected.explicitNextUrl) nextUrl = collected.explicitNextUrl;
+          if (!prevUrl && collected.explicitPrevUrl) prevUrl = collected.explicitPrevUrl;
+        }
+      }
+    }
+
+    if (!nextUrl || !prevUrl) {
+      const relCandidates = Array.from(
+        doc.querySelectorAll('head link[rel="next"], head link[rel="prev"], a[rel="next"], a[rel="prev"], footer[data-pr-links] a[href]')
+      );
+      for (const el of relCandidates) {
+        if (el.closest?.(_PAGINATION_EXCLUDE)) continue;
+        const resolved = safeResolveUrl(el.getAttribute('href'), pageUrl);
+        if (!resolved || !_isSameArticlePageUrl(resolved, pageUrl)) continue;
+        const norm = normalizeUrl(resolved);
+        const rel = (el.getAttribute('rel') || '').toLowerCase();
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!nextUrl && (rel.includes('next') || _NEXT_TEXT_RE.test(text))) {
+          nextUrl = norm;
+        } else if (!prevUrl && (rel.includes('prev') || _PREV_TEXT_RE.test(text))) {
+          prevUrl = norm;
+        }
+      }
+    }
+
+    // Ensure current page entry is present when pagination container only links sibling pages (e.g. Jina links [2], [3])
+    const expectedCurPage = urlPageNum || 1;
+    if (bestPages.length > 0 && !bestPages.some((p) => p.page === expectedCurPage)) {
+      if (bestPages.some((p) => p.page === expectedCurPage + 1 || p.page === expectedCurPage - 1)) {
+        bestPages.push({ page: expectedCurPage, label: String(expectedCurPage), url: normalizeUrl(pageUrl), active: true });
+        bestPages.sort((a, b) => a.page - b.page);
+      }
+    }
+
+    if (bestPages.length < 2 && !nextUrl && !prevUrl) return null;
+
+    let currentPage = bestPages.find((p) => p.active)?.page || null;
+    if (!currentPage && urlPageNum && bestPages.some((p) => p.page === urlPageNum)) {
+      currentPage = urlPageNum;
+    }
+    if (!currentPage && bestPages.length >= 2) {
+      currentPage = bestPages[0].page;
+    }
+
+    if (bestPages.length > 0 && currentPage) {
+      bestPages = bestPages.map((p) => ({ ...p, active: p.page === currentPage }));
+      const nextEntry = bestPages.find((p) => p.page === currentPage + 1);
+      const prevEntry = bestPages.find((p) => p.page === currentPage - 1);
+      if (nextEntry?.url) nextUrl = nextEntry.url;
+      if (prevEntry?.url) prevUrl = prevEntry.url;
+    }
+
+    if (!nextUrl && !prevUrl) return null;
+    const totalPages = bestPages.length >= 2 ? Math.max(...bestPages.map((p) => p.page)) : null;
+
+    return {
+      currentPage: currentPage || urlPageNum || (prevUrl && !nextUrl ? 2 : 1),
+      totalPages,
+      prevUrl,
+      nextUrl,
+      pages: bestPages,
     };
   }
 
@@ -1826,6 +2194,8 @@
     const chromeSelectors = [
       'nav', 'footer', 'aside', '[role="navigation"]', '[role="banner"]', '[role="complementary"]', '[role="contentinfo"]',
       '.ad', '.ads', '.advert', '.advertisement', '.adsbygoogle', '.adBlock', '.clickforceads',
+      '.adv01', '.adv02', '.adv03', '.adv-article-content', '.adv-tall-desktop',
+      '[class*="adv-article"]', '[class*="adv-tall"]', '.tmgad', '[id^="tmgad-"]',
       '.ad-container', '.ad-wrapper', '.ad-banner', '.ad-slot', '[data-ad-zone]', '[data-ad-slot]',
       '[data-google-query-id]', 'ins.adsbygoogle', '[id^="ad-"]', '[class^="ad-"]', '[class*="-ad-"]',
       '.dable-widget', '#dablewidget', '.popin', '.outbrain', '.teads', '.taboola', '.mgid',
@@ -2080,6 +2450,7 @@
     /^喜歡《?.*》?請大家收藏/,
     /^(?:上一章|上一頁)\s*(?:[|｜/\s]*目錄[|｜/\s]*)?(?:下一章|下一頁)$/,
     /^(?:延伸閱讀|相關閱讀|相關文章|推薦閱讀|猜你喜歡|更多新聞|分享到|複製連結|立即訂閱|加入會員)[:：]?$/,
+    /^(?:請)?繼續往下閱讀$/,
     /無彈窗免費閱讀|最新章節全文閱讀|筆趣閣.*最快更新/,
   ];
 
@@ -2134,6 +2505,9 @@
         el.remove();
       }
     });
+
+    // 4b. Strip publisher inline styles (prevents empty ad spacers like min-height: 360px and theme breaks)
+    rootEl.querySelectorAll('[style]').forEach((el) => el.removeAttribute('style'));
 
     // 5. Clean images: absolute URLs, dedupe consecutive identical images, strip trackers/placeholders
     let prevImgSrc = '';
@@ -2203,6 +2577,7 @@
     const doc = parser.parseFromString(html, 'text/html');
     const meta = _harvestMetadata(doc, url);
     const effectiveUrl = url || meta.canonical || '';
+    const pagination = _extractPagination(doc, effectiveUrl);
 
     let domain = '';
     try {
@@ -2226,6 +2601,7 @@
             siteName: meta.siteName,
             domain,
             leadImage: meta.leadImage,
+            pagination,
             content: polished.html,
             textContent: polished.plainText,
             extractorTier: 'markdown',
@@ -2330,6 +2706,7 @@
       siteName: meta.siteName || '',
       domain,
       leadImage: meta.leadImage || '',
+      pagination,
       content: polished.html,
       textContent: polished.plainText,
       extractorTier: bestResult.extractorTier,
@@ -2747,10 +3124,16 @@
     looksLikeEmptySpaShell,
     markdownToHtml,
     tryDirectFastFetch,
+    tryAndroidNativeFetch,
     fetchJinaReader,
     fetchViaProxies,
     resetProxyHealth,
     extractFromHtml,
+    extractPaginationFromHtml: (html, url, DOMParserImpl = globalScope.DOMParser) => {
+      if (!html || !url) return null;
+      const doc = new DOMParserImpl().parseFromString(html, 'text/html');
+      return _extractPagination(doc, url);
+    },
     isMhtmlContent,
     parseMhtml,
     extractFromPastedContent,

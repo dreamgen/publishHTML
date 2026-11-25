@@ -5,3 +5,14 @@ node_modules/
 .wrangler/
 dist/
 *.tgz
+pureReader-android/.gradle/
+pureReader-android/build/
+pureReader-android/app/build/
+pureReader-android/app/src/main/assets/www/
+pureReader-android/local.properties
+pureReader-android/.idea/
+pureReader-android/*.iml
+pureReader-android/*.apk
+pureReader-android/keystore.properties
+*.jks
+*.keystore

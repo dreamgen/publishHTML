@@ -542,6 +542,9 @@
                         <span>解析並淨化網頁</span>
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
                     </button>
+                    <button type="button" id="native-browse-url-btn" onclick="openUrlInNativeBrowser(false)" class="hidden w-full py-2.5 px-4 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-sm font-medium rounded-lg border border-indigo-200 dark:border-indigo-800/60 transition-colors flex justify-center items-center gap-2 cursor-pointer">
+                        <span>🌐 內建瀏覽器開啟網址（登入／選章／真人驗證）</span>
+                    </button>
                 </form>
 
                 <!-- Mode 2: Paste Content / Import HTML-MHTML Form -->
@@ -701,6 +704,56 @@
                 </div>
             </div>
 
+            <!-- Android App Auto-Update Settings Section -->
+            <div id="app-update-section" class="hidden w-full">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                        自動更新設定
+                    </h3>
+                    <span id="app-update-version-badge" class="text-xs font-medium px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">v1.0.0</span>
+                </div>
+                <div class="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700 flex flex-col gap-3">
+                    <div id="app-update-status-box" class="hidden text-xs rounded-lg px-3 py-2 border"></div>
+                    <div id="app-update-progress-wrap" class="hidden w-full">
+                        <div class="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                            <div id="app-update-progress-bar" class="h-full bg-blue-600 transition-all duration-200" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <label class="flex items-center justify-between gap-3 text-sm text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <span>啟動時自動檢查 GitHub 新版本</span>
+                        <input type="checkbox" id="app-update-auto-check" onchange="saveAppUpdateToggles()" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    </label>
+                    <label class="flex items-center justify-between gap-3 text-sm text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <span>發現新版時自動背景下載 APK</span>
+                        <input type="checkbox" id="app-update-auto-download" onchange="saveAppUpdateToggles()" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    </label>
+                    <label class="flex items-center justify-between gap-3 text-sm text-gray-700 dark:text-gray-200 cursor-pointer">
+                        <span>僅在 Wi-Fi 下自動檢查與下載</span>
+                        <input type="checkbox" id="app-update-wifi-only" onchange="saveAppUpdateToggles()" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    </label>
+                    <div class="flex flex-wrap gap-2 pt-1">
+                        <button type="button" id="app-update-check-btn" onclick="checkForAppUpdate(true)" class="flex-1 min-w-[140px] py-2 px-3 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-xl transition-colors text-sm border border-gray-200 dark:border-gray-600 shadow-sm cursor-pointer">
+                            立即檢查更新
+                        </button>
+                        <button type="button" id="app-update-install-btn" onclick="installAppUpdate()" class="hidden flex-1 min-w-[150px] py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm cursor-pointer">
+                            下載並安裝新版
+                        </button>
+                    </div>
+                    <details class="pt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <summary class="cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200">進階更新來源設定（個人版專用）</summary>
+                        <div class="mt-2 flex flex-col gap-2">
+                            <input type="url" id="app-update-manifest-input" placeholder="https://github.com/.../version.json" class="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200">
+                            <div class="flex gap-2">
+                                <button type="button" onclick="saveAppUpdateManifestUrl()" class="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 font-medium hover:bg-blue-100 cursor-pointer">儲存網址</button>
+                                <button type="button" onclick="resetAppUpdateManifestUrl()" class="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 cursor-pointer">還原預設</button>
+                            </div>
+                            <p id="app-update-last-checked" class="text-[11px] text-gray-400 dark:text-gray-500"></p>
+                        </div>
+                    </details>
+                </div>
+            </div>
+
             <!-- Failed Hosts Section -->
             <div id="failed-section" class="hidden w-full">
                 <div class="flex items-center justify-between mb-3">
@@ -739,6 +792,7 @@
         <div id="error-section" class="hidden mb-6 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-5 text-center">
             <p id="error-message" class="text-red-600 dark:text-red-400 font-medium whitespace-pre-line"></p>
             <div class="mt-4 flex flex-wrap justify-center gap-2">
+                <button id="error-native-browser-btn" onclick="openNativeBrowserRescueFromError()" class="hidden px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors cursor-pointer">🌐 內建瀏覽器驗證並自動擷取</button>
                 <button id="error-paste-mode-btn" onclick="openPasteModeFromError()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium transition-colors cursor-pointer">改用貼上內容／匯入網頁</button>
                 <a id="error-open-url-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">瀏覽器開啟原頁 ↗</a>
                 <button id="error-deep-retry-btn" onclick="retryLastUrlDeep()" class="hidden px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-md text-sm font-medium transition-colors cursor-pointer">無頭瀏覽器深度重試</button>
@@ -770,6 +824,12 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                             快取載入
                         </span>
+                        <!-- 多頁文章頁碼／下一頁快捷按鈕 -->
+                        <button type="button" id="article-page-pill" onclick="scrollToArticlePagination()" class="hidden text-xs font-medium px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 dark:text-amber-300 rounded-full flex items-center gap-1 transition-colors cursor-pointer"></button>
+                        <button type="button" id="article-top-next-btn" onclick="openTopNextArticlePage()" class="hidden text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center gap-1 shadow-xs transition-colors cursor-pointer">
+                            <span>下一頁</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </button>
                     </div>
                     <!-- 右側：操作按鈕 -->
                     <div class="flex flex-wrap items-center gap-2">
@@ -1434,7 +1494,8 @@
                 const cleanContent = DOMPurify.sanitize(chapter.contentHtml, {
                     USE_PROFILES: { html: true },
                     ADD_TAGS: ['img', 'figure', 'figcaption'],
-                    FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed']
+                    FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed'],
+                    FORBID_ATTR: ['style']
                 });
                 await idbPut('novel-pages', {
                     url: chapter.url,
@@ -1540,7 +1601,332 @@
             }
         }
 
+        // ─── Android Native Hybrid Bridge ─────────────────────────────────────
+        const IS_ANDROID_APP = Boolean(
+            window.PureReaderAndroid &&
+            typeof window.PureReaderAndroid.isAndroidApp === 'function' &&
+            window.PureReaderAndroid.isAndroidApp()
+        );
+        const _pendingNativeFetches = new Map();
+        let _nativeFetchSeq = 0;
+
+        function _utf8ToBase64(str) {
+            const bytes = new TextEncoder().encode(String(str || ''));
+            let bin = '';
+            const chunkSize = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                bin += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+            }
+            return btoa(bin);
+        }
+
+        window.PureReaderNativeBridge = {
+            isActive: IS_ANDROID_APP,
+            fetchHtml(url, { signal, allowInteractive = true, fresh = false } = {}) {
+                if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.requestFetch !== 'function') {
+                    return Promise.resolve(null);
+                }
+                if (signal?.aborted) {
+                    return Promise.reject(new DOMException('Aborted', 'AbortError'));
+                }
+                const reqId = `pr_nat_${Date.now()}_${++_nativeFetchSeq}`;
+                return new Promise((resolve, reject) => {
+                    const startedAt = Date.now();
+                    const cleanup = () => {
+                        const entry = _pendingNativeFetches.get(reqId);
+                        if (entry?.signal && entry?.onAbort) {
+                            entry.signal.removeEventListener('abort', entry.onAbort);
+                        }
+                        _pendingNativeFetches.delete(reqId);
+                    };
+                    const onAbort = () => {
+                        cleanup();
+                        try { window.PureReaderAndroid.cancelFetch(reqId); } catch (e) {}
+                        reject(new DOMException('Aborted', 'AbortError'));
+                    };
+                    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+                    _pendingNativeFetches.set(reqId, { resolve, reject, startedAt, cleanup, signal, onAbort });
+                    try {
+                        window.PureReaderAndroid.requestFetch(reqId, url, Boolean(allowInteractive), Boolean(fresh));
+                    } catch (e) {
+                        cleanup();
+                        resolve(null);
+                    }
+                });
+            },
+            openBrowser(url, autoCapture = false) {
+                if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.openInAppBrowser !== 'function') return false;
+                try {
+                    window.PureReaderAndroid.openInAppBrowser(url || '', Boolean(autoCapture));
+                    return true;
+                } catch (e) {
+                    console.warn('[pureReader] openInAppBrowser failed:', e);
+                    return false;
+                }
+            },
+            saveTextFile(filename, mimeType, textContent) {
+                if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.saveBase64File !== 'function') return false;
+                try {
+                    const b64 = _utf8ToBase64(textContent);
+                    window.PureReaderAndroid.saveBase64File(filename, mimeType || 'application/json', b64);
+                    return true;
+                } catch (e) {
+                    console.warn('[pureReader] saveBase64File failed:', e);
+                    return false;
+                }
+            }
+        };
+
+        window.__prNativeDeliver = function(kind, requestId, token) {
+            let payload = {};
+            try {
+                const raw = token && window.PureReaderAndroid && typeof window.PureReaderAndroid.consumePayload === 'function'
+                    ? window.PureReaderAndroid.consumePayload(token)
+                    : '';
+                if (raw) payload = JSON.parse(raw);
+            } catch (e) {
+                console.error('[pureReader] Failed to consume native payload:', e);
+                payload = {};
+            }
+
+            if (kind === 'fetch') {
+                const entry = _pendingNativeFetches.get(requestId);
+                if (!entry) return;
+                entry.cleanup();
+                entry.resolve({
+                    ...payload,
+                    elapsedMs: typeof payload.elapsedMs === 'number' ? payload.elapsedMs : (Date.now() - entry.startedAt)
+                });
+                return;
+            }
+
+            if (kind === 'manualCapture') {
+                if (!payload?.html) {
+                    showSyncBar('⚠ 未從內建瀏覽器取得有效網頁內容', null, null, 4000);
+                    return;
+                }
+                const targetUrl = normalizeUrl(payload.url || '');
+                if (targetUrl) {
+                    _lastFetchedRawHtml = { url: targetUrl, html: payload.html };
+                }
+                const ok = processPastedOrImported({
+                    html: payload.html,
+                    text: '',
+                    sourceUrl: targetUrl,
+                    customTitle: '',
+                    fallbackTitle: payload.title || '',
+                    sourceLabel: '內建瀏覽器擷取'
+                });
+                if (ok) {
+                    showSyncBar('✓ 已從內建瀏覽器擷取並淨化網頁', null, null, 3500);
+                }
+                return;
+            }
+
+            if (kind === 'sharedInput') {
+                const sharedUrl = normalizeUrl((payload.url || '').trim());
+                if (sharedUrl && /^https?:\/\//i.test(sharedUrl) && !payload.html) {
+                    const urlInput = document.getElementById('url-input');
+                    if (urlInput) urlInput.value = sharedUrl;
+                    extractArticle(sharedUrl);
+                } else if (payload.html || payload.text) {
+                    processPastedOrImported({
+                        html: payload.html || '',
+                        text: payload.text || '',
+                        sourceUrl: sharedUrl,
+                        customTitle: payload.title || '',
+                        sourceLabel: '系統分享匯入'
+                    });
+                }
+                return;
+            }
+
+            if (kind === 'tts') {
+                if (typeof NovelMode !== 'undefined' && typeof NovelMode.__onNativeTtsEvent === 'function') {
+                    NovelMode.__onNativeTtsEvent(payload);
+                }
+                return;
+            }
+
+            if (kind === 'appUpdate') {
+                renderAppUpdateState(payload, { notifyIfNew: true });
+            }
+        };
+
+        let _lastPromptedUpdateVersionCode = 0;
+
+        function initAppUpdateSettingsUI() {
+            if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.getUpdateSettingsJson !== 'function') return;
+            document.getElementById('app-update-section')?.classList.remove('hidden');
+            try {
+                const raw = window.PureReaderAndroid.getUpdateSettingsJson();
+                if (raw) renderAppUpdateState(JSON.parse(raw), { notifyIfNew: false });
+            } catch (e) {}
+        }
+
+        function renderAppUpdateState(state, { notifyIfNew = false } = {}) {
+            if (!state || typeof state !== 'object') return;
+            const verBadge = document.getElementById('app-update-version-badge');
+            const statusBox = document.getElementById('app-update-status-box');
+            const progressWrap = document.getElementById('app-update-progress-wrap');
+            const progressBar = document.getElementById('app-update-progress-bar');
+            const autoCheckEl = document.getElementById('app-update-auto-check');
+            const autoDlEl = document.getElementById('app-update-auto-download');
+            const wifiEl = document.getElementById('app-update-wifi-only');
+            const manifestEl = document.getElementById('app-update-manifest-input');
+            const lastCheckedEl = document.getElementById('app-update-last-checked');
+            const checkBtn = document.getElementById('app-update-check-btn');
+            const installBtn = document.getElementById('app-update-install-btn');
+
+            if (verBadge && state.versionName) {
+                verBadge.textContent = `v${state.versionName} (Build ${state.versionCode || 1})`;
+            }
+            if (autoCheckEl && typeof state.autoCheckEnabled === 'boolean') autoCheckEl.checked = state.autoCheckEnabled;
+            if (autoDlEl && typeof state.autoDownload === 'boolean') autoDlEl.checked = state.autoDownload;
+            if (wifiEl && typeof state.wifiOnly === 'boolean') wifiEl.checked = state.wifiOnly;
+            if (manifestEl && state.manifestUrl && document.activeElement !== manifestEl) {
+                manifestEl.value = state.manifestUrl;
+            }
+            if (lastCheckedEl) {
+                lastCheckedEl.textContent = state.lastCheckedAt > 0
+                    ? `上次檢查：${new Date(state.lastCheckedAt).toLocaleString()}`
+                    : '尚未檢查過更新';
+            }
+
+            if (progressWrap && progressBar) {
+                if (state.downloading) {
+                    progressWrap.classList.remove('hidden');
+                    progressBar.style.width = `${Math.max(5, Number(state.downloadProgress || 0))}%`;
+                } else {
+                    progressWrap.classList.add('hidden');
+                }
+            }
+
+            if (checkBtn) {
+                checkBtn.disabled = Boolean(state.checking || state.downloading);
+                checkBtn.textContent = state.checking ? '檢查中…' : '立即檢查更新';
+            }
+            if (installBtn) {
+                if (state.updateAvailable) {
+                    installBtn.classList.remove('hidden');
+                    installBtn.disabled = Boolean(state.downloading);
+                    if (state.downloading) {
+                        installBtn.textContent = `下載中 ${state.downloadProgress || 0}%`;
+                    } else if (state.readyToInstall) {
+                        installBtn.textContent = `安裝 v${state.latestVersionName}`;
+                    } else {
+                        installBtn.textContent = `下載並更新 v${state.latestVersionName}`;
+                    }
+                } else {
+                    installBtn.classList.add('hidden');
+                }
+            }
+
+            if (statusBox) {
+                const err = state.error || '';
+                const msg = state.statusMessage || '';
+                const notes = state.updateAvailable && state.releaseNotes ? `\n更新說明：${state.releaseNotes}` : '';
+                if (err) {
+                    statusBox.className = 'text-xs rounded-lg px-3 py-2 border bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 whitespace-pre-line';
+                    statusBox.textContent = err;
+                    statusBox.classList.remove('hidden');
+                } else if (msg) {
+                    const cls = state.updateAvailable
+                        ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-200'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300';
+                    statusBox.className = `text-xs rounded-lg px-3 py-2 border whitespace-pre-line ${cls}`;
+                    statusBox.textContent = msg + notes;
+                    statusBox.classList.remove('hidden');
+                } else {
+                    statusBox.classList.add('hidden');
+                }
+            }
+
+            if (
+                notifyIfNew &&
+                state.updateAvailable &&
+                state.latestVersionCode &&
+                state.latestVersionCode > _lastPromptedUpdateVersionCode &&
+                !state.downloading
+            ) {
+                _lastPromptedUpdateVersionCode = state.latestVersionCode;
+                showSyncBar(
+                    `🆕 發現新版 v${state.latestVersionName}（${state.readyToInstall ? '已下載就緒' : '可一鍵下載更新'}）`,
+                    state.readyToInstall ? '立即安裝' : '立即更新',
+                    () => {
+                        document.getElementById('sync-bar')?.classList.add('hidden');
+                        installAppUpdate();
+                    },
+                    0
+                );
+            }
+        }
+
+        function saveAppUpdateToggles() {
+            if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.saveUpdateSettingsJson !== 'function') return;
+            const payload = {
+                autoCheckEnabled: Boolean(document.getElementById('app-update-auto-check')?.checked),
+                autoDownload: Boolean(document.getElementById('app-update-auto-download')?.checked),
+                wifiOnly: Boolean(document.getElementById('app-update-wifi-only')?.checked),
+            };
+            try {
+                const raw = window.PureReaderAndroid.saveUpdateSettingsJson(JSON.stringify(payload));
+                if (raw) renderAppUpdateState(JSON.parse(raw), { notifyIfNew: false });
+            } catch (e) {}
+        }
+
+        function saveAppUpdateManifestUrl() {
+            if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.saveUpdateSettingsJson !== 'function') return;
+            const manifestUrl = (document.getElementById('app-update-manifest-input')?.value || '').trim();
+            try {
+                const raw = window.PureReaderAndroid.saveUpdateSettingsJson(JSON.stringify({ manifestUrl }));
+                if (raw) renderAppUpdateState(JSON.parse(raw), { notifyIfNew: false });
+            } catch (e) {}
+        }
+
+        function resetAppUpdateManifestUrl() {
+            if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.saveUpdateSettingsJson !== 'function') return;
+            try {
+                const raw = window.PureReaderAndroid.saveUpdateSettingsJson(JSON.stringify({ manifestUrl: '' }));
+                if (raw) renderAppUpdateState(JSON.parse(raw), { notifyIfNew: false });
+            } catch (e) {}
+        }
+
+        function checkForAppUpdate(manual = true) {
+            if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.checkAppUpdate !== 'function') return;
+            try {
+                window.PureReaderAndroid.checkAppUpdate(Boolean(manual));
+            } catch (e) {}
+        }
+
+        function installAppUpdate() {
+            if (!IS_ANDROID_APP || typeof window.PureReaderAndroid.installAppUpdate !== 'function') return;
+            try {
+                window.PureReaderAndroid.installAppUpdate();
+            } catch (e) {}
+        }
+
+        function openUrlInNativeBrowser(autoCapture = false) {
+            const raw = document.getElementById('url-input')?.value.trim() || '';
+            const normalized = normalizeUrl(raw);
+            if (!normalized || !/^https?:\/\//i.test(normalized)) {
+                showSyncBar('⚠ 請先輸入有效的 https:// 或 http:// 網址', null, null, 3500);
+                document.getElementById('url-input')?.focus();
+                return;
+            }
+            window.PureReaderNativeBridge.openBrowser(normalized, autoCapture);
+        }
+
+        function openNativeBrowserRescueFromError() {
+            const target = _lastFailedUrl && /^https?:\/\//i.test(_lastFailedUrl)
+                ? _lastFailedUrl
+                : (document.getElementById('url-input')?.value.trim() || '');
+            if (!target) return;
+            window.PureReaderNativeBridge.openBrowser(normalizeUrl(target), true);
+        }
+
         window.addEventListener('beforeinstallprompt', (e) => {
+            if (IS_ANDROID_APP) return;
             e.preventDefault();
             deferredPrompt = e;
             document.getElementById('install-banner').classList.remove('hidden');
@@ -1557,6 +1943,14 @@
         }
 
         // ─── Theme ────────────────────────────────────────────────────────────
+        function _syncNativeTheme() {
+            if (IS_ANDROID_APP && typeof window.PureReaderAndroid.setThemeDark === 'function') {
+                try {
+                    window.PureReaderAndroid.setThemeDark(document.documentElement.classList.contains('dark'));
+                } catch (e) {}
+            }
+        }
+
         function toggleTheme() {
             const html = document.documentElement;
             if (html.classList.contains('dark')) {
@@ -1570,6 +1964,7 @@
                 document.getElementById('theme-icon-moon').classList.add('hidden');
                 localStorage.setItem('pureReader-theme', 'dark');
             }
+            _syncNativeTheme();
         }
 
         function initTheme() {
@@ -1580,6 +1975,7 @@
                 document.getElementById('theme-icon-sun').classList.remove('hidden');
                 document.getElementById('theme-icon-moon').classList.add('hidden');
             }
+            _syncNativeTheme();
         }
 
         // ─── Font Size ────────────────────────────────────────────────────────
@@ -1943,12 +2339,17 @@
                     console.error('Failed to export novel-sessions', e);
                 }
 
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const jsonStr = JSON.stringify(data, null, 2);
+                const dateStr = new Date().toISOString().slice(0,10);
+                const filename = `pureReader_backup_${dateStr}.json`;
+                if (window.PureReaderNativeBridge.saveTextFile(filename, 'application/json', jsonStr)) {
+                    return;
+                }
+                const blob = new Blob([jsonStr], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                const dateStr = new Date().toISOString().slice(0,10);
-                a.download = `pureReader_backup_${dateStr}.json`;
+                a.download = filename;
                 a.click();
                 URL.revokeObjectURL(url);
             } catch(err) {
@@ -2140,6 +2541,11 @@
             if (id === 'input-section' || id === 'loading-section') {
                 target.classList.add('flex');
             }
+            if (IS_ANDROID_APP && typeof window.PureReaderAndroid.setKeepScreenOn === 'function') {
+                try {
+                    window.PureReaderAndroid.setKeepScreenOn(id === 'article-section');
+                } catch (e) {}
+            }
         }
 
         function showLoading() {
@@ -2174,6 +2580,10 @@
             const retryDeepBtn = document.getElementById('error-deep-retry-btn');
             if (retryDeepBtn) {
                 retryDeepBtn.classList.toggle('hidden', !hasHttpUrl);
+            }
+            const nativeBrowserBtn = document.getElementById('error-native-browser-btn');
+            if (nativeBrowserBtn) {
+                nativeBrowserBtn.classList.toggle('hidden', !(IS_ANDROID_APP && hasHttpUrl));
             }
             const openUrlLink = document.getElementById('error-open-url-link');
             if (openUrlLink) {
@@ -2368,7 +2778,8 @@
                     'pre', 'code', 'blockquote', 'details', 'summary', 'hr', 'mark', 'del', 'ins', 'sup', 'sub'
                 ],
                 ADD_ATTR: ['referrerpolicy', 'loading', 'decoding', 'target', 'rel', 'open'],
-                FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed']
+                FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed'],
+                FORBID_ATTR: ['style']
             });
         }
 
@@ -2401,7 +2812,8 @@
                 domain:         article.domain || (() => { try { return new URL(url).hostname; } catch (e) { return ''; } })(),
                 charCount:      article.charCount || 0,
                 readingMinutes: article.readingMinutes || 0,
-                extractorTier:  article.extractorTier || ''
+                extractorTier:  article.extractorTier || '',
+                pagination:     article.pagination || null
             };
             await idbDelete('raw-html', url);
             cacheArticle(url, data);
@@ -2555,7 +2967,8 @@
                     readingMinutes: article.readingMinutes || 0,
                     extractorTier:  article.extractorTier || '',
                     fetchSource:    winnerLabel || '',
-                    fetchElapsedMs: elapsedMs || 0
+                    fetchElapsedMs: elapsedMs || 0,
+                    pagination:     article.pagination || null
                 };
 
                 // 5. Save to cache & history, then render
@@ -2587,6 +3000,22 @@
             const cleanHTML = sanitizeArticleHtml(articleData.content);
             contentEl.innerHTML = cleanHTML;
 
+            // 清除舊版快取可能殘留的穿插廣告占位框與「請繼續往下閱讀」提示
+            try {
+                contentEl.querySelectorAll('.adv01, .adv02, .adv03, .adv-article-content, .adv-tall-desktop, .tmgad, [id^="tmgad-"]').forEach(el => el.remove());
+                contentEl.querySelectorAll('p, div, span, li').forEach(el => {
+                    if (!el.isConnected || el.children.length > 2 || el.querySelector('img, table, pre, code')) return;
+                    const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (/^(?:請)?繼續往下閱讀$/.test(t)) el.remove();
+                });
+                Array.from(contentEl.querySelectorAll('p, div, span, section, figure')).reverse().forEach(el => {
+                    if (!el.isConnected) return;
+                    if (!el.textContent.trim() && !el.querySelector('img, video, audio, table, pre, hr')) {
+                        el.remove();
+                    }
+                });
+            } catch (e) {}
+
             // Fix relative image URLs, prevent hotlink blocking (no-referrer) & add lazy loading
             try {
                 contentEl.querySelectorAll('img').forEach(img => {
@@ -2605,12 +3034,18 @@
             // 反排文字修復：依使用者在工具列選擇的模式套用（自動判斷／全文反排／不處理）
             unscrambleReversedText(contentEl, getUnscrambleMode());
 
+            // 站內分頁導覽（「上一頁／頁碼／下一頁」自動偵測與切換）
+            let prevPagContainer = document.getElementById('article-pagination-container');
+            if (prevPagContainer) prevPagContainer.remove();
+            renderArticlePaginationControls(articleData, isLocalPasted);
+
             // 站內深度渲染重抓與強制重抓控制列（直接在淨讀器內完成，不跳開原始亂版分頁）
             let deepContainer = document.getElementById('deep-fetch-container');
             if (deepContainer) deepContainer.remove();
 
             if (!isLocalPasted) {
-                contentEl.insertAdjacentHTML('afterend', `
+                const anchorEl = document.getElementById('article-pagination-container') || contentEl;
+                anchorEl.insertAdjacentHTML('afterend', `
                     <div id="deep-fetch-container" class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center pb-8">
                         <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">內容有缺漏、圖片未載入，或網頁需要 JS 動態渲染？</p>
                         <div class="flex flex-wrap items-center justify-center gap-3">
@@ -2627,6 +3062,121 @@
                     </div>
                 `);
             }
+        }
+
+        function _getActivePagination(articleData, isLocalPasted) {
+            if (isLocalPasted) return null;
+            if (typeof NovelMode !== 'undefined' && NovelMode.active) return null;
+            const pag = articleData?.pagination;
+            if (!pag || (!pag.nextUrl && !pag.prevUrl)) return null;
+            return pag;
+        }
+
+        function navigateToArticlePage(targetUrl) {
+            if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) return;
+            const normalized = normalizeUrl(targetUrl);
+            const urlInput = document.getElementById('url-input');
+            if (urlInput) urlInput.value = normalized;
+            extractArticle(normalized);
+        }
+
+        function scrollToArticlePagination() {
+            const box = document.getElementById('article-pagination-container');
+            if (box) {
+                box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else if (_currentArticleData?.pagination?.nextUrl) {
+                navigateToArticlePage(_currentArticleData.pagination.nextUrl);
+            }
+        }
+
+        function openTopNextArticlePage() {
+            const nextUrl = _currentArticleData?.pagination?.nextUrl;
+            if (nextUrl) navigateToArticlePage(nextUrl);
+        }
+
+        function _makePaginationButton(label, targetUrl, { active = false, disabled = false, primary = false } = {}) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = label;
+            if (active) {
+                btn.className = 'min-w-[2.25rem] px-3 py-2 text-sm font-semibold rounded-xl bg-blue-600 text-white shadow-xs cursor-default';
+                btn.setAttribute('aria-current', 'page');
+                btn.disabled = true;
+            } else if (disabled || !targetUrl) {
+                btn.className = 'px-3.5 py-2 text-sm font-medium rounded-xl bg-gray-100 dark:bg-gray-800/60 text-gray-400 dark:text-gray-600 border border-gray-200 dark:border-gray-800 cursor-not-allowed';
+                btn.disabled = true;
+            } else if (primary) {
+                btn.className = 'px-4 py-2 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors inline-flex items-center gap-1.5 cursor-pointer';
+                btn.addEventListener('click', () => navigateToArticlePage(targetUrl));
+            } else {
+                btn.className = 'min-w-[2.25rem] px-3.5 py-2 text-sm font-medium rounded-xl bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-gray-700 transition-colors cursor-pointer';
+                btn.addEventListener('click', () => navigateToArticlePage(targetUrl));
+            }
+            return btn;
+        }
+
+        function renderArticlePaginationControls(articleData, isLocalPasted) {
+            const pagePill = document.getElementById('article-page-pill');
+            const topNextBtn = document.getElementById('article-top-next-btn');
+            const contentEl = document.getElementById('article-content');
+            const pag = _getActivePagination(articleData, isLocalPasted);
+
+            if (!pag) {
+                if (pagePill) pagePill.classList.add('hidden');
+                if (topNextBtn) topNextBtn.classList.add('hidden');
+                return;
+            }
+
+            const cur = pag.currentPage || 1;
+            const totalText = pag.totalPages ? `第 ${cur} / ${pag.totalPages} 頁` : `第 ${cur} 頁`;
+            if (pagePill) {
+                pagePill.textContent = totalText;
+                pagePill.classList.remove('hidden');
+            }
+            if (topNextBtn) {
+                if (pag.nextUrl) {
+                    const nextNum = pag.currentPage ? pag.currentPage + 1 : null;
+                    const labelEl = topNextBtn.querySelector('span');
+                    if (labelEl) labelEl.textContent = nextNum ? `第 ${nextNum} 頁` : '下一頁';
+                    topNextBtn.classList.remove('hidden');
+                } else {
+                    topNextBtn.classList.add('hidden');
+                }
+            }
+
+            if (!contentEl) return;
+            const nav = document.createElement('nav');
+            nav.id = 'article-pagination-container';
+            nav.setAttribute('aria-label', '文章分頁導覽');
+            nav.className = 'mt-10 pt-6 border-t border-gray-200 dark:border-gray-800 flex flex-col items-center gap-3';
+
+            const summary = document.createElement('p');
+            summary.className = 'text-xs font-medium text-gray-500 dark:text-gray-400';
+            summary.textContent = pag.totalPages
+                ? `本文共 ${pag.totalPages} 頁・目前閱讀第 ${cur} 頁`
+                : `偵測到文章分頁・目前第 ${cur} 頁`;
+            nav.appendChild(summary);
+
+            const row = document.createElement('div');
+            row.className = 'flex flex-wrap items-center justify-center gap-2';
+
+            row.appendChild(_makePaginationButton('← 上一頁', pag.prevUrl, { disabled: !pag.prevUrl }));
+
+            if (Array.isArray(pag.pages) && pag.pages.length >= 2) {
+                for (const p of pag.pages) {
+                    row.appendChild(
+                        _makePaginationButton(p.label || String(p.page), p.url, {
+                            active: Boolean(p.active),
+                        })
+                    );
+                }
+            }
+
+            const nextLabel = pag.nextUrl && pag.currentPage ? `下一頁（第 ${pag.currentPage + 1} 頁）→` : '下一頁 →';
+            row.appendChild(_makePaginationButton(nextLabel, pag.nextUrl, { disabled: !pag.nextUrl, primary: Boolean(pag.nextUrl) }));
+
+            nav.appendChild(row);
+            contentEl.insertAdjacentElement('afterend', nav);
         }
 
         function renderArticle(articleData, originalUrl, isFromCache) {
@@ -3173,7 +3723,8 @@
                 readingMinutes: article.readingMinutes || 0,
                 extractorTier:  article.extractorTier || 'paste',
                 fetchSource:    sourceLabel,
-                fetchElapsedMs: elapsedMs
+                fetchElapsedMs: elapsedMs,
+                pagination:     article.pagination || null
             };
 
             _lastFailedUrl = null;
@@ -3757,7 +4308,22 @@
                         // Fetch the next page
                         const nextHtml = await _fetchHtml(foundNextUrl, activeCtrl.signal);
                         if (activeCtrl.signal.aborted) break;
-                        if (!nextHtml) break;
+                        if (!nextHtml) {
+                            if (IS_ANDROID_APP && _lastNovelChallengeUrl) {
+                                const rescueUrl = _lastNovelChallengeUrl;
+                                _lastNovelChallengeUrl = null;
+                                showSyncBar(
+                                    '⚠ 預載後續章節時遇真人驗證',
+                                    '開啟內建瀏覽器驗證',
+                                    () => {
+                                        document.getElementById('sync-bar')?.classList.add('hidden');
+                                        window.PureReaderNativeBridge.openBrowser(rescueUrl, true);
+                                    },
+                                    12000
+                                );
+                            }
+                            break;
+                        }
 
                         // Parse with unified multi-tier extractor
                         const article = extractCleanArticleFromHtml(nextHtml, foundNextUrl, { mode: 'novel' });
@@ -4277,19 +4843,25 @@
                         chapters
                     };
 
-                    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json;charset=utf-8' });
+                    const jsonStr = JSON.stringify(bundle, null, 2);
+                    const filename = `${_safeChapterFilename(bundle.book.title, 'PureReader小說')}_${chapters.length}章.purereader.json`;
+                    const missingCount = pageUrls.length - chapters.length;
+                    const missingMessage = missingCount > 0 ? `；另有 ${missingCount} 章未快取正文，已略過` : '';
+                    if (window.PureReaderNativeBridge.saveTextFile(filename, 'application/json', jsonStr)) {
+                        showSyncBar(`✓ 已準備匯出 ${chapters.length} 章${missingMessage}`, null, null, 6000);
+                        return;
+                    }
+                    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
                     const objectUrl = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = objectUrl;
-                    link.download = `${_safeChapterFilename(bundle.book.title, 'PureReader小說')}_${chapters.length}章.purereader.json`;
+                    link.download = filename;
                     link.style.display = 'none';
                     document.body.append(link);
                     link.click();
                     link.remove();
                     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
-                    const missingCount = pageUrls.length - chapters.length;
-                    const missingMessage = missingCount > 0 ? `；另有 ${missingCount} 章未快取正文，已略過` : '';
                     showSyncBar(`✓ 已下載 ${chapters.length} 章${missingMessage}`, null, null, 6000);
                 } catch (error) {
                     showSyncBar(`⚠ 下載失敗：${error.message || '未知錯誤'}`, null, null, 6000);
@@ -4465,6 +5037,7 @@
                 } catch (e) { infoEl.classList.add('hidden'); }
             }
 
+            let _lastNovelChallengeUrl = null;
             // ── Fetch helper (reuses proxy strategy from main app) ───────────
             // 共用 PureExtractor 的對沖競速、編碼解碼、Bot 頁偵測與轉址追蹤。
             async function _fetchHtml(url, signal, depth = 0, { fresh = false } = {}) {
@@ -4484,6 +5057,11 @@
                     });
                     html = res.html;
                     finalUrl = res.finalUrl || url;
+                    if (!html && res.hadChallengePage) {
+                        _lastNovelChallengeUrl = url;
+                    } else if (html) {
+                        _lastNovelChallengeUrl = null;
+                    }
                     if (html && res.winnerIdx >= 0 && hostname && res.winnerIdx !== preferredIdx) {
                         saveStratPref(hostname, res.winnerIdx);
                     }
@@ -5148,9 +5726,47 @@
             }
 
             // ── TTS Methods ───────────────────────────────────────────────────
+            function _useNativeTts() {
+                return Boolean(
+                    IS_ANDROID_APP &&
+                    window.PureReaderAndroid &&
+                    typeof window.PureReaderAndroid.isNativeTtsAvailable === 'function' &&
+                    window.PureReaderAndroid.isNativeTtsAvailable()
+                );
+            }
+
             function _initTtsVoices() {
                 const select = document.getElementById('novel-tts-voice-select');
                 if (!select) return;
+
+                if (_useNativeTts() && typeof window.PureReaderAndroid.getNativeTtsVoicesJson === 'function') {
+                    let nativeList = [];
+                    try {
+                        nativeList = JSON.parse(window.PureReaderAndroid.getNativeTtsVoicesJson() || '[]');
+                    } catch (e) { nativeList = []; }
+                    select.innerHTML = '';
+                    nativeList.forEach(v => {
+                        const opt = document.createElement('option');
+                        opt.value = v.name;
+                        opt.textContent = v.label || `${v.name} (${v.locale || ''})`;
+                        select.appendChild(opt);
+                    });
+                    const savedVoice = localStorage.getItem('novel-tts-voice');
+                    if (savedVoice && nativeList.some(v => v.name === savedVoice)) {
+                        select.value = savedVoice;
+                        _ttsVoiceName = savedVoice;
+                    } else if (nativeList.length > 0) {
+                        select.value = nativeList[0].name;
+                        _ttsVoiceName = nativeList[0].name;
+                    } else {
+                        const opt = document.createElement('option');
+                        opt.value = '';
+                        opt.textContent = '系統預設語音';
+                        select.appendChild(opt);
+                        _ttsVoiceName = '';
+                    }
+                    return;
+                }
                 
                 let voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
                 
@@ -5274,7 +5890,7 @@
             }
 
             function startTTS() {
-                if (!window.speechSynthesis) {
+                if (!_useNativeTts() && !window.speechSynthesis) {
                     showSyncBar('⚠ 您的瀏覽器不支援語音朗讀功能', null, null, 3000);
                     return;
                 }
@@ -5307,7 +5923,9 @@
             function stopTTS() {
                 _ttsActive = false;
                 _ttsPlaying = false;
-                if (window.speechSynthesis) {
+                if (_useNativeTts() && typeof window.PureReaderAndroid.stopNativeTts === 'function') {
+                    try { window.PureReaderAndroid.stopNativeTts(); } catch (e) {}
+                } else if (window.speechSynthesis) {
                     window.speechSynthesis.cancel();
                 }
                 _clearUtterance();
@@ -5323,6 +5941,32 @@
 
             function toggleTTSPlay() {
                 if (!_ttsActive) return;
+
+                if (_useNativeTts()) {
+                    if (_ttsPlaying) {
+                        _ttsPlaying = false;
+                        try { window.PureReaderAndroid.pauseNativeTts(); } catch (e) {}
+                        _updateTtsPlayBtn();
+                        _releaseWakeLock();
+                    } else {
+                        _ttsPlaying = true;
+                        _updateTtsPlayBtn();
+                        if (_ttsParagraphs.length === 0) {
+                            _ttsParagraphs = Array.from(document.querySelectorAll('#article-content p')).filter(p => p.textContent.trim().length > 0);
+                        }
+                        try {
+                            if (typeof window.PureReaderAndroid.resumeNativeTts === 'function') {
+                                window.PureReaderAndroid.resumeNativeTts();
+                            } else {
+                                _speakCurrentParagraph();
+                            }
+                        } catch (e) {
+                            _speakCurrentParagraph();
+                        }
+                        _requestWakeLock();
+                    }
+                    return;
+                }
                 
                 if (_ttsPlaying) {
                     _ttsPlaying = false;
@@ -5351,7 +5995,72 @@
                 }
             }
 
+            function _highlightTtsParagraph(index) {
+                _clearParagraphHighlights();
+                const p = _ttsParagraphs[index];
+                if (!p) return null;
+                p.classList.add('tts-active-paragraph');
+                if (document.visibilityState === 'visible') {
+                    p.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return p;
+            }
+
+            function _startNativeTtsFromCurrent() {
+                if (!_useNativeTts() || typeof window.PureReaderAndroid.startNativeTts !== 'function') return;
+                if (_currentTtsIndex < 0 || _currentTtsIndex >= _ttsParagraphs.length) {
+                    if (_currentTtsIndex >= _ttsParagraphs.length) _handleTtsChapterEnd();
+                    return;
+                }
+                _highlightTtsParagraph(_currentTtsIndex);
+                const chapterTitle = document.getElementById('article-title')?.textContent?.trim() || _session?.title || '淨讀器朗讀';
+                const texts = _ttsParagraphs.map(el => el.textContent.trim());
+                const select = document.getElementById('novel-tts-voice-select');
+                const voiceName = (select && select.value) || _ttsVoiceName || '';
+                window.PureReaderAndroid.startNativeTts(
+                    chapterTitle,
+                    JSON.stringify(texts),
+                    _currentTtsIndex,
+                    _ttsRate,
+                    voiceName
+                );
+            }
+
+            function __onNativeTtsEvent(evt) {
+                if (!evt || typeof evt !== 'object') return;
+                if (evt.type === 'progress') {
+                    if (!_ttsActive) return;
+                    const idx = Number(evt.index);
+                    if (Number.isInteger(idx) && idx >= 0 && idx < _ttsParagraphs.length) {
+                        _currentTtsIndex = idx;
+                        _highlightTtsParagraph(idx);
+                    }
+                    return;
+                }
+                if (evt.type === 'state') {
+                    if (!_ttsActive) return;
+                    _ttsPlaying = Boolean(evt.playing);
+                    _updateTtsPlayBtn();
+                    return;
+                }
+                if (evt.type === 'stopped') {
+                    if (_ttsActive) stopTTS();
+                    return;
+                }
+                if (evt.type === 'chapterEnd') {
+                    if (_ttsActive && _ttsPlaying) {
+                        _handleTtsChapterEnd();
+                    }
+                }
+            }
+
             function _speakCurrentParagraph() {
+                if (_useNativeTts()) {
+                    if (!_ttsPlaying || !_ttsActive) return;
+                    _startNativeTtsFromCurrent();
+                    return;
+                }
+
                 if (window.speechSynthesis) {
                     window.speechSynthesis.cancel();
                 }
@@ -5368,11 +6077,8 @@
                     return;
                 }
 
-                const p = _ttsParagraphs[_currentTtsIndex];
+                const p = _highlightTtsParagraph(_currentTtsIndex);
                 if (!p) return;
-
-                p.classList.add('tts-active-paragraph');
-                p.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
                 const text = p.textContent.trim();
                 const utterance = new SpeechSynthesisUtterance(text);
@@ -5556,6 +6262,7 @@
                 isAtPageBottom: _isAtPageBottom,
                 startTTS, stopTTS, toggleTTSPlay, changeTTSVoice, changeTTSRate, adjustTTSRate,
                 prevTTSParagraph, nextTTSParagraph, isTtsActive, jumpToTtsParagraph, syncWakeLock: _syncWakeLock,
+                __onNativeTtsEvent,
                 toggleHideLabels,
                 get active() { return _active; },
                 get session() { return _session; }
@@ -5770,7 +6477,11 @@
 
                 _removeIdleListeners();
                 if (NovelMode.isTtsActive && NovelMode.isTtsActive()) {
-                    window.speechSynthesis.pause();
+                    if (IS_ANDROID_APP && window.PureReaderAndroid?.pauseNativeTts) {
+                        try { window.PureReaderAndroid.pauseNativeTts(); } catch (e) {}
+                    } else if (window.speechSynthesis) {
+                        window.speechSynthesis.pause();
+                    }
                 }
                 
                 const el = document.getElementById('novel-tl-pause-overlay');
@@ -5789,8 +6500,12 @@
                 if (el) el.classList.remove('active');
                 
                 _setupIdleListeners();
-                if (NovelMode.isTtsActive && NovelMode.isTtsActive() && window.speechSynthesis.paused) {
-                    window.speechSynthesis.resume();
+                if (NovelMode.isTtsActive && NovelMode.isTtsActive()) {
+                    if (IS_ANDROID_APP && window.PureReaderAndroid?.resumeNativeTts) {
+                        try { window.PureReaderAndroid.resumeNativeTts(); } catch (e) {}
+                    } else if (window.speechSynthesis?.paused) {
+                        window.speechSynthesis.resume();
+                    }
                 }
             }
 
@@ -6208,6 +6923,14 @@
             renderSearchSources();
             initUserScriptBridge();
 
+            if (IS_ANDROID_APP) {
+                document.getElementById('native-browse-url-btn')?.classList.remove('hidden');
+                initAppUpdateSettingsUI();
+                if (typeof window.PureReaderAndroid.notifyWebReady === 'function') {
+                    try { window.PureReaderAndroid.notifyWebReady(); } catch (e) {}
+                }
+            }
+
             if (localStorage.getItem('pureReader_hide_labels') === 'true') {
                 document.body.classList.add('hide-toolbar-labels');
                 const cb = document.getElementById('novel-hide-labels-checkbox');
@@ -6385,7 +7108,7 @@
 
     <!-- Service Worker Registration -->
     <script>
-        if ('serviceWorker' in navigator) {
+        if ('serviceWorker' in navigator && !window.PureReaderAndroid) {
             window.addEventListener('load', () =>
                 navigator.serviceWorker.register('./sw.js')
                     .catch(err => console.warn('[pureReader SW] Registration failed:', err))

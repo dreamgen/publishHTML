@@ -34,6 +34,7 @@ const OUT_FILE = join(OUT_DIR, 'apps.json');
 const EXCLUDE = new Set([
   'appHub',              // 本工具自己
   'node-backend',        // Node 後端服務，非 PWA
+  'pureReader-android',  // Android 原生混合 App 專案，非網頁 PWA
   'purereader-proxy-cf', // Cloudflare Worker 後端，非 PWA
   'tmp',                 // 暫存資料夾
 ]);
