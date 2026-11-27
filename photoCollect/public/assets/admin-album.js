@@ -30,29 +30,44 @@ export function renderAlbum(ctx, panel) {
     if (loading) return;
     loading = true;
     try {
+      const wasDirty = !!(form && A && JSON.stringify(form) !== JSON.stringify(fromAlbum(A.album, A.gphotos)));
       A = await ctx.api('/album');
-      if (!form) form = fromAlbum(A.album);
+      if (!form || !wasDirty) form = fromAlbum(A.album, A.gphotos);
       draw();
     } catch (e) {
       mount(panel, h('div', { class: 'card warn', text: `讀取相簿資料失敗：${e.message}` }));
     } finally { loading = false; }
   }
-  const fromAlbum = (a) => ({
+  const fromAlbum = (a, gp) => ({
     source: a.source, access: a.access, limit: a.limit, show_votes: a.show_votes,
-    closes_at: isoToLocalInput(a.closes_at), allow_download: a.allow_download, password: '', has_password: a.has_password,
+    closes_at: isoToLocalInput(a.closes_at), allow_download: !!a.allow_download,
+    show_gphotos: !!a.show_gphotos, gphotos_share_url: (gp && gp.share_url) || '',
+    password: '', has_password: a.has_password,
   });
 
   async function save(extra = {}) {
     const body = {
       source: form.source, access: form.access, limit: Number(form.limit), show_votes: form.show_votes,
-      closes_at: localInputToIso(form.closes_at), allow_download: form.allow_download, ...extra,
+      closes_at: localInputToIso(form.closes_at), allow_download: !!form.allow_download,
+      show_gphotos: !!form.show_gphotos, ...extra,
     };
     if (form.password) body.password = form.password;
     if (body.access === 'password' && !form.password && !form.has_password) { toast('請設定相簿密碼', 'err'); return false; }
+    const nextShare = (form.gphotos_share_url || '').trim();
+    const prevShare = ((A.gphotos && A.gphotos.share_url) || '').trim();
+    if (A.gphotos && A.gphotos.linked && nextShare !== prevShare) {
+      try {
+        await ctx.api('/gphotos', { method: 'PATCH', body: { share_url: nextShare } });
+      } catch (e) {
+        toast(`儲存 Google 相簿連結失敗：${e.message}`, 'err');
+        return false;
+      }
+    }
+    const missingShare = !!(body.show_gphotos && A.gphotos?.linked && !nextShare);
     try {
       await ctx.patch({ album: body }, { quiet: true });
       form = null;
-      toast('已儲存相簿設定');
+      toast(missingShare ? '已儲存設定（填入 Google 相簿共用連結後才會顯示按鈕）' : '已儲存相簿設定');
       await load();
       return true;
     } catch { return false; }
@@ -81,11 +96,18 @@ export function renderAlbum(ctx, panel) {
   function settingsCard() {
     const a = A.album;
     const f = form;
-    const dirty = JSON.stringify(f) !== JSON.stringify(fromAlbum(a));
+    const gp = A.gphotos || { linked: false, share_url: '', album_title: '' };
+    const isDirty = () => JSON.stringify(f) !== JSON.stringify(fromAlbum(a, gp));
     const redraw = () => draw();
+    const resetBtn = h('button', { type: 'button', class: 'btn', text: '還原', hidden: !isDirty(), onclick: () => { form = fromAlbum(a, gp); draw(); } });
+    const syncDirty = () => { resetBtn.hidden = !isDirty(); };
     const toggle = h('button', { type: 'button', class: 'pill-toggle' + (a.enabled ? ' on' : ''), 'aria-pressed': String(a.enabled), onclick: toggleOpen },
       h('span', { class: 'dot', 'aria-hidden': 'true' }), h('span', { text: a.enabled ? '相簿開放中' : '相簿未開放' }));
-    const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: f.has_password ? '已設定（留空＝不變）' : '4–32 字', value: f.password, oninput: (e) => { f.password = e.target.value; } });
+    const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: f.has_password ? '已設定（留空＝不變）' : '4–32 字', value: f.password, oninput: (e) => { f.password = e.target.value; syncDirty(); } });
+    const gpShareInp = gp.linked ? h('input', {
+      class: 'input', type: 'url', value: f.gphotos_share_url || '', placeholder: 'https://photos.app.goo.gl/…',
+      'aria-label': 'Google 相簿共用連結', oninput: (e) => { f.gphotos_share_url = e.target.value; syncDirty(); },
+    }) : null;
     return h('section', { class: 'card stack', 'aria-labelledby': 'al-set-h' },
       h('div', { class: 'sec-head' }, h('h2', { id: 'al-set-h', class: 'h2', text: '相簿設定' }), toggle),
       h('fieldset', { class: 'al-fs' }, h('legend', { text: '相簿放哪些照片' }),
@@ -94,19 +116,35 @@ export function renderAlbum(ctx, panel) {
         radios('al-acc', [['link', '知道連結的人（預設）', '未登入者以「這支手機＋暱稱」識別；換瀏覽器可能重複投'], ['google', '需用 Google 登入', '可確保一人一份選票'], ['password', '需輸入相簿密碼', '密碼另外在群組公布']], f.access, (v) => { f.access = v; redraw(); }),
         f.access === 'password' ? h('label', { class: 'field', style: 'margin-top:8px' }, '相簿密碼', pw) : null),
       h('label', { class: 'field' }, h('span', {}, '每人可選幾張 ', h('span', { class: 'muted small', text: '預設 10；攝影者選自己的作品不受此限，結果分開標示' })),
-        h('input', { class: 'input', type: 'number', min: '1', max: '50', value: String(f.limit), style: 'max-width:120px', oninput: (e) => { f.limit = e.target.value; } })),
+        h('input', { class: 'input', type: 'number', min: '1', max: '50', value: String(f.limit), style: 'max-width:120px', oninput: (e) => { f.limit = e.target.value; syncDirty(); } })),
       h('fieldset', { class: 'al-fs' }, h('legend', { text: '參與者看得到票數嗎' }),
         h('div', { class: 'chips' }, ...[['live', '隨時顯示'], ['after', '截止後顯示'], ['never', '不顯示']].map(([v, l]) => h('button', {
           type: 'button', class: 'chip', 'aria-pressed': String(f.show_votes === v), onclick: () => { f.show_votes = v; redraw(); },
         }, l))),
         h('div', { class: 'muted small', text: '截止前隱藏票數，比較不會跟風。' })),
       h('label', { class: 'field' }, '票選截止（留空＝不截止）',
-        h('input', { class: 'input', type: 'datetime-local', value: f.closes_at, style: 'max-width:260px', oninput: (e) => { f.closes_at = e.target.value; } })),
-      h('label', { class: 'al-check' }, h('input', { type: 'checkbox', checked: f.allow_download, onchange: (e) => { f.allow_download = e.target.checked; } }),
-        h('span', { class: 'stack', style: 'gap:2px' }, h('b', { text: '允許下載原檔' }), h('span', { class: 'muted small', text: '預設關閉' }))),
+        h('input', { class: 'input', type: 'datetime-local', value: f.closes_at, style: 'max-width:260px', oninput: (e) => { f.closes_at = e.target.value; syncDirty(); } })),
+      h('label', { class: 'al-check' }, h('input', { type: 'checkbox', checked: f.allow_download, onchange: (e) => { f.allow_download = e.target.checked; redraw(); } }),
+        h('span', { class: 'stack', style: 'gap:2px' }, h('b', { text: '允許下載原檔（照片與影片）' }), h('span', { class: 'muted small', text: '開啟後，參與者可在相簿列表與大圖檢視下載原檔（預設關閉）' }))),
+      gp.linked
+        ? h('div', { class: 'stack', style: 'gap:8px' },
+          h('label', { class: 'al-check' }, h('input', { type: 'checkbox', checked: f.show_gphotos, onchange: (e) => { f.show_gphotos = e.target.checked; redraw(); } }),
+            h('span', { class: 'stack', style: 'gap:2px' },
+              h('b', { text: '在活動相簿加入「前往 Google 相簿」連結' }),
+              h('span', { class: 'muted small', text: `已連結「${gp.album_title || 'Google 相簿'}」${gp.share_url ? '' : '（需填入共用連結才會顯示）'}` }))),
+          f.show_gphotos ? h('div', { class: 'al-subbox' },
+            h('label', { class: 'field' }, 'Google 相簿共用連結', gpShareInp),
+            !(f.gphotos_share_url || '').trim()
+              ? h('div', { class: 'warn small', text: '尚未填入共用連結，請先在 Google 相簿 App 建立共用連結並貼在上方，活動相簿才會顯示前往按鈕。' })
+              : h('div', { class: 'muted small', text: '參與者開啟活動相簿時，頁首會顯示「前往 Google 相簿」按鈕。' }),
+            h('div', { class: 'row' },
+              h('button', { type: 'button', class: 'btn btn-sm', text: '前往「Google 相簿」分頁', onclick: () => ctx.switchTab('gphotos') }))) : null)
+        : h('div', { class: 'al-gp-hint' },
+          h('span', { class: 'muted small', text: '若已連結 Google 相簿，可在此開啟「前往 Google 相簿」連結讓參與者直接前往。' }),
+          h('button', { type: 'button', class: 'btn btn-sm', text: '前往「Google 相簿」連結', onclick: () => ctx.switchTab('gphotos') })),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'btn btn-primary', text: '儲存相簿設定', onclick: () => save() }),
-        dirty ? h('button', { type: 'button', class: 'btn', text: '還原', onclick: () => { form = fromAlbum(a); draw(); } }) : null));
+        resetBtn));
   }
 
   function shareCard() {

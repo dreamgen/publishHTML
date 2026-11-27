@@ -199,6 +199,8 @@ details.pv pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: va
 .al-opt input { width: 18px; height: 18px; accent-color: var(--c-accent); flex: none; margin: 0; }
 .al-check { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
 .al-check input { width: 22px; height: 22px; accent-color: var(--c-accent); flex: none; margin: 0; }
+.al-subbox { margin-left: 34px; padding: 10px 12px; border-radius: 10px; background: var(--c-bg); border: 1px solid var(--c-line); display: flex; flex-direction: column; gap: 8px; }
+.al-gp-hint { padding: 10px 12px; border-radius: 10px; background: var(--c-bg); border: 1px dashed var(--c-line-strong); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .warn-card { background: var(--c-warn-bg); border-color: var(--c-warn-line); }
 .al-optrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #fff; border-radius: 10px; padding: 10px 12px; }
 .al-optimg { width: 56px; height: 42px; border-radius: 6px; overflow: hidden; background: var(--c-track); flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--c-muted); }

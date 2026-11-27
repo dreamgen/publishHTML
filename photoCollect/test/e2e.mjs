@@ -1512,7 +1512,9 @@ async function mineAlbumTests() {
   r = await api('GET', '/api/a/AAAAAAAAAAAAAAAAAAAAAA/info');
   ok(r.status === 404, '不存在的相簿 → 404');
   r = await api('GET', `/api/admin/${id}/album`, { token: tok });
-  ok(r.status === 200 && r.data.album.enabled === false && r.data.album_url === null, '相簿預設關閉、沒有連結');
+  ok(r.status === 200 && r.data.album.enabled === false && r.data.album_url === null && r.data.album.show_gphotos === false && r.data.gphotos && r.data.gphotos.linked === false && r.data.gphotos.share_url === '', '相簿預設關閉、沒有連結、未開啟 Google 相簿連結');
+  r = await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { show_gphotos: 'yes' } } });
+  ok(r.status === 400, 'show_gphotos 非布林 → 400');
   r = await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { enabled: true, limit: 1, show_votes: 'live' } } });
   ok(r.status === 200 && /^\/a\/[A-Za-z0-9_-]{22}$/.test(r.data.album_url) && r.data.config.album.has_password === false && !('password_hash' in r.data.config.album), '開啟相簿產生連結，不外露密碼雜湊');
   let aurl = r.data.album_url;
@@ -1522,7 +1524,11 @@ async function mineAlbumTests() {
   ok(r.status === 200 && r.data.album_url === aurl, '上傳頁 /info 帶回已開放的相簿連結');
   const albumApi = (method, path, { dev, body, headers = {} } = {}) => api(method, `/api/a/${acode}${path}`, { body, headers: { ...(dev ? { 'x-device': dev } : {}), ...headers } });
   r = await albumApi('GET', '/info');
-  ok(r.status === 200 && r.data.me.kind === null && r.data.photos.length === 4, '匿名可看相簿（4 張）');
+  ok(r.status === 200 && r.data.me.kind === null && r.data.photos.length === 4 && r.data.album.gphotos_url === null, '匿名可看相簿（4 張），預設不附 Google 相簿連結');
+  await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { show_gphotos: true } } });
+  r = await albumApi('GET', '/info');
+  eq(r.data.album.gphotos_url, null, '未連結 Google 相簿時即使開啟 show_gphotos 仍回 null');
+  await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { show_gphotos: false } } });
   ok(!JSON.stringify(r.data).includes(up), '相簿資料不含上傳碼');
   r = await albumApi('GET', '/info', { dev: D1 });
   ok(r.data.me.kind === 'device' && r.data.me.needs_name === true, '裝置身分需要暱稱');
@@ -1598,6 +1604,7 @@ async function mineAlbumTests() {
   // 頁面與預覽
   pg = await getPage(aurl);
   ok(pg.status === 200 && metaOf(pg.html, 'og:title') === '相簿測試 活動相簿' && metaOf(pg.html, 'og:image').endsWith(`/og/a/${acode}`), '/a/{code} 預覽 meta');
+  ok(pg.html.includes('id="gp-link"') && pg.html.includes('id="v-dl"'), '相簿頁含前往 Google 相簿與下載原檔元件');
   ok(!pg.html.includes(up), '相簿頁不含上傳碼');
   r = await fetch(`${BASE}/og/a/${acode}`);
   ok(r.status === 200 && r.headers.get('content-type') === 'image/png', '/og/a/{code} 回預覽圖');
@@ -2620,6 +2627,12 @@ async function gdriveVideoTests() {
     ok(ap && ap.media === 'video' && ap.duration === 15 && ap.viewable === true, '相簿 info 回報影片 viewable/media/duration');
     const aRange = await fetch(`${BASE}/api/a/${acode}/photo/${h1}`, { headers: { range: 'bytes=0-3' } });
     ok(aRange.status === 206 && Buffer.from(await aRange.arrayBuffer()).equals(v1.subarray(0, 4)), '相簿播放支援 Range 206 串流');
+    const vidDlDenied = await fetch(`${BASE}/api/a/${acode}/photo/${h1}?download=1`);
+    ok(vidDlDenied.status === 403, '相簿未開放下載時影片下載 → 403');
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { allow_download: true } } });
+    const vidDlOk = await fetch(`${BASE}/api/a/${acode}/photo/${h1}?download=1`);
+    const vidDlBytes = Buffer.from(await vidDlOk.arrayBuffer());
+    ok(vidDlOk.status === 200 && /attachment; filename="video-.*\.mp4"/.test(vidDlOk.headers.get('content-disposition') || '') && vidDlBytes.equals(v1), '相簿開放下載後可下載影片原檔');
 
     // ---- 同步到 Google 相簿（含共用雲端硬碟影片串流）----
     r = await api('POST', `/api/admin/${id}/gphotos/connect`, { token: tok });
@@ -2637,7 +2650,34 @@ async function gdriveVideoTests() {
     const upV2 = fake.gpUploads.find((u) => u.name === `${h2.slice(0, 10)}.mov`);
     ok(upV1 && upV1.type === 'video/mp4' && upV1.bytes.equals(v1), 'MP4 影片位元組自 Drive 串流送至 Google Photos /uploads（Content-Type 正確）', upV1);
     ok(upV2 && upV2.type === 'video/quicktime' && upV2.bytes.equals(v2), 'MOV 影片位元組自 Drive 串流送至 Google Photos /uploads（Content-Type 正確）', upV2);
+
+    // ---- 活動相簿連結 Google 相簿 ----
+    r = await api('GET', `/api/admin/${id}/album`, { token: tok });
+    ok(r.status === 200 && r.data.gphotos.linked === true && r.data.gphotos.connected === true && r.data.gphotos.share_url === '' && /^https:\/\/photos\.google\.com\/lr\/album\//.test(r.data.gphotos.album_url || '') && !('enc_rt' in r.data.gphotos), '管理相簿回傳已連結的 Google 相簿狀態且不含密鑰', r.data.gphotos);
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { show_gphotos: true } } });
+    r = await api('GET', `/api/a/${acode}/info`);
+    eq(r.data.album.gphotos_url, null, '尚未填共用連結前活動相簿不外露私人 album_url');
+    const gpShare = 'https://photos.app.goo.gl/TestShare123';
+    await api('PATCH', `/api/admin/${id}/gphotos`, { token: tok, body: { share_url: gpShare } });
+    r = await api('GET', `/api/admin/${id}/album`, { token: tok });
+    eq(r.data.gphotos.share_url, gpShare, '管理相簿帶回已設定的 Google 相簿共用連結');
+    r = await api('GET', `/api/a/${acode}/info`);
+    eq(r.data.album.gphotos_url, gpShare, '開啟 show_gphotos 後活動相簿回傳 Google 相簿共用連結');
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { access: 'password', password: 'gp1234' } } });
+    r = await api('GET', `/api/a/${acode}/info`);
+    ok(r.status === 401 && !JSON.stringify(r.data).includes(gpShare), '設密碼的相簿未驗證前不外露 Google 相簿連結');
+    r = await api('GET', `/api/a/${acode}/info`, { headers: { 'x-album-pass': 'gp1234' } });
+    ok(r.status === 200 && r.data.album.gphotos_url === gpShare, '通過相簿密碼後回傳 Google 相簿連結');
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { access: 'link', show_gphotos: false } } });
+    r = await api('GET', `/api/a/${acode}/info`);
+    eq(r.data.album.gphotos_url, null, '關閉 show_gphotos 後活動相簿不顯示 Google 相簿連結');
+
     await api('POST', `/api/admin/${id}/gphotos/disconnect`, { token: tok });
+    await api('PATCH', `/api/admin/${id}`, { token: tok, body: { album: { show_gphotos: true } } });
+    r = await api('GET', `/api/admin/${id}/album`, { token: tok });
+    ok(r.data.gphotos.linked === true && r.data.gphotos.connected === false && r.data.gphotos.share_url === gpShare, '中斷同步授權後仍保留已連結狀態與共用連結');
+    r = await api('GET', `/api/a/${acode}/info`);
+    eq(r.data.album.gphotos_url, gpShare, '中斷同步授權後仍可在活動相簿顯示共用連結');
 
     // ---- Google 雲端硬碟連結匯入影片 ----
     const v3 = Buffer.concat([Buffer.from('\x00\x00\x00\x18ftypmp42'), Buffer.from('DRIVE_IMPORT_MP4_COPY_PAYLOAD')]);

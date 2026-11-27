@@ -42,7 +42,7 @@ export const NONCE_COOKIE = 'gpn';
 export const CALLBACK_PATH = '/oauth/gphotos/callback';
 const stateKey = (id) => `events/${id}/gphotos.json`;
 const autoKey = (id) => `gphotos/auto/${id}`;
-const SHARE_RE = /^https:\/\/(photos\.app\.goo\.gl\/[A-Za-z0-9_-]+|photos\.google\.com\/share\/[A-Za-z0-9_-]+(\?key=[A-Za-z0-9_-]+)?)\/?$/;
+export const SHARE_RE = /^https:\/\/(photos\.app\.goo\.gl\/[A-Za-z0-9_-]+|photos\.google\.com\/share\/[A-Za-z0-9_-]+(\?key=[A-Za-z0-9_-]+)?)\/?$/;
 const enc = new TextEncoder();
 
 // 功能開關：需要 Client ID、Client Secret、SESSION_SECRET（≥32，用來簽 state 與加密 token）

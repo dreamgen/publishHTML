@@ -60,7 +60,7 @@ export function inviteEffective(cfg, origin) {
 // enabled 預設關閉；code 為相簿連結碼（與上傳碼分開）；password_hash 只在 access='password' 時使用
 export const defaultAlbum = () => ({
   enabled: false, code: null, source: 'all', access: 'link', password_hash: null,
-  limit: 10, show_votes: 'after', closes_at: null, allow_download: false,
+  limit: 10, show_votes: 'after', closes_at: null, allow_download: false, show_gphotos: false,
 });
 
 // 舊活動沒有相簿相關欄位時補上預設值
@@ -596,6 +596,10 @@ function applyAlbumPatch(cfg, a, pwHash) {
   if (a.allow_download !== undefined) {
     if (typeof a.allow_download !== 'boolean') throw bad('album.allow_download 需為布林。');
     al.allow_download = a.allow_download;
+  }
+  if (a.show_gphotos !== undefined) {
+    if (typeof a.show_gphotos !== 'boolean') throw bad('album.show_gphotos 需為布林。');
+    al.show_gphotos = a.show_gphotos;
   }
   if (a.password !== undefined) {
     if (a.password === null) al.password_hash = null;

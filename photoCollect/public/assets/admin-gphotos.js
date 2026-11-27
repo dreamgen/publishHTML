@@ -231,7 +231,10 @@ export function renderGphotos(ctx, panel) {
       st.share_url ? null : h('div', { class: 'note', text: '相簿目前只有你看得到。請在 Google 相簿 App 打開上面的相簿 → 右上角「分享」→「建立連結」（可開啟「協作」讓大家也能加照片），把連結貼在下面。' }),
       h('div', { class: 'row' }, shareInp,
         canWrite ? h('button', { type: 'button', class: 'btn', text: '儲存', onclick: () => savePatch({ share_url: shareInp.value.trim() }, '已儲存共用連結') }) : null,
-        copyShare));
+        copyShare),
+      st.share_url ? h('div', { class: 'row', style: 'justify-content:space-between;align-items:center' },
+        h('span', { class: 'muted small', text: '想讓參與者在活動相簿看到前往連結？到「相簿與票選」勾選顯示即可。' }),
+        h('button', { type: 'button', class: 'btn btn-sm', text: '前往「相簿與票選」', onclick: () => ctx.switchTab('album') })) : null);
     return h('section', { class: 'card stack', 'aria-labelledby': 'gp-h' }, ...kids);
   }
 

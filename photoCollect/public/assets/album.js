@@ -39,6 +39,19 @@ function heartSvg() {
   s.append(p);
   return s;
 }
+function downloadSvg(size = 17) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(ns, 'svg');
+  for (const [k, v] of Object.entries({ width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) s.setAttribute(k, v);
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4');
+  const pl = document.createElementNS(ns, 'polyline');
+  pl.setAttribute('points', '7 10 12 15 17 10');
+  const ln = document.createElementNS(ns, 'line');
+  for (const [k, v] of Object.entries({ x1: 12, y1: 15, x2: 12, y2: 3 })) ln.setAttribute(k, v);
+  s.append(p, pl, ln);
+  return s;
+}
 function say(t) { const l = $('live'); l.textContent = ''; setTimeout(() => { l.textContent = t; }, 50); }
 function toast(t) {
   const d = el('div', { class: 'toast', role: 'status' }, t);
@@ -85,6 +98,9 @@ let pendingVote = null; // 等暱稱填好後要補送的選擇
 function gate(title, text, { pw = false, login = false } = {}) {
   for (const id of ['picks', 'tabs', 'main', 'nick']) $(id).hidden = true;
   $('who-btn').hidden = true;
+  $('hero-actions').hidden = true;
+  $('gp-link').hidden = true;
+  $('gp-link').removeAttribute('href');
   $('gate').hidden = false;
   $('gate-h').textContent = title;
   $('gate-text').textContent = text;
@@ -124,9 +140,21 @@ function paint() {
   $('ev-name').textContent = ev.name || '活動相簿';
   document.title = `${ev.name}｜活動相簿`;
   const sub = [`${info.photos.length} 張`];
+  if (info.album.allow_download) sub.push('可下載原檔');
   if (info.album.closes_at) sub.push(`${info.album.voting_open ? '票選至' : '票選已於'} ${fmtWhen(info.album.closes_at)}${info.album.voting_open ? '' : ' 截止'}`);
   else if (!info.album.voting_open) sub.push('票選已截止');
   $('ev-sub').textContent = sub.join(' · ');
+  const gpUrl = typeof info.album.gphotos_url === 'string' && info.album.gphotos_url.startsWith('https://') ? info.album.gphotos_url : '';
+  const gpEl = $('gp-link');
+  if (gpUrl) {
+    gpEl.href = gpUrl;
+    gpEl.hidden = false;
+    $('hero-actions').hidden = false;
+  } else {
+    gpEl.hidden = true;
+    gpEl.removeAttribute('href');
+    $('hero-actions').hidden = true;
+  }
   paintWho();
   paintPicks();
   const closed = $('closed-note');
@@ -221,7 +249,8 @@ const isPicked = (p) => info.me.picks.includes(p.hash) || info.me.self.includes(
 
 function tile(p, i) {
   const on = isPicked(p);
-  const wrap = el('div', { class: 'tile', style: 'cursor:default' });
+  const canDl = !!info.album.allow_download;
+  const wrap = el('div', { class: 'tile' + (canDl ? ' can-dl' : ''), style: 'cursor:default' });
   const open = el('button', { type: 'button', class: 'tile', style: 'position:absolute;inset:0;border-radius:0;background:transparent', 'aria-label': `開啟大圖：${p.segment || '未分類'}${p.uploader ? `，攝影 ${p.uploader}` : ''}`, onclick: () => openViewer(i) });
   if (p.has_thumb || (p.viewable && p.media !== 'video')) {
     const img = el('img', { alt: '', loading: 'lazy', decoding: 'async' });
@@ -231,6 +260,17 @@ function tile(p, i) {
   } else open.append(el('span', { class: 'noimg' }, p.media === 'video' ? fmtDur(p.duration) : '無預覽'));
   wrap.append(open);
   if (p.segment) wrap.append(el('span', { class: 'badge b-seg' }, p.segment));
+  if (canDl) {
+    const dlLabel = p.media === 'video' ? '下載影片原檔' : '下載照片原檔';
+    wrap.append(el('a', {
+      class: 'tile-dl',
+      href: imgUrl('photo', p.hash, true),
+      download: '',
+      'aria-label': `${dlLabel}：${p.segment || '未分類'}${p.uploader ? `，攝影 ${p.uploader}` : ''}`,
+      title: dlLabel,
+      onclick: (e) => { e.stopPropagation(); },
+    }, downloadSvg(17)));
+  }
   if (p.media === 'video') wrap.append(el('span', { class: 'badge b-vid' }, fmtDur(p.duration)));
   if (p.mine) wrap.append(el('span', { class: 'badge b-mine' }, '我拍的 · 不佔名額'));
   const full = !p.mine && countedPicks() >= info.album.limit && !on;
@@ -318,7 +358,12 @@ function paintViewer() {
   $('v-pick-label').textContent = on ? '已選為最佳（再按取消）' : (p.mine ? '選為最佳（自己的作品，不佔名額）' : '選為最佳照片');
   const dl = $('v-dl');
   dl.hidden = !info.album.allow_download;
-  dl.href = imgUrl('photo', p.hash, true);
+  if (info.album.allow_download) {
+    dl.href = imgUrl('photo', p.hash, true);
+    $('v-dl-label').textContent = p.media === 'video' ? '下載影片原檔' : '下載照片原檔';
+  } else {
+    dl.removeAttribute('href');
+  }
   $('opt-link').hidden = !info.me.kind || p.mine || !$('opt-box').hidden; // 自己拍的照片到「我上傳的照片」刪除即可
   $('opt-link').textContent = info.me.optouts.includes(p.hash) ? '已通知主辦者' : '照片裡有我，我不想入鏡';
   $('v-prev').hidden = $('v-next').hidden = shown.length < 2;

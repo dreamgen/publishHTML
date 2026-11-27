@@ -11,6 +11,7 @@ import { updateJson, NO_CHANGE } from './store.js';
 import { requireRole } from './auth.js';
 import { cleanText } from './upload.js';
 import { streamDriveVideo } from './gdrive.js';
+import { loadState as loadGphotosState, SHARE_RE as GPHOTOS_SHARE_RE } from './gphotos.js';
 
 const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const notFound = () => new HttpError(404, 'not_found', '相簿未開放，或連結已失效。');
@@ -137,6 +138,11 @@ function meView(who, v, cfg) {
   };
 }
 
+function validGphotosShareUrl(st) {
+  const u = st && typeof st.share_url === 'string' ? st.share_url.trim() : '';
+  return u && GPHOTOS_SHARE_RE.test(u) ? u : null;
+}
+
 // GET /api/a/{code}/info
 export async function info(env, code, req, url) {
   const cfg = await resolveAlbum(env, code);
@@ -146,11 +152,13 @@ export async function info(env, code, req, url) {
   const show = votesVisible(cfg);
   const counts = show ? (await loadVotes(env, cfg.id)).counts : new Map();
   const v = await readVoter(env, cfg, who.voter);
+  const gphotosUrl = cfg.album.show_gphotos ? validGphotosShareUrl(await loadGphotosState(env, cfg.id)) : null;
   const out = {
     event: { name: cfg.basic.name, date: cfg.basic.date, end_date: cfg.basic.end_date || null, location: cfg.basic.location },
     album: {
       limit: cfg.album.limit, show_votes: cfg.album.show_votes, votes_visible: show, closes_at: cfg.album.closes_at,
       voting_open: albumVotingOpen(cfg), allow_download: cfg.album.allow_download, access: cfg.album.access,
+      gphotos_url: gphotosUrl,
     },
     segments: cfg.segments.map((s) => s.name),
     me: meView(who, v, cfg),
@@ -293,8 +301,11 @@ export async function optout(env, code, req, url) {
 // GET /api/admin/{id}/album：設定、統計、排行、不想入鏡待處理
 export async function adminGet(env, req, id) {
   const { cfg } = await requireRole(env, req, id, 'viewer');
-  const { photos } = await loadPhotos(env, cfg.id);
-  const { voters, counts } = await loadVotes(env, cfg.id);
+  const [{ photos }, { voters, counts }, gp] = await Promise.all([
+    loadPhotos(env, cfg.id),
+    loadVotes(env, cfg.id),
+    loadGphotosState(env, cfg.id),
+  ]);
   const byHash = new Map(photos.map((p) => [p.hash, p]));
   const inAlbum = albumPhotos(cfg, photos);
   const prio = new Set(cfg.mv_priority || []);
@@ -338,6 +349,19 @@ export async function adminGet(env, req, id) {
     }),
     mv_priority: cfg.mv_priority || [],
     album_picked: cfg.album_picked || [],
+    gphotos: gp && gp.album_id ? {
+      linked: true,
+      connected: !!(gp.enc_rt && !gp.need_reconnect),
+      album_title: gp.album_title || '',
+      album_url: gp.album_url || null,
+      share_url: gp.share_url || '',
+    } : {
+      linked: false,
+      connected: false,
+      album_title: '',
+      album_url: null,
+      share_url: '',
+    },
   });
 }
 

@@ -41,6 +41,12 @@
       <span id="ev-sub"></span>
       <button type="button" id="who-btn" class="hero-chip" hidden></button>
     </div>
+    <div id="hero-actions" class="hero-actions" hidden>
+      <a id="gp-link" class="hero-mine hero-gp" href="#" target="_blank" rel="noopener noreferrer" hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+        <span>前往 Google 相簿</span>
+      </a>
+    </div>
   </header>
 
   <!-- 進不去時：載入中、需要登入、需要密碼、相簿已關閉 -->
@@ -107,7 +113,8 @@
       </div>
       <button type="button" id="v-pick" class="pick-big" aria-pressed="false">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"></path></svg><span id="v-pick-label">選為最佳照片</span></button>
-      <a id="v-dl" class="opt-link" href="#" hidden>下載原檔</a>
+      <a id="v-dl" class="dl-big" href="#" download hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span id="v-dl-label">下載原檔</span></a>
       <div id="opt-box" class="opt-box" role="alertdialog" aria-labelledby="opt-h" hidden>
         <div id="opt-h" style="font-size:14px;font-weight:700">通知主辦者：我不想入鏡</div>
         <div style="font-size:13px;line-height:1.6;color:#C9D2CF">主辦者確認前，這張會先從相簿隱藏。不會告訴攝影者是誰提出的。</div>

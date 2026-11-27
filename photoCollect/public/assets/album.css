@@ -72,6 +72,12 @@
 .sortbar { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--c-muted); }
 .link-btn { min-height: 40px; padding: 0 10px; border: 0; background: transparent; color: var(--c-accent); font: inherit; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .hero-chip { min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid #CDE7E4; background: transparent; color: #fff; font: inherit; font-size: 13px; cursor: pointer; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero-gp { gap: 6px; }
+.tile-dl { position: absolute; top: 6px; right: 6px; width: 38px; height: 38px; border-radius: 999px; background: rgba(255,255,255,.94); color: var(--c-accent); display: flex; align-items: center; justify-content: center; text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,.28); z-index: 2; }
+.tile-dl:hover { background: #fff; color: var(--c-accent-ink); }
+.tile-dl:focus-visible { outline: 3px solid #7FC4BD; outline-offset: 2px; }
+.tile.can-dl .badge.b-seg { max-width: calc(100% - 54px); }
+.tile.can-dl .badge.b-vid { top: 50px; right: 6px; }
 
 /* 大圖 */
 .viewer { position: fixed; inset: 0; z-index: 40; background: #111615; color: #fff; display: flex; flex-direction: column; }
@@ -92,6 +98,9 @@
 .pick-big[aria-pressed="true"] { background: #5FB3AC; color: #111615; }
 .pick-big[aria-pressed="true"] svg { fill: currentColor; }
 .pick-big:disabled { opacity: .55; cursor: default; }
+.dl-big { min-height: 46px; border-radius: 12px; border: 1.5px solid #5B6663; background: rgba(255,255,255,.06); color: #fff; font: inherit; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; cursor: pointer; }
+.dl-big:hover { background: rgba(255,255,255,.14); color: #fff; }
+.dl-big[hidden], .opt-link[hidden] { display: none; }
 .opt-link { min-height: 44px; border: 0; background: transparent; color: #C9D2CF; font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
 .opt-box { border: 1px solid #3D4845; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; background: #1C2321; }
 .opt-box[hidden] { display: none; }

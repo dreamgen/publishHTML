@@ -301,7 +301,7 @@ shares/{sha256(lower(email))}.json   {"events":[{"event_id","role","added_at","a
 ### 9.3 參與者相簿 `/api/a/{code}`（相簿碼與上傳碼分開；相簿關閉或活動刪除 → 404）
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/info` | `{event, album:{limit, show_votes, votes_visible, closes_at, voting_open, allow_download, access}, segments, me:{kind, name, needs_name, picks, self, optouts}, login, photos:[{hash, segment, uploader, exif_time, mine, has_thumb, viewable, votes?}], key?}` |
+| GET | `/info` | `{event, album:{limit, show_votes, votes_visible, closes_at, voting_open, allow_download, access, gphotos_url}, segments, me:{kind, name, needs_name, picks, self, optouts}, login, photos:[{hash, segment, uploader, exif_time, mine, has_thumb, viewable, votes?}], key?}`（`gphotos_url` 僅在 `show_gphotos` 為 true 且已設定有效 Google 相簿共用連結時回傳，否則為 `null`） |
 | POST | `/me` | `{name}` 設定暱稱 |
 | POST | `/vote` | `{hash, on, name?}`；自己拍的進 `self`、不佔名額；超過上限 409 `limit_reached`；截止 403 `voting_closed`；沒暱稱 400 `name_required` |
 | POST | `/optout` | `{hash}` 回報不想入鏡（每人最多 10 件），照片先隱藏 |
@@ -310,8 +310,8 @@ shares/{sha256(lower(email))}.json   {"events":[{"event_id","role","added_at","a
 存取：`access=google` 未登入 → 401 `login_required`；`access=password` 以 `x-album-pass`（明碼）換得 `key`，之後用 `x-album-key` 標頭或 `?k=`；錯誤 → 401 `album_password`。
 
 ### 9.4 主辦者
-- `PATCH /api/admin/{id}` 新增 `album: {enabled, source:'all'|'picked', access:'link'|'google'|'password', password, limit 1–50, show_votes:'live'|'after'|'never', closes_at, allow_download}`；第一次 `enabled:true` 時產生相簿碼；回應多 `album_url`，`config.album` 以 `has_password` 取代密碼雜湊。
-- `GET /api/admin/{id}/album`（viewer）：設定、`stats{voters, google_voters, total_votes, self_votes, photos_in_album, hidden, eligible}`、`ranking[{hash, segment, uploader, exif_time, votes, self, priority, picked}]`、`optouts`、`mv_priority`、`album_picked`。
+- `PATCH /api/admin/{id}` 新增 `album: {enabled, source:'all'|'picked', access:'link'|'google'|'password', password, limit 1–50, show_votes:'live'|'after'|'never', closes_at, allow_download, show_gphotos}`；第一次 `enabled:true` 時產生相簿碼；回應多 `album_url`，`config.album` 以 `has_password` 取代密碼雜湊。
+- `GET /api/admin/{id}/album`（viewer）：設定、`stats{voters, google_voters, total_votes, self_votes, photos_in_album, hidden, eligible}`、`ranking[{hash, segment, uploader, exif_time, votes, self, priority, picked}]`、`optouts`、`mv_priority`、`album_picked`、`gphotos:{linked, connected, album_title, album_url, share_url}`。
 - `POST /api/admin/{id}/album/code`（重設相簿連結）、`/album/optout {hash, action:'exclude'|'keep'}`、`/album/priority {hashes, on}` 或 `{top_per_segment:N}`、`/album/pick {hashes, on}`（manager）。
 
 ### 9.5 同步
